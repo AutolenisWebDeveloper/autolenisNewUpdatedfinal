@@ -30,6 +30,9 @@ const createSchema = z.object({
   }),
   mileage: z.number().int().nonnegative().optional(),
   condition: z.enum(["NEW", "USED", "CPO"]).optional(),
+  // The add form has always sent a description; the .strict() schema rejected
+  // it, so EVERY manual add 422'd. Accept and persist it.
+  description: z.string().max(2000).optional(),
   images: z.array(z.string().url()).max(20).optional(),
 }).strict();
 
@@ -67,6 +70,7 @@ export async function POST(request: NextRequest) {
         vin: parsed.data.vin,
         mileage: parsed.data.mileage,
         condition: parsed.data.condition?.toLowerCase(),
+        description: parsed.data.description,
         images: parsed.data.images ?? [],
         isActive: true,
         // Batch 1 — provenance + freshness so dealer-owned inventory is

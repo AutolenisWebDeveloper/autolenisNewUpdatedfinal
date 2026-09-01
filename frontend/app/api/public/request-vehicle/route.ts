@@ -651,6 +651,7 @@ export async function POST(request: NextRequest) {
         tradeModel: data.tradeModel,
         notes: data.notes,
         notificationId,
+        vehicleRequestId,
       }),
       sendVehicleRequestConfirmation(data.email, data.firstName),
     ]);

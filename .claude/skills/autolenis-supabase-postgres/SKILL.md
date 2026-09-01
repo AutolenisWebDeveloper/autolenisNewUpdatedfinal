@@ -29,7 +29,7 @@ later", "RLS is optional") conflicts with anything here, this skill wins.
 - Editing `frontend/prisma/schema.prisma` (~200 models) or any enum.
 - Adding a migration under `frontend/prisma/migrations/` (timestamped dir +
   `migration.sql`), or hand-written SQL in
-  `frontend/prisma/migrations/manual_supabase_sql/`.
+  `frontend/prisma/manual_supabase_sql/`.
 - Adding/altering a table, column, index, constraint, FK, or default.
 - Writing or reviewing RLS policies.
 - Choosing between the Prisma client, the RLS-scoped Supabase client, and the

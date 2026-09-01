@@ -31,6 +31,15 @@ export interface DealerJwtPayload {
   userId: string;
   email: string;
   role: "DEALER";
+  /**
+   * Mirror of the dealer's scope at mint time, used ONLY by proxy.ts for an
+   * edge-level routing decision (no DB at the edge). It is NEVER the
+   * authorization decision: lib/auth/dealer-session.ts re-derives scope from the
+   * live Dealer.status on every server request, so a stale claim can widen
+   * nothing. Absent on tokens minted before this field existed — treat as
+   * "full" there, because the server-side check still gates the request.
+   */
+  scope?: "onboarding" | "full";
 }
 
 export async function signDealerJwt(payload: DealerJwtPayload, opts?: { remember?: boolean }): Promise<string> {

@@ -4,6 +4,10 @@ import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import {
+  settleApprovedCommission,
+  CommissionNotClaimableError,
+} from "@/lib/services/affiliate/affiliate-payout.service";
 
 interface Props { params: Promise<{ commissionId: string }> }
 
@@ -16,8 +20,9 @@ const schema = z.object({
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
   const adminCheck = await requirePermissionStrict(request, "finance.commissions.settle");
-  // Enforced directly (not via the shadow flag): this route had no role
-  // check at all, so every authenticated admin could reach it.
+  // Hard-enforced (not via the shadow flag), and the allow-list is read from
+  // PERMISSION_ROLES rather than restated here: a duplicated inline role set is
+  // a second source of policy that can drift from the matrix it is meant to mirror.
   if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
   const admin = adminCheck.admin;
 
@@ -33,30 +38,26 @@ export async function POST(request: NextRequest, { params }: Props) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
 
-  // F-002/F-003 — single settlement rail. Record a REAL AffiliatePayout(PAID)
-  // and flip the commission to PAID + link it (payoutId) in ONE transaction, so
-  // status, paidAt, and the money-out record can never diverge. PAID is set
-  // only here, on an actual recorded settlement — never speculatively at
-  // request time (the old self-serve rail did, and is now disabled).
-  const settledAt = new Date();
-  await prisma.$transaction(async (tx) => {
-    const payout = await tx.affiliatePayout.create({
-      data: {
-        affiliateId: commission.affiliateId,
-        amountCents: commission.amountCents,
-        status: "PAID",
-        method: parsed.data.paymentMethod,
-        reference: parsed.data.paymentReference,
-        periodStart: commission.createdAt,
-        periodEnd: settledAt,
-        processedAt: settledAt,
-      },
+  // F-002/F-003 — single settlement rail. The service records a REAL
+  // AffiliatePayout(PAID) and flips the commission to PAID + links payoutId in
+  // ONE transaction via an APPROVED→PAID compare-and-set, so two concurrent
+  // settlements (double-click / two admins) can never both succeed. The
+  // status check above is a fast, friendly fail; the compare-and-set is the
+  // real guard against the concurrent case a plain read cannot see.
+  let settlement;
+  try {
+    settlement = await settleApprovedCommission({
+      commissionId,
+      paymentMethod: parsed.data.paymentMethod,
+      paymentReference: parsed.data.paymentReference,
     });
-    await tx.commission.update({
-      where: { id: commissionId },
-      data: { status: "PAID", paidAt: settledAt, payoutId: payout.id },
-    });
-  });
+  } catch (err) {
+    if (err instanceof CommissionNotClaimableError) {
+      // Lost the race between the read and the claim, or it was settled meanwhile.
+      return adminError("CONFLICT", "Commission was already settled or is being settled concurrently", 409);
+    }
+    throw err;
+  }
 
   await prisma.adminAuditLog.create({
     data: {
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       metadata: {
         affiliateId: commission.affiliateId,
         amountCents: commission.amountCents,
+        payoutId: settlement.payoutId,
         paymentMethod: parsed.data.paymentMethod,
         paymentReference: parsed.data.paymentReference,
         note: parsed.data.note ?? null,

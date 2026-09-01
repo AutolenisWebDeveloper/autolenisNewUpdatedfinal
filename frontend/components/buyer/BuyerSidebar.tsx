@@ -10,11 +10,12 @@ import {
   LayoutDashboard, Car, Gavel, FileText, FileCheck, Shield, PenLine,
   MapPin, Bell, MessageSquare, FolderOpen, User, Settings, LogOut,
   ClipboardList, TrendingUp, Heart, Search, Menu, CreditCard,
-  Bookmark, Activity, Share2, Receipt,
+  Bookmark, Activity, Share2, Receipt, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { NOTIFICATION_CLEARED_EVENT } from "@/lib/events/notifications";
 import { api } from "@/lib/api/client";
+import { isNavItemReachable, type JourneyView } from "@/lib/services/buyer/nav-gating";
 
 const NAV_GROUPS = [
   {
@@ -58,7 +59,26 @@ const NAV_GROUPS = [
   },
 ];
 
-function SidebarContent({ pathname, onNavigate, unreadCount }: { pathname: string; onNavigate?: () => void; unreadCount: number }) {
+// Why a locked item is locked, so the affordance explains itself instead of
+// leaving the buyer to guess why a link did nothing.
+function lockReason(journey: JourneyView | null): string {
+  if (!journey) return "Not available yet";
+  return journey.completedStages.includes("onboarding")
+    ? "Unlocks as your deal progresses"
+    : "Finish setting up your account to unlock this";
+}
+
+function SidebarContent({
+  pathname,
+  onNavigate,
+  unreadCount,
+  journey,
+}: {
+  pathname: string;
+  onNavigate?: () => void;
+  unreadCount: number;
+  journey: JourneyView | null;
+}) {
   return (
     <>
       <div className="px-5 py-4 border-b border-slate-100">
@@ -72,19 +92,49 @@ function SidebarContent({ pathname, onNavigate, unreadCount }: { pathname: strin
               {group.items.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(item.href + "/");
                 const showBadge = item.href === "/buyer/notifications" && unreadCount > 0;
+                const testId = `sidebar-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`;
+                // Journey-aware gating (lib/services/buyer/nav-gating). Until the
+                // journey is known, render everything as a link — the server
+                // layout is the authority and will redirect if needed; showing a
+                // flash of locks would be worse than a brief live link.
+                const reachable = journey ? isNavItemReachable(item.href, journey) : true;
+
+                if (!reachable) {
+                  // A LOCKED affordance, not a dead link. These used to be live
+                  // links that silently redirected to /buyer/onboarding (or to a
+                  // "nothing here yet" page) with no explanation at all.
+                  return (
+                    <li key={item.href}>
+                      <span
+                        data-testid={testId}
+                        data-locked="true"
+                        aria-disabled="true"
+                        title={lockReason(journey)}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 cursor-not-allowed select-none"
+                      >
+                        <item.icon size={15} className="shrink-0" aria-hidden="true" />
+                        <span className="flex-1">{item.label}</span>
+                        <Lock size={12} className="shrink-0 text-slate-300" aria-hidden="true" />
+                        <span className="sr-only">— locked. {lockReason(journey)}</span>
+                      </span>
+                    </li>
+                  );
+                }
+
                 return (
                   <li key={item.href}>
                     <Link
                       href={item.href}
                       onClick={onNavigate}
-                      data-testid={`sidebar-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                      aria-current={active ? "page" : undefined}
+                      data-testid={testId}
                       className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                         active
                           ? "bg-al-primary/10 text-al-primary font-semibold"
                           : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                       }`}
                     >
-                      <item.icon size={15} className="shrink-0" />
+                      <item.icon size={15} className="shrink-0" aria-hidden="true" />
                       <span className="flex-1">{item.label}</span>
                       {showBadge && (
                         <span
@@ -113,7 +163,7 @@ function SidebarContent({ pathname, onNavigate, unreadCount }: { pathname: strin
   );
 }
 
-export default function BuyerSidebar() {
+export default function BuyerSidebar({ journey = null }: { journey?: JourneyView | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -149,7 +199,7 @@ export default function BuyerSidebar() {
         className="hidden lg:flex w-60 shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0"
         data-testid="buyer-sidebar"
       >
-        <SidebarContent pathname={pathname} unreadCount={unreadCount} />
+        <SidebarContent pathname={pathname} unreadCount={unreadCount} journey={journey} />
       </aside>
 
       {/* Mobile top bar (< lg) */}
@@ -180,7 +230,7 @@ export default function BuyerSidebar() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent variant="sheet" side="left" className="flex flex-col p-0" data-testid="buyer-mobile-drawer">
           <DialogTitle className="sr-only">Buyer navigation</DialogTitle>
-          <SidebarContent pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
+          <SidebarContent pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} journey={journey} />
         </DialogContent>
       </Dialog>
     </>

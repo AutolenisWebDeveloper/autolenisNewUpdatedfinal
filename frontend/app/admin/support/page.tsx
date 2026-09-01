@@ -80,7 +80,7 @@ export default async function AdminSupportPage({
       </div>
       <p className="text-sm text-slate-500 mb-6">
         Audited support sessions — every session records who, why, and when in the audit log.
-        Only Super Admin and Support Admin can start or end sessions.
+        Only Super Admin can start or end sessions.
       </p>
 
       {/* User search */}
@@ -117,7 +117,7 @@ export default async function AdminSupportPage({
                       <p className="text-xs text-slate-400">{u.email} · {u.role}</p>
                     </div>
                     {canImpersonate ? (
-                      <StartImpersonationButton targetUserId={u.id} targetLabel={name ?? u.email} />
+                      <StartImpersonationButton targetUserId={u.id} targetLabel={name ?? u.email} adminRole={admin.role} />
                     ) : (
                       <span className="text-xs text-slate-400" data-testid="impersonate-not-permitted">
                         SUPER_ADMIN only
@@ -152,7 +152,7 @@ export default async function AdminSupportPage({
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="amber" className="text-xs">ACTIVE</Badge>
-                  <EndImpersonationButton sessionId={s.id} />
+                  <EndImpersonationButton sessionId={s.id} adminRole={admin.role} />
                 </div>
               </div>
             ))}

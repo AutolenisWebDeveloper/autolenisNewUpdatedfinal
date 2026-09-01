@@ -93,11 +93,19 @@ export function toDealerEnvelopeSummary(e: EvidenceLike | null | undefined): Dea
 export interface AdminEvidencePackage {
   envelope: ESignEnvelope;
   history: ESignEnvelopeHistory[];
+  /**
+   * False when the ESignEnvelopeHistory archive is not readable in this
+   * environment (migration 20261014 unapplied / schema gate closed). An empty
+   * `history` with `historyAvailable: false` means "unknown", NOT "no superseded
+   * attempts" — the distinction matters for a forensic export.
+   */
+  historyAvailable: boolean;
 }
 
 export function toAdminEvidencePackage(
   envelope: ESignEnvelope,
   history: ESignEnvelopeHistory[],
+  historyAvailable = true,
 ): AdminEvidencePackage {
-  return { envelope, history };
+  return { envelope, history, historyAvailable };
 }

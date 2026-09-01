@@ -60,9 +60,11 @@ export default async function BuyerDashboard() {
     unreadCount,
     activeDealerCount,
   ] = await Promise.all([
+    // A failed read must be distinguishable from "no deposit" — see the
+    // depositStatus derivation below.
     prisma.deposit
       .findFirst({ where: { buyerId: buyer.id }, orderBy: { createdAt: "desc" }, select: { status: true } })
-      .catch(() => null),
+      .catch(() => "UNREADABLE" as const),
     prequalApproved
       ? prisma.shortlist
           .findUnique({ where: { buyerId: buyer.id }, select: { _count: { select: { items: true } } } })
@@ -96,9 +98,15 @@ export default async function BuyerDashboard() {
     prisma.dealer.count({ where: { status: "ACTIVE" } }).catch(() => 0),
   ]);
 
+  // A null deposit means "no deposit row"; a failed query means "we don't know".
+  // Collapsing the second into NOT_PAID told a buyer who had paid $99 that they
+  // had not, and drove the "pay your deposit" recommendation at them.
+  const depositUnreadable = latestDeposit === "UNREADABLE";
+  const depositRow = depositUnreadable ? null : latestDeposit;
   const depositStatus: DepositStatus =
-    latestDeposit?.status === "PAID" ? "PAID" :
-    latestDeposit?.status === "PENDING" ? "PENDING" : "NOT_PAID";
+    depositUnreadable ? "UNKNOWN" :
+    depositRow?.status === "PAID" ? "PAID" :
+    depositRow?.status === "PENDING" ? "PENDING" : "NOT_PAID";
 
   const shortlistCount = shortlist?._count.items ?? 0;
 

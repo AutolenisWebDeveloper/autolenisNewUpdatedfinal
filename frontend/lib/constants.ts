@@ -91,11 +91,27 @@ export const IPREDICT_TIERS = {
   DECLINED: { min: 300, max: 479, label: "Declined" },
 } as const;
 
-// ─── Auction Gating Rule ─────────────────────────────────────────────────────
-// D1: NEVER check PreQualification.status — the field does not exist.
-// The correct gating pattern is:
-//   prequal record EXISTS && prequal.expiresAt > now()
-// This is the only valid auction gate.
+// ─── Prequal provider-failure marker ─────────────────────────────────────────
+// ComplianceEvent.eventType written when the credit-bureau call itself failed
+// (timeout / HTTP error / empty / unparseable) rather than when a buyer was
+// held for a genuine risk reason. Both outcomes are fail-closed MANUAL_REVIEW,
+// so this marker is the ONLY thing that tells an integration outage apart from
+// a compliance hold — it drives the admin queue label and the health check.
+// Lives here (not in the prequal service) so the health check and admin pages
+// can read it without importing the orchestrator's email/Stripe dependencies.
+export const PREQUAL_PROVIDER_FAILURE_EVENT = "PREQUAL_PROVIDER_FAILURE";
+
+// ─── Prequal Gating Rule ─────────────────────────────────────────────────────
+// NEVER check PreQualification.status — the field does not exist.
+//
+// A prequal is usable ONLY when it is APPROVED and unexpired. Use the single
+// source of truth, `isPrequalValid()` in lib/services/prequal/prequal.service:
+//   prequal.decision === "APPROVED" && prequal.expiresAt > now()
+//
+// Gating on the mere EXISTENCE of a row is wrong and has shipped as a bug: a
+// PENDING / MANUAL_REVIEW row carries maxOtdAmountCents = 0, so "row exists"
+// gating presented buyers an undetermined budget as an approved budget of $0
+// and filtered all inventory out of their search. Existence is not approval.
 
 // ─── iPredict OFAC Rule ──────────────────────────────────────────────────────
 // checkOfacAlert = true MUST auto-escalate to manual review immediately.
@@ -181,6 +197,15 @@ export const CRON_AUTH_PREFIX = "Bearer ";
 
 // ─── Affiliate Document Upload ───────────────────────────────────────────────
 export const AFFILIATE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+// O12 — the ONE tax-classification vocabulary for AffiliateTaxProfile: the
+// finance route and the onboarding wizard previously wrote two different
+// casings/granularities into the same column.
+export const AFFILIATE_TAX_CLASSIFICATIONS = ["INDIVIDUAL", "LLC", "CORP", "S_CORP", "PARTNERSHIP"] as const;
+
+// Decision 3 — self-serve payout request threshold (config constant, never a
+// literal). Requests below this total are rejected with BELOW_MINIMUM.
+export const AFFILIATE_PAYOUT_MINIMUM_CENTS = 2500; // $25
 
 // ─── Affiliate Compliance ─────────────────────────────────────────────────────
 export const AFFILIATE_DISCLOSURE_VERSION = "1.0";

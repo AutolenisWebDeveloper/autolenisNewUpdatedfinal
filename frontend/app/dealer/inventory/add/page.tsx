@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
-const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"] as const;
+// Must match the API enum exactly (z.enum(["NEW","USED","CPO"])). The previous
+// list ("Excellent"/"Good"/...) could only ever produce a 422.
+const CONDITIONS = [
+  { value: "NEW", label: "New" },
+  { value: "USED", label: "Used" },
+  { value: "CPO", label: "Certified Pre-Owned" },
+] as const;
 
 const INPUT_CLASS =
   "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30";
@@ -23,7 +29,7 @@ export default function AddInventoryPage() {
   const [model, setModel] = useState("");
   const [trim, setTrim] = useState("");
   const [mileage, setMileage] = useState("");
-  const [condition, setCondition] = useState<string>("Good");
+  const [condition, setCondition] = useState<string>("USED");
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
 
@@ -89,7 +95,10 @@ export default function AddInventoryPage() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-5 text-sm">
+        <div
+          role="alert"
+          className="bg-al-danger-subtle border border-al-danger/30 text-al-danger-fg rounded-lg px-4 py-3 mb-5 text-sm"
+        >
           {error}
         </div>
       )}
@@ -203,8 +212,8 @@ export default function AddInventoryPage() {
               data-testid="condition-select"
             >
               {CONDITIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+                <option key={c.value} value={c.value}>
+                  {c.label}
                 </option>
               ))}
             </select>

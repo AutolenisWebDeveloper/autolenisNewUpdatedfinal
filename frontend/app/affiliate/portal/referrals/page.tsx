@@ -1,12 +1,17 @@
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
+import { countsTowardEarned } from "@/lib/services/affiliate/commission.service";
 import { Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import EmptyState from "@/components/ui/patterns/EmptyState";
 
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateReferralsPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
   const referrals = await prisma.affiliate.findMany({
     where: { parentId: affiliate.id },
     include: { user: { select: { email: true, createdAt: true } }, commissions: { select: { amountCents: true, status: true } } },
@@ -27,19 +32,24 @@ export default async function AffiliateReferralsPage() {
         <Badge variant="secondary">{referrals.length}</Badge>
       </div>
       {referrals.length === 0 ? (
-        <div className="text-center py-16 text-slate-400" data-testid="no-referrals">
-          <p>No referrals yet. Share your link to grow your network.</p>
-        </div>
+        <EmptyState
+          testId="no-referrals"
+          icon={Users}
+          title="No referrals yet"
+          body="Share your link to grow your network — everyone who joins with your code shows up here."
+          action={{ label: "Open referral hub", href: "/affiliate/portal/referral-hub", testId: "empty-referrals-cta" }}
+          className="py-16 bg-white border border-slate-200 rounded-xl"
+        />
       ) : (
         <div className="space-y-2">
           {referrals.map((r, i) => {
-            const totalEarned = r.commissions.filter(c => c.status !== "REVERSED").reduce((s, c) => s + c.amountCents, 0);
+            const totalEarned = r.commissions.filter(countsTowardEarned).reduce((s, c) => s + c.amountCents, 0);
             return (
               <div key={r.id} data-testid={`referral-row-${i}`}
                 className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
                 <div>
                   <p className="text-sm font-medium text-slate-800">{maskEmail(r.user.email)}</p>
-                  <p className="text-xs text-slate-400">Joined {r.createdAt.toLocaleDateString()} · {r.commissions.length} deal{r.commissions.length !== 1 ? "s" : ""}</p>
+                  <p className="text-xs text-slate-500">Joined {r.createdAt.toLocaleDateString()} · {r.commissions.length} deal{r.commissions.length !== 1 ? "s" : ""}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-semibold text-sm text-green-600">${(totalEarned / 100).toLocaleString()} earned</p>

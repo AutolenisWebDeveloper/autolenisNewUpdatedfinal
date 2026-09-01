@@ -25,7 +25,7 @@ import {
   MessageSquare,
   Award,
 } from "lucide-react";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
@@ -33,16 +33,19 @@ export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.forAffiliates)
 export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
+// P1-2 (review) — advertised per-deal figures compute from the $400 captured
+// basis commissions are actually paid on, never the $499 sticker.
+const L1 = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(2);
+const L2 = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_2).toFixed(2);
+const L3 = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_3).toFixed(2);
+
 const HOW_TO_EARN = [
   { icon: Share2, title: "Share your referral link", body: "Get a unique link. Share it via blog, YouTube, email, or social. Every buyer who signs up through you becomes your L1 referral." },
   { icon: Users, title: "They complete a deal", body: "When your referred buyer pays the $499 AutoLenis concierge fee, your commission is triggered automatically." },
-  { icon: DollarSign, title: "You earn 15%", body: "L1 pays $74.85 per completed deal. Your L1s also earn from their referrals — and you earn L2/L3 on those too." },
+  { icon: DollarSign, title: `You earn ${Math.round(COMMISSION_RATES.LEVEL_1 * 100)}%`, body: `L1 pays $${L1} per completed deal. Your L1s also earn from their referrals — and you earn L2/L3 on those too.` },
   { icon: TrendingUp, title: "Build your network", body: "Earn a percentage of commissions up to 3 levels deep — automatic and compounding as your network grows." },
 ];
 
-const L1 = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(2);
-const L2 = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_2).toFixed(2);
-const L3 = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_3).toFixed(2);
 
 const TOTAL_PAYOUT_PCT = Math.round(
   (COMMISSION_RATES.LEVEL_1 + COMMISSION_RATES.LEVEL_2 + COMMISSION_RATES.LEVEL_3) * 100,
@@ -205,8 +208,10 @@ export default function ForAffiliatesPage() {
               Earn on Every Deal in Your Network — Up to 3 Levels Deep.
             </h2>
             <p className="mt-3 text-sm text-[#4B5563]">
-              Based on the ${(PREMIUM_FEE_CENTS / 100).toFixed(0)} AutoLenis concierge
-              fee. Commissions paid only on completed deals.
+              Based on the ${(PREMIUM_FEE_REMAINING_CENTS / 100).toFixed(0)} concierge-fee
+              balance (the ${(PREMIUM_FEE_CENTS / 100).toFixed(0)} Premium fee less the deposit
+              credit) — the basis commissions are actually paid on. Commissions paid only on
+              completed deals.
             </p>
           </div>
           <div className="grid max-w-5xl grid-cols-1 gap-5 md:grid-cols-3">

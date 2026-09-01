@@ -36,15 +36,19 @@ export async function getLeaderboard(
   currentAffiliateId: string,
   limit = 10
 ): Promise<LeaderboardResult> {
-  // Lifetime earned = all commissions except REVERSED (clawed back) — the same
-  // basis as getCommissionSummary.totalCents and the portal's level breakdown.
+  // Lifetime earned = the shared ledger rule (M1): PENDING/APPROVED/PAID rows
+  // plus negative REVERSED clawback offsets — the same basis as
+  // getCommissionSummary.totalCents (ledgerEarnedWhere in SQL form).
   // ROW_NUMBER keeps the original deterministic dense ordering (id tiebreak).
   const rows = await prisma.$queryRaw<RawRow[]>(Prisma.sql`
     WITH totals AS (
       SELECT
         a.id,
         a.referral_code,
-        COALESCE(SUM(c.amount_cents) FILTER (WHERE c.status <> 'REVERSED'), 0)::bigint AS total_cents,
+        COALESCE(SUM(c.amount_cents) FILTER (
+          WHERE c.status IN ('PENDING', 'APPROVED', 'PAID')
+             OR (c.status = 'REVERSED' AND c.amount_cents < 0)
+        ), 0)::bigint AS total_cents,
         (SELECT COUNT(*) FROM affiliates ch WHERE ch.parent_id = a.id)::bigint         AS network_count
       FROM affiliates a
       LEFT JOIN commissions c ON c.affiliate_id = a.id

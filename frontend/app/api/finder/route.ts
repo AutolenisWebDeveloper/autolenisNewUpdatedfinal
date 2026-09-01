@@ -184,48 +184,30 @@ export async function POST(req: Request) {
         },
       });
 
-      // If we know this phone, attach to the buyer & store final score there.
-      if (extractedData.phone) {
-        const buyer = await prisma.buyer.findFirst({
-          where: { phone: extractedData.phone },
-          select: { id: true, firstName: true },
-        });
-        if (buyer) {
-          await prisma.buyer.update({
-            where: { id: buyer.id },
-            data: {
-              leadScore: scoring.score,
-              leadTemperature: scoring.temperature,
-            },
-          });
-          await prisma.leadScore.updateMany({
-            where: { sessionId, buyerId: null },
-            data: { buyerId: buyer.id },
-          });
-          await prisma.conversation.update({
-            where: { sessionId },
-            data: { buyerId: buyer.id },
-          });
-        }
-
-        if (scoring.temperature === "hot") {
-          const hotLead: HotLeadData = {
-            firstName: undefined,
-            vehicle: describeVehicle(extractedData),
-            budget: describeBudget(extractedData),
-            timeline: describeTimeline(extractedData.timeline),
-            zip: extractedData.zip ?? "Unknown",
-            score: scoring.score,
-            sessionId,
-            phone: extractedData.phone,
-          };
-          // Founder alert + buyer first-contact SMS run in parallel. Both
-          // are best-effort; neither throws out of this block.
-          await Promise.all([
-            notifyFounderHotLead(hotLead),
-            sendHotLeadBuyerSms(hotLead),
-          ]);
-        }
+      // The LeadScore row above stays explicitly unattributed (buyerId: null).
+      // A phone-keyed Buyer lookup used to run here and write the score onto the
+      // matched buyer, but this route is unauthenticated, un-rate-limited and
+      // CSRF-exempt, and `buyers.phone` is non-unique — so `findFirst` returned
+      // an arbitrary row and an anonymous caller supplying a known phone number
+      // could mutate a different person's record. Attribution belongs on an
+      // authenticated path; see docs/plans/BUYER-LOCATION-GAP.md (Fix 4).
+      if (extractedData.phone && scoring.temperature === "hot") {
+        const hotLead: HotLeadData = {
+          firstName: undefined,
+          vehicle: describeVehicle(extractedData),
+          budget: describeBudget(extractedData),
+          timeline: describeTimeline(extractedData.timeline),
+          zip: extractedData.zip ?? "Unknown",
+          score: scoring.score,
+          sessionId,
+          phone: extractedData.phone,
+        };
+        // Founder alert + buyer first-contact SMS run in parallel. Both
+        // are best-effort; neither throws out of this block.
+        await Promise.all([
+          notifyFounderHotLead(hotLead),
+          sendHotLeadBuyerSms(hotLead),
+        ]);
       }
     } catch (err) {
       // Scoring is non-blocking — buyer still completes the flow.

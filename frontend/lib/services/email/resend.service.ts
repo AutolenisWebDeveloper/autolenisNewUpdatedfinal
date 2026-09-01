@@ -4,15 +4,19 @@
 // FROM_NAME and RESEND_API_KEY from env
 
 import { logger } from "@/lib/logger";
+import { escapeHtml } from "@/lib/utils/escape-html";
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 import { enqueueTransactionalEmail } from "./transactional-dispatch";
-import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
+import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, PREMIUM_FEE_REMAINING_CENTS, PREMIUM_FEE_REMAINING_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
 
 // L1 affiliate commission on the Premium concierge fee.
 // Derived from constants so a fee or rate change is reflected automatically.
+// P1-2 (review) — advertised figures compute from the $400 captured basis
+// commissions are actually paid on (PREMIUM_FEE_REMAINING_CENTS), never the
+// $499 sticker; the ledger pays on amount_received (commission.service.ts).
 const L1_PREMIUM_FEE_COMMISSION_USD = formatCentsAsUsd(
-  Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1),
+  Math.round(PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_1),
 );
 const L1_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_1 * 100)}%`;
 const L2_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_2 * 100)}%`;
@@ -386,6 +390,8 @@ export async function sendFounderHotLeadAlertEmail(params: {
   score: number;
   scoringReason: string;
   sessionId: string;
+  /** Admin path the CTA opens (see adminPathForOpportunity). */
+  adminPath: string;
 }) {
   return sendIdempotent({
     idempotencyKey: `founder-hot-lead-${params.sessionId}`,
@@ -403,6 +409,7 @@ export async function sendFounderHotLeadAlertEmail(params: {
       score: params.score,
       scoringReason: params.scoringReason,
       sessionId: params.sessionId,
+      adminPath: params.adminPath,
     }),
   });
 }
@@ -866,7 +873,7 @@ export async function sendRefundConfirmationEmail(params: {
         <div style="padding:32px;color:#1f2937;line-height:1.7;font-size:14px">
           <p>Hi ${firstName},</p>
           <p>We've processed a refund of <strong>${amount}</strong> back to your original payment method.</p>
-          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;color:#4B5563"><strong>Reason:</strong> ${reason}</p>` : ""}
+          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;color:#4B5563"><strong>Reason:</strong> ${escapeHtml(reason)}</p>` : ""}
           <p>Most banks post refunds within 5–10 business days.</p>
           <a href="${dashboardUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Back to dashboard →</a>
           <p style="margin-top:32px;color:#94A3B8;font-size:12px">Reference: ${refundId}</p>
@@ -1008,7 +1015,7 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
             <br/>
             <span style="color:#4B5563;font-size:13px">Once you verify your email, you&rsquo;ll have immediate access to your affiliate dashboard and referral link.</span>
           </p>
-          <p style="color:#4B5563;font-size:13px">Commission rates on the ${PREMIUM_FEE_USD} Premium concierge fee: L1 ${L1_PCT_LABEL} &middot; L2 ${L2_PCT_LABEL} &middot; L3 ${L3_PCT_LABEL}.</p>
+          <p style="color:#4B5563;font-size:13px">Commission rates on the ${PREMIUM_FEE_REMAINING_USD} concierge-fee balance (the ${PREMIUM_FEE_USD} Premium fee less the deposit credit): L1 ${L1_PCT_LABEL} &middot; L2 ${L2_PCT_LABEL} &middot; L3 ${L3_PCT_LABEL}.</p>
           <p style="margin-top:24px;color:#94A3B8;font-size:12px">If you didn&rsquo;t apply for an AutoLenis affiliate account, you can safely ignore this email.</p>
         </div>
       </div>
@@ -1044,7 +1051,7 @@ export async function sendAffiliateActivationEmail(to: string, firstName: string
             <p style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:600">How it works</p>
             <ul style="margin:0;padding-left:20px;color:#4B5563;font-size:13px;line-height:1.7">
               <li>Share your link or code with anyone shopping for a car.</li>
-              <li>When they complete a deal, you earn <strong>${L1_PCT_LABEL} of the ${PREMIUM_FEE_USD} concierge fee (${L1_PREMIUM_FEE_COMMISSION_USD})</strong>.</li>
+              <li>When they complete a deal, you earn <strong>${L1_PCT_LABEL} of the ${PREMIUM_FEE_REMAINING_USD} concierge-fee balance (${L1_PREMIUM_FEE_COMMISSION_USD})</strong>.</li>
               <li>Their referrals earn you L2 (${L2_PCT_LABEL}) and L3 (${L3_PCT_LABEL}) commissions — up to 3 levels deep.</li>
               <li>Payouts process automatically every two weeks.</li>
             </ul>
@@ -1071,7 +1078,7 @@ export async function sendAffiliateRejectionEmail(to: string, firstName: string,
         <div style="padding:32px;color:#4B5563;line-height:1.7">
           <p>Hi ${firstName},</p>
           <p>Thank you for your interest in the AutoLenis affiliate program. After reviewing your application, we're unable to approve it at this time.</p>
-          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Note from our team:</strong> ${reason}</p>` : ""}
+          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Note from our team:</strong> ${escapeHtml(reason)}</p>` : ""}
           <p>We review applications on an ongoing basis and typically look for affiliates with:</p>
           <ul style="padding-left:20px;font-size:14px">
             <li>An established platform (blog, social, newsletter, podcast, or community)</li>
@@ -1103,7 +1110,7 @@ export async function sendAffiliateSuspendedEmail(to: string, firstName: string,
         <div style="padding:32px;color:#4B5563;line-height:1.7">
           <p>Hi ${firstName},</p>
           <p>Your AutoLenis affiliate account has been suspended. While suspended, your referral links remain active for attribution but you will not accrue new commissions and payouts are paused.</p>
-          <p style="background:#F8F9FB;border-left:3px solid #DC2626;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Reason:</strong> ${reason}</p>
+          <p style="background:#F8F9FB;border-left:3px solid #DC2626;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Reason:</strong> ${escapeHtml(reason)}</p>
           <p>If you believe this is a mistake or would like to discuss reinstatement, please contact our team.</p>
           <a href="mailto:support@autolenis.com" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Contact Support</a>
           <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
@@ -1362,7 +1369,7 @@ export async function sendDealerRejectionEmail(
         <div style="padding:32px">
           <p style="color:#1a1a2e;font-size:15px">Hi ${contactName},</p>
           <p style="color:#4B5563;font-size:14px;line-height:1.7">Thank you for your interest in the AutoLenis Dealer Network. After careful review, we are unable to approve your application at this time.</p>
-          ${reason ? `<p style="color:#4B5563;font-size:14px;line-height:1.7"><strong>Reason:</strong> ${reason}</p>` : ""}
+          ${reason ? `<p style="color:#4B5563;font-size:14px;line-height:1.7"><strong>Reason:</strong> ${escapeHtml(reason)}</p>` : ""}
           <p style="color:#4B5563;font-size:14px;line-height:1.7">If you believe this was a mistake, please contact us at support@autolenis.com.</p>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowEngine } from '@/lib/services/workflow.engine';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
@@ -15,8 +15,14 @@ interface RouteContext {
 // pairing (used for back-filling, debugging, or one-off sends).
 export async function POST(req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
-  const actor = await requirePermissionActor("comms.bulk_send");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const auth = await requirePermissionActorStrict("comms.bulk_send");
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
+      { status: auth.status },
+    );
+  }
+  const actor = auth.actor;
   let body: { contact_id?: string; trigger_data?: Record<string, unknown> };
   try {
     body = await req.json();

@@ -10,6 +10,7 @@ import { Shield, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-reac
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import ContractPdfViewer from "@/components/buyer/ContractPdfViewer";
+import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ contractId: string }> }
@@ -18,20 +19,24 @@ export default async function ContractDetailPage({ params }: Props) {
   const { contractId } = await params;
   const buyer = await requireBuyer();
 
-  // Ownership enforced — buyer can only view their own contracts
+  // Ask for the contract that was actually requested, scoped to the buyer.
+  // This previously filtered on buyerId alone and took the newest deal, then
+  // compared it to contractId afterwards — so a buyer with more than one deal
+  // could open only their most recent contract, and every other link on
+  // /buyer/contracts (which lists them all) dead-ended in a 404. Ownership
+  // belongs in the query, not in a post-hoc comparison.
   const deal = await prisma.deal.findFirst({
-    where: { buyerId: buyer.id },
+    where: { id: contractId, buyerId: buyer.id },
     include: {
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: true,
+      eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT },
       offer: { include: { dealer: { select: { dealershipName: true, tier: true, isSystemPlaceholder: true } } } },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
-    orderBy: { createdAt: "desc" },
   });
 
-  // Use deal ID as contract identifier — enforce ownership
-  if (!deal || deal.id !== contractId) notFound();
+  // Not found, or not this buyer's — the query already enforced both.
+  if (!deal) notFound();
 
   const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
   const dealerName = buyerFacingDealerName(deal.offer);

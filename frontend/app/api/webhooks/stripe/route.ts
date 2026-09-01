@@ -10,7 +10,7 @@ import {
   sendConciergeFeeConfirmationEmail,
   sendRefundConfirmationEmail,
 } from "@/lib/services/email/resend.service";
-import { processFeeCommission } from "@/lib/services/affiliate/commission.service";
+import { processFeeCommission, reverseCommissionsForPaymentIntent } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer";
@@ -21,9 +21,61 @@ import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 import { allowedPredecessors } from "@/lib/payments/deposit-state";
+import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
+
+// PaymentIntent metadata types this endpoint can actually fulfil. A
+// signature-valid payment whose type is not in this set is a real charge the
+// platform cannot route — acknowledged (retrying cannot fix bad metadata) but
+// never silently, because "200 OK and nothing happened" is exactly how a broken
+// money path stays invisible.
+const ROUTABLE_PI_TYPES = new Set(["deposit", "concierge_deposit", "concierge_fee", "service_fee"]);
+
+// Ops-only SYSTEM_ALERT for a payment this endpoint accepted but could not
+// route. Reuses the existing alert rail (surfaced on /admin/operations), deduped
+// per PaymentIntent, and best-effort — alerting must never fail an
+// already-acknowledged webhook.
+async function raiseUnroutablePaymentException(pi: Stripe.PaymentIntent, reason: string) {
+  const title = `Unroutable Stripe payment — no platform effect: ${pi.id}`;
+  try {
+    const existing = await prisma.notification.findFirst({
+      where: { title, type: "SYSTEM_ALERT" },
+      select: { id: true },
+    });
+    if (existing) return;
+    await prisma.notification.create({
+      data: {
+        title,
+        body: `Stripe reported payment_intent.succeeded for ${pi.id} (${pi.amount ?? "unknown"} minor units), but ${reason}. NOTHING ran: no deposit was flipped, no auction created, no deal advanced. Money moved at Stripe with no corresponding platform state. Identify the intent in the Stripe Dashboard, then converge it by hand through the owning admin path — do NOT fabricate a provider event. Review via /admin/operations.`,
+        type: "SYSTEM_ALERT",
+        actionUrl: "/admin/operations",
+      },
+    });
+  } catch (err) {
+    logger.error(`[stripe/webhook] unroutable-payment alert failed for ${pi.id} (best-effort):`, err);
+  }
+}
 
 export async function POST(request: NextRequest) {
-  const stripe = getStripe();
+  // getStripe() throws hard when STRIPE_SECRET_KEY is unset. Uncaught, that
+  // surfaces as an opaque framework 500 with nothing in the app log naming the
+  // cause — the endpoint looks "broken" from Stripe's delivery log and silent
+  // from ours. Catch it here so the misconfiguration is as legible as the
+  // missing-webhook-secret case below.
+  let stripe: Stripe;
+  try {
+    stripe = getStripe();
+  } catch (err) {
+    logger.error("[stripe/webhook] STRIPE_SECRET_KEY is not set — cannot verify webhooks:", err);
+    // Persist the condition: the app log is not queryable from the platform, and
+    // this state is otherwise indistinguishable from "Stripe never delivered".
+    await recordWebhookRejection({
+      source: "stripe",
+      reason: "provider_client_unavailable",
+      bodyBytes: 0,
+      hasSignatureHeader: request.headers.get("stripe-signature") !== null,
+    });
+    return new NextResponse("Webhook not configured", { status: 500 });
+  }
   const body = await request.text();
   const sig = request.headers.get("stripe-signature");
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -32,6 +84,12 @@ export async function POST(request: NextRequest) {
     // is a deployment error, not a bad request. 500 keeps Stripe retrying so
     // no events are lost while ops fixes the env.
     logger.error("[stripe/webhook] STRIPE_WEBHOOK_SECRET is not set — rejecting webhook");
+    await recordWebhookRejection({
+      source: "stripe",
+      reason: "webhook_secret_missing",
+      bodyBytes: body.length,
+      hasSignatureHeader: sig !== null,
+    });
     return new NextResponse("Webhook not configured", { status: 500 });
   }
 
@@ -39,6 +97,21 @@ export async function POST(request: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(body, sig ?? "", webhookSecret);
   } catch {
+    // This branch used to be entirely silent — no log, no row. A signing-secret
+    // mismatch therefore looked exactly like Stripe never calling us at all,
+    // which is the ambiguity that let a dead money path go unnoticed. The body
+    // is unverified and possibly hostile, so only its SIZE is recorded.
+    logger.error(
+      `[stripe/webhook] signature verification FAILED (body ${body.length} bytes, ` +
+        `signature header ${sig ? "present" : "absent"}) — if Stripe is delivering, ` +
+        `the endpoint's signing secret does not match STRIPE_WEBHOOK_SECRET`,
+    );
+    await recordWebhookRejection({
+      source: "stripe",
+      reason: "signature_invalid",
+      bodyBytes: body.length,
+      hasSignatureHeader: sig !== null,
+    });
     return new NextResponse("Webhook signature invalid", { status: 400 });
   }
 
@@ -70,6 +143,10 @@ export async function POST(request: NextRequest) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
         const { buyerId, type } = pi.metadata;
+        // Set true only by a branch that matched this payment's type AND resolved
+        // the row it is meant to act on. Left false, this is a real charge that
+        // changed nothing — the failure mode a bare 200 hides best.
+        let routed = false;
 
         if (type === "deposit") {
           // Phase 0.5-3: the deposit money-cluster (PI link → deposit PAID →
@@ -156,6 +233,7 @@ export async function POST(request: NextRequest) {
           }
 
           const { deposit, createdAuction, isNewAuction } = outcome;
+          routed = deposit !== null;
           const existingAuction = isNewAuction ? null : createdAuction;
           if (deposit) {
             // Post-commit effects: idempotent or best-effort; failures are
@@ -346,6 +424,7 @@ export async function POST(request: NextRequest) {
           }
 
           const { deposit, auctionId, reused } = outcome;
+          routed = deposit !== null;
           if (deposit && auctionId && !reused) {
             // Post-commit, best-effort effects (money already committed).
             const buyerEmail = deposit.buyer?.user?.email;
@@ -411,6 +490,7 @@ export async function POST(request: NextRequest) {
           // authoritative payment fact, so the forward transition is forced and the
           // change is recorded in DealStatusHistory.
           const feeDeal = await prisma.deal.findFirst({ where: whereClause });
+          routed = feeDeal !== null;
           if (feeDeal) {
             // Net of the $99 deposit credit — the amount actually captured.
             const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: pi.id };
@@ -474,15 +554,21 @@ export async function POST(request: NextRequest) {
           // queue keyed on the fee PaymentIntent; the DLQ drainer replays
           // processFeeCommission (idempotent) until it succeeds or is surfaced for
           // review — closing the one path where a paid-fee commission could vanish.
-          if (metaDealId && metaBuyerId) {
+          // M3 — the walk runs for BOTH resolution paths: metadata ids
+          // (primary) or the deal matched via stripeFeePIId (legacy buyer
+          // self-service). Before, the legacy path recorded the fee and
+          // advanced the deal but silently skipped commissions.
+          const commissionDealId = metaDealId ?? feeDeal?.id;
+          const commissionBuyerId = metaBuyerId ?? feeDeal?.buyerId;
+          if (commissionDealId && commissionBuyerId) {
             // F-004 — base commissions on the actual fee paid (this PI), not a
             // hardcoded constant. amount_received is the captured amount in cents;
             // fall back to amount if unset.
             const feeBasisCents = pi.amount_received || pi.amount || 0;
             try {
               await processFeeCommission({
-                dealId: metaDealId,
-                buyerId: metaBuyerId,
+                dealId: commissionDealId,
+                buyerId: commissionBuyerId,
                 qualifyingEventId: pi.id,
                 feeBasisCents,
               });
@@ -493,9 +579,9 @@ export async function POST(request: NextRequest) {
                 const { getServiceSupabase } = await import("@/lib/supabase-service");
                 await moveJobToDeadLetter(
                   getServiceSupabase(),
-                  `commission:${metaDealId}:${pi.id}`,
+                  `commission:${commissionDealId}:${pi.id}`,
                   "autolenis/affiliate.commission_walk",
-                  { dealId: metaDealId, buyerId: metaBuyerId, qualifyingEventId: pi.id, feeBasisCents },
+                  { dealId: commissionDealId, buyerId: commissionBuyerId, qualifyingEventId: pi.id, feeBasisCents },
                   commissionErr instanceof Error ? commissionErr.message : String(commissionErr),
                 );
               } catch (dlqErr) {
@@ -503,6 +589,23 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+        }
+
+        // Nothing above claimed this payment. Two ways to get here, both of
+        // which used to end in a bare 200 with no trace: the metadata type
+        // matches no branch at all, or a branch matched but the row it needed
+        // (Deposit for this PaymentIntent, Deal for this dealId) does not exist.
+        // Stripe is still acknowledged — a retry cannot conjure the missing row
+        // or repair metadata — but the charge is surfaced as an operational
+        // exception instead of being acked into silence.
+        if (!routed) {
+          const reason = ROUTABLE_PI_TYPES.has(type ?? "")
+            ? `metadata.type="${type}" matched a fulfillment branch, but no matching record was found for this payment`
+            : `metadata.type="${type ?? "absent"}" matched no fulfillment branch`;
+          logger.error(
+            `[stripe/webhook] unroutable payment_intent.succeeded ${pi.id} — ${reason}; no platform state changed`,
+          );
+          await raiseUnroutablePaymentException(pi, reason);
         }
         break;
       }
@@ -608,6 +711,38 @@ export async function POST(request: NextRequest) {
               metadata:   { piId, chargeId: charge.id },
             },
           }).catch(() => {});
+
+          // M2 — the fee was refunded, so its commissions must not stay
+          // payable: PENDING/APPROVED flip to REVERSED (status-guarded CAS
+          // inside the service). PAID commissions are never auto-reversed —
+          // pulling paid money back is a human clawback decision — so raise a
+          // deduped SYSTEM_ALERT naming them instead. Best-effort: a commission
+          // failure never un-acks the refund handling above.
+          try {
+            const { reversed, paidNeedingReview } = await reverseCommissionsForPaymentIntent(piId);
+            if (reversed > 0) {
+              logger.info(`[stripe/webhook] reversed ${reversed} commission(s) for refunded fee ${piId}`);
+            }
+            if (paidNeedingReview.length > 0) {
+              const title = `Refunded fee has PAID commissions — manual clawback needed: ${piId}`;
+              const existing = await prisma.notification.findFirst({
+                where: { title, type: "SYSTEM_ALERT" },
+                select: { id: true },
+              });
+              if (!existing) {
+                await prisma.notification.create({
+                  data: {
+                    title,
+                    body: `Stripe reported charge.refunded for fee PaymentIntent ${piId} (deal ${deal.id}), but commission(s) ${paidNeedingReview.join(", ")} were already PAID out. They were NOT auto-reversed. Review and claw back via the admin affiliate command center. /admin/operations`,
+                    type: "SYSTEM_ALERT",
+                    actionUrl: "/admin/operations",
+                  },
+                });
+              }
+            }
+          } catch (err) {
+            logger.error("[stripe/webhook] commission reversal for refunded fee failed:", err);
+          }
 
           // Receipt to the buyer for the concierge / service fee refund.
           try {

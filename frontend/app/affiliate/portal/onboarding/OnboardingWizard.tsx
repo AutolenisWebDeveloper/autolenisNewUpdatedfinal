@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CheckCircle2, ChevronRight, ChevronLeft, Upload, AlertCircle,
+  CheckCircle2, ChevronRight, ChevronLeft, Upload, AlertCircle, Clock,
   User, Building2, FileText, CreditCard, FolderOpen, ClipboardList,
 } from "lucide-react";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -76,9 +76,9 @@ const STEPS = [
 
 const TOTAL = STEPS.length;
 
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+function Label({ children, required, htmlFor }: { children: React.ReactNode; required?: boolean; htmlFor?: string }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 mb-1">
+    <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700 mb-1">
       {children}{required && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
@@ -144,10 +144,14 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
   const [paypalEmail, setPaypalEmail]   = useState(profile.paymentProfile?.paypalEmail ?? "");
   const [zellePhone, setZellePhone]     = useState(profile.paymentProfile?.zellePhone ?? "");
 
-  // Step 6 state
+  // Step 6 state. O15 — the step is satisfied only by a GOVERNMENT_ID upload
+  // (matching the server-side submit gate), not by any document.
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
   const [docType, setDocType]         = useState("GOVERNMENT_ID");
   const [uploadSuccess, setUploadSuccess] = useState(profile.documents.length > 0);
+  const [governmentIdUploaded, setGovernmentIdUploaded] = useState(
+    profile.documents.some(d => d.type === "GOVERNMENT_ID"),
+  );
 
   const goTo = (n: number) => {
     setError(null);
@@ -205,16 +209,29 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
+  // U6 — the raw fetch here used to reject unhandled on a network failure or
+  // non-JSON response: loading reset (try/finally in handleNext) but no error
+  // was ever shown. Every failure path now lands in setError.
   async function uploadDocument() {
     if (!uploadFile) { setError("Please select a file to upload."); return false; }
-    const fd = new FormData();
-    fd.append("file", uploadFile);
-    fd.append("type", docType);
-    const res = await fetch("/api/affiliate/onboarding/documents/upload", { method: "POST", body: fd });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Upload failed"); return false; }
-    setUploadSuccess(true);
-    setUploadFile(null);
-    return true;
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("type", docType);
+      const res = await fetch("/api/affiliate/onboarding/documents/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        setError(d?.error?.message ?? `Upload failed (${res.status}). Please try again.`);
+        return false;
+      }
+      if (docType === "GOVERNMENT_ID") setGovernmentIdUploaded(true);
+      setUploadSuccess(true);
+      setUploadFile(null);
+      return true;
+    } catch {
+      setError("Upload failed — check your connection and try again.");
+      return false;
+    }
   }
 
   async function handleNext() {
@@ -226,7 +243,22 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
       if (step === 4 && !(await saveStep4())) return;
       if (step === 5 && !(await saveStep5())) return;
       if (step === 6) {
-        if (!uploadSuccess && !(await uploadDocument())) return;
+        // O15 — the server's submit gate requires a GOVERNMENT_ID document
+        // specifically; letting any doc type satisfy this step produced a
+        // confusing "Missing: Government ID document" failure at the end.
+        if (!governmentIdUploaded) {
+          if (uploadFile && docType !== "GOVERNMENT_ID") {
+            // Upload their selected supporting doc, but the step isn't done.
+            if (!(await uploadDocument())) return;
+            setError("Supporting document uploaded — a Government ID is still required to continue.");
+            return;
+          }
+          if (docType !== "GOVERNMENT_ID") {
+            setError("A Government ID document is required to continue. Select \"Government ID\" and upload it.");
+            return;
+          }
+          if (!(await uploadDocument())) return;
+        }
       }
       if (step < TOTAL) goTo(step + 1);
     } finally {
@@ -247,16 +279,52 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     }
   }
 
+  // O5/U7 — the post-submit card must tell the truth per status: SUBMITTED/
+  // UNDER_REVIEW is "awaiting review", only APPROVED is "complete", and
+  // REJECTED gets an explanation instead of a blank wizard.
   if (submitted) {
+    const approved = onboarding.status === "APPROVED";
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="bg-white border border-slate-200 rounded-2xl p-10 max-w-md w-full text-center shadow-sm">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 size={32} className="text-green-600" />
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 max-w-md w-full text-center shadow-sm" data-testid={approved ? "onboarding-approved" : "onboarding-under-review"}>
+          <div className={`w-16 h-16 ${approved ? "bg-green-100" : "bg-blue-100"} rounded-full flex items-center justify-center mx-auto mb-4`}>
+            {approved
+              ? <CheckCircle2 size={32} className="text-green-600" />
+              : <Clock size={32} className="text-blue-600" />}
           </div>
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Onboarding Complete!</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">
+            {approved ? "Onboarding Complete!" : "Submitted — under review"}
+          </h1>
           <p className="text-sm text-slate-600 mb-6">
-            Your affiliate account is active. Head to your dashboard to grab your referral link and start earning.
+            {approved
+              ? "Your onboarding is approved. Head to your dashboard to grab your referral link and start earning."
+              : "Our team is reviewing your information. You'll get a notification (and an email) once it's processed — usually within 2 business days. Your referral link works in the meantime."}
+          </p>
+          <button
+            onClick={() => router.push("/affiliate/portal/dashboard")}
+            className="w-full bg-al-primary text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-al-primary/90 transition-colors"
+          >
+            Go to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (onboarding.status === "REJECTED") {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white border border-red-200 rounded-2xl p-10 max-w-md w-full text-center shadow-sm" data-testid="onboarding-rejected">
+          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle size={32} className="text-red-500" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">Onboarding not approved</h1>
+          {onboarding.decisionNote && (
+            <p className="text-sm text-red-900 bg-red-50 border border-red-100 rounded-lg p-3 mb-4 text-left">{onboarding.decisionNote}</p>
+          )}
+          <p className="text-sm text-slate-600 mb-6">
+            If you believe this was a mistake or want to appeal, contact{" "}
+            <a href="mailto:support@autolenis.com" className="text-al-primary font-semibold hover:underline">support@autolenis.com</a>.
           </p>
           <button
             onClick={() => router.push("/affiliate/portal/dashboard")}
@@ -277,6 +345,31 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
           <h1 className="text-2xl font-bold text-slate-900">Affiliate Onboarding</h1>
           <p className="text-sm text-slate-500 mt-1">Complete all steps to activate your account for payouts.</p>
         </div>
+
+        {/* O4 — corrections requested: the admin's decision note and item list
+            were collected but never shown; without them the affiliate saw a
+            blank wizard with no idea what to fix. */}
+        {onboarding.status === "NEEDS_CORRECTION" && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6" role="alert" data-testid="corrections-banner">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle size={16} className="text-amber-600 shrink-0" aria-hidden="true" />
+              <p className="text-sm font-semibold text-amber-900">Corrections requested</p>
+            </div>
+            {onboarding.decisionNote && (
+              <p className="text-sm text-amber-900 mb-2">{onboarding.decisionNote}</p>
+            )}
+            {onboarding.correctionItems.length > 0 && (
+              <ul className="list-disc pl-5 text-sm text-amber-900 space-y-0.5">
+                {onboarding.correctionItems.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-amber-800 mt-2">
+              Update the steps below, then resubmit from the Review step.
+            </p>
+          </div>
+        )}
 
         {/* Progress bar */}
         <div className="flex items-center gap-1 mb-8 overflow-x-auto pb-2">
@@ -340,7 +433,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 Your information is encrypted and securely stored. We only retain the last 4 digits of sensitive numbers.
               </p>
             </div>
@@ -353,40 +446,40 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">Legal name and mailing address for tax documents.</p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label required>First Name</Label>
-                  <Input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="John" />
+                  <Label required htmlFor="ob-first-name">First Name</Label>
+                  <Input id="ob-first-name" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="John" />
                 </div>
                 <div>
-                  <Label required>Last Name</Label>
-                  <Input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Smith" />
+                  <Label required htmlFor="ob-last-name">Last Name</Label>
+                  <Input id="ob-last-name" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Smith" />
                 </div>
                 <div>
-                  <Label required>Phone</Label>
-                  <Input value={phone} onChange={e => setPhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
+                  <Label required htmlFor="ob-phone">Phone</Label>
+                  <Input id="ob-phone" value={phone} onChange={e => setPhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
                 </div>
                 <div>
-                  <Label>Date of Birth</Label>
-                  <Input value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} type="date" />
+                  <Label htmlFor="ob-date-of-birth">Date of Birth</Label>
+                  <Input id="ob-date-of-birth" value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} type="date" />
                 </div>
                 <div className="col-span-2">
-                  <Label required>Address Line 1</Label>
-                  <Input value={address1} onChange={e => setAddress1(e.target.value)} placeholder="123 Main St" />
+                  <Label required htmlFor="ob-address-line-1">Address Line 1</Label>
+                  <Input id="ob-address-line-1" value={address1} onChange={e => setAddress1(e.target.value)} placeholder="123 Main St" />
                 </div>
                 <div className="col-span-2">
-                  <Label>Address Line 2</Label>
-                  <Input value={address2} onChange={e => setAddress2(e.target.value)} placeholder="Apt 4B (optional)" />
+                  <Label htmlFor="ob-address-line-2">Address Line 2</Label>
+                  <Input id="ob-address-line-2" value={address2} onChange={e => setAddress2(e.target.value)} placeholder="Apt 4B (optional)" />
                 </div>
                 <div>
-                  <Label required>City</Label>
-                  <Input value={city} onChange={e => setCity(e.target.value)} placeholder="Austin" />
+                  <Label required htmlFor="ob-city">City</Label>
+                  <Input id="ob-city" value={city} onChange={e => setCity(e.target.value)} placeholder="Austin" />
                 </div>
                 <div>
-                  <Label required>State</Label>
-                  <Input value={state} onChange={e => setState(e.target.value)} placeholder="TX" maxLength={2} />
+                  <Label required htmlFor="ob-state">State</Label>
+                  <Input id="ob-state" value={state} onChange={e => setState(e.target.value)} placeholder="TX" maxLength={2} />
                 </div>
                 <div>
-                  <Label required>ZIP Code</Label>
-                  <Input value={zip} onChange={e => setZip(e.target.value)} placeholder="78701" maxLength={10} />
+                  <Label required htmlFor="ob-zip-code">ZIP Code</Label>
+                  <Input id="ob-zip-code" value={zip} onChange={e => setZip(e.target.value)} placeholder="78701" maxLength={10} />
                 </div>
               </div>
             </div>
@@ -399,8 +492,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">How you operate as an affiliate (individual or business entity).</p>
               <div className="space-y-4">
                 <div>
-                  <Label required>Entity Type</Label>
-                  <Select value={entityType} onChange={e => setEntityType(e.target.value)}>
+                  <Label required htmlFor="ob-entity-type">Entity Type</Label>
+                  <Select id="ob-entity-type" value={entityType} onChange={e => setEntityType(e.target.value)}>
                     <option value="">Select entity type…</option>
                     <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
                     <option value="LLC">LLC</option>
@@ -410,21 +503,21 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </Select>
                 </div>
                 <div>
-                  <Label>Business Name</Label>
-                  <Input value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Acme Autos LLC (if applicable)" />
+                  <Label htmlFor="ob-business-name">Business Name</Label>
+                  <Input id="ob-business-name" value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Acme Autos LLC (if applicable)" />
                 </div>
                 <div>
-                  <Label>DBA Name</Label>
-                  <Input value={dbaName} onChange={e => setDbaName(e.target.value)} placeholder="Doing business as… (optional)" />
+                  <Label htmlFor="ob-dba-name">DBA Name</Label>
+                  <Input id="ob-dba-name" value={dbaName} onChange={e => setDbaName(e.target.value)} placeholder="Doing business as… (optional)" />
                 </div>
                 <div>
-                  <Label>Business Address</Label>
-                  <Input value={businessAddress} onChange={e => setBusinessAddress(e.target.value)} placeholder="Same as personal or different" />
+                  <Label htmlFor="ob-business-address">Business Address</Label>
+                  <Input id="ob-business-address" value={businessAddress} onChange={e => setBusinessAddress(e.target.value)} placeholder="Same as personal or different" />
                 </div>
                 {entityType !== "INDIVIDUAL" && (
                   <div>
-                    <Label>EIN (last 4 digits only)</Label>
-                    <Input value={einLast4} onChange={e => setEinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} className="max-w-[120px]" />
+                    <Label htmlFor="ob-ein-last-4-digits-only">EIN (last 4 digits only)</Label>
+                    <Input id="ob-ein-last-4-digits-only" value={einLast4} onChange={e => setEinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} className="max-w-[120px]" />
                   </div>
                 )}
               </div>
@@ -438,41 +531,42 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">Required by the IRS for payments over $600/year. We only store the last 4 digits of your TIN.</p>
               <div className="space-y-4">
                 <div>
-                  <Label required>Tax Classification</Label>
-                  <Select value={taxClass} onChange={e => setTaxClass(e.target.value)}>
+                  <Label required htmlFor="ob-tax-classification">Tax Classification</Label>
+                  <Select id="ob-tax-classification" value={taxClass} onChange={e => setTaxClass(e.target.value)}>
                     <option value="">Select classification…</option>
-                    <option value="individual">Individual / Sole Proprietor</option>
-                    <option value="llc_single">Single-member LLC</option>
-                    <option value="llc_multi">Multi-member LLC</option>
-                    <option value="corporation">C Corporation</option>
-                    <option value="s_corp">S Corporation</option>
-                    <option value="partnership">Partnership</option>
+                    {/* O12 — canonical AFFILIATE_TAX_CLASSIFICATIONS values, matching
+                        the finance route: one vocabulary in the tax column. */}
+                    <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
+                    <option value="LLC">LLC</option>
+                    <option value="CORP">C Corporation</option>
+                    <option value="S_CORP">S Corporation</option>
+                    <option value="PARTNERSHIP">Partnership</option>
                   </Select>
                 </div>
                 <div>
-                  <Label required>TIN Type</Label>
-                  <Select value={tinType} onChange={e => setTinType(e.target.value)}>
+                  <Label required htmlFor="ob-tin-type">TIN Type</Label>
+                  <Select id="ob-tin-type" value={tinType} onChange={e => setTinType(e.target.value)}>
                     <option value="">Select type…</option>
                     <option value="SSN">SSN (Social Security Number)</option>
                     <option value="EIN">EIN (Employer ID Number)</option>
                   </Select>
                 </div>
                 <div>
-                  <Label required>Last 4 digits of TIN</Label>
-                  <Input value={tinLast4} onChange={e => setTinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="e.g. 5678" maxLength={4} className="max-w-[120px]" />
-                  <p className="text-xs text-slate-400 mt-1">We never store your full TIN — only the last 4 digits.</p>
+                  <Label required htmlFor="ob-last-4-digits-of-tin">Last 4 digits of TIN</Label>
+                  <Input id="ob-last-4-digits-of-tin" value={tinLast4} onChange={e => setTinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="e.g. 5678" maxLength={4} className="max-w-[120px]" />
+                  <p className="text-xs text-slate-500 mt-1">We never store your full TIN — only the last 4 digits.</p>
                 </div>
                 <div>
-                  <Label required>Legal Name (as on tax return)</Label>
-                  <Input value={legalName} onChange={e => setLegalName(e.target.value)} placeholder="Full legal name" />
+                  <Label required htmlFor="ob-legal-name-as-on-tax-return">Legal Name (as on tax return)</Label>
+                  <Input id="ob-legal-name-as-on-tax-return" value={legalName} onChange={e => setLegalName(e.target.value)} placeholder="Full legal name" />
                 </div>
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                   <p className="font-semibold mb-1">IRS Certification</p>
                   <p>Under penalties of perjury, I certify that: (1) The number shown is my correct taxpayer identification number; (2) I am not subject to backup withholding; (3) I am a U.S. citizen or other U.S. person; (4) The FATCA code (if any) is correct.</p>
                 </div>
                 <div>
-                  <Label required>Electronic Signature (type your full name)</Label>
-                  <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your full legal name" />
+                  <Label required htmlFor="ob-electronic-signature-type-your-full-name">Electronic Signature (type your full name)</Label>
+                  <Input id="ob-electronic-signature-type-your-full-name" value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your full legal name" />
                 </div>
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={certified} onChange={e => setCertified(e.target.checked)} className="mt-0.5 w-4 h-4 accent-al-primary" />
@@ -489,8 +583,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">How you&apos;d like to receive commission payments. Only the last 4 digits of account numbers are stored.</p>
               <div className="space-y-4">
                 <div>
-                  <Label required>Payout Method</Label>
-                  <Select value={payoutMethod} onChange={e => setPayoutMethod(e.target.value)}>
+                  <Label required htmlFor="ob-payout-method">Payout Method</Label>
+                  <Select id="ob-payout-method" value={payoutMethod} onChange={e => setPayoutMethod(e.target.value)}>
                     <option value="">Select method…</option>
                     <option value="ACH">ACH / Direct Deposit</option>
                     <option value="CHECK">Paper Check</option>
@@ -501,22 +595,22 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                 {(payoutMethod === "ACH" || payoutMethod === "CHECK") && (
                   <>
                     <div>
-                      <Label required>Account Holder Name</Label>
-                      <Input value={holderName} onChange={e => setHolderName(e.target.value)} placeholder="Full name on account" />
+                      <Label required htmlFor="ob-account-holder-name">Account Holder Name</Label>
+                      <Input id="ob-account-holder-name" value={holderName} onChange={e => setHolderName(e.target.value)} placeholder="Full name on account" />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label required>Routing (last 4)</Label>
-                        <Input value={routingLast4} onChange={e => setRoutingLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} />
+                        <Label required htmlFor="ob-routing-last-4">Routing (last 4)</Label>
+                        <Input id="ob-routing-last-4" value={routingLast4} onChange={e => setRoutingLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} />
                       </div>
                       <div>
-                        <Label required>Account (last 4)</Label>
-                        <Input value={accountLast4} onChange={e => setAccountLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="5678" maxLength={4} />
+                        <Label required htmlFor="ob-account-last-4">Account (last 4)</Label>
+                        <Input id="ob-account-last-4" value={accountLast4} onChange={e => setAccountLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="5678" maxLength={4} />
                       </div>
                     </div>
                     <div>
-                      <Label required>Account Type</Label>
-                      <Select value={accountType} onChange={e => setAccountType(e.target.value)}>
+                      <Label required htmlFor="ob-account-type">Account Type</Label>
+                      <Select id="ob-account-type" value={accountType} onChange={e => setAccountType(e.target.value)}>
                         <option value="">Select…</option>
                         <option value="CHECKING">Checking</option>
                         <option value="SAVINGS">Savings</option>
@@ -526,14 +620,14 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                 )}
                 {payoutMethod === "PAYPAL" && (
                   <div>
-                    <Label required>PayPal Email</Label>
-                    <Input value={paypalEmail} onChange={e => setPaypalEmail(e.target.value)} type="email" placeholder="you@paypal.com" />
+                    <Label required htmlFor="ob-paypal-email">PayPal Email</Label>
+                    <Input id="ob-paypal-email" value={paypalEmail} onChange={e => setPaypalEmail(e.target.value)} type="email" placeholder="you@paypal.com" />
                   </div>
                 )}
                 {payoutMethod === "ZELLE" && (
                   <div>
-                    <Label required>Zelle Phone Number</Label>
-                    <Input value={zellePhone} onChange={e => setZellePhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
+                    <Label required htmlFor="ob-zelle-phone-number">Zelle Phone Number</Label>
+                    <Input id="ob-zelle-phone-number" value={zellePhone} onChange={e => setZellePhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
                   </div>
                 )}
               </div>
@@ -556,8 +650,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <Label required>Document Type</Label>
-                    <Select value={docType} onChange={e => setDocType(e.target.value)}>
+                    <Label required htmlFor="ob-document-type">Document Type</Label>
+                    <Select id="ob-document-type" value={docType} onChange={e => setDocType(e.target.value)}>
                       <option value="GOVERNMENT_ID">Government-Issued ID</option>
                       <option value="W9">W-9 Form</option>
                       <option value="VOIDED_CHECK">Voided Check</option>
@@ -570,7 +664,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                     <label className="block border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-al-primary/50 transition-colors">
                       <Upload size={24} className="mx-auto mb-2 text-slate-400" />
                       <p className="text-sm font-medium text-slate-700">{uploadFile ? uploadFile.name : "Click to select file"}</p>
-                      <p className="text-xs text-slate-400 mt-1">PDF, JPG, PNG, WEBP — max 10 MB</p>
+                      <p className="text-xs text-slate-500 mt-1">PDF, JPG, PNG, WEBP — max 10 MB</p>
                       <input
                         type="file"
                         className="sr-only"
@@ -649,7 +743,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-slate-400 mt-4">
+              <p className="text-xs text-slate-500 mt-4">
                 By submitting, you confirm that all information provided is accurate and complete.
               </p>
             </div>

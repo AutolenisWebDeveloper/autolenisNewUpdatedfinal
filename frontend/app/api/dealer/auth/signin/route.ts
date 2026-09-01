@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma";
 import { signDealerJwt, DEALER_TOKEN_COOKIE } from "@/lib/dealer-auth";
 import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
+import { dealerScope, ONBOARDING_PATH } from "@/lib/auth/dealer-scope";
 
 export async function POST(request: NextRequest) {
   let email: string, password: string, remember: boolean;
@@ -64,14 +65,12 @@ export async function POST(request: NextRequest) {
       { status: 403 }
     );
   }
-  if (dealer.status === "PENDING") {
-    return NextResponse.json(
-      { error: "Your dealer account is pending admin approval. You will receive an email when approved." },
-      { status: 403 }
-    );
-  }
-  // Only ACTIVE dealers may receive a dealer_token.
-  if (dealer.status !== "ACTIVE") {
+  // PENDING is NOT rejected. Admin approval granted permission to onboard, so a
+  // PENDING dealer signs in and receives an ONBOARDING-scoped token confining
+  // them to /dealer/onboarding. Rejecting here was the circular deadlock:
+  // approved -> PENDING -> cannot sign in -> cannot onboard -> never ACTIVE.
+  const scope = dealerScope(dealer);
+  if (scope === "NONE") {
     return NextResponse.json(
       { error: "Your dealer account is not active. Please contact support@autolenis.com." },
       { status: 403 }
@@ -84,9 +83,14 @@ export async function POST(request: NextRequest) {
     userId: dealer.userId,
     email: dealer.user.email,
     role: "DEALER",
+    scope: scope === "ONBOARDING" ? "onboarding" : "full",
   }, { remember });
 
-  const res = NextResponse.json({ success: true, dealerId: dealer.id });
+  const res = NextResponse.json({
+    success: true,
+    dealerId: dealer.id,
+    redirect: scope === "ONBOARDING" ? ONBOARDING_PATH : "/dealer/dashboard",
+  });
   res.cookies.set(DEALER_TOKEN_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

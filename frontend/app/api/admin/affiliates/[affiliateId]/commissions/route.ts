@@ -20,6 +20,9 @@ const schema = z.object({
   level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   amountCents: z.number().int().positive().max(100000, "Amount cannot exceed $1,000"),
   reason: z.string().min(10, "Reason must be at least 10 characters"),
+  // M10 — caller-supplied so the qualifying key is deterministic: a retry or
+  // double-click replays the same key and can never mint a second commission.
+  idempotencyKey: z.string().min(8, "idempotencyKey must be at least 8 characters").max(64),
 });
 
 const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
@@ -44,22 +47,41 @@ export async function POST(request: NextRequest, { params }: Props) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
 
-  const { dealId, level, amountCents, reason } = parsed.data;
+  const { dealId, level, amountCents, reason, idempotencyKey } = parsed.data;
 
   const deal = await prisma.deal.findUnique({ where: { id: dealId }, select: { id: true } });
   if (!deal) return adminError("NOT_FOUND", "Deal not found", 404);
 
-  const commission = await prisma.commission.create({
-    data: {
-      affiliateId,
-      dealId,
-      level,
-      rate: COMMISSION_RATE_MAP[level],
-      amountCents,
-      status: "APPROVED",
-      qualifyingEventId: `admin-manual-${affiliateId}-${dealId}-${Date.now()}`,
-    },
-  });
+  // M10 — deterministic key: same idempotencyKey → same qualifyingEventId,
+  // and the unique constraint makes a replay return the existing row instead
+  // of creating a duplicate. basisCents stays null on purpose: a manual
+  // adjustment has no fee basis, and fabricating one would make the ledger lie.
+  const qualifyingEventId = `admin-manual-${affiliateId}-${dealId}-${idempotencyKey}`;
+
+  const existing = await prisma.commission.findUnique({ where: { qualifyingEventId } });
+  if (existing) return adminSuccess({ commission: existing, replayed: true }, 200);
+
+  let commission;
+  try {
+    commission = await prisma.commission.create({
+      data: {
+        affiliateId,
+        dealId,
+        level,
+        rate: COMMISSION_RATE_MAP[level],
+        amountCents,
+        status: "APPROVED",
+        qualifyingEventId,
+      },
+    });
+  } catch (err) {
+    // Race between the check and the create: the unique constraint won — replay.
+    if ((err as { code?: string })?.code === "P2002") {
+      const raced = await prisma.commission.findUnique({ where: { qualifyingEventId } });
+      if (raced) return adminSuccess({ commission: raced, replayed: true }, 200);
+    }
+    throw err;
+  }
 
   const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;
 

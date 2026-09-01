@@ -3,6 +3,7 @@
 import { toast } from "sonner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -10,9 +11,14 @@ interface Props {
   pickupStatus: string | null;
   scheduledAt: Date | string | null;
   location: string | null;
+  /** UX only — the complete route re-checks the role server-side. */
+  adminRole?: string;
 }
 
-export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location }: Props) {
+export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location, adminRole }: Props) {
+  // Only the complete route role-checks; schedule / regenerate / reschedule are
+  // auth-only and stay ungated.
+  const mayComplete = canUse("pickup.complete", adminRole);
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +173,8 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
                   Regenerate QR Code
                 </Button>
                 <Button size="sm" variant="ghost" data-testid="mark-completed-btn"
+                  disabled={!mayComplete}
+                  title={mayComplete ? undefined : deniedReason("pickup.complete")}
                   onClick={() => { setError(null); setConfirmReason(""); setConfirmModal({ action: "complete", label: "Mark Complete", requiresReason: true }); }}>
                   Mark Complete
                 </Button>

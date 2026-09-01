@@ -1349,7 +1349,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                 {availability.canResolveException && (
                   <button onClick={() => setModal("resolveException")} className="text-xs text-green-600 hover:underline flex items-center gap-1"><CheckCircle2 size={11} />Resolve</button>
                 )}
-                <Link href="/admin/queues/OFAC_ALERT" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />OFAC Queue</Link>
+                <Link href="/admin/compliance/ofac" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />OFAC Queue</Link>
               </div>
             </SectionCard>
 
@@ -1441,7 +1441,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                       {d.serviceFeePayment!.paidAt && <p className="text-[10px] text-slate-400">{fmtDate(d.serviceFeePayment!.paidAt)}</p>}
                     </div>
                   ))}
-                  <Link href="/admin/payments/concierge-fees" className="text-xs text-purple-600 hover:underline mt-2 flex items-center gap-1"><ExternalLink size={11} />All Concierge Fees</Link>
+                  <Link href="/admin/payments" className="text-xs text-purple-600 hover:underline mt-2 flex items-center gap-1"><ExternalLink size={11} />All Concierge Fees</Link>
                 </>
               )}
             </SectionCard>
@@ -1741,7 +1741,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                 ))}
               </div>
               <div className="pt-3">
-                <Link href="/admin/audit-logs" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />All Audit Logs</Link>
+                <Link href="/admin/audit-log" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />All Audit Logs</Link>
               </div>
             </SectionCard>
 

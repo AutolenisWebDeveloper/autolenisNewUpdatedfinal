@@ -10,7 +10,8 @@
 -- standard autolenis/email.send pipeline (so suppression, DNC, and consent
 -- gates still apply).
 --
--- Seeds use ON CONFLICT (template_key) DO NOTHING so re-applying the migration
+-- Seeds use ON CONFLICT (template_key) WHERE template_key IS NOT NULL (the
+-- arbiter must carry the partial index's predicate) so re-applying the migration
 -- never overwrites edits an admin has made through the CRM UI.
 -- ============================================================================
 
@@ -179,7 +180,7 @@ You stopped by AutoLenis earlier. No commitment was made, no pressure here. If y
 See how it works: {{returnUrl}}$text$,
     ARRAY['firstName','returnUrl','unsubscribeUrl']
   )
-ON CONFLICT (template_key) DO NOTHING;
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;
 
 -- Seed v1 of the version history for any rows we just inserted. Skipped for
 -- rows that already existed (the version row already exists too).

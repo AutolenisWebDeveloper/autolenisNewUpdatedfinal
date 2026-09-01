@@ -187,7 +187,11 @@ These three gates **remain open**. Each requires human action and must NOT be tr
 ### Gate 3 — Promote DocuSign + MicroBilt credentials
 - Owner: User
 - DocuSign: in DocuSign Admin → Apps & Keys → Production app → copy real Integration Key, RSA private key, Account ID, User ID. Set in Vercel: `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_PRIVATE_KEY_BASE64`, `DOCUSIGN_ACCOUNT_ID`, `DOCUSIGN_USER_ID`, `DOCUSIGN_AUTH_SERVER=account.docusign.com`, `DOCUSIGN_BASE_URL=https://www.docusign.net/restapi`, `DOCUSIGN_ENV=production`, `DOCUSIGN_DEALER_TEMPLATE_ID=<real template>`.
-- MicroBilt: switch to production credentials and base URLs `https://api.microbilt.com` (replace `apitest.microbilt.com` in `MICROBILT_IPREDICT_BASE_URL`, `MICROBILT_OAUTH_TOKEN_URL`, `IPREDICT_GET_REPORT_URL`, `IPREDICT_REPORT_PERFORMANCE_URL`, `IPREDICT_GET_ARCHIVE_REPORT_URL`).
+- MicroBilt: set `MICROBILT_SANDBOX=false`, switch to production credentials (`MICROBILT_CLIENT_ID`, `MICROBILT_CLIENT_SECRET`), and set the two URLs the adapter actually reads:
+  - `MICROBILT_BASE_URL` — the **full report URL including the `/GetReport` suffix**, e.g. `https://api.microbilt.com/iPredict/GetReport`. The value is used verbatim (nothing appends the path); a URL that does not end in `/GetReport` is refused as `REPORT_URL_INVALID`, and one still pointing at `apitest.` is refused as `CONFIG_MISMATCH`.
+  - `MICROBILT_OAUTH_BASE_URL` — the full token URL, e.g. `https://api.microbilt.com/OAuth/Token`.
+
+  Optional: `MICROBILT_PRODUCT` / `MICROBILT_CAID` (the `X-Product` / `X-CAID` headers). `IPREDICT_GET_REPORT_URL` and `MICROBILT_OAUTH_TOKEN_URL` are still honoured as legacy fallbacks; prefer the `*_BASE_URL` names. Full operator checklist: `docs/prequal-live-run-checklist.md`.
 - Stripe (also tied to gate 2): swap `sk_live_…` / `pk_live_…` from production account; remove sandbox values. Today's `.env` already contains `sk_live_…` keys — confirm these belong to the **sandbox/test account**, not production, before any real transaction is processed.
 
 > Until gate 3 lands, `lib/services/esign/envelope-template.service.ts` returns `{mock:true}` for envelope creation, and `lib/services/prequal/microbilt.service.ts` returns `mockIPredict()` if credentials look like placeholders or the API is unavailable.

@@ -19,6 +19,13 @@
 --   * Idempotent: safe to re-run.
 -- ============================================================================
 
+-- Ensure the column exists before indexing it. On a fresh database this file
+-- can be the first to introduce template_key (05 aborts historically; 09/14/15
+-- add it themselves) — indexing a column this file never created made the
+-- whole transaction roll back on fresh provisions.
+ALTER TABLE email_templates
+  ADD COLUMN IF NOT EXISTS template_key TEXT;
+
 -- Ensure ON CONFLICT has a constraint to target (no-op if it already exists).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_email_templates_template_key
   ON email_templates (template_key)
@@ -63,7 +70,7 @@ Over the next few days we'll show you how it works. To start, set up your profil
 {{dashboardUrl}}$txt$,
   '{firstName,dashboardUrl}'
 )
-ON CONFLICT (template_key) DO NOTHING;
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;
 
 -- ----------------------------------------------------------------------------
 -- D1 — How AutoLenis works
@@ -107,7 +114,7 @@ VALUES
 Start a request: {{dashboardUrl}}$txt$,
   '{firstName,dashboardUrl}'
 )
-ON CONFLICT (template_key) DO NOTHING;
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;
 
 -- ----------------------------------------------------------------------------
 -- D3 — Dealers compete for you
@@ -150,7 +157,7 @@ You stay anonymous until you choose. No pressure, no calls during the process �
 Set up my request: {{dashboardUrl}}$txt$,
   '{firstName,dashboardUrl}'
 )
-ON CONFLICT (template_key) DO NOTHING;
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;
 
 -- ----------------------------------------------------------------------------
 -- D5 — What to expect (illustrative process walkthrough — NOT a fabricated testimonial)
@@ -195,7 +202,7 @@ Once you submit a request, here's how it plays out:
 Start when you're ready: {{dashboardUrl}}$txt$,
   '{firstName,dashboardUrl}'
 )
-ON CONFLICT (template_key) DO NOTHING;
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;
 
 -- ----------------------------------------------------------------------------
 -- D7 — Ready to start? Request your vehicle
@@ -237,4 +244,4 @@ It takes about a minute, and there's no obligation to accept any offer that come
 Request my vehicle: {{dashboardUrl}}$txt$,
   '{firstName,dashboardUrl}'
 )
-ON CONFLICT (template_key) DO NOTHING;
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;

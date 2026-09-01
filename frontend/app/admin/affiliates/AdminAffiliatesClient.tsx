@@ -8,7 +8,7 @@ import {
   SlidersHorizontal, CheckCircle2, Clock,
   Ban, XCircle, Share2, UserCheck, DollarSign,
   CreditCard, Trophy, AlertTriangle, Eye,
-  FileText, ShieldAlert,
+  FileText, ShieldAlert, ClipboardCheck,
 } from "lucide-react";
 import type { AdminAffiliateKpis } from "@/lib/services/admin/admin-affiliate-command-center.service";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -271,6 +271,21 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
             <p className="text-xs text-slate-500 mt-0.5">{total.toLocaleString()} total affiliates</p>
           </div>
         </div>
+        {/* Batch 2 IA: the onboarding review queue lost its sidebar entry;
+            this roster is its canonical parent. */}
+        <Link
+          href="/admin/affiliates/onboarding"
+          data-testid="admin-affiliates-onboarding-link"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 hover:border-amber-300 hover:bg-amber-50 text-slate-700 hover:text-amber-700 rounded-lg text-xs font-semibold transition-colors"
+        >
+          <ClipboardCheck size={13} />
+          Onboarding Reviews
+          {kpis.pending > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">
+              {kpis.pending}
+            </span>
+          )}
+        </Link>
       </div>
 
       {/* KPI Cards — Row 1 */}
@@ -525,12 +540,7 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
                     <div className="border-t border-slate-100 my-1" />
                     {(a.status === "PENDING" || a.status === "REJECTED" || a.status === "SUSPENDED") && (
                       <button onClick={() => openAction("approve", a.id, a.email)} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-green-700 hover:bg-green-50 transition-colors text-left">
-                        <CheckCircle2 size={13} /> Approve
-                      </button>
-                    )}
-                    {a.status === "PENDING" && (
-                      <button onClick={() => openAction("reject", a.id, a.email)} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors text-left">
-                        <XCircle size={13} /> Reject
+                        <CheckCircle2 size={13} /> Restore access
                       </button>
                     )}
                     {a.status === "ACTIVE" && (

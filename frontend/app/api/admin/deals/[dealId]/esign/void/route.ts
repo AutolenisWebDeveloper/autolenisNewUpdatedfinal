@@ -16,8 +16,9 @@ const schema = z.object({
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
-  // Enforced directly (not via the shadow flag): this route had no role
-  // check at all, so every authenticated admin could reach it.
+  // Hard-enforced (not via the shadow flag), and the allow-list is read from
+  // PERMISSION_ROLES rather than restated here: a duplicated inline role set is
+  // a second source of policy that can drift from the matrix it is meant to mirror.
   if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
   const admin = adminCheck.admin;
 
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: { id: true, status: true } });
   if (!envelope) return adminError("NOT_FOUND", "Envelope not found", 404);
   if (envelope.status === "VOIDED") return adminError("CONFLICT", "Envelope is already voided", 409);
   if (envelope.status === "COMPLETED") return adminError("CONFLICT", "Cannot void a completed envelope", 409);

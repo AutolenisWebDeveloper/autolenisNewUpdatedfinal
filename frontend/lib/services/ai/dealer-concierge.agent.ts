@@ -2,6 +2,7 @@
 // Groq ONLY | Kill switch required | Dealer context injected per session
 import { groqChat, ChatMessage } from "@/lib/ai/groq-client";
 import { prisma } from "@/lib/prisma";
+import { buildActorGuidance, isActionIntentSurfaceEnabled } from "@/lib/services/ai/action-intent";
 
 interface DealerContext {
   dealershipName: string;
@@ -63,7 +64,9 @@ RULES:
 - Never reveal other dealers' bids or presence in an auction
 - Never reveal buyer personal information (name, DOB, SSN, etc.)
 - Keep responses concise and action-oriented
-- Always refer dealers to support@autolenis.com for billing or compliance issues`;
+- Always refer dealers to support@autolenis.com for billing or compliance issues${
+    isActionIntentSurfaceEnabled() ? `\n\n${buildActorGuidance("DEALER")}` : ""
+  }`;
 }
 
 export async function dealerConciergeChat(

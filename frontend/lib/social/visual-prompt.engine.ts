@@ -8,6 +8,7 @@
 
 import { logger } from "@/lib/logger";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
+import { complete } from "@/lib/ai/provider";
 
 export interface VisualPromptInput {
   franchise: string;
@@ -135,30 +136,21 @@ function buildFallback(input: VisualPromptInput): VisualPromptOutput {
 
 // ─── Groq helper (mirrors groq-script.engine.ts REST pattern) ────────────────
 async function callGroq(systemPrompt: string, userPrompt: string): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured");
-  }
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: GROQ_SUMMARY, // llama-3.3-70b-versatile
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 900,
-      temperature: 0.7,
-      top_p: 1.0,
-    }),
+  // Transport only — model, prompts, token cap, temperature and top_p unchanged.
+  // The retry layer below still keys on "429"/"503" in the message, and
+  // ProviderHttpError's message keeps that exact `Groq HTTP <status>:` prefix.
+  const result = await complete({
+    purpose: "social.visual_prompt",
+    model: GROQ_SUMMARY, // llama-3.3-70b-versatile
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 900,
+    temperature: 0.7,
+    topP: 1.0,
   });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 200)}`);
-  }
-  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return data.choices?.[0]?.message?.content ?? "";
+  return result.content;
 }
 
 async function callGroqWithRetry(systemPrompt: string, userPrompt: string): Promise<string> {

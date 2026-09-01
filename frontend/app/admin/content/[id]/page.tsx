@@ -10,47 +10,20 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ExternalLink } from "lucide-react";
 import { getContentArticleById } from "@/lib/services/admin/admin-content.service";
-import { clusterLabel, statusMeta } from "@/lib/content/cluster-meta";
+import {
+  clusterLabel,
+  parseFaqs,
+  parseQualityFlags,
+  statusMeta,
+} from "@/lib/content/cluster-meta";
 import ArticleStatusActions from "@/components/admin/content/ArticleStatusActions";
 
 export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ id: string }>;
-}
-
-interface ParsedFaq {
-  question: string;
-  answer: string;
-}
-
-function parseFaqs(raw: string | null): ParsedFaq[] {
-  if (!raw) return [];
-  try {
-    const data = JSON.parse(raw);
-    if (Array.isArray(data)) {
-      return data.filter(
-        (f): f is ParsedFaq =>
-          f && typeof f.question === "string" && typeof f.answer === "string",
-      );
-    }
-  } catch {
-    /* ignore malformed JSON */
-  }
-  return [];
-}
-
-function parseFlags(raw: string | null): string[] {
-  if (!raw) return [];
-  try {
-    const data = JSON.parse(raw);
-    if (Array.isArray(data)) return data.filter((f): f is string => typeof f === "string");
-  } catch {
-    /* ignore */
-  }
-  return [];
 }
 
 export default async function AdminContentDetailPage({ params }: PageProps) {
@@ -61,7 +34,7 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
 
   const meta = statusMeta(article.status);
   const faqs = parseFaqs(article.faqJson);
-  const flags = parseFlags(article.qualityFlags);
+  const flags = parseQualityFlags(article.qualityFlags);
 
   const metaRows: Array<{ label: string; value: string }> = [
     { label: "Cluster", value: clusterLabel(article.cluster) },
@@ -120,6 +93,24 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
       <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 mb-6" data-testid="content-detail-actions">
         <p className="text-sm font-semibold text-slate-800 mb-3">Status</p>
         <ArticleStatusActions articleId={article.id} status={article.status} />
+
+        {article.scheduledAt && (
+          <p className="mt-3 text-xs text-slate-500" data-testid="content-detail-scheduled">
+            Scheduled to publish {article.scheduledAt.toLocaleString("en-US")}.
+          </p>
+        )}
+
+        {article.publishFailureReason && (
+          <div
+            className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5"
+            data-testid="content-detail-publish-failure"
+          >
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-red-800">
+              <AlertTriangle size={13} aria-hidden /> Last publish attempt was blocked
+            </p>
+            <p className="mt-1 text-xs text-red-700 break-words">{article.publishFailureReason}</p>
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">

@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { complete } from "@/lib/ai/provider";
 
 export async function POST(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
@@ -72,30 +73,19 @@ Return ONLY valid JSON, no other text:
 }`;
 
     try {
-      const res = await fetch(
-        "https://api.groq.com/openai/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${GROQ_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "llama-3.3-70b-versatile",
-            messages: [{ role: "user", content: platformPrompt }],
-            max_tokens: 600,
-          }),
-        },
-      );
+      // Transport only — model, prompt and token cap unchanged.
+      //
       // A non-2xx Groq response must not be parsed as an empty object and
       // returned as a successful "optimization" that silently echoes the
-      // original content — surface it to the catch fallback below.
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        throw new Error(`Groq ${res.status}: ${body.slice(0, 200)}`);
-      }
-      const data = await res.json();
-      const raw = data?.choices?.[0]?.message?.content ?? "{}";
+      // original content. The provider adapter throws on non-2xx, so it reaches
+      // the catch fallback below exactly as the explicit throw did.
+      const completion = await complete({
+        purpose: "social.analytics.viral_optimize",
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: platformPrompt }],
+        maxTokens: 600,
+      });
+      const raw = completion.content || "{}";
       const result = JSON.parse(raw.replace(/```json|```/g, "").trim());
 
       optimized[platform] = {

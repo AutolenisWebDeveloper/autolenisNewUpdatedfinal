@@ -88,6 +88,9 @@ model Buyer {
   conversations         Conversation[]
   buyerOpportunities    BuyerOpportunity[]
 
+  // D7 — the inactive-affiliate cron and admin KPIs filter buyers by
+  // affiliate_id; previously an unindexed scan per affiliate in a loop.
+  @@index([affiliateId])
   @@map("buyers")
 }
 
@@ -258,6 +261,8 @@ model Affiliate {
   onboardingReview    AffiliateOnboardingReview?
   clicks              AffiliateClick[]
 
+  // D8 — network/digest/leaderboard/referrals all filter on parentId.
+  @@index([parentId])
   @@map("affiliates")
 }
 
@@ -874,17 +879,29 @@ model Commission {
   status            CommissionStatus @default(PENDING)
   qualifyingEventId String           @unique @map("qualifying_event_id")
   paidAt            DateTime?        @map("paid_at")
+  // D13 — transition stamps: the audit log is no longer the ONLY record of
+  // who approved/reversed money. Nullable for pre-existing rows. Requires
+  // owner-gated migration 001_affiliate_correctness before deploy.
+  approvedAt        DateTime?        @map("approved_at")
+  approvedBy        String?          @map("approved_by")
+  reversedAt        DateTime?        @map("reversed_at")
   // F-002/F-003 — link to the settlement that actually paid this commission.
   // Set ONLY when an admin records a real payout via the mark-paid rail; the
-  // status flips to PAID in the same transaction. The previously orphaned
-  // self-serve requestPayout rail is disabled.
+  // status flips to PAID in the same transaction. The self-serve request rail
+  // (payout PENDING) attaches commissions here too, before settlement.
+  // D20 — Restrict: deleting a payout would fabricate the exact corruption
+  // isCommissionSettled rejects (PAID + paidAt + no payout link).
   payoutId          String?          @map("payout_id")
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
   affiliate         Affiliate        @relation(fields: [affiliateId], references: [id])
-  payout            AffiliatePayout? @relation(fields: [payoutId], references: [id])
+  payout            AffiliatePayout? @relation(fields: [payoutId], references: [id], onDelete: Restrict)
 
   @@index([payoutId])
+  // D1 — every affiliate-facing read filters (affiliateId, status); the cron
+  // sweeps (status, createdAt). Both were full-table scans.
+  @@index([affiliateId, status])
+  @@index([status, createdAt])
   @@map("commissions")
 }
 
@@ -1599,6 +1616,7 @@ enum NotificationType {
   PAYOUT_REQUESTED
   PAYOUT_PAID
   PAYOUT_FAILED
+  PAYOUT_CANCELLED
 }
 
 enum RiskTier {
@@ -2425,6 +2443,9 @@ model AffiliatePayout {
   // F-002/F-003 — the commissions settled by this payout.
   commissions   Commission[]
 
+  // D15 — payout history reads filter on affiliateId; the table scales with
+  // commissions (one payout per settled commission on the admin rail).
+  @@index([affiliateId])
   @@map("affiliate_payouts")
 }
 
@@ -3052,6 +3073,9 @@ model AffiliateReferral {
   totalDeals     Int       @default(0) @map("total_deals")
 
   @@unique([affiliateId, referredUserId])
+  // D6 — one referrer per referred user (first-touch wins): the payee lookup
+  // must never depend on planner order. Safe to add: 0 live rows at audit.
+  @@unique([referredUserId])
   @@map("affiliate_referrals")
 }
 
@@ -3470,6 +3494,64 @@ model AiChatMessage {
   @@map("ai_chat_messages")
 }
 
+// Program 6 — durable ActionIntent lifecycle record. The single mutable store
+// for the AI→business control boundary: PROPOSED → APPROVAL_REQUIRED →
+// APPROVED/REJECTED → EXECUTING → COMPLETED/FAILED. No existing model can hold
+// this without corrupting its semantics (AuditLog/AdminAuditLog are append-only;
+// FinancingReviewTask/BuyerOfferReview/ExternalPreApproval carry required
+// domain FKs and 3-state review enums). Ships DORMANT — no rows are written
+// until an actor+intent is owner-activated. Audit trail links via AuditLog
+// rows with entity_type = "AiActionIntent", entity_id = this id.
+model AiActionIntent {
+  id                    String               @id @default(uuid())
+  intentType            String               @map("intent_type")
+  status                AiActionIntentStatus @default(PROPOSED)
+  // Requesting agent surface + authenticated principal (server-resolved).
+  actorType             String               @map("actor_type")
+  actorId               String               @map("actor_id")
+  authenticatedRole     String               @map("authenticated_role")
+  subjectId             String?              @map("subject_id")
+  // Validated, safe parameter representation (never raw secrets/PII).
+  parameters            Json
+  consequence           String
+  requiresHumanApproval Boolean              @map("requires_human_approval")
+  // Proposal/idempotency identity — one record per key (dedup replayed proposals).
+  idempotencyKey        String?              @unique @map("idempotency_key")
+  rationale             String?
+  // Deterministic policy outcome captured at proposal time.
+  policyResult          Json?                @map("policy_result")
+  // Approver identity + authorization (server-authoritative human approval).
+  approverId            String?              @map("approver_id")
+  approverRole          String?              @map("approver_role")
+  approvedAt            DateTime?            @map("approved_at")
+  rejectedAt            DateTime?            @map("rejected_at")
+  rejectionCode         String?              @map("rejection_code")
+  // Atomic execution claim + attempts (exactly-once under concurrency/replay).
+  executionClaimedAt    DateTime?            @map("execution_claimed_at")
+  executionAttempts     Int                  @default(0) @map("execution_attempts")
+  // Authoritative result / failure (never model output).
+  result                Json?
+  failureReason         String?              @map("failure_reason")
+  completedAt           DateTime?            @map("completed_at")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([actorType, actorId])
+  @@index([status, requiresHumanApproval])
+  @@map("ai_action_intents")
+}
+
+enum AiActionIntentStatus {
+  PROPOSED
+  APPROVAL_REQUIRED
+  APPROVED
+  REJECTED
+  EXECUTING
+  COMPLETED
+  FAILED
+}
+
 model InsuranceProvider {
   id              String   @id @default(uuid())
   name            String   @unique
@@ -3529,7 +3611,13 @@ model DealerInvitation {
   contactName     String                 @map("contact_name")
   email           String
   personalMessage String?                @map("personal_message")
-  token           String                 @unique
+  // Plaintext `token` is retained ONLY for the migration window so existing
+  // emailed links keep resolving while rows are backfilled. It is dropped by a
+  // separate, later migration once tokenHash is populated everywhere. New rows
+  // never write it — see account-claim.service.ts for the hashed design.
+  token           String?                @unique
+  tokenHash       String?                @unique @map("token_hash")
+  consumedAt      DateTime?              @map("consumed_at")
   expiresAt       DateTime               @map("expires_at")
   status          DealerInvitationStatus @default(PENDING)
   invitedBy       String                 @map("invited_by")
@@ -3540,6 +3628,7 @@ model DealerInvitation {
 
   @@index([status])
   @@index([token])
+  @@index([tokenHash])
   @@map("dealer_invitations")
 }
 
@@ -3873,29 +3962,30 @@ model BuyerOpportunity {
 // READ-ONLY signal (from DealerCapacityConfig.preferredMakes for registered
 // dealers, brand/discovery for prospects) — the rooftop never writes preferredMakes.
 model DealerRooftop {
-  id               String                 @id @default(cuid())
-  displayName      String                 @map("display_name")
-  nameKey          String                 @map("name_key")
+  id               String                  @id @default(cuid())
+  displayName      String                  @map("display_name")
+  nameKey          String                  @map("name_key")
   // Strongest identity key — unique so two candidates on the same real domain
   // can never create two rooftops (Postgres treats NULLs as distinct, so
   // host-less rooftops are unconstrained). name+zip races are a noted follow-up.
-  websiteHost      String?                @unique @map("website_host")
-  phoneKey         String?                @map("phone_key")
-  nameZipKey       String?                @map("name_zip_key")
-  nameCityStateKey String?                @map("name_city_state_key")
+  websiteHost      String?                 @unique @map("website_host")
+  phoneKey         String?                 @map("phone_key")
+  nameZipKey       String?                 @map("name_zip_key")
+  nameCityStateKey String?                 @map("name_city_state_key")
   zip              String?
   city             String?
   state            String?
   latitude         Float?
   longitude        Float?
-  makes            String[]               @default([])
+  makes            String[]                @default([])
   // Provenance of `makes`: "preferred_makes" (registered dealer) | "prospect_brand" | null
-  makesSource      String?                @map("makes_source")
-  createdAt        DateTime               @default(now()) @map("created_at")
-  updatedAt        DateTime               @updatedAt @map("updated_at")
+  makesSource      String?                 @map("makes_source")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
   dealers          Dealer[]
   prospects        DealerProspect[]
   contacts         DealerContactProfile[]
+  candidates       ApolloPersonCandidate[]
 
   // websiteHost lookups are served by its @unique index (above) — no separate
   // @@index (that would drift from the migration, which creates only the unique).
@@ -3944,6 +4034,92 @@ model ApolloReveal {
   @@map("apollo_reveals")
 }
 
+/// A person returned by Apollo People Search — the 0-credit acquisition path.
+/// Persisted WITHOUT enrichment. Search results carry an obfuscated last name;
+/// that is expected at this stage and does not block rooftop matching.
+model ApolloPersonCandidate {
+  id String @id @default(cuid())
+
+  apolloPersonId       String  @unique @map("apollo_person_id")
+  apolloOrganizationId String? @map("apollo_organization_id")
+  firstName            String? @map("first_name")
+  lastNameObfuscated   String? @map("last_name_obfuscated")
+  title                String?
+  organizationName     String? @map("organization_name")
+  organizationCity     String? @map("organization_city")
+  organizationState    String? @map("organization_state")
+  organizationZip      String? @map("organization_zip")
+  organizationDomain   String? @map("organization_domain")
+  linkedinUrl          String? @map("linkedin_url")
+
+  /// Resolved rooftop plus HOW it was resolved. A match is never silently
+  /// guessed: matchMethod and matchConfidence are recorded on every link, and an
+  /// ambiguous match is recorded as low confidence rather than taken on trust.
+  /// matchMethod: website_host | name_zip | name_city_state | phone | created
+  rooftopId       String?        @map("rooftop_id")
+  rooftop         DealerRooftop? @relation(fields: [rooftopId], references: [id], onDelete: SetNull)
+  matchMethod     String?        @map("match_method")
+  matchConfidence String?        @map("match_confidence")
+
+  /// Enrichment lifecycle. Every terminal state is explicit — an async reveal
+  /// that expires, names an unknown request, or hard-fails is recorded as such
+  /// rather than swallowed. UNREACHABLE means Apollo returned no contact detail;
+  /// nothing is ever fabricated to fill the gap.
+  /// NEW | QUEUED | ENRICHED | EMPTY | UNREACHABLE | PENDING_REVEAL | EXPIRED
+  ///   | UNKNOWN_REQUEST | FAILED | SKIPPED_CAP
+  enrichmentStatus String    @default("NEW") @map("enrichment_status")
+  enrichmentError  String?   @map("enrichment_error")
+  revealRequestId  String?   @map("reveal_request_id")
+  revealPollCount  Int       @default(0) @map("reveal_poll_count")
+  lastSyncedAt     DateTime? @map("last_synced_at")
+
+  searchRunKey String   @map("search_run_key")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([rooftopId])
+  @@index([enrichmentStatus])
+  @@index([searchRunKey])
+  @@map("apollo_person_candidates")
+}
+
+/// One credit-spending enrichment run. Exists so spend is auditable after the
+/// fact: how many credits the run was allowed, how many it actually consumed,
+/// and — when it stopped early — exactly why.
+model ApolloEnrichmentRun {
+  id String @id @default(cuid())
+
+  /// "preview" spends nothing and only reports the worst-case cost; "execute"
+  /// is the only mode that draws credits.
+  mode String
+
+  /// The hard cap this run ran under, read from config. The run aborts when it
+  /// is reached and records the reason.
+  maxCredits     Int @map("max_credits")
+  candidateCount Int @default(0) @map("candidate_count")
+  estimatedCost  Int @default(0) @map("estimated_cost")
+  creditsSpent   Int @default(0) @map("credits_spent")
+  enrichedCount  Int @default(0) @map("enriched_count")
+  emptyCount     Int @default(0) @map("empty_count")
+  failedCount    Int @default(0) @map("failed_count")
+
+  /// Waterfall reveal has variable, plan-dependent per-contact cost that can
+  /// exceed a standard match, so it is off by default and recorded per run.
+  waterfallEnabled Boolean @default(false) @map("waterfall_enabled")
+
+  /// RUNNING | COMPLETED | ABORTED_CAP | ABORTED_ERROR | ABORTED_DISABLED
+  status      String  @default("RUNNING")
+  abortReason String? @map("abort_reason")
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  startedBy  String?   @map("started_by")
+
+  @@index([status])
+  @@index([startedAt])
+  @@map("apollo_enrichment_runs")
+}
+
 // Block B / B1 — person-level dealer contact identity, keyed to the canonical A2
 // DealerRooftop so a registered Dealer and its prospect twin share ONE contact
 // history (not a per-Dealer / per-Prospect re-split). Reconciled from the
@@ -3979,6 +4155,42 @@ model DealerContactProfile {
   // Staleness anchor for the Block B CONTACT_STALE_MONTHS re-check.
   lastVerifiedAt DateTime? @map("last_verified_at")
 
+  // ── Apollo identity + sync provenance ─────────────────────────────────────
+  // apolloPersonId is the SPEND idempotency key. The guard keys on the PERSON,
+  // not the prospect: one Apollo person can surface under two rooftops, and a
+  // per-prospect guard would reveal — and bill for — that person twice. @unique
+  // so the guard is enforced by the database, not by a read-then-write.
+  apolloPersonId       String?   @unique @map("apollo_person_id")
+  apolloOrganizationId String?   @map("apollo_organization_id")
+  apolloLastSyncedAt   DateTime? @map("apollo_last_synced_at")
+  linkedinUrl          String?   @map("linkedin_url")
+
+  // ── Phone-channel governance ──────────────────────────────────────────────
+  // dncStatus is Apollo's dnc_status_cd, persisted VERBATIM: 'found' |
+  // 'not_found' | 'pending'. Only 'not_found' clears the phone channel —
+  // 'pending' is NOT a clearance and NULL means never checked. The gate lives in
+  // the send service, not only in the UI.
+  dncStatus    String?   @map("dnc_status")
+  dncCheckedAt DateTime? @map("dnc_checked_at")
+
+  // Apollo's phone classification: mobile_phone | direct_phone | corporate_phone.
+  // Gated INDEPENDENTLY of DNC — a mobile carries materially higher risk than a
+  // corporate line, so the send service must be able to allow one and block the
+  // other. Never collapsed into a single "phone" field.
+  phoneType String? @map("phone_type")
+
+  // TCPA basis for contacting this person on the phone channel:
+  //   EXPRESS_WRITTEN | EXPRESS | EXISTING_BUSINESS_RELATIONSHIP | NONE
+  // NONE always refuses, whatever else is true. Nothing in this change sets it
+  // to anything else, so SMS correctly reaches zero prospects today — that is
+  // the intended outcome, not a gap to route around.
+  consentBasis       String    @default("NONE") @map("consent_basis")
+  consentBasisSetAt  DateTime? @map("consent_basis_set_at")
+  consentBasisSource String?   @map("consent_basis_source")
+
+  // Which contact outreach should address when a rooftop has several.
+  isPrimaryContact Boolean @default(false) @map("is_primary_contact")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -3986,6 +4198,8 @@ model DealerContactProfile {
   // email-dedup lookup; emailKey alone serves cross-rooftop shared-inbox scans.
   @@index([rooftopId, emailKey])
   @@index([emailKey])
+  // The queue filters on DNC state on every load.
+  @@index([dncStatus])
   @@map("dealer_contact_profiles")
 }
 
@@ -4127,6 +4341,24 @@ model DealerOutreachLog {
   repliedAt        DateTime? @map("replied_at")
   metadata         Json      @default("{}")
 
+  // ── SMS channel (Phase 3) ─────────────────────────────────────────────────
+  // `channel` already discriminates email | sms | CALL; these are the SMS-side
+  // analogues of toEmail / fromEmail / resendId.
+  toPhone   String? @map("to_phone")
+  fromPhone String? @map("from_phone")
+  twilioSid String? @map("twilio_sid")
+
+  // ── Call channel (Phase 3 shipping deliverable) ───────────────────────────
+  // A logged human call. This is what turns 1,527 phone numbers into recorded
+  // outreach without needing consent the prospects have not given.
+  callDisposition     String? @map("call_disposition")
+  callDurationSeconds Int?    @map("call_duration_seconds")
+
+  // The consent basis in force at SEND time, recorded on every phone-channel row
+  // so an audit can reconstruct why a message was or was not permitted. Null on
+  // email rows, where consent is governed by CAN-SPAM + suppression instead.
+  consentBasis String? @map("consent_basis")
+
   // Phase 4B-4 — multi-touch follow-up sequencing.
   // outreachSequenceStep: 1 = initial, 2 = follow-up 1, 3 = follow-up 2.
   outreachSequenceStep Int?      @default(1) @map("outreach_sequence_step")
@@ -4140,6 +4372,11 @@ model DealerOutreachLog {
   @@index([sentAt])
   @@index([resendId])
   @@index([outreachSequenceStep])
+  // One live attempt per (prospect, step, channel). Declared in migration.sql as
+  // a PARTIAL unique index (WHERE status <> 'failed') so a failed attempt stays
+  // retriable; Prisma cannot express the predicate, so this @@index only
+  // documents the lookup shape.
+  @@index([dealerProspectId, outreachSequenceStep, channel])
   @@map("dealer_outreach_log")
 }
 

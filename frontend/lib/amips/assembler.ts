@@ -16,9 +16,13 @@ import {
   type NegotiationDifficulty,
 } from "@/lib/amips/market-score.service";
 import { TIER_F_TRANSACTION_THRESHOLD } from "@/lib/amips/pipelines/tier-f-threshold.pipeline";
+import { METRO_ASSEMBLY_TIERS, tierFDataAsOf } from "@/lib/amips/tiers";
 
-// Tiers that require local market + dealer data (Metro, Transaction, Dealer).
-const METRO_TIERS = new Set(["C", "D", "E"]);
+// Tiers routed down the metro-assembly branch below. Tier F returns earlier
+// from its own transaction-backed branch, so it is deliberately absent here.
+// The authoritative "which tiers carry market data" set is MARKET_DATA_TIERS in
+// lib/amips/tiers.ts — see that file for why the two differ.
+const METRO_TIERS = METRO_ASSEMBLY_TIERS;
 
 // Freshness windows (days) per the AMIPS quality gate.
 export const FRESHNESS_DAYS = {
@@ -248,6 +252,19 @@ export async function assembleAmipsPageData(
       dealerCount,
       dataTokens,
       vehicleDataAsOf: vehicleRow.lastUpdated,
+      // Tier F is a market-backed tier (MARKET_DATA_TIERS), so it must carry
+      // these. Omitting them made every Tier F page read as permanently stale
+      // to the lifecycle manager, which de-indexed it on its first run.
+      //
+      // Both source rows are OPTIONAL for Tier F, though — it qualifies on the
+      // transaction record alone — so passing them through raw would reproduce
+      // the same defect for any combo lacking them. tierFDataAsOf() falls back
+      // to the always-present transaction timestamp; see its note in tiers.ts.
+      ...tierFDataAsOf({
+        scoreComputedAt: scoreRow?.computedAt,
+        marketLastUpdated: marketRow?.lastUpdated,
+        transactionLastUpdated: al.lastUpdated,
+      }),
     };
   }
 

@@ -3,6 +3,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { finalizeBuyerSignatureCertificate } from "@/lib/services/esign/buyer-signing.service";
 import { getBuyerContractCertificateUrl } from "@/lib/services/esign/buyer-contract-certificate.service";
+import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelope: true } });
+  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT } } });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
   if (deal.eSignEnvelope?.status !== "COMPLETED") {
     return errorResponse("NOT_READY", "Your signature certificate is not available yet.", 202);

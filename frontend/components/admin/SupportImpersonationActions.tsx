@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/kit";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -15,16 +16,24 @@ import { api, apiErrorMessage } from "@/lib/api/client";
 export function StartImpersonationButton({
   targetUserId,
   targetLabel,
+  adminRole,
 }: {
   targetUserId: string;
   targetLabel: string;
+  adminRole?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // Mirrors the ROUTE's allow-list, which is broader than
+  // PERMISSION_ROLES["support.impersonate"]. That disagreement is reported as
+  // an owner-gated authorization decision; server behaviour is unchanged.
+  const mayImpersonate = canUse("support.impersonate", adminRole);
 
   return (
     <>
-      <Button size="sm" variant="secondary" onClick={() => setOpen(true)} data-testid={`impersonate-${targetUserId}`}>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)} disabled={!mayImpersonate}
+        title={mayImpersonate ? undefined : deniedReason("support.impersonate")}
+        data-testid={`impersonate-${targetUserId}`}>
         Start session
       </Button>
       <ConfirmDialog
@@ -52,9 +61,11 @@ export function StartImpersonationButton({
   );
 }
 
-export function EndImpersonationButton({ sessionId }: { sessionId: string }) {
+export function EndImpersonationButton({ sessionId, adminRole }: { sessionId: string; adminRole?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // Ending a session hard-denies on the same allow-list as starting one.
+  const mayImpersonate = canUse("support.impersonate", adminRole);
 
   async function end() {
     setBusy(true);
@@ -70,7 +81,9 @@ export function EndImpersonationButton({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <Button size="sm" variant="outline" disabled={busy} onClick={end} data-testid={`end-impersonation-${sessionId}`}>
+    <Button size="sm" variant="outline" disabled={busy || !mayImpersonate}
+      title={mayImpersonate ? undefined : deniedReason("support.impersonate")}
+      onClick={end} data-testid={`end-impersonation-${sessionId}`}>
       {busy && <Loader2 size={12} className="animate-spin mr-1" aria-hidden />}
       End session
     </Button>

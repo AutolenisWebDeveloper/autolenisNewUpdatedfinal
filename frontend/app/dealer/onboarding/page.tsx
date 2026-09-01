@@ -16,25 +16,29 @@ type StepId = typeof STEPS[number]["id"];
 
 function StepIndicator({ current, completed }: { current: number; completed: number[] }) {
   return (
-    <div className="flex items-center justify-center gap-2 mb-8">
+    <nav aria-label="Onboarding steps" className="flex items-center justify-center gap-2 mb-8">
       {STEPS.map((step, i) => {
         const Icon = step.icon;
         const isDone = completed.includes(i);
         const isCurrent = i === current;
         return (
-          <div key={step.id} className="flex items-center">
+          <div
+            key={step.id}
+            className="flex items-center"
+            aria-current={isCurrent ? "step" : undefined}
+          >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors
-              ${isDone ? "bg-[#059669] text-white" : isCurrent ? "bg-al-primary text-white" : "bg-[#E2E8F0] text-[#94A3B8]"}`}>
+              ${isDone ? "bg-al-success text-white" : isCurrent ? "bg-al-primary text-white" : "bg-al-border text-al-text-subtle"}`}>
               {isDone ? <CheckCircle size={16} /> : <Icon size={14} />}
             </div>
-            <span className={`ml-1.5 text-xs hidden sm:inline ${isCurrent ? "text-al-primary font-semibold" : "text-[#94A3B8]"}`}>
+            <span className={`ml-1.5 text-xs hidden sm:inline ${isCurrent ? "text-al-primary font-semibold" : "text-al-text-subtle"}`}>
               {step.label}
             </span>
-            {i < STEPS.length - 1 && <div className={`w-6 h-px mx-2 ${isDone ? "bg-[#059669]" : "bg-[#E2E8F0]"}`} />}
+            {i < STEPS.length - 1 && <div className={`w-6 h-px mx-2 ${isDone ? "bg-al-success" : "bg-al-border"}`} />}
           </div>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
@@ -134,34 +138,38 @@ export default function DealerOnboardingPage() {
   // Loading state while hydrating to prevent overwriting persisted values on first render.
   if (!hydrated) {
     return (
-      <div className="min-h-screen bg-[#F8F9FB] flex items-center justify-center">
+      <div className="min-h-screen bg-al-bg flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-al-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  const inputClass = "w-full bg-white border border-[#E2E8F0] rounded-lg px-4 py-3 text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:ring-2 focus:ring-al-primary";
+  const inputClass = "w-full bg-white border border-al-border rounded-lg px-4 py-3 text-al-text placeholder-al-text-subtle text-sm focus:outline-none focus:ring-2 focus:ring-al-primary";
   const ctaClass = "w-full bg-al-primary hover:bg-al-primary-hover disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm";
 
   return (
-    <div className="min-h-screen bg-[#F8F9FB] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-al-bg flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-[#111827]">Complete Your Setup</h1>
-          <p className="text-[#4B5563] text-sm mt-1">4 quick steps to activate your dealer account</p>
+          <h1 className="text-2xl font-bold text-al-text">Complete Your Setup</h1>
+          <p className="text-al-text-muted text-sm mt-1">4 quick steps to activate your dealer account</p>
         </div>
 
         <StepIndicator current={currentStep} completed={completed} />
 
-        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-8 shadow-sm">
+        <div className="bg-white border border-al-border rounded-2xl p-8 shadow-sm">
           {error && (
-            <div data-testid="onboarding-error" className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-6 text-sm">{error}</div>
+            <div
+              role="alert"
+              data-testid="onboarding-error"
+              className="bg-al-danger-subtle border border-al-danger/30 text-al-danger-fg rounded-lg px-4 py-3 mb-6 text-sm"
+            >{error}</div>
           )}
 
           {/* Step 0: Business Info */}
           {currentStep === 0 && (
             <form onSubmit={(e) => { e.preventDefault(); submitStep("BUSINESS_INFO", business); }} className="space-y-4">
-              <h2 className="text-lg font-semibold text-[#111827] mb-4">Business Information</h2>
+              <h2 className="text-lg font-semibold text-al-text mb-4">Business Information</h2>
               <input data-testid="ob-dealership-name" placeholder="Dealership Name*" value={business.dealershipName} onChange={e => setBusiness(b => ({...b, dealershipName: e.target.value}))} required className={inputClass} />
               <input data-testid="ob-phone" placeholder="Phone Number*" value={business.phone} onChange={e => setBusiness(b => ({...b, phone: e.target.value}))} required className={inputClass} />
               <input data-testid="ob-address" placeholder="Street Address*" value={business.address} onChange={e => setBusiness(b => ({...b, address: e.target.value}))} required className={inputClass} />
@@ -177,8 +185,8 @@ export default function DealerOnboardingPage() {
           {/* Step 1: License */}
           {currentStep === 1 && (
             <form onSubmit={(e) => { e.preventDefault(); submitStep("LICENSE", license); }} className="space-y-4">
-              <h2 className="text-lg font-semibold text-[#111827] mb-4">Dealer License</h2>
-              <p className="text-[#4B5563] text-sm">Enter your official dealer license number for compliance verification.</p>
+              <h2 className="text-lg font-semibold text-al-text mb-4">Dealer License</h2>
+              <p className="text-al-text-muted text-sm">Enter your official dealer license number for compliance verification.</p>
               <input data-testid="ob-license-number" placeholder="Dealer License Number*" value={license.licenseNumber} onChange={e => setLicense({ licenseNumber: e.target.value })} required className={inputClass} />
               <button data-testid="ob-next-license" type="submit" disabled={loading} className={ctaClass}>{loading ? "Saving..." : "Continue"}</button>
             </form>
@@ -187,8 +195,8 @@ export default function DealerOnboardingPage() {
           {/* Step 2: Inventory Setup */}
           {currentStep === 2 && (
             <form onSubmit={(e) => { e.preventDefault(); submitStep("INVENTORY", inventory); }} className="space-y-4">
-              <h2 className="text-lg font-semibold text-[#111827] mb-4">Inventory Setup</h2>
-              <p className="text-[#4B5563] text-sm">Optionally provide a feed URL to automatically sync your inventory. You can also add vehicles manually from your dashboard.</p>
+              <h2 className="text-lg font-semibold text-al-text mb-4">Inventory Setup</h2>
+              <p className="text-al-text-muted text-sm">Optionally provide a feed URL to automatically sync your inventory. You can also add vehicles manually from your dashboard.</p>
               <input data-testid="ob-feed-url" placeholder="Inventory Feed URL (optional)" type="url" value={inventory.feedUrl} onChange={e => setInventory({ feedUrl: e.target.value })} className={inputClass} />
               <button data-testid="ob-next-inventory" type="submit" disabled={loading} className={ctaClass}>{loading ? "Saving..." : "Continue"}</button>
             </form>
@@ -197,14 +205,14 @@ export default function DealerOnboardingPage() {
           {/* Step 3: Agreement */}
           {currentStep === 3 && (
             <form onSubmit={(e) => { e.preventDefault(); if (agreed) submitStep("AGREEMENT", { agreedToTerms: true }); }} className="space-y-4">
-              <h2 className="text-lg font-semibold text-[#111827] mb-4">Dealer Agreement</h2>
-              <div className="bg-[#F8F9FB] border border-[#E2E8F0] rounded-lg p-4 max-h-48 overflow-y-auto text-[#4B5563] text-xs leading-relaxed">
-                <p className="font-semibold text-[#111827] mb-2">AutoLenis Dealer Network Agreement</p>
+              <h2 className="text-lg font-semibold text-al-text mb-4">Dealer Agreement</h2>
+              <div className="bg-al-bg border border-al-border rounded-lg p-4 max-h-48 overflow-y-auto text-al-text-muted text-xs leading-relaxed">
+                <p className="font-semibold text-al-text mb-2">AutoLenis Dealer Network Agreement</p>
                 <p>By joining the AutoLenis Dealer Network, you agree to: (1) provide accurate vehicle listings and pricing; (2) respond promptly to buyer inquiries; (3) comply with all applicable state and federal regulations; (4) maintain your dealer license in good standing; (5) abide by AutoLenis marketplace policies. AutoLenis reserves the right to suspend or terminate accounts that violate these terms. Your account data is governed by the AutoLenis Privacy Policy.</p>
               </div>
               <label className="flex items-start gap-3 cursor-pointer">
-                <input data-testid="ob-agree-checkbox" type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-[#E2E8F0] bg-white accent-al-primary" />
-                <span className="text-[#374151] text-sm">I have read and agree to the AutoLenis Dealer Network Agreement</span>
+                <input data-testid="ob-agree-checkbox" type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-al-border bg-white accent-al-primary" />
+                <span className="text-al-text-muted text-sm">I have read and agree to the AutoLenis Dealer Network Agreement</span>
               </label>
               <button data-testid="ob-complete" type="submit" disabled={loading || !agreed} className={ctaClass}>{loading ? "Activating..." : "Complete Setup & Activate Account"}</button>
             </form>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import { TemplateService } from '@/lib/services/template.service';
 import { CampaignService } from '@/lib/services/campaign.service';
@@ -25,8 +25,14 @@ type ApproveRequest =
 // into the templates/campaigns tables with DRAFT status, reusing the existing
 // services (which audit-log the write). Still nothing is sent or activated.
 export async function POST(req: Request) {
-  const actor = await requirePermissionActor("comms.bulk_send");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const auth = await requirePermissionActorStrict("comms.bulk_send");
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
+      { status: auth.status },
+    );
+  }
+  const actor = auth.actor;
 
   let body: ApproveRequest;
   try {

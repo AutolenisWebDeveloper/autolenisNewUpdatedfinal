@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
-import { GROQ_REASONING } from "@/lib/ai/acquisition"
+import { GROQ_REASONING, type GroqAcquisitionModel } from "@/lib/ai/acquisition"
+import { complete } from "@/lib/ai/provider"
 
 // Drafts a phone-call script for the founder to use when
 // calling a dealer prospect. References the specific buyer
@@ -19,43 +20,25 @@ export interface PhoneScript {
 // so we mirror the exact REST pattern here (POST to Groq's OpenAI-compatible
 // chat completions endpoint with bearer auth).
 async function callGroq(options: {
-  model: string
+  model: GroqAcquisitionModel
   systemPrompt: string
   userPrompt: string
   temperature?: number
   maxTokens?: number
 }): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured")
-  }
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: options.model,
-      messages: [
-        { role: "system", content: options.systemPrompt },
-        { role: "user", content: options.userPrompt },
-      ],
-      max_tokens: options.maxTokens ?? 1024,
-      temperature: options.temperature ?? 0.2,
-      top_p: 1.0,
-    }),
+  // Transport only — model, prompts, token cap, temperature and top_p unchanged.
+  const result = await complete({
+    purpose: "dealer_recruitment.phone_script",
+    model: options.model,
+    messages: [
+      { role: "system", content: options.systemPrompt },
+      { role: "user", content: options.userPrompt },
+    ],
+    maxTokens: options.maxTokens ?? 1024,
+    temperature: options.temperature ?? 0.2,
+    topP: 1.0,
   })
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "")
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`)
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  return data.choices?.[0]?.message?.content ?? ""
+  return result.content
 }
 
 // ─── Retry wrapper with exponential backoff ──────────────────────────────────

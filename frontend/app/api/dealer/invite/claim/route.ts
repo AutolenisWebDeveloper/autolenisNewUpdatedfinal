@@ -10,6 +10,7 @@ import { sendDealerWelcomeEmail } from "@/lib/services/email/resend.service";
 import { ContactService } from "@/lib/services/contact.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { z } from "zod";
+import { validateInvitationToken, consumeInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 const schema = z.object({
   token: z.string().min(1),
@@ -38,15 +39,30 @@ export async function POST(request: NextRequest) {
 
   const { token, password, businessName } = parsed.data;
 
-  // Find and validate invitation
-  const invitation = await prisma.dealerInvitation.findUnique({ where: { token } });
-  if (!invitation) return NextResponse.json({ error: "Invalid or expired invitation" }, { status: 404 });
-  if (invitation.status === "ACCEPTED") return NextResponse.json({ error: "Invitation already accepted" }, { status: 409 });
-  if (invitation.status === "CANCELLED") return NextResponse.json({ error: "This invitation has been cancelled" }, { status: 410 });
-  if (invitation.expiresAt < new Date()) {
-    await prisma.dealerInvitation.update({ where: { id: invitation.id }, data: { status: "EXPIRED" } });
-    return NextResponse.json({ error: "This invitation has expired. Please request a new one." }, { status: 410 });
+  // Validate by HASH — the raw token is never stored, so it is never compared
+  // against a stored plaintext value.
+  const validation = await validateInvitationToken(token);
+  if (!validation.ok) {
+    if (validation.reason === "consumed") {
+      return NextResponse.json({ error: "Invitation already accepted" }, { status: 409 });
+    }
+    if (validation.reason === "cancelled") {
+      return NextResponse.json({ error: "This invitation has been cancelled" }, { status: 410 });
+    }
+    if (validation.reason === "expired") {
+      return NextResponse.json(
+        { error: "This invitation has expired. Please request a new one." },
+        { status: 410 },
+      );
+    }
+    return NextResponse.json({ error: "Invalid or expired invitation" }, { status: 404 });
   }
+  const invitation = {
+    id: validation.invitationId,
+    email: validation.email,
+    dealershipName: validation.dealershipName,
+    contactName: validation.contactName,
+  };
 
   // Check if email already registered
   const existing = await prisma.user.findFirst({ where: { email: invitation.email.toLowerCase() } });
@@ -86,13 +102,25 @@ export async function POST(request: NextRequest) {
         },
       });
       dealerId = dealer.id;
-      await tx.dealerInvitation.update({
-        where: { id: invitation.id },
-        data: { status: "ACCEPTED", acceptedAt: new Date(), dealerId: dealer.id },
-      });
+      // Consumed through the service, inside THIS transaction, so the guard the
+      // service enforces (PENDING + not yet consumed) actually applies here and
+      // two concurrent claims of the same link cannot both create a dealer. The
+      // loser's transaction aborts and its Supabase user is deleted below.
+      const consumed = await consumeInvitationToken(invitation.id, dealer.id, new Date(), tx);
+      if (!consumed) {
+        throw new Error("INVITATION_ALREADY_CONSUMED");
+      }
     });
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
+    if (err instanceof Error && err.message === "INVITATION_ALREADY_CONSUMED") {
+      // Lost the race: the invitation was accepted, cancelled, or swept to
+      // EXPIRED between validation and consumption. No dealer was created.
+      return NextResponse.json(
+        { error: "This invitation is no longer available. Please request a new one." },
+        { status: 409 },
+      );
+    }
     logger.error("[dealer/invite/claim] DB error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 500 });
   }
@@ -149,27 +177,26 @@ export async function GET(request: NextRequest) {
   const token = searchParams.get("token");
   if (!token) return NextResponse.json({ error: "Token required" }, { status: 400 });
 
-  const invitation = await prisma.dealerInvitation.findUnique({ where: { token } });
-  if (!invitation) return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
-
-  if (invitation.status === "ACCEPTED") {
-    return NextResponse.json({ error: "Invitation already accepted", expired: true }, { status: 410 });
-  }
-  if (invitation.status === "CANCELLED") {
-    return NextResponse.json({ error: "Invitation cancelled", expired: true }, { status: 410 });
-  }
-  if (invitation.expiresAt < new Date()) {
-    await prisma.dealerInvitation.update({ where: { id: invitation.id }, data: { status: "EXPIRED" } });
-    return NextResponse.json({ error: "Invitation expired", expired: true }, { status: 410 });
+  const validation = await validateInvitationToken(token);
+  if (!validation.ok) {
+    if (validation.reason === "not_found") {
+      return NextResponse.json({ error: "Invalid invitation" }, { status: 404 });
+    }
+    const message =
+      validation.reason === "consumed"
+        ? "Invitation already accepted"
+        : validation.reason === "cancelled"
+          ? "Invitation cancelled"
+          : "Invitation expired";
+    return NextResponse.json({ error: message, expired: true }, { status: 410 });
   }
 
   return NextResponse.json({
     success: true,
     data: {
-      dealershipName: invitation.dealershipName,
-      contactName: invitation.contactName,
-      email: invitation.email,
-      expiresAt: invitation.expiresAt.toISOString(),
+      dealershipName: validation.dealershipName,
+      contactName: validation.contactName,
+      email: validation.email,
     },
   });
 }

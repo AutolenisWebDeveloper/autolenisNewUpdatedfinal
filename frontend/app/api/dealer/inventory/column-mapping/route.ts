@@ -15,6 +15,7 @@ import { getRequestDealer, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { parseCsvPriceToCents } from "@/lib/utils/csv-price";
 
 const STANDARD_FIELD = z.enum([
   "VIN",
@@ -76,11 +77,10 @@ function rowToInventoryCreate(
   // Price: required by Prisma model (priceCents Int — non-null)
   const priceStr = mapped.Price;
   if (!priceStr) return { ok: false, error: `Missing Price for VIN ${vin}` };
-  const priceNum = parseFloat(priceStr.replace(/[$,]/g, ""));
-  if (Number.isNaN(priceNum) || priceNum <= 0) {
+  const priceCents = parseCsvPriceToCents(priceStr);
+  if (priceCents === null) {
     return { ok: false, error: `Invalid Price "${priceStr}" for VIN ${vin}` };
   }
-  const priceCents = Math.round(priceNum * 100);
 
   let mileage: number | undefined;
   if (mapped.Mileage) {
@@ -196,7 +196,10 @@ export async function POST(request: NextRequest) {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    path: "/dealer",
+    // Must be "/" — the consumer is /api/dealer/inventory/bulk, and a cookie
+    // scoped to "/dealer" is never sent to an "/api/dealer/..." request
+    // (RFC 6265 path-match), which made mapped CSV import unreachable.
+    path: "/",
     maxAge: COOKIE_MAX_AGE_SECONDS,
   });
 

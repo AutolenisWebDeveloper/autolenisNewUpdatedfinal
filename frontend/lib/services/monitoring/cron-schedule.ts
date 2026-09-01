@@ -86,6 +86,11 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "prequal-sla-escalation": { intervalMinutes: DAY },
   "prequal-purge": { intervalMinutes: DAY },
   "analytics-snapshot": { intervalMinutes: DAY },
+  // Content Autopilot seeder. Registered here even though it ships behind
+  // CONTENT_AUTOPILOT_ENABLED: the run itself is unconditional (a disabled run
+  // records a truthful { enabled: false } skip), so a missing run still means a
+  // dead cron and must still alert.
+  "content-generation-seed": { intervalMinutes: DAY },
   "analytics-refresh": { intervalMinutes: DAY }, // migrated off Inngest cron `0 2 * * *`
   "morning-briefing": { intervalMinutes: DAY },
   "amips-tier-f": { intervalMinutes: DAY },
@@ -93,6 +98,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "lead-magnet-sequence": { intervalMinutes: DAY },
   "social-lead-nurture": { intervalMinutes: DAY },
   "amips-snapshot": { intervalMinutes: DAY },
+  "amips-refresh": { intervalMinutes: DAY }, // 03:00 — refresh sources, re-open rescued pages
   "social-signal-scan": { intervalMinutes: DAY },
   "social-generate": { intervalMinutes: DAY },
   "social-analytics-sync": { intervalMinutes: DAY },

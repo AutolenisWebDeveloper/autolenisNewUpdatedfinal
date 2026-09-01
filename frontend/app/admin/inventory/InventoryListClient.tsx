@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   Package, Plus, Upload, Search, Filter, Edit2, Trash2,
-  Power, Loader2, CheckCircle2, X, Eye, ArrowRightLeft
+  Power, Loader2, CheckCircle2, X, Eye, ArrowRightLeft, FileSearch
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -393,11 +393,23 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {/* Batch 2 IA: the admin detail view was orphaned —
+                              the row's only "view" affordance opened the PUBLIC
+                              listing, so the price history, last-seen time and
+                              per-item external-dealer attribution rendered
+                              nowhere else were reachable only by typing a URL. */}
+                          <Link
+                            href={`/admin/inventory/${it.id}`}
+                            data-testid={`view-admin-${it.id}`}
+                            title="Admin detail — price history, last seen, source dealer"
+                            className="p-1.5 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900"
+                          ><FileSearch size={13} /></Link>
                           <Link
                             href={`/inventory/${it.id}`}
                             target="_blank"
+                            rel="noopener noreferrer"
                             data-testid={`view-public-${it.id}`}
-                            title="View public listing"
+                            title="View public listing (opens in a new tab)"
                             className="p-1.5 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900"
                           ><Eye size={13} /></Link>
                           <Link

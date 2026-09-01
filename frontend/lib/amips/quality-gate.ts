@@ -14,8 +14,13 @@
 import type { GeneratedAmipsArticle } from "@/lib/amips/prompts/amips-generator.prompts";
 import type { AmipsPageData } from "@/lib/amips/assembler";
 import { FRESHNESS_DAYS } from "@/lib/amips/assembler";
+import { MARKET_DATA_TIERS } from "@/lib/amips/tiers";
 
-const METRO_TIERS = new Set(["C", "D", "E"]);
+// Freshness (Gate 5) uses the SAME authoritative set as the lifecycle staleness
+// check. Previously this was {C,D,E} while the lifecycle used {C,D,E,F}, so a
+// Tier F page was certified fresh here and simultaneously treated as
+// permanently stale there. See lib/amips/tiers.ts.
+const METRO_TIERS = MARKET_DATA_TIERS;
 
 export interface QualityGateResult {
   passed: boolean; // true only when all five gates pass

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminDealPickupPage({ params }: Props) {
   const { dealId } = await params;
-  await requireAdmin();
+  const admin = await requireAdmin();
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: { buyer: true, pickup: true },
@@ -29,7 +29,7 @@ export default async function AdminDealPickupPage({ params }: Props) {
           </div>
           {deal.pickup.scheduledAt && <p className="text-sm text-slate-500">Scheduled: {deal.pickup.scheduledAt.toLocaleDateString()}</p>}
           {deal.pickup.location && <p className="text-sm text-slate-500">Location: {deal.pickup.location}</p>}
-          <AdminPickupActions
+          <AdminPickupActions adminRole={admin.role}
             dealId={dealId}
             pickupStatus={deal.pickup.status}
             scheduledAt={deal.pickup.scheduledAt?.toISOString() ?? null}
@@ -39,7 +39,7 @@ export default async function AdminDealPickupPage({ params }: Props) {
       ) : (
         <div className="text-center py-10 bg-white border border-slate-200 rounded-xl text-slate-400" data-testid="no-pickup">
           <p>No pickup scheduled yet.</p>
-          <AdminPickupActions dealId={dealId} pickupStatus={null} scheduledAt={null} location={null} />
+          <AdminPickupActions adminRole={admin.role} dealId={dealId} pickupStatus={null} scheduledAt={null} location={null} />
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@
 // Groq ONLY | Kill switch required | Affiliate context injected per session
 import { groqChat, ChatMessage } from "@/lib/ai/groq-client";
 import { prisma } from "@/lib/prisma";
+import { buildActorGuidance, isActionIntentSurfaceEnabled } from "@/lib/services/ai/action-intent";
 
 interface AffiliateContext {
   email: string;
@@ -51,7 +52,9 @@ WHAT YOU CAN HELP WITH:
 RULES:
 - Never share another affiliate's data or referral stats
 - For legal/tax questions, always recommend consulting a professional
-- For payout disputes, refer to support@autolenis.com`;
+- For payout disputes, refer to support@autolenis.com${
+    isActionIntentSurfaceEnabled() ? `\n\n${buildActorGuidance("AFFILIATE")}` : ""
+  }`;
 }
 
 export async function affiliateConciergeChat(

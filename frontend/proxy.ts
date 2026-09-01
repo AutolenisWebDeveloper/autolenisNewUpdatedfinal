@@ -7,6 +7,13 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { jwtVerify } from "jose";
+import { needsTermsAcceptance } from "@/lib/auth/terms";
+import {
+  ONBOARDING_PATH,
+  DEALER_PUBLIC_ROUTES,
+  isOnboardingPath,
+  isOnboardingApiPath,
+} from "@/lib/auth/dealer-scope";
 
 // Per-system JWT secrets. Each prefers its dedicated secret and falls back to
 // the shared JWT_SECRET — mirroring lib/admin-auth.ts and lib/dealer-auth.ts
@@ -39,14 +46,24 @@ async function hasValidAdminSession(request: NextRequest): Promise<boolean> {
   }
 }
 
-async function hasValidDealerSession(request: NextRequest): Promise<boolean> {
+/**
+ * Verified dealer JWT claims, or null. `scope` mirrors the dealer's scope at mint
+ * time and drives the edge routing decision only — the authoritative check
+ * re-derives from Dealer.status server-side (lib/auth/dealer-session.ts). A token
+ * minted before `scope` existed has no claim; treat it as full, since the
+ * server-side gate still applies.
+ */
+async function getDealerSessionClaims(
+  request: NextRequest,
+): Promise<{ scope: "onboarding" | "full" } | null> {
   const token = request.cookies.get(DEALER_TOKEN_COOKIE)?.value;
-  if (!token) return false;
+  if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, DEALER_JWT_SECRET, { issuer: DEALER_JWT_ISSUER });
-    return payload.role === "DEALER";
+    if (payload.role !== "DEALER") return null;
+    return { scope: payload.scope === "onboarding" ? "onboarding" : "full" };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -133,20 +150,10 @@ const ADMIN_AUTH_ROUTES = [
   "/admin/auth/verify-mfa",
 ];
 
-const DEALER_AUTH_ROUTES = [
-  "/dealer/signin",
-  "/dealer/sign-in",
-  "/dealer/invite/claim",
-  "/dealer/forgot-password",
-  "/dealer/reset-password",
-];
-
-const PORTAL_PREFIXES = {
-  buyer: "/buyer",
-  dealer: "/dealer",
-  affiliate: "/affiliate/portal",
-  admin: "/admin",
-} as const;
+// Canonical list lives in lib/auth/dealer-scope.ts so proxy.ts (edge gate) and
+// app/dealer/layout.tsx (server gate) can never disagree about which dealer
+// routes are reachable without a session.
+const DEALER_AUTH_ROUTES = [...DEALER_PUBLIC_ROUTES];
 
 // Role to portal mapping
 const ROLE_PORTAL_MAP: Record<string, string> = {
@@ -193,6 +200,25 @@ function isAdminAuthRoute(pathname: string): boolean {
 function isDealerAuthRoute(pathname: string): boolean {
   return DEALER_AUTH_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 }
+
+/**
+ * Dealer paths that carry their own token credential and are therefore exempt
+ * from the dealer-session requirement. Exported for test only via
+ * `__routeTestHooks` — the runtime decision stays inline in the handler below.
+ */
+function isTokenExemptDealerPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/dealer/invite/claim") ||
+    pathname.startsWith("/dealer/invite/complete")
+  );
+}
+
+/** Test seam — route predicates only, no request handling. */
+export const __routeTestHooks = {
+  isPublicRoute,
+  isDealerAuthRoute,
+  isTokenExemptDealerPath,
+};
 
 function isApiRoute(pathname: string): boolean {
   return pathname.startsWith("/api/");
@@ -267,9 +293,12 @@ function validateCsrfToken(request: NextRequest): boolean {
   }
 
   // Skip CSRF for role-specific API routes — protected by Supabase session auth
-  // in each route handler via getRequestBuyer / getRequestDealer / getRequestAffiliate.
-  // The Supabase session cookie is HttpOnly and SameSite=Lax, which already mitigates
-  // cross-site request forgery for these authenticated routes.
+  // in each route handler via getRequestBuyer / getRequestDealer /
+  // getRequestAffiliate. R9 (comment accuracy, not a behavior change): the
+  // @supabase/ssr session cookie is SameSite=Lax but NOT HttpOnly — Lax is
+  // what actually mitigates classic cross-site POST CSRF here. Note that
+  // /api/affiliate/register performs no session auth at all (public by
+  // design); it defends itself with IP+email rate limiting in the handler.
   if (
     pathname.startsWith("/api/buyer/") ||
     pathname.startsWith("/api/dealer/") ||
@@ -306,14 +335,15 @@ function validateCronRequest(request: NextRequest): boolean {
 
 function requiresTermsAcceptance(
   pathname: string,
-  termsAccepted: boolean,
+  termsAcceptedAt: string | null | undefined,
   termsVersion: string | null | undefined,
 ): boolean {
   if (!pathname.startsWith("/buyer/")) return false;
-  if (!termsAccepted) return true;
-  const currentVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
-  if (termsVersion && termsVersion !== currentVersion) return true;
-  return false;
+  // Delegates to the shared predicate (lib/auth/terms) that app/buyer/layout.tsx
+  // and acceptTermsAction also use, so this edge gate and the server-side
+  // backstop can never disagree about the same buyer — which is what produced a
+  // permanent, invisible redirect loop when each resolved the version itself.
+  return needsTermsAcceptance(termsAcceptedAt, termsVersion);
 }
 
 // ─── Test Route Gating ────────────────────────────────────────────────────────
@@ -335,10 +365,25 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Maintenance mode gate — must run before any other check so an outage
   // cannot be bypassed by hitting an authenticated route.
   if (process.env.MAINTENANCE_MODE === "true") {
-    // Always allow: static assets, /maintenance page itself, admin auth
+    // Always allow: static assets, /maintenance page itself, admin auth,
+    // provider webhooks, and cron.
+    //
+    // Webhooks and cron are exempt because a 307 to /maintenance is NOT a
+    // delivery a provider can act on: Stripe (and Twilio/DocuSign/Resend) do not
+    // follow redirects, so the attempt is recorded as failed and the event is
+    // retried until it is abandoned — money-path facts silently lost, with the
+    // loss surfacing only in the provider's dashboard. Neither surface is
+    // session-authenticated, so exempting them widens nothing: every handler
+    // under /api/webhooks/ authenticates its own caller before acting (Stripe
+    // and Higgsfield HMAC signatures, Svix for Resend, the Twilio request
+    // signature, a shared secret for MicroBilt, the cron secret for
+    // content-conversion), and cron routes are checked against the cron secret
+    // by step 2 below.
     if (
       !pathname.startsWith("/_next/") &&
       !pathname.startsWith("/api/admin/auth/") &&
+      !pathname.startsWith("/api/webhooks/") &&
+      !isCronRoute(pathname) &&
       pathname !== "/maintenance"
     ) {
       return NextResponse.redirect(new URL("/maintenance", request.url));
@@ -361,6 +406,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     response.cookies.set("affiliate_ref", refCode, {
       httpOnly: false, // readable by client JS for confirmation
       sameSite: "lax",
+      // M6 — attribution data never travels over plaintext in production.
+      secure: process.env.NODE_ENV === "production",
       maxAge: 60 * 60 * 24 * 30, // 30 days
       path: "/",
     });
@@ -436,15 +483,40 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     (pathname.startsWith("/dealer") || pathname.startsWith("/api/dealer/")) &&
     !isDealerAuthRoute(pathname);
   if (isDealerPath) {
-    if (await hasValidDealerSession(request)) {
+    const dealerSession = await getDealerSessionClaims(request);
+    if (dealerSession) {
+      // Onboarding-scoped session: admin approval granted permission to ONBOARD,
+      // not portal access. Confine it to onboarding at the edge. This is a
+      // routing decision only — lib/auth/dealer-session.ts re-derives scope from
+      // the live Dealer.status and is the authoritative gate.
+      if (dealerSession.scope === "onboarding") {
+        if (pathname.startsWith("/api/dealer/")) {
+          if (!isOnboardingApiPath(pathname)) {
+            return new NextResponse(
+              JSON.stringify({
+                error: {
+                  code: "ONBOARDING_REQUIRED",
+                  message: "Complete onboarding before using the dealer portal.",
+                },
+                correlationId: crypto.randomUUID(),
+              }),
+              { status: 403, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          return response;
+        }
+        if (!isOnboardingPath(pathname)) {
+          return NextResponse.redirect(new URL(ONBOARDING_PATH, request.url));
+        }
+      }
       return response;
     }
-    // /dealer/invite/claim is public (token is auth)
-    // Token-validated public dealer routes
+    // Token-validated public dealer routes. The token in the emailed link is the
+    // credential; each handler validates it. /dealer/claim and /api/dealer/claim
+    // are covered by DEALER_AUTH_ROUTES above and never reach this branch.
     if (
       pathname.startsWith("/dealer/invite/claim") ||
-      pathname.startsWith("/dealer/invite/complete") ||
-      pathname.startsWith("/dealer/onboarding/fast-track")
+      pathname.startsWith("/dealer/invite/complete")
     ) {
       return response;
     }
@@ -550,9 +622,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // termsAcceptedAt is written to user_metadata by acceptTermsAction()
   // via a supabase.auth.admin.updateUserById() call so the edge can read it
   // without a Prisma round-trip.
-  const termsAccepted = Boolean(user.user_metadata?.termsAcceptedAt);
+  const termsAcceptedAt = user.user_metadata?.termsAcceptedAt as string | undefined;
   const termsVersion = user.user_metadata?.termsVersion as string | undefined;
-  if (requiresTermsAcceptance(pathname, termsAccepted, termsVersion)) {
+  if (requiresTermsAcceptance(pathname, termsAcceptedAt, termsVersion)) {
     const acceptUrl = new URL("/auth/accept-terms", request.url);
     // Preserve original destination so buyer lands there after accepting
     if (pathname !== "/auth/accept-terms") {
@@ -562,7 +634,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   // 10. Affiliate portal canonical enforcement
-  // All /affiliate/* authenticated routes redirect to /affiliate/portal/*
+  // All /affiliate/* authenticated routes redirect to /affiliate/portal/*.
+  // R1 — bare /affiliate/portal (no trailing segment) has no page.tsx and the
+  // generic rewrite produced /affiliate/portal/portal (a 404); it is reachable
+  // via the post-sign-in redirect, so send it to the dashboard explicitly.
+  if (pathname === "/affiliate/portal" || pathname === "/affiliate/portal/") {
+    return NextResponse.redirect(new URL("/affiliate/portal/dashboard", request.url));
+  }
   if (
     pathname.startsWith("/affiliate/") &&
     !pathname.startsWith("/affiliate/portal/") &&

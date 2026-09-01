@@ -14,6 +14,8 @@ export async function POST(request: NextRequest) {
   // contradicted PERMISSION_ROLES["support.impersonate"] = SUPER_ADMIN; shadow
   // mode meant the route's wider list won and support could impersonate. The
   // role now comes from the matrix alone, so the two cannot disagree again.
+  // lib/auth/__tests__/admin-ui-roles.test.ts pins route, UI mirror and policy
+  // together — they diverged once and SUPPORT_ADMIN silently held a withheld grant.
   const adminCheck = await requirePermissionStrict(request, "support.impersonate");
   if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
   const admin = adminCheck.admin;

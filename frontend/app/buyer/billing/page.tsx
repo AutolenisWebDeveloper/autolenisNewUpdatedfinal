@@ -48,7 +48,6 @@ export default async function BillingPage() {
     orderBy: { createdAt: "desc" },
     select: {
       id:             true,
-      stripeFeePIId:  true,
       feePaidAt:      true,
       feeAmountCents: true,
       status:         true,
@@ -56,7 +55,14 @@ export default async function BillingPage() {
   });
 
   const hasPaidDeposit = deposits.some((d) => d.status === "PAID");
-  const paidDeals = deals.filter(d => d.stripeFeePIId);
+  // A payment reference is not a payment. This used to select on stripeFeePIId,
+  // which the admin fee route wrote when it merely CREATED an intent — so a fee
+  // nobody had been charged for appeared in this history with an amount beside
+  // it. feePaidAt is written only on settlement, so it is the fact this list is
+  // actually about.
+  const paidDeals = deals.filter(
+    (d): d is typeof d & { feePaidAt: Date } => d.feePaidAt !== null,
+  );
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
@@ -157,20 +163,16 @@ export default async function BillingPage() {
                   <p className="text-sm font-semibold text-[#111827]">
                     Service Fee — Deal #{d.id.slice(-8).toUpperCase()}
                   </p>
-                  {d.feePaidAt && (
-                    <p className="text-xs text-[#6B7280] mt-0.5">
-                      Paid {d.feePaidAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                    </p>
-                  )}
+                  <p className="text-xs text-[#6B7280] mt-0.5">
+                    Paid {d.feePaidAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-bold text-[#111827]">
                     {formatCurrency(d.feeAmountCents ?? 0)}
                   </span>
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                    d.feePaidAt ? "bg-[#ECFDF5] text-[#065F46]" : "bg-[#FFFBEB] text-amber-800"
-                  }`}>
-                    {d.feePaidAt ? "Paid" : "Pending"}
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#ECFDF5] text-[#065F46]">
+                    Paid
                   </span>
                 </div>
               </div>

@@ -1,50 +1,105 @@
-// /admin/content/attribution — Phase C-Attribution dashboard.
-// Reports content-engine leads and conversions by cluster, metro, state, and
-// city — the national metro/state dimensions sit alongside cluster and city.
-// Server component; reads the report directly from the analytics service.
-// Renders cleanly against an empty database (zero state).
+// /admin/content/attribution — content-engine leads and conversions.
+//
+// Reports by cluster, metro, state and city, plus a 30-day trend and the top
+// articles. Server component; reads the report from the analytics service.
+// Renders cleanly against an empty database.
+//
+// This page was the one Content surface with no link back to its parent, and
+// the only one still carrying module-level colour constants instead of the
+// al-* tokens. Both are fixed here. Its server authorization is deliberately
+// UNCHANGED — requireAdmin() only, every operational role keeps access, and the
+// CSV export is neither hidden nor gated in the UI. The export's PII exposure
+// is a known finding awaiting a separately authorized security batch; the
+// control now states what the file contains so nobody downloads buyer email
+// without knowing.
+
 import type { Metadata } from "next";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  BarChart2,
+  Building2,
+  Download,
+  FileText,
+  Flag,
+  Layers,
+  Map as MapIcon,
+  TrendingUp,
+} from "lucide-react";
+
 import { requireAdmin } from "@/lib/auth/admin-session";
 import {
   getContentAttributionReport,
   type AttributionDimensionRow,
 } from "@/lib/services/analytics/content-attribution-analytics.service";
 import { formatCentsAsUsd } from "@/lib/constants";
-import {
-  BarChart2, Layers, Map as MapIcon, Flag, Building2, FileText, Download, TrendingUp,
-} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Content Attribution — Admin" };
 
-const BLUE = "#0B5FD1";
-const GREEN = "#059669";
-const PURPLE = "#643293";
+/** Accent roles, from the token layer rather than restated hex. */
+type Accent = "primary" | "success" | "accent" | "warning";
 
-function KPICard({
-  label, value, sub, accent = BLUE,
-}: { label: string; value: string | number; sub?: string; accent?: string }) {
+const ACCENT_TEXT: Record<Accent, string> = {
+  primary: "text-al-primary",
+  success: "text-al-success",
+  accent: "text-al-accent",
+  warning: "text-al-warning",
+};
+const ACCENT_DOT: Record<Accent, string> = {
+  primary: "bg-al-primary",
+  success: "bg-al-success",
+  accent: "bg-al-accent",
+  warning: "bg-al-warning",
+};
+const ACCENT_WASH: Record<Accent, string> = {
+  primary: "bg-al-primary-subtle",
+  success: "bg-al-success-subtle",
+  accent: "bg-al-accent/10",
+  warning: "bg-al-warning-subtle",
+};
+
+function fmt(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function KpiCard({
+  label,
+  value,
+  sub,
+  accent = "primary",
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  accent?: Accent;
+}) {
   return (
     <div
       data-testid={`kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm"
+      className="rounded-al-lg border border-al-border bg-white p-5 shadow-al-1"
     >
-      <div className="flex items-center gap-2 mb-3">
-        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} />
-        <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">{label}</p>
+      <div className="mb-3 flex items-center gap-2">
+        <span className={`h-1.5 w-1.5 rounded-full ${ACCENT_DOT[accent]}`} aria-hidden />
+        <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">{label}</p>
       </div>
-      <p className="text-3xl font-bold text-[#0F172A] font-mono tracking-tight">{value}</p>
-      {sub && <p className="text-xs text-[#94A3B8] font-medium mt-1">{sub}</p>}
+      <p className="font-mono text-3xl font-bold tracking-tight tabular-nums text-al-text">{value}</p>
+      {sub && <p className="mt-1 text-xs font-medium text-slate-400">{sub}</p>}
     </div>
   );
 }
 
 function DimensionTable({
-  title, icon: Icon, accent = BLUE, testId, keyHeader, rows,
+  title,
+  icon: Icon,
+  accent = "primary",
+  testId,
+  keyHeader,
+  rows,
 }: {
   title: string;
-  icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>;
-  accent?: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  accent?: Accent;
   testId: string;
   keyHeader: string;
   rows: AttributionDimensionRow[];
@@ -52,37 +107,51 @@ function DimensionTable({
   return (
     <section
       data-testid={testId}
-      className="bg-white border border-[#E2E8F0] rounded-2xl p-5 md:p-6 shadow-sm"
+      className="rounded-al-lg border border-al-border bg-white p-5 shadow-al-1 md:p-6"
     >
-      <div className="flex items-center gap-2.5 mb-5">
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accent}15` }}>
-          <Icon size={15} style={{ color: accent }} />
-        </div>
-        <h2 className="text-sm font-bold tracking-tight" style={{ color: accent }}>{title}</h2>
+      <div className="mb-5 flex items-center gap-2.5">
+        <span
+          className={`flex h-8 w-8 items-center justify-center rounded-al-lg ${ACCENT_WASH[accent]}`}
+          aria-hidden
+        >
+          <Icon size={15} className={ACCENT_TEXT[accent]} />
+        </span>
+        <h2 className={`text-sm font-bold tracking-tight ${ACCENT_TEXT[accent]}`}>{title}</h2>
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-[#94A3B8] py-4 text-center">No content-attributed leads yet.</p>
+        <p className="py-4 text-center text-sm text-slate-400">No content-attributed leads yet.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
+            <caption className="sr-only">{title}</caption>
             <thead>
-              <tr className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.12em] border-b border-[#F1F5F9]">
-                <th className="text-left py-2 pr-3 font-bold">{keyHeader}</th>
-                <th className="text-right py-2 px-3 font-bold">Leads</th>
-                <th className="text-right py-2 px-3 font-bold">Conv.</th>
-                <th className="text-right py-2 px-3 font-bold">Rate</th>
-                <th className="text-right py-2 pl-3 font-bold">Value</th>
+              <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                <th scope="col" className="py-2 pr-3 text-left font-bold">{keyHeader}</th>
+                <th scope="col" className="px-3 py-2 text-right font-bold">Leads</th>
+                <th scope="col" className="px-3 py-2 text-right font-bold">Conv.</th>
+                <th scope="col" className="px-3 py-2 text-right font-bold">Rate</th>
+                <th scope="col" className="py-2 pl-3 text-right font-bold">Value</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.key} className="border-b border-[#F8FAFC] last:border-0">
-                  <td className="py-2.5 pr-3 text-[#0F172A] capitalize">{r.key.replace(/[_]/g, " ")}</td>
-                  <td className="py-2.5 px-3 text-right font-mono text-[#475569]">{r.leads.toLocaleString("en-US")}</td>
-                  <td className="py-2.5 px-3 text-right font-mono font-bold" style={{ color: GREEN }}>{r.conversions.toLocaleString("en-US")}</td>
-                  <td className="py-2.5 px-3 text-right font-mono text-[#0F172A]">{r.conversionRate}%</td>
-                  <td className="py-2.5 pl-3 text-right font-mono text-[#0F172A]">{formatCentsAsUsd(r.valueCents)}</td>
+                <tr key={r.key} className="border-b border-slate-50 last:border-0">
+                  <th scope="row" className="py-2.5 pr-3 text-left font-normal capitalize text-al-text">
+                    {r.key.replace(/[_]/g, " ")}
+                  </th>
+                  <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-600">
+                    {fmt(r.leads)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono font-bold tabular-nums text-al-success">
+                    {fmt(r.conversions)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono tabular-nums text-al-text">
+                    {r.conversionRate}%
+                  </td>
+                  <td className="py-2.5 pl-3 text-right font-mono tabular-nums text-al-text">
+                    {formatCentsAsUsd(r.valueCents)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -93,60 +162,100 @@ function DimensionTable({
   );
 }
 
-function TrendChart({
-  points,
-}: {
-  points: { date: string; leads: number; conversions: number }[];
-}) {
+/**
+ * 30-day trend.
+ *
+ * The bars carry a `title` only, which is mouse-only and unreadable to a screen
+ * reader — so the same series is also published as a real table in a
+ * disclosure. Sighted users get the shape; everyone can get the numbers.
+ */
+function TrendChart({ points }: { points: { date: string; leads: number; conversions: number }[] }) {
   const max = Math.max(1, ...points.map((p) => p.leads));
+  const totals = points.reduce(
+    (acc, p) => ({ leads: acc.leads + p.leads, conversions: acc.conversions + p.conversions }),
+    { leads: 0, conversions: 0 },
+  );
+
   return (
     <section
       data-testid="attribution-trend"
-      className="bg-white border border-[#E2E8F0] rounded-2xl p-5 md:p-6 shadow-sm"
+      className="rounded-al-lg border border-al-border bg-white p-5 shadow-al-1 md:p-6"
     >
-      <div className="flex items-center justify-between mb-5">
+      <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${BLUE}15` }}>
-            <TrendingUp size={15} style={{ color: BLUE }} />
-          </div>
-          <h2 className="text-sm font-bold tracking-tight" style={{ color: BLUE }}>Last 30 Days</h2>
+          <span
+            className={`flex h-8 w-8 items-center justify-center rounded-al-lg ${ACCENT_WASH.primary}`}
+            aria-hidden
+          >
+            <TrendingUp size={15} className={ACCENT_TEXT.primary} />
+          </span>
+          <h2 className="text-sm font-bold tracking-tight text-al-primary">Last 30 days</h2>
         </div>
-        <div className="flex items-center gap-4 text-[11px] text-[#94A3B8]">
+        <div className="flex items-center gap-4 text-[11px] text-slate-400">
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: BLUE }} /> Leads
+            <span className="h-2.5 w-2.5 rounded-sm bg-al-primary" aria-hidden /> Leads
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: GREEN }} /> Conversions
+            <span className="h-2.5 w-2.5 rounded-sm bg-al-success" aria-hidden /> Conversions
           </span>
         </div>
       </div>
-      <div className="flex items-end gap-1 h-28">
+
+      <div
+        className="flex h-28 items-end gap-1"
+        role="img"
+        aria-label={`Daily leads and conversions over the last ${points.length} days: ${fmt(totals.leads)} leads and ${fmt(totals.conversions)} conversions in total. The same figures are listed in the table below.`}
+      >
         {points.map((p) => (
-          <div
-            key={p.date}
-            className="flex-1 flex flex-col items-center justify-end gap-0.5"
-            title={`${p.date}: ${p.leads} leads, ${p.conversions} conversions`}
-          >
-            <div className="w-full flex flex-col justify-end items-center" style={{ height: "100%" }}>
+          <div key={p.date} className="flex flex-1 flex-col items-center justify-end gap-0.5">
+            <div className="flex h-full w-full flex-col items-center justify-end">
               <div
-                className="w-full rounded-t"
+                className="w-full rounded-t bg-al-primary"
                 style={{
                   height: `${Math.round((p.leads / max) * 100)}%`,
-                  backgroundColor: BLUE,
                   opacity: p.leads === 0 ? 0.15 : 1,
                 }}
               />
               <div
-                className="w-full"
-                style={{
-                  height: `${Math.round((p.conversions / max) * 100)}%`,
-                  backgroundColor: GREEN,
-                }}
+                className="w-full bg-al-success"
+                style={{ height: `${Math.round((p.conversions / max) * 100)}%` }}
               />
             </div>
           </div>
         ))}
       </div>
+
+      <details className="group mt-4" data-testid="attribution-trend-table">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded text-xs font-semibold text-al-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus">
+          <span aria-hidden className="transition-transform group-open:rotate-90">▸</span>
+          View the daily figures as a table
+        </summary>
+        <div className="mt-3 max-h-64 overflow-auto">
+          <table className="w-full text-sm">
+            <caption className="sr-only">
+              Daily content-attributed leads and conversions, last {points.length} days
+            </caption>
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                <th scope="col" className="py-2 pr-3 text-left font-bold">Date</th>
+                <th scope="col" className="px-3 py-2 text-right font-bold">Leads</th>
+                <th scope="col" className="py-2 pl-3 text-right font-bold">Conversions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {points.map((p) => (
+                <tr key={p.date} className="border-b border-slate-50 last:border-0">
+                  <th scope="row" className="py-2 pr-3 text-left font-normal text-al-text">{p.date}</th>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-600">{fmt(p.leads)}</td>
+                  <td className="py-2 pl-3 text-right font-mono tabular-nums text-al-success">
+                    {fmt(p.conversions)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </section>
   );
 }
@@ -156,52 +265,122 @@ export default async function ContentAttributionPage() {
   const report = await getContentAttributionReport();
 
   return (
-    <div
-      data-testid="content-attribution-page"
-      className="min-h-screen bg-[#F4F6FA] p-6 md:p-8 max-w-[1400px] mx-auto space-y-6"
-    >
-      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+    <div data-testid="content-attribution-page" className="p-6 md:p-8">
+      <Link
+        href="/admin/content"
+        data-testid="attribution-parent-link"
+        className="mb-4 inline-flex items-center gap-1.5 rounded text-sm text-al-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus"
+      >
+        <ArrowLeft size={14} aria-hidden /> Content Engine
+      </Link>
+
+      <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <BarChart2 size={16} style={{ color: BLUE }} />
-            <p className="text-[10px] text-[#94A3B8] font-semibold uppercase tracking-widest">
+          <div className="mb-1.5 flex items-center gap-2">
+            <BarChart2 size={16} className="text-al-primary" aria-hidden />
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
               Content Engine
             </p>
           </div>
-          <h1 className="text-2xl font-bold text-[#0F172A] tracking-tight">Content Attribution</h1>
-          <p className="text-sm text-[#94A3B8] mt-0.5">
-            Leads &amp; conversions by cluster, metro, state, and city · Last updated:{" "}
+          <h1 className="text-2xl font-bold tracking-tight text-al-text">Content Attribution</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Leads and conversions by cluster, metro, state and city · Last updated{" "}
             {new Date(report.generatedAt).toLocaleString("en-US")}
           </p>
         </div>
-        <a
-          href="/api/admin/content/attribution/export"
-          data-testid="attribution-export-csv"
-          className="inline-flex shrink-0 items-center gap-2 px-4 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-sm font-semibold text-[#0F172A] hover:border-al-primary hover:text-al-primary transition-colors shadow-sm"
-        >
-          <Download size={15} />
-          Export CSV
-        </a>
+
+        <div className="shrink-0">
+          <a
+            href="/api/admin/content/attribution/export"
+            data-testid="attribution-export-csv"
+            className="inline-flex items-center gap-2 rounded-al-lg border border-al-border bg-white px-4 py-2.5 text-sm font-semibold text-al-text shadow-al-1 transition-colors hover:border-al-primary hover:text-al-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus"
+          >
+            <Download size={15} aria-hidden />
+            Export CSV
+          </a>
+          {/* Says what leaves the building. The file carries buyer email; the
+              control is not hidden or gated here, and the route's authorization
+              is unchanged — this is disclosure, not enforcement. */}
+          <p
+            className="mt-1.5 max-w-[15rem] text-xs text-al-warning-fg"
+            data-testid="attribution-export-pii-notice"
+          >
+            Contains buyer email addresses — personal data. Handle per the PII policy.
+          </p>
+        </div>
       </header>
 
-      {/* Totals */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPICard label="Content Leads" value={report.totals.leads.toLocaleString("en-US")} sub="attributed to articles" />
-        <KPICard label="Conversions" value={report.totals.conversions.toLocaleString("en-US")} sub="deal / paid deposit" accent={GREEN} />
-        <KPICard label="Conversion" value={`${report.totals.conversionRate}%`} sub="leads → converted" accent={PURPLE} />
-        <KPICard label="Attributed Value" value={formatCentsAsUsd(report.totals.valueCents)} sub="deposit value" accent="#D97706" />
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <KpiCard
+          label="Content Leads"
+          value={fmt(report.totals.leads)}
+          sub="attributed to articles"
+        />
+        <KpiCard
+          label="Conversions"
+          value={fmt(report.totals.conversions)}
+          sub="deal / paid deposit"
+          accent="success"
+        />
+        <KpiCard
+          label="Conversion"
+          value={`${report.totals.conversionRate}%`}
+          sub="leads → converted"
+          accent="accent"
+        />
+        <KpiCard
+          label="Attributed Value"
+          value={formatCentsAsUsd(report.totals.valueCents)}
+          sub="deposit value"
+          accent="warning"
+        />
       </div>
 
-      <TrendChart points={report.dailyTrend} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <DimensionTable title="By Cluster" icon={Layers} testId="attribution-by-cluster" keyHeader="Cluster" rows={report.byCluster} />
-        <DimensionTable title="By Metro" icon={MapIcon} testId="attribution-by-metro" accent={GREEN} keyHeader="Metro" rows={report.byMetro} />
-        <DimensionTable title="By State" icon={Flag} testId="attribution-by-state" accent={PURPLE} keyHeader="State" rows={report.byState} />
-        <DimensionTable title="By City" icon={Building2} testId="attribution-by-city" accent="#D97706" keyHeader="City" rows={report.byCity} />
+      <div className="mb-6">
+        <TrendChart points={report.dailyTrend} />
       </div>
 
-      <DimensionTable title="Top Articles" icon={FileText} testId="attribution-top-articles" keyHeader="Article Slug" rows={report.topArticles} />
+      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <DimensionTable
+          title="By cluster"
+          icon={Layers}
+          testId="attribution-by-cluster"
+          keyHeader="Cluster"
+          rows={report.byCluster}
+        />
+        <DimensionTable
+          title="By metro"
+          icon={MapIcon}
+          accent="success"
+          testId="attribution-by-metro"
+          keyHeader="Metro"
+          rows={report.byMetro}
+        />
+        <DimensionTable
+          title="By state"
+          icon={Flag}
+          accent="accent"
+          testId="attribution-by-state"
+          keyHeader="State"
+          rows={report.byState}
+        />
+        <DimensionTable
+          title="By city"
+          icon={Building2}
+          accent="warning"
+          testId="attribution-by-city"
+          keyHeader="City"
+          rows={report.byCity}
+        />
+      </div>
+
+      <DimensionTable
+        title="Top articles"
+        icon={FileText}
+        testId="attribution-top-articles"
+        keyHeader="Article slug"
+        rows={report.topArticles}
+      />
     </div>
   );
 }

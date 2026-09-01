@@ -47,7 +47,7 @@
   - pdfkit installed: pnpm add pdfkit && pnpm add -D @types/pdfkit
 
 - [ ] `social-media-assets` bucket — create via `pnpm setup:storage` or
-      `prisma/migrations/manual_supabase_sql/social_media_assets_bucket.sql`
+      `prisma/manual_supabase_sql/social_media_assets_bucket.sql`
   - Access: public (post images/videos served directly)
   - RLS: public SELECT; service role INSERT (Social Engine uploads via service role key)
   - File size limit: 50MB

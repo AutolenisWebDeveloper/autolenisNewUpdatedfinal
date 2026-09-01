@@ -7,6 +7,8 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { complete } from "@/lib/ai/provider";
+import { ProviderHttpError } from "@/lib/ai/provider-errors";
 
 export async function POST(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
@@ -138,32 +140,26 @@ Provide your analysis in this exact JSON format:
 }`;
 
   try {
-    const groqRes = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 1500,
-        }),
-      },
-    );
-
-    // Surface upstream failures (auth/quota/5xx) as an error rather than
-    // parsing the error body into an empty "{}" analysis returned as success.
-    if (!groqRes.ok) {
-      const body = await groqRes.text().catch(() => "");
-      logger.error(`[ai-analyze] Groq ${groqRes.status}: ${body.slice(0, 300)}`);
-      return adminError("AI_ANALYSIS_FAILED", "AI analysis upstream failed", 502);
+    // Transport only — model, prompt and token cap unchanged.
+    let groqResult;
+    try {
+      groqResult = await complete({
+        purpose: "social.analytics.analyze",
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: prompt }],
+        maxTokens: 1500,
+      });
+    } catch (err) {
+      // Surface upstream failures (auth/quota/5xx) as an error rather than
+      // parsing the error body into an empty "{}" analysis returned as success.
+      if (err instanceof ProviderHttpError) {
+        logger.error(`[ai-analyze] Groq ${err.status}: ${err.detail.slice(0, 300)}`);
+        return adminError("AI_ANALYSIS_FAILED", "AI analysis upstream failed", 502);
+      }
+      throw err;
     }
 
-    const groqData = await groqRes.json();
-    const raw = groqData?.choices?.[0]?.message?.content ?? "{}";
+    const raw = groqResult.content || "{}";
     const cleaned = raw.replace(/```json|```/g, "").trim();
     const analysis = JSON.parse(cleaned);
 

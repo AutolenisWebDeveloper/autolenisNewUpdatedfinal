@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest(request);

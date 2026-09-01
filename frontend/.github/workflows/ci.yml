@@ -52,7 +52,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: whsec_placeholder
           MICROBILT_CLIENT_ID: placeholder
           MICROBILT_CLIENT_SECRET: placeholder
-          MICROBILT_IPREDICT_BASE_URL: https://placeholder.microbilt.com
+          MICROBILT_BASE_URL: https://placeholder.microbilt.com/iPredict/GetReport
           RESEND_API_KEY: re_placeholder
           GROQ_API_KEY: gsk_placeholder
           JWT_SECRET: placeholder_jwt_secret_min_32_chars_xxxxxxxxxxxxxxx

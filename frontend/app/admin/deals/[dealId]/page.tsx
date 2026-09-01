@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import AdminDealTabs from "@/components/admin/AdminDealTabs";
+import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ dealId: string }> }
@@ -27,7 +28,7 @@ export default async function AdminDealDetailPage({ params }: Props) {
       buyer: { include: { user: true } },
       offer: { include: { dealer: { include: { user: true } }, auction: { include: { deposit: true } } } },
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: true,
+      eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT },
       pickup: true,
     },
   });
@@ -70,6 +71,7 @@ export default async function AdminDealDetailPage({ params }: Props) {
         auditLogs={JSON.parse(JSON.stringify(auditLogs))}
         adminId={admin.adminId}
         adminEmail={admin.email}
+        adminRole={admin.role}
       />
     </div>
   );

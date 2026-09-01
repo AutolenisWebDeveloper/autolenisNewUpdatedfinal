@@ -336,7 +336,10 @@ export async function getAdminBuyerDetailData(buyerId: string) {
               dealer: { select: { dealershipName: true, city: true, state: true } },
             },
           },
-          eSignEnvelope: true,
+          // Explicit projection — `eSignEnvelope: true` selects every scalar,
+          // including the columns migrations 20261014/20261015 add but production
+          // does not yet have. Only these four are serialized below.
+          eSignEnvelope: { select: { status: true, docusignEnvelopeId: true, sentAt: true, completedAt: true } },
           pickup: true,
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },
@@ -717,7 +720,27 @@ export async function updateBuyerProfileByAdmin(
     reason: string;
   }
 ) {
-  const { reason, ...profileData } = data;
+  const { reason, ...rest } = data;
+  // Two normalisations, both matching app/api/buyer/profile/route.ts so the
+  // column means the same thing whichever surface wrote it:
+  //  1. state is stored uppercase (the route schema already enforces 2 letters);
+  //  2. an empty string clears the field to NULL rather than persisting "".
+  //     The admin edit form submits every field on each save, so a buyer with a
+  //     NULL location posts city/state/zip as "" — storing that would replace a
+  //     meaningful NULL with a value that no lookup can resolve.
+  const blankToNull = <T extends string | undefined>(v: T) =>
+    v === undefined ? undefined : v.trim() === "" ? null : v;
+
+  const profileData = {
+    ...rest,
+    ...(rest.phone !== undefined ? { phone: blankToNull(rest.phone) } : {}),
+    ...(rest.address !== undefined ? { address: blankToNull(rest.address) } : {}),
+    ...(rest.city !== undefined ? { city: blankToNull(rest.city) } : {}),
+    ...(rest.zip !== undefined ? { zip: blankToNull(rest.zip) } : {}),
+    ...(rest.state !== undefined
+      ? { state: rest.state.trim() === "" ? null : rest.state.toUpperCase() }
+      : {}),
+  };
   const updated = await prisma.buyer.update({
     where: { id: buyerId },
     data: profileData,

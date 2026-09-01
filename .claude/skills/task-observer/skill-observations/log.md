@@ -187,3 +187,201 @@ Observations captured during task-oriented work.
 **Suggested improvement:** autolenis-observability-sre should note that the vercel.json↔CRON_STALENESS bidirectional parity test is the safety net for BOTH adding and removing crons, and that a cron change is not complete until both registries agree (the test proves it).
 
 **Principle:** A bidirectional registry-parity invariant turns an easy-to-half-do change (add/remove in two places) into a self-checking one; lean on it rather than manual cross-checking.
+
+### Observation 13: Dead schema table treated as diagnostic evidence
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Diagnosing a silently non-delivering Stripe webhook from production row counts
+**Skill:** autolenis-debugging
+**Type:** open-source
+**Phase/Area:** Evidence gathering — "trace the actual execution path"
+
+**Issue:** An incident report cited two zero row counts as corroborating evidence of the
+same failure. One of the two tables has no writer anywhere in the codebase, so its count is
+zero unconditionally and carries no information about the failure. Only the other count was
+actually diagnostic. Reasoning from the dead table would have widened the suspected blast
+radius incorrectly.
+
+**Suggested improvement:** In the evidence-gathering section, add a step: for every table,
+metric, or log stream cited as evidence, first confirm a writer exists on the path being
+diagnosed (grep for writes to it). A zero from a table nothing writes to is not a signal.
+
+**Principle:** Absence-of-data is only evidence when something would have written the data
+had the system worked. Before reasoning from a zero, verify the write path exists.
+
+### Observation 14: Alert invariants need a false-positive analysis before shipping
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Adding an operational exception for a payment intent stranded without a provider event
+**Skill:** autolenis-observability-sre
+**Type:** open-source
+**Phase/Area:** Alerting / operational exceptions
+
+**Issue:** The obvious formulation of a "we never heard back from the provider" invariant
+("record is PENDING with a provider id and has no provider event past a window") also matches
+the far more common benign case — the user simply abandoned checkout and never paid. Shipping
+it as written would have produced a permanently noisy alert that operators learn to ignore,
+which is the same outcome as having no alert at all.
+
+**Suggested improvement:** Add a rule to the alerting guidance: for every new invariant,
+enumerate the benign states that also satisfy the predicate and either exclude them or
+reconcile against the authoritative external source before alerting. State the expected
+steady-state alert volume.
+
+**Principle:** An invariant that fires on the normal case is not monitoring, it is noise.
+Design the exclusion set at the same time as the predicate, not after the first false page.
+
+### Observation 15: A discriminator that lives only in the provider's payload
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Adding isolation between two fulfillment tracks that share one payments table
+**Skill:** autolenis-domain-model
+**Type:** open-source
+**Phase/Area:** Entity design — status/kind fields
+
+**Issue:** Two materially different fulfillment tracks shared one table and one amount,
+distinguished only by a metadata field on the external provider's object. Every internal
+path that had to tell them apart therefore needed a network round-trip to the provider, and
+any path that forgot would silently run the wrong fulfillment. The webhook could branch
+correctly because the provider payload was in hand; no other path could.
+
+**Suggested improvement:** Add a rule: when a single entity serves two or more downstream
+workflows, the discriminator must be a persisted column on the entity, written at creation.
+A field readable only from an external payload is not a discriminator — it is a lookup, and
+every consumer inherits the provider's availability and latency.
+
+**Principle:** If two rows in the same table mean different things, the difference belongs in
+the row. Provider payloads are evidence, not schema.
+
+### Observation 16: Adding a collaborator import silently breaks sibling route tests
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Wiring an existing service into a route that previously did not import it
+**Skill:** autolenis-testing-quality-gates
+**Type:** open-source
+**Phase/Area:** Route-handler test harnesses
+
+**Issue:** Adding one import to a route handler broke six unrelated tests in a sibling file.
+The tests exercised the route's authorization gate and returned before ever reaching the new
+call, but the import itself pulled in a server-only module at load time. The per-file mock
+registration meant the file that mocked the new collaborator passed while the older file
+failed, and the failure message named a framework constraint rather than the cause.
+
+**Suggested improvement:** In the route-handler testing guidance, note that route tests mock
+the module graph, not just the call path: after adding an import to a route, re-run every
+test file that imports that route, not only the one for the behaviour being changed. Grep
+for the route path across test files as part of the change.
+
+**Principle:** A route test depends on everything the route imports, including code the test
+never executes. Import-time coupling is coupling.
+
+## 2026-08-30
+
+### Observation 17: Admin UI audits should grep for API capabilities with no UI consumer
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Auditing /admin/content before a UX/workflow redesign; discovered an entire Phase-3 content workflow API layer (validate/approve/schedule/publish_now/unpublish/rollback, generation jobs with pause/resume/cancel/retry, a content capability model) with zero UI consumers.
+**Skill:** autolenis-system-architecture
+**Type:** open-source
+**Phase/Area:** Reuse-before-create protocol / capability-index
+
+**Issue:** The reuse-before-create protocol tells you to search for an existing service before building a new one, but it does not tell you to search the reverse direction — for existing API routes and services that no UI reaches. A redesign brief that says "preserve every capability" is silently scoped to what the UI already shows, so orphaned server capability stays invisible and gets rebuilt later as a "new" feature.
+
+**Suggested improvement:** Add an "orphan sweep" step to the reuse-before-create protocol: for the domain under change, list every route handler and exported service function, then grep the UI tree for a consumer of each. Report the ones with no consumer as orphaned capability rather than assuming the UI is the complete inventory.
+
+**Principle:** An inventory taken from the user interface is not an inventory of the system. Capability audits must enumerate from the server surface inward, because unreached capability is invisible from the surface that fails to reach it.
+
+### Observation 18: Two write paths to the same state with different invariants is a design defect worth naming explicitly
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Same /admin/content audit. Publishing an article is reachable by two paths with different semantics: a plain status flip (updateContentArticleStatus) that bypasses approval/validation guardrails, and publishNow() which enforces them.
+**Skill:** autolenis-code-verification
+**Type:** open-source
+**Phase/Area:** STEP 2 — first code review checklist
+
+**Issue:** The review checklist lists "duplicated functionality" and "invalid assumptions" but does not name the specific and more dangerous pattern: two code paths that write the same field, where one enforces an invariant and the other does not. This reads as acceptable duplication rather than as a guardrail bypass.
+
+**Suggested improvement:** Add an explicit review prompt to STEP 2: "For every state field this change touches, enumerate all write paths. If one path enforces a guard the others do not, that is a bypass — report it even if the change did not introduce it."
+
+**Principle:** Duplication of a write path is not a style problem; it is an invariant problem. The weakest path defines the actual guarantee, so guardrails must be reviewed at the field level, not the function level.
+
+### Observation 19: Reaching for the same visual device in three components is the signal, not each instance
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Building an owner-facing audit document; the Impeccable hook flagged a thick left accent border on three separate card components (banner, finding card, callout).
+**Skill:** impeccable
+**Type:** open-source
+**Phase/Area:** side-tab rule / design self-review
+
+**Issue:** The rule fires per instance, so it reads as three independent nits. The actual defect was singular and structural: one device was reused for three different jobs, and in one of them it duplicated information a chip already carried. Fixing instance-by-instance would have produced three subtler stripes rather than three distinct devices.
+
+**Suggested improvement:** When the same rule fires on 3+ components in one file, report it once as a repetition finding — "this device appears in N components; each should encode something different, or the device should collapse to one" — rather than N independent findings.
+
+**Principle:** A visual device repeated across components that mean different things is not N small problems; it is one design problem about vocabulary. Review tooling that counts instances hides the pattern that makes them worth fixing.
+
+### Observation 20: A capability-preservation fixture is only as good as its enumeration
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Implementing the approved /admin/content redesign. Wrote an executable capability-preservation test listing every pre-existing control by data-testid, ran it green at 90/90, and only found during the independent second review that a banner and its two actions had been dropped — the fixture had never named them, so it passed while the regression was live.
+**Skill:** autolenis-code-verification
+**Type:** open-source
+**Phase/Area:** STEP 6 — independent second review
+
+**Issue:** An allow-list style regression fixture reports on what it enumerates and is silent on what it omits. A green run therefore reads as "nothing was lost" when it only means "nothing on the list was lost". The failure is invisible precisely because the test is passing, and the confidence it produces suppresses the manual check that would have caught it.
+
+**Suggested improvement:** When a preservation fixture is built by hand, derive the baseline mechanically rather than from memory — enumerate the identifiers present at the base commit (e.g. extract them from `git show BASE:file`) and diff that set against the fixture, failing on any baseline identifier the fixture does not mention. The fixture then cannot be quietly incomplete.
+
+**Principle:** A hand-written allow-list cannot prove completeness, only conformance to itself. Any test asserting that nothing was lost must derive its baseline from the artifact being preserved, not from the author's recollection of it.
+
+### Observation 21: env.d.ts required vars make `delete process.env.X` a typecheck error in tests
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Adding a cron-triggered content-generation seeder; writing a route test that needed CRON_SECRET unset to prove the fail-closed 500 path.
+**Skill:** autolenis-testing-quality-gates
+**Type:** open-source
+**Phase/Area:** Writing route/cron tests that manipulate environment variables
+
+**Issue:** `delete process.env.CRON_SECRET` in a test compiles under `tsx --test` and the test passes, but `pnpm typecheck` fails with TS2790 ("The operand of a 'delete' operator must be optional") because env.d.ts declares CRON_SECRET as a required `string`. The failure surfaces only at the typecheck gate, after the suite is already green — a misleading signal that costs a debug cycle. The repo already has two different established workarounds (`process.env.X = ""` in the sibling cron route tests, `delete (process.env as Record<string, string | undefined>).X` in lib/security tests) but neither is written down.
+
+**Suggested improvement:** In the testing skill's test-authoring guidance, add a short rule: to unset a declared-required env var in a test, assign the empty string (preferred where the reader treats empty as unset, which `evaluateCronAuth` does) or cast through `Record<string, string | undefined>`; never `delete process.env.X` directly. Note that a green suite does not imply a green typecheck when env vars are manipulated.
+
+**Principle:** When a project narrows an ambient type (here, NodeJS.ProcessEnv) to make required configuration explicit, it also removes operations the ambient type allowed. Document the sanctioned replacement operations at the point of narrowing, or every consumer rediscovers the restriction at a later gate than the one they are working in.
+
+### Observation 22: Directory-glob test scripts already cover new files — no package.json edit needed
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Task spec required registering two new test files in a `test:*` script and in `test:all`, or `scripts/check-test-coverage.ts` would fail the build.
+**Skill:** autolenis-testing-quality-gates
+**Type:** open-source
+**Phase/Area:** Test registration / test-reachability guard
+
+**Issue:** Most `test:*` scripts are directory globs (`lib/services/content/__tests__/*.test.ts`, `app/api/cron/__tests__/*.test.ts`). A new test file placed in an already-globbed directory is automatically reachable and already inside `test:all`, so no package.json change is required — but this is not stated anywhere, so a task spec (and an implementer) can reasonably assume every new suite needs manual registration and add a redundant script. The distinction that matters is whether the target directory is already globbed by a script that `test:all` chains.
+
+**Suggested improvement:** Add a two-line rule to the testing skill: before adding a `test:*` script for a new suite, check whether an existing script already globs that `__tests__` directory and whether that script is chained in `test:all`; add a new script only for a genuinely new directory. Either way, prove it by running `pnpm test:coverage-check` rather than reasoning about it.
+
+**Principle:** When a guard is executable, the answer to "is this registered?" is the guard's output, not an inspection of the manifest. Document the cheap way to ask the guard, so contributors verify instead of pre-emptively adding redundant configuration.
+
+### Observation 23: A repeating scheduler's skip rules must guarantee forward progress, not just prevent duplicates
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Building a daily cron that seeds article-generation work from a fixed-order keyword list. The spec named two skip rules (already-produced, currently-in-flight) and a per-run cap; I implemented exactly those and shipped a starvation bug that the owner caught in review.
+**Skill:** autolenis-system-architecture
+**Type:** open-source
+**Phase/Area:** Designing a repeating scheduler / queue seeder
+
+**Issue:** The two skip rules covered "don't redo finished work" and "don't double-enqueue work in flight", but nothing covered permanently-failed work. A terminally-failed item was neither in-flight nor did it leave a completed-work row, so it returned to the eligible pool every run — and because candidates were selected in fixed source order with `slice(0, cap)`, failures near the head of the list re-filled the entire batch forever. With roughly `cap` permanent failures the queue would spend its whole daily budget re-running the same doomed items and never reach new work. I noticed the daily-retry behaviour while writing it, documented it in a comment as intended, and moved on — treating an unbounded, order-biased, budget-consuming loop as a characteristic instead of a defect. The fix was to partition the eligible pool into never-attempted and previously-attempted, fill new-first, and bound retries to a fraction of the cap so each pool absorbs the other's unused slots.
+
+**Suggested improvement:** Add a checklist item to the background-jobs / scheduler guidance: for any repeating selector over a bounded batch, state explicitly what happens to permanently-failed items on the NEXT run, and prove forward progress is guaranteed regardless of the failure count. Concretely — if selection is `filter(...).slice(0, cap)` over a fixed-order source, ask whether a stuck item can reoccupy its slot indefinitely; if so, partition the pool and reserve the majority of the cap for un-attempted work. Also worth a rule: emit per-pool counters (new vs retry) rather than one total, so the pathology is visible in the run record.
+
+**Principle:** Idempotence and progress are different properties, and a repeating job needs both. Skip rules written to prevent duplicate work only establish "nothing is done twice concurrently"; they say nothing about whether the frontier advances. Any bounded, repeating selector over an ordered candidate set needs an explicit liveness argument — and when a known-bad item can consume the same slot every cycle, documenting it as intended behaviour is not a substitute for bounding it.

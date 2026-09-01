@@ -4,8 +4,15 @@
 // "never cold-email an unverified address" rule is enforced HERE regardless of
 // how `email` was populated (Y1 verify-before-persist, admin backfill/re-enrich,
 // manual entry). This proves the BEHAVIOR: an undeliverable address is never
-// dispatched (no outreach-log row is even created), and a deliverable address is
-// let through the gate.
+// dispatched, and a deliverable address is let through the gate.
+//
+// PHASE 2 UPDATE — what these tests assert changed, and it is not a relaxation.
+// They previously used "no outreach-log row was created" as the proxy for
+// "nothing was sent". That proxy is now invalid: a blocked attempt DOES write a
+// row, deliberately, because the absence of rows made a blocked send
+// indistinguishable from a send never attempted. The safety property is
+// unchanged and is now asserted DIRECTLY against the provider seam (dispatchSpy
+// call count), which is strictly stronger than inferring it from a side effect.
 //
 // The send service uses top-level (non-injected) imports, and several of them
 // (prospect-claim / unsubscribe-token / supabase-service) pull in `server-only`,
@@ -68,6 +75,12 @@ const prisma = {
 };
 mock.module("@/lib/prisma", { namedExports: { prisma } });
 
+// Injected provider seam. NOT mock.module("resend", ...) — the service is
+// transformed to CJS, so require() bypasses node:test's ESM mocking and the
+// service would reach the LIVE Resend API while the spy recorded zero calls.
+// Injection is what keeps this suite off the network.
+const dispatchSpy = mock.fn(async () => ({ id: "prov_1", error: null }));
+
 // Isolate the send from the AI template + claim/unsubscribe internals so the
 // deliverable-path test is hermetic (no Groq fallback latency, no swallowed
 // claim-token throw). These are only reached AFTER the gate, so the gate test
@@ -108,21 +121,25 @@ beforeEach(() => {
   process.env.RESEND_API_KEY = "re_placeholder_test";
   createSpy.mock.resetCalls();
   verifySpy.mock.resetCalls();
+  dispatchSpy.mock.resetCalls();
   deliverability = { deliverable: true, reason: "mx_ok" };
 });
 
-test("an undeliverable address is blocked BEFORE any outreach log is created", async () => {
+test("an undeliverable address is never dispatched, and the block is recorded", async () => {
   deliverability = { deliverable: false, reason: "no_mx" };
   const sendDealerEmail = await loadSend();
 
-  const result = await sendDealerEmail({ dealerProspectId: "p1" });
+  const result = await sendDealerEmail({ dealerProspectId: "p1" }, { dispatch: dispatchSpy });
 
   assert.equal(result.success, false);
   assert.match(result.error ?? "", /not deliverable/i);
   assert.match(result.error ?? "", /no_mx/);
-  // The gate fires before log creation — nothing is queued, nothing dispatched.
-  assert.equal(createSpy.mock.callCount(), 0, "no outreach log may be created for an undeliverable address");
+  // THE safety property, asserted directly rather than inferred: the provider is
+  // never reached for an address that failed the deliverability gate.
+  assert.equal(dispatchSpy.mock.callCount(), 0, "an undeliverable address must never be dispatched");
   assert.equal(verifySpy.mock.callCount(), 1, "the deliverability check must run");
+  // And the rejection is now observable instead of silent.
+  assert.equal(createSpy.mock.callCount(), 1, "a blocked attempt must leave exactly one row");
 });
 
 test("an unconfigured email channel returns reason 'not_configured' (never a genuine send error)", async () => {
@@ -133,24 +150,27 @@ test("an unconfigured email channel returns reason 'not_configured' (never a gen
   delete process.env.DEALER_OUTREACH_FROM_EMAIL;
   const sendDealerEmail = await loadSend();
 
-  const result = await sendDealerEmail({ dealerProspectId: "p1" });
+  const result = await sendDealerEmail({ dealerProspectId: "p1" }, { dispatch: dispatchSpy });
 
   assert.equal(result.success, false);
   assert.equal(result.reason, "not_configured");
   assert.match(result.error ?? "", /not configured/i);
-  // Blocked at the very top — no prospect load, no deliverability check, no log row.
-  assert.equal(createSpy.mock.callCount(), 0, "no outreach log for an unconfigured channel");
+  assert.equal(dispatchSpy.mock.callCount(), 0, "an unconfigured channel must never dispatch");
   assert.equal(verifySpy.mock.callCount(), 0, "config gate short-circuits before deliverability");
+  // The config gate now runs AFTER the prospect load so its rejection can be
+  // attributed to a prospect and recorded. This is the fix for the failure mode
+  // where a misconfigured channel produced no evidence anywhere.
+  assert.equal(createSpy.mock.callCount(), 1, "an unconfigured channel must leave exactly one row");
 });
 
-test("a deliverable address passes the gate and proceeds to dispatch", async () => {
+test("a deliverable address passes the gate and reaches the provider", async () => {
   deliverability = { deliverable: true, reason: "mx_ok" };
   const sendDealerEmail = await loadSend();
 
-  const result = await sendDealerEmail({ dealerProspectId: "p1" });
+  const result = await sendDealerEmail({ dealerProspectId: "p1" }, { dispatch: dispatchSpy });
 
-  // Placeholder RESEND key → getResend() null → "not configured", but only
-  // AFTER the log row was created, which proves the gate let it through.
-  assert.equal(createSpy.mock.callCount(), 1, "a deliverable address must reach log creation");
+  // The gate let it through, proven at the provider rather than by a side effect.
+  assert.equal(dispatchSpy.mock.callCount(), 1, "a deliverable address must reach dispatch");
+  assert.equal(result.success, true);
   assert.doesNotMatch(result.error ?? "", /not deliverable/i);
 });

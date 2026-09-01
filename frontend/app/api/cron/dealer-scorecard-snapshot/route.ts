@@ -19,7 +19,7 @@ function isoWeekKey(d: Date): string {
   return `${date.getUTCFullYear()}-W${weekNo.toString().padStart(2, "0")}`;
 }
 
-export async function POST(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const cronAuth = authorizeCronRequest(request);
   if (cronAuth) return cronAuth;
   const run = await withCronRun("dealer-scorecard-snapshot", async () => {

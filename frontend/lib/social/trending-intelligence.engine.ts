@@ -8,6 +8,7 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { complete } from "@/lib/ai/provider";
 
 export interface TrendingData {
   tiktokHashtags: string[];
@@ -79,10 +80,8 @@ async function fetchTikTokHashtags(apiKey: string): Promise<string[]> {
   }
 }
 
-async function fetchRedditTopics(
-  apiKey: string,
-  groqKey: string,
-): Promise<string[]> {
+// The Groq API key is resolved by the provider adapter, not threaded in here.
+async function fetchRedditTopics(apiKey: string): Promise<string[]> {
   try {
     const res = await fetch(
       "https://reddit3.p.rapidapi.com/r/askcarsales/hot?limit=10",
@@ -103,29 +102,20 @@ async function fetchRedditTopics(
     }
     if (posts.length === 0) return [];
 
-    // Use Groq to extract content opportunities.
-    const groqRes = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${groqKey}`,
-          "Content-Type": "application/json",
+    // Use Groq to extract content opportunities. Transport only — model, prompt
+    // and token cap unchanged; `temperature` was never sent and still is not.
+    const groqResult = await complete({
+      purpose: "social.trending_intelligence",
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "user",
+          content: `Given these Reddit car buying questions, identify the top 3 content opportunities for AutoLenis social media today. Return ONLY a JSON array of 3 short strings (under 15 words each), no other text:\n${posts.join("\n")}`,
         },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            {
-              role: "user",
-              content: `Given these Reddit car buying questions, identify the top 3 content opportunities for AutoLenis social media today. Return ONLY a JSON array of 3 short strings (under 15 words each), no other text:\n${posts.join("\n")}`,
-            },
-          ],
-          max_tokens: 200,
-        }),
-      },
-    );
-    const groqData = await groqRes.json();
-    const raw = groqData?.choices?.[0]?.message?.content ?? "[]";
+      ],
+      maxTokens: 200,
+    });
+    const raw = groqResult.content || "[]";
     const cleaned = raw.replace(/```json|```/g, "").trim();
     return JSON.parse(cleaned) as string[];
   } catch {
@@ -175,7 +165,6 @@ async function fetchGoogleTrends(apiKey: string): Promise<string[]> {
 
 export async function fetchTrendingIntelligence(): Promise<TrendingData> {
   const apiKey = process.env.RAPIDAPI_KEY ?? "";
-  const groqKey = process.env.GROQ_API_KEY ?? "";
 
   if (!apiKey) {
     logger.info("[trending] RAPIDAPI_KEY not set — using defaults");
@@ -190,7 +179,7 @@ export async function fetchTrendingIntelligence(): Promise<TrendingData> {
 
   const [tiktokHashtags, redditTopics, googleTrends] = await Promise.all([
     fetchTikTokHashtags(apiKey),
-    fetchRedditTopics(apiKey, groqKey),
+    fetchRedditTopics(apiKey),
     fetchGoogleTrends(apiKey),
   ]);
 

@@ -1,12 +1,13 @@
 // lib/ai/acquisition.ts
-// Acquisition-specific AI helpers. The existing groqChat() in groq-client.ts
-// hardcodes its model, so the per-function model assignments below (gpt-oss
-// reasoning / messaging / safeguard) are called against the Groq REST
-// endpoint directly. groqChat() itself is untouched and continues to drive
-// the voice + general-purpose flows.
+// Acquisition-specific AI helpers. Each function below picks its own model from
+// the gpt-oss lineup (reasoning / messaging / safeguard / fast) rather than
+// inheriting groqChat()'s hardcoded pair, and reaches it through the provider
+// chokepoint (`lib/ai/provider.ts`) so the AI kill switch covers every one of
+// them. Prompts, models, temperatures, token caps and reasoning-effort settings
+// are unchanged — only the transport moved.
 
 import { logger } from "@/lib/logger";
-import type { ChatMessage } from "@/lib/ai/groq-client";
+import { complete, completeStream, type ChatMessage } from "@/lib/ai/provider";
 
 // ─── Model lineup ────────────────────────────────────────────────────────────
 export const GROQ_FAST = "llama-3.1-8b-instant";
@@ -23,6 +24,18 @@ export const GROQ_SAFETY = "openai/gpt-oss-safeguard-20b";
 
 export const GROQ_SUMMARY = "llama-3.3-70b-versatile";
 // Morning briefing, general summarization
+
+/**
+ * The acquisition lineup, as a closed union. Typing `callGroq` against this
+ * (rather than `string`) means a typo cannot reach the provider adapter — the
+ * adapter's `ModelId` union rejects it at compile time.
+ */
+export type GroqAcquisitionModel =
+  | typeof GROQ_FAST
+  | typeof GROQ_REASONING
+  | typeof GROQ_MESSAGING
+  | typeof GROQ_SAFETY
+  | typeof GROQ_SUMMARY;
 
 // ─── Public types ────────────────────────────────────────────────────────────
 export interface ExtractedData {
@@ -49,64 +62,34 @@ const EMPTY: ExtractedData = {
   phone: null,
 };
 
-// ─── Low-level: call Groq's OpenAI-compatible chat completions endpoint ──────
-// We bypass the local groqChat() helper because the gpt-oss family accepts a
-// `reasoning_effort` knob that the helper does not pass through, and because
-// the helper hardcodes its model.
+// ─── Low-level: one labelled call through the provider chokepoint ───────────
+// Previously this posted to the Groq REST endpoint directly, which is precisely
+// why the kill switch never reached it. The body it builds is unchanged; it is
+// now built by `lib/ai/providers/groq.ts`.
 
 interface GroqCallOptions {
-  model: string;
+  model: GroqAcquisitionModel;
   messages: ChatMessage[];
   maxTokens?: number;
   temperature?: number;
   reasoningEffort?: "low" | "medium" | "high";
   responseFormatJson?: boolean;
-}
-
-interface GroqRawResponse {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
+  /** Stable, non-PII label for the AI audit trail and logs. */
+  purpose: string;
 }
 
 async function callGroq(options: GroqCallOptions): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured");
-  }
-
-  const body: Record<string, unknown> = {
+  const result = await complete({
+    purpose: options.purpose,
     model: options.model,
     messages: options.messages,
-    max_tokens: options.maxTokens ?? 1024,
+    maxTokens: options.maxTokens ?? 1024,
     temperature: options.temperature ?? 0.2,
-    top_p: 1.0,
-  };
-  if (options.reasoningEffort) {
-    // gpt-oss family knob — Groq accepts this on the openai/gpt-oss-* models.
-    body.reasoning_effort = options.reasoningEffort;
-  }
-  if (options.responseFormatJson) {
-    body.response_format = { type: "json_object" };
-  }
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
+    topP: 1.0,
+    reasoningEffort: options.reasoningEffort,
+    responseFormatJson: options.responseFormatJson,
   });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
-  }
-  const data = (await res.json()) as GroqRawResponse;
-  return data.choices?.[0]?.message?.content ?? "";
+  return result.content;
 }
 
 // ─── JSON parsing helpers ────────────────────────────────────────────────────
@@ -195,6 +178,7 @@ Return the merged JSON.`;
 
   try {
     const content = await callGroq({
+      purpose: "acquisition.extract_vehicle_data",
       model: GROQ_FAST,
       messages: [
         { role: "system", content: system },
@@ -248,6 +232,7 @@ Guidance:
 
   try {
     const content = await callGroq({
+      purpose: "acquisition.score_lead",
       model: GROQ_MESSAGING,
       messages: [
         { role: "system", content: system },
@@ -288,6 +273,7 @@ Output ONLY valid JSON: { "isOptOut": boolean }`;
 
   try {
     const content = await callGroq({
+      purpose: "acquisition.detect_opt_out_intent",
       model: GROQ_SAFETY,
       messages: [
         { role: "system", content: system },
@@ -321,66 +307,39 @@ export async function* streamConcierge(
   systemPrompt: string,
   messages: ConciergeMessage[],
 ): AsyncGenerator<string, void, unknown> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    yield "I am temporarily unavailable. Please try again in a moment.";
-    return;
-  }
-
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  // Model, reasoning effort, token cap and temperature are unchanged; the SSE
+  // reader moved into `lib/ai/providers/groq.ts` so the kill switch gates it.
+  //
+  // The two degraded yields below are preserved for TRANSPORT failures (missing
+  // key, provider error) because a public visitor must never see a stack trace.
+  // A kill-switch refusal is NOT swallowed: it rethrows so the route can answer
+  // AI_DISABLED instead of streaming a friendly sentence that hides the outage.
+  try {
+    yield* completeStream({
+      purpose: "acquisition.stream_concierge",
       model: GROQ_REASONING,
       messages: [
         { role: "system", content: systemPrompt },
-        ...messages,
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
       ],
-      reasoning_effort: "medium",
-      stream: true,
-      max_tokens: 1024,
+      reasoningEffort: "medium",
+      maxTokens: 1024,
       temperature: 0.7,
-    }),
-  });
-
-  if (!response.ok || !response.body) {
-    yield "I am having trouble responding right now. Please try again.";
-    return;
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") return;
-
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices?.[0]?.delta?.content;
-          if (content) yield content;
-        } catch {
-          // Skip malformed chunks
-        }
-      }
+    });
+  } catch (err) {
+    if (isAiDisabledError(err)) throw err;
+    if (String(err).includes("GROQ_API_KEY")) {
+      yield "I am temporarily unavailable. Please try again in a moment.";
+      return;
     }
-  } finally {
-    reader.releaseLock();
+    logger.error("[acquisition.streamConcierge] stream failed", err);
+    yield "I am having trouble responding right now. Please try again.";
   }
+}
+
+/** True when a failure is the AI kill switch refusing, not a transport fault. */
+export function isAiDisabledError(err: unknown): boolean {
+  return String(err).includes("AI_KILL_SWITCH");
 }
 
 // ─── extractStructuredData — GROQ_MESSAGING (gpt-oss-20b, low effort) ────────
@@ -503,32 +462,22 @@ No commentary. No explanation.`;
     .join("\n\n")}\n\nReturn updated JSON.`;
 
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: GROQ_MESSAGING,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        reasoning_effort: "low",
-        max_tokens: 512,
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-      }),
+    // Model, reasoning effort, token cap, temperature and strict-JSON response
+    // format are unchanged; only the transport moved onto the chokepoint.
+    const result = await complete({
+      purpose: "acquisition.extract_structured_data",
+      model: GROQ_MESSAGING,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      reasoningEffort: "low",
+      maxTokens: 512,
+      temperature: 0.1,
+      responseFormatJson: true,
     });
 
-    if (!response.ok) {
-      return { ...defaultProfile(), ...existing } as BuyerProfile;
-    }
-
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content ?? "{}";
-    const rawParsed = JSON.parse(text);
+    const rawParsed = JSON.parse(result.content || "{}");
 
     // Coerce LLM output to correct types before merging.
     // LLMs sometimes return numbers as strings — never trust the JSON.

@@ -6,10 +6,18 @@
 // Current step is highlighted but not linked.
 // Future/locked steps remain disabled with a lock icon.
 //
-// Missing routes (no dedicated page yet):
-//   - "financing" → /buyer/financing (use /buyer/deal/financing as fallback)
-//   - "contract"  → /buyer/contract (use /buyer/contracts as fallback)
-//   - "sign"      → /buyer/sign (use /buyer/esign as fallback)
+// Stage routes below are the CANONICAL destinations, not fallbacks:
+//   - "financing" → /buyer/deal/financing is where the buyer picks their
+//     financing path. (/buyer/financing also exists — it is the credit
+//     APPLICATION status page, a different screen, and is currently unlinked.)
+//   - "contract"  → /buyer/contracts is the contract list. There is no
+//     /buyer/contract.
+//   - "sign"      → /buyer/esign is the signing ceremony. There is no /buyer/sign.
+//
+// This block previously described the first of those as a fallback for a
+// "missing" /buyer/financing, which the repository contradicts — that file
+// exists. A comment that misstates the routing is worse than none, because the
+// next reader "fixes" the route to match it.
 
 "use client";
 
@@ -29,12 +37,13 @@ const STAGE_ROUTE: Record<string, string | null> = {
   deposit: "/buyer/deposit",
   auction: "/buyer/auctions",    // /buyer/auctions (list page; /buyer/auction has no index)
   "select-deal": "/buyer/deal",
-  financing: "/buyer/deal/financing", // canonical /buyer/financing missing — fallback
+  financing: "/buyer/deal/financing", // choose financing path (canonical)
   fee: "/buyer/fee",
   insurance: "/buyer/insurance",
-  contract: "/buyer/contracts",       // canonical /buyer/contract missing — fallback
-  sign: "/buyer/esign",               // canonical /buyer/sign missing — fallback
+  contract: "/buyer/contracts",       // contract list (canonical; no /buyer/contract)
+  sign: "/buyer/esign",               // signing ceremony (canonical; no /buyer/sign)
   pickup: "/buyer/pickup",
+  complete: "/buyer/deal",
 };
 
 const STAGES = [
@@ -52,6 +61,11 @@ const STAGES = [
   { id: "contract", label: "Contract" },
   { id: "sign", label: "Sign" },
   { id: "pickup", label: "Pickup" },
+  // "complete" is a real stage in the shared machine (lib/services/buyer/journey
+  // JOURNEY_STAGES). Omitting it here made findIndex return -1 for a buyer whose
+  // purchase was COMPLETE, rendering "Step 0 of 14 — Getting Started ·
+  // Next: Account" on a finished deal.
+  { id: "complete", label: "Complete" },
 ] as const;
 
 interface JourneyNavigatorProps {
@@ -71,7 +85,10 @@ export default function JourneyNavigator({
   // SUPPRESS on all /buyer/requests/* routes (System 4C exclusion)
   if (pathname.startsWith("/buyer/requests")) return null;
 
-  const currentIndex = STAGES.findIndex((s) => s.id === currentStage);
+  const foundIndex = STAGES.findIndex((s) => s.id === currentStage);
+  // Defensive: an unknown stage must not render "Step 0 of N — Getting Started".
+  // Fall back to the first stage rather than a nonsense position.
+  const currentIndex = foundIndex >= 0 ? foundIndex : 0;
   const stepNum = currentIndex + 1;
 
   return (

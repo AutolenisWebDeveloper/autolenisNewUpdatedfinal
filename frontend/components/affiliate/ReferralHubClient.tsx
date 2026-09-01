@@ -7,12 +7,11 @@
 import { useState } from "react";
 import { Copy, Check, Share2, Link2, Twitter, Linkedin, Mail, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { COMMISSION_RATES, PREMIUM_FEE_USD } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_USD } from "@/lib/constants";
 
 interface Props {
   referralCode: string;
   referralLink: string;
-  affiliateStatus: string;
   qrDataUrl: string;
   l1PerDealCents: number;
   l2PerDealCents: number;
@@ -78,7 +77,7 @@ function CopyButton({ text, label, testId }: { text: string; label: string; test
 }
 
 
-export default function ReferralHubClient({ referralCode, referralLink, affiliateStatus, qrDataUrl, l1PerDealCents, l2PerDealCents, l3PerDealCents }: Props) {
+export default function ReferralHubClient({ referralCode, referralLink, qrDataUrl, l1PerDealCents, l2PerDealCents, l3PerDealCents }: Props) {
   const [copiedLink, setCopiedLink] = useState(false);
   const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
   const templates = buildSocialTemplates(referralCode, referralLink);
@@ -105,7 +104,6 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
     }
   }
 
-  const isActive = affiliateStatus === "ACTIVE";
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="referral-hub-page">
@@ -117,11 +115,6 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
         Share your referral link and earn commissions on completed deals.
       </p>
 
-      {!isActive && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 mb-6 text-sm text-amber-800" data-testid="inactive-affiliate-notice">
-          Your affiliate account is currently <strong>{affiliateStatus.toLowerCase()}</strong>. Referral commissions are only earned while your account is Active.
-        </div>
-      )}
 
       {/* Referral code + link card */}
       <div className="bg-gradient-to-br from-al-primary to-al-primary-hover rounded-xl p-6 text-white mb-6 relative overflow-hidden"
@@ -140,8 +133,9 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
             </code>
             <button type="button" onClick={handleCopyLink}
               data-testid="hub-copy-link-btn"
+              aria-label={copiedLink ? "Referral link copied" : "Copy referral link"}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/15">
-              {copiedLink ? <Check size={15} className="text-[#50D14E]" /> : <Copy size={15} />}
+              {copiedLink ? <Check size={15} className="text-[#50D14E]" aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
             </button>
           </div>
           <div className="flex items-center gap-3 mt-4">
@@ -170,7 +164,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
 
         {/* Stats / earning preview */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col gap-3" data-testid="earning-preview">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">What you earn</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">What you earn</p>
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">L1 direct referral</span>
@@ -185,9 +179,9 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
               <span className="font-semibold text-green-600">${(l3PerDealCents / 100).toFixed(2)} / deal</span>
             </div>
           </div>
-          <p className="text-[10px] text-slate-400 mt-auto">
+          <p className="text-[10px] text-slate-500 mt-auto">
             {/* Derived from platform constants — never hardcode rates or the fee. */}
-            {Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the {PREMIUM_FEE_USD} fee.
+            {Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the {PREMIUM_FEE_REMAINING_USD} fee.
           </p>
         </div>
       </div>
@@ -225,7 +219,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
             </div>
           ))}
         </div>
-        <p className="text-xs text-slate-400 text-center mt-4">
+        <p className="text-xs text-slate-500 text-center mt-4">
           All templates include FTC-required affiliate disclosure. Customize before sending.
         </p>
       </div>

@@ -30,7 +30,7 @@ function fmtCents(cents: number) {
 }
 
 export default async function AdminDepositsPage({ searchParams }: SP) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const sp = await searchParams;
   const status = (sp.status?.toUpperCase() ?? "ALL").trim();
   const q = (sp.q ?? "").trim().toLowerCase();
@@ -133,6 +133,7 @@ export default async function AdminDepositsPage({ searchParams }: SP) {
               <span className="text-xs text-slate-500">{fmtDate(d.createdAt)}</span>
               <div>
                 <AdminPaymentActionsClient
+                  adminRole={admin.role}
                   type="deposit"
                   depositId={d.depositId}
                   buyerId={d.buyerId}

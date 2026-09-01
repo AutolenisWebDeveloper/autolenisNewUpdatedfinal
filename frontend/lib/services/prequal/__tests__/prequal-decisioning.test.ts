@@ -12,6 +12,12 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
+// Imported BEFORE the mock.module call below so the orchestrator runs against
+// the REAL provider-failure classifier rather than a restatement of it.
+import {
+  isProviderErrorReason,
+  classifyProviderFailure,
+} from "@/lib/services/prequal/microbilt.service";
 
 interface Captured {
   ipredict: Record<string, unknown>;
@@ -69,6 +75,17 @@ mock.module("@/lib/services/prequal/microbilt.service", {
   namedExports: {
     callIPredict: async () => cap.ipredict,
     FCRA_CONSENT_TEXT: "consent",
+    isProviderErrorReason,
+    classifyProviderFailure,
+  },
+});
+
+// The orchestrator records provider failures on the PlatformAlert rail. Stubbed
+// so these decisioning tests never reach the database for an alert write.
+mock.module("@/lib/services/monitoring/health-alert.service", {
+  namedExports: {
+    createAlert: async () => ({}),
+    createAlertOnce: async () => ({}),
   },
 });
 
@@ -85,8 +102,15 @@ const prismaMock = {
   },
   prequalConsent: { create: async () => ({ id: "c_1" }) },
   notification: { create: async (a: { data: Record<string, unknown> }) => { cap.notifications.push(a.data); return {}; } },
-  complianceEvent: { create: async (a: { data: Record<string, unknown> }) => { cap.compliance.push(a.data); return {}; } },
-  buyer: { findUnique: async () => null }, // skip CRM sync block
+  complianceEvent: {
+    create: async (a: { data: Record<string, unknown> }) => { cap.compliance.push(a.data); return {}; },
+    count: async () => 0,
+  },
+  buyer: {
+    findUnique: async () => null, // skip CRM sync block
+    // Fix 1 — the orchestrator backfills city/state/zip via conditional updateMany.
+    updateMany: async () => ({ count: 1 }),
+  },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
     const { prisma } = await import("@/lib/prisma");
     return fn(prisma);

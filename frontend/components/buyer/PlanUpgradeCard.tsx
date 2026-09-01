@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { PREMIUM_FEE_REMAINING_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
-export type DepositStatus = "NOT_PAID" | "PENDING" | "PAID";
+// UNKNOWN is distinct from NOT_PAID on purpose. The dashboard reads the deposit
+// with a .catch(() => null) fallback, and a null used to collapse into
+// NOT_PAID — so a transient database error told a buyer who HAD paid $99 that
+// they had not. "We don't know" is the truthful answer to a failed read.
+export type DepositStatus = "NOT_PAID" | "PENDING" | "PAID" | "UNKNOWN";
 
 interface PlanUpgradeCardProps {
   plan: "STANDARD" | "PREMIUM";
@@ -47,6 +51,9 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
     }
     if (depositStatus === "PENDING") {
       return { text: "Payment pending", color: "text-amber-700", bg: "bg-amber-50 border-amber-200" };
+    }
+    if (depositStatus === "UNKNOWN") {
+      return { text: "Status unavailable", color: "text-slate-500", bg: "bg-slate-50 border-slate-200" };
     }
     return { text: "Not yet paid", color: "text-slate-500", bg: "bg-slate-50 border-slate-200" };
   }

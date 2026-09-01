@@ -120,7 +120,7 @@ export default function AffiliatePayoutMethodForm({
               autoComplete="off"
             />
             {initialRoutingLast4 && !routingNumber && (
-              <p className="text-xs text-slate-400 mt-0.5">Saved: ****{initialRoutingLast4}</p>
+              <p className="text-xs text-slate-500 mt-0.5">Saved: ****{initialRoutingLast4}</p>
             )}
           </div>
           <div>
@@ -135,7 +135,7 @@ export default function AffiliatePayoutMethodForm({
               autoComplete="off"
             />
             {initialAccountLast4 && !accountNumber && (
-              <p className="text-xs text-slate-400 mt-0.5">Saved: ****{initialAccountLast4}</p>
+              <p className="text-xs text-slate-500 mt-0.5">Saved: ****{initialAccountLast4}</p>
             )}
           </div>
         </>

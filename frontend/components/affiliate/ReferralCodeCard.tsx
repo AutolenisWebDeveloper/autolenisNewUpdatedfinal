@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Copy, Check, Share2 } from "lucide-react";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 interface Props {
   referralCode: string;
@@ -13,8 +13,8 @@ export default function ReferralCodeCard({ referralCode, referralLink }: Props) 
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const l1PerDeal = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(2);
-  const feeDollars = (PREMIUM_FEE_CENTS / 100).toFixed(0);
+  const l1PerDeal = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(2);
+  const feeDollars = (PREMIUM_FEE_REMAINING_CENTS / 100).toFixed(0);
 
   async function copyCode() {
     try {

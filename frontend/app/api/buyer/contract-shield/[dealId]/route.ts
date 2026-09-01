@@ -3,7 +3,7 @@
 // Contract Shield is the compliance gate that stands between the buyer and a
 // signable contract, so the buyer must never be able to write its verdict. A
 // mutating POST used to live here: it accepted a buyer-supplied `contractText`,
-// handed it to scanContract() — which writes the authoritative ContractScan,
+// handed it to the scan service — which writes the authoritative ContractScan,
 // overwrites deal.contractShieldScore/contractShieldStatus, and then calls
 // autoAdvanceContractOnPass() to walk the deal CONTRACT_PENDING → CONTRACT_REVIEW →
 // CONTRACT_APPROVED — and, with no body at all, wrote a mock PASS (score 88)
@@ -11,9 +11,11 @@
 // make the deal signable without the dealer's real document ever being scanned.
 // It had zero callers. Removed.
 //
-// Scans are produced only by the dealer contract upload
-// (lib/services/dealer/dealer-contract.service.ts, which scans the stored PDF) and
-// by admin review (app/api/admin/contract-shield/**).
+// Scanning stays where it belongs — on the dealer's real uploaded contract,
+// through the canonical path: dealer upload -> scanContractVersion() (which
+// extracts the actual PDF text) -> app/api/cron/contract-shield sweeps unscanned
+// versions -> admin review at /api/admin/contract-shield/[reviewId]. A buyer
+// never selects the document, and no mock result is ever persisted.
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";

@@ -40,6 +40,12 @@ export default function SigningCeremony({ dealId }: { dealId: string }) {
       // Read current state; begin (prepare) signing if the contract is approved
       // but no live signing session exists yet.
       let res = await fetch(`/api/buyer/esign/${dealId}`, { cache: "no-store" });
+      // A non-OK response is a FAILURE, not a signing state. Without this check
+      // an HTTP 500 body flowed straight into the presentation and rendered
+      // "Your contract isn't ready to sign yet. You'll be notified as soon as
+      // it's available." — telling the buyer to wait for a notification that
+      // nothing was going to send.
+      if (!res.ok) { setPhase("error"); return; }
       let json = await res.json();
       let p: Presentation = json?.data ?? json;
 
@@ -47,8 +53,15 @@ export default function SigningCeremony({ dealId }: { dealId: string }) {
         const begin = await fetch(`/api/buyer/esign/${dealId}`, { method: "POST" });
         if (begin.ok) {
           res = await fetch(`/api/buyer/esign/${dealId}`, { cache: "no-store" });
+          if (!res.ok) { setPhase("error"); return; }
           json = await res.json();
           p = json?.data ?? json;
+        } else if (begin.status >= 500) {
+          // 4xx here is a legitimate state (e.g. CONTRACT_NOT_APPROVED, or the
+          // 503 raised when signing cannot be re-issued) and falls through to
+          // the unavailable copy; a 5xx is a real failure and must say so.
+          setPhase("error");
+          return;
         }
       }
 

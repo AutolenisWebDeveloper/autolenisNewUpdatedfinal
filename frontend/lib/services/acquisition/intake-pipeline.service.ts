@@ -190,6 +190,38 @@ function coerceVehicleType(vehicleType: string | null): "new" | "used" | "open" 
 }
 
 /**
+ * The admin surface an operator should land on for a BuyerOpportunity.
+ *
+ * There is no admin opportunities detail page. The founder hot-lead alert used
+ * to link to one under /admin/opportunities, so every alert 404'd. A
+ * BuyerOpportunity has no detail page of its own; the canonical operational
+ * surface is the VehicleRequest it produced (BuyerOpportunity.vehicleRequests),
+ * which is where an operator can actually act on the lead. A voice/concierge
+ * opportunity may have no VehicleRequest yet, so the fallback is the existing
+ * list that renders BuyerOpportunity rows.
+ *
+ * Returns a PATH, not a URL — callers prefix their own APP_URL. NEVER throws:
+ * this resolves a link inside a best-effort alert fan-out, so a transient read
+ * failure must degrade the CTA, not suppress the notification. A hot lead
+ * reaching the founder matters more than landing on the sharpest surface.
+ */
+export const ADMIN_OPPORTUNITY_FALLBACK_PATH = "/admin/buyer-sources";
+
+export async function adminPathForOpportunity(buyerOpportunityId: string): Promise<string> {
+  try {
+    const linked = await prisma.vehicleRequest.findFirst({
+      where: { buyerOpportunityId },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+    });
+    return linked ? `/admin/requests/${linked.id}` : ADMIN_OPPORTUNITY_FALLBACK_PATH;
+  } catch (err) {
+    logger.error("[intake-pipeline] hot-lead admin path resolution failed:", err);
+    return ADMIN_OPPORTUNITY_FALLBACK_PATH;
+  }
+}
+
+/**
  * Score the lead and, when hot, fire the four notification channels. Moved here
  * from unified-buyer-intake with its behavior preserved; the caller guards it so
  * a re-drive of an already-scored opportunity never re-notifies.
@@ -257,6 +289,12 @@ async function scoreAndAlert(
 
       const founderEmail = process.env.FOUNDER_EMAIL;
       const email = fields.email ?? null;
+      // Resolved once, before the fan-out, so the founder CTA points at a page
+      // that exists (see adminPathForOpportunity). Only the founder EMAIL uses
+      // it, so it is not resolved when there is no founder address to send to.
+      const adminPath = founderEmail
+        ? await adminPathForOpportunity(opportunityId)
+        : ADMIN_OPPORTUNITY_FALLBACK_PATH;
 
       const results = await Promise.allSettled([
         notifyFounderHotLead(lead),
@@ -285,6 +323,7 @@ async function scoreAndAlert(
               score: scoreResult.score,
               scoringReason: scoreResult.reasoning,
               sessionId: opportunityId,
+              adminPath,
             })
           : Promise.resolve({ sent: false, skipped: "no founder email" }),
       ]);

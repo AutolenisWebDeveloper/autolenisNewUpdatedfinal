@@ -83,7 +83,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           state: app.state,
           zip: app.zip,
           licenseNumber: app.licenseNumber,
-          status: DealerStatus.PENDING, // dealer must complete onboarding to become ACTIVE
+          // PENDING = approved to ONBOARD, not approved to trade. The dealer
+          // receives an onboarding-scoped session (lib/auth/dealer-scope.ts)
+          // confined to /dealer/onboarding; ACTIVE is set only once the
+          // agreement step records a signature.
+          status: DealerStatus.PENDING,
         },
       });
       await tx.dealerApplication.update({

@@ -9,12 +9,18 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { PreQualDecision, PreQualTier } from "@prisma/client";
+import { getCurrentTermsVersion } from "@/lib/auth/terms";
+import { HealthAlertLevel, PreQualDecision, PreQualTier } from "@prisma/client";
 import {
   callIPredict,
   FCRA_CONSENT_TEXT,
+  isProviderErrorReason,
+  classifyProviderFailure,
+  type ProviderFailureClass,
   type MicroBiltBuyerPII,
 } from "./microbilt.service";
+import { createAlertOnce } from "@/lib/services/monitoring/health-alert.service";
+import { PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
@@ -22,19 +28,98 @@ import {
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 
-const PROVIDER_ERROR_REASONS = new Set([
-  "TIMEOUT",
-  "NETWORK_ERROR",
-  "OAUTH_FAILED",
-  "IPREDICT_ERROR",
-  "CONFIG_ERROR",
-  "CONFIG_MISMATCH",
-  "URL_NOT_CONFIGURED",
-]);
+// ── Provider-failure observability ──────────────────────────────────────────
+// A MicroBilt failure and a risk-triggered compliance hold both land as
+// MANUAL_REVIEW — correctly, because the decision is fail-closed either way.
+// They are NOT the same operational event, though, and for ~8 weeks nothing
+// distinguished them: every buyer prequal silently failed while the only signal
+// was a fire-and-forget admin email that is skipped outright when
+// ADMIN_NOTIFICATION_EMAIL is unset. These constants back a durable, queryable
+// record plus an operational exception on the existing PlatformAlert rail.
+const PROVIDER_FAILURE_ALERT_SOURCE = "prequal-microbilt";
+const PROVIDER_FAILURE_WINDOW_HOURS = 24;
+// At/above this many failures inside the window the integration is treated as
+// down rather than flaky, and the alert escalates to P0 (owner-visible).
+const PROVIDER_FAILURE_P0_THRESHOLD = 3;
 
-function isProviderErrorReason(reason: string | undefined): boolean {
-  if (!reason) return false;
-  return PROVIDER_ERROR_REASONS.has(reason) || reason.startsWith("HTTP_");
+// What the classification means for the person reading the page. Kept next to
+// the alert so the wording and the classification can never drift apart.
+const FAILURE_CLASS_GUIDANCE: Record<ProviderFailureClass, string> = {
+  REQUEST_REJECTED:
+    "MicroBilt REJECTED our request (malformed payload, bad credentials, or a " +
+    "misconfigured URL) — this cannot be fixed by retrying and needs an engineer.",
+  PROVIDER_UNAVAILABLE:
+    "The provider was unavailable or unwell — this class of failure is transient " +
+    "and the same request may succeed on retry.",
+  UNKNOWN:
+    "The failure could not be classified as either a rejected request or a " +
+    "transient outage — inspect the encrypted rawResponse on the prequal row.",
+};
+const PROVIDER_FAILURE_TITLE_P1 = "MicroBilt prequalification call failed";
+const PROVIDER_FAILURE_TITLE_P0 =
+  "MicroBilt prequalification integration DOWN — repeated failures";
+
+/**
+ * Record a provider failure distinctly from a risk-triggered manual review, and
+ * raise an operational exception.
+ *
+ * Deliberately best-effort: the buyer's prequal decision is already committed
+ * and must never be rolled back or delayed by an observability write. Both
+ * halves are independently guarded so a failure in one still leaves the other.
+ *
+ * PRIVACY: prequal data is FCRA-protected consumer information. Only the
+ * operational reason, the decision, and opaque record ids go into the event
+ * metadata or the alert body — never a name, address, DOB, income, score, or
+ * any part of the consumer report.
+ */
+async function recordProviderFailure(args: {
+  buyerId: string;
+  prequalId: string;
+  reason: string;
+  decision: PreQualDecision;
+}): Promise<void> {
+  // "Is this ours or theirs?" is the operator's first question at 2am, and the
+  // two need opposite responses: a rejected request needs an engineer now and
+  // will never fix itself; an unavailable provider usually needs nobody.
+  const failureClass = classifyProviderFailure(args.reason);
+  try {
+    await prisma.complianceEvent.create({
+      data: {
+        eventType: PREQUAL_PROVIDER_FAILURE_EVENT,
+        buyerId: args.buyerId,
+        prequalApplicationId: args.prequalId,
+        metadata: {
+          provider: "microbilt",
+          providerReason: args.reason,
+          providerFailureClass: failureClass,
+          decision: args.decision,
+        },
+      },
+    });
+  } catch (err) {
+    logger.error("[prequal] failed to record provider-failure compliance event:", err);
+  }
+
+  try {
+    const since = new Date(Date.now() - PROVIDER_FAILURE_WINDOW_HOURS * 60 * 60 * 1000);
+    const recent = await prisma.complianceEvent.count({
+      where: { eventType: PREQUAL_PROVIDER_FAILURE_EVENT, createdAt: { gte: since } },
+    });
+    const isDown = recent >= PROVIDER_FAILURE_P0_THRESHOLD;
+    await createAlertOnce(
+      isDown ? HealthAlertLevel.P0 : HealthAlertLevel.P1,
+      isDown ? PROVIDER_FAILURE_TITLE_P0 : PROVIDER_FAILURE_TITLE_P1,
+      `MicroBilt iPredict returned no usable data (reason: ${args.reason}). ` +
+        `${FAILURE_CLASS_GUIDANCE[failureClass]} ` +
+        `The prequalification was held at ${args.decision} — fail-closed, no approval issued. ` +
+        `${recent} failure(s) in the last ${PROVIDER_FAILURE_WINDOW_HOURS}h. ` +
+        `No buyer can be approved, and therefore no deposit can be taken, while this persists. ` +
+        `Prequal record: ${args.prequalId}.`,
+      PROVIDER_FAILURE_ALERT_SOURCE,
+    );
+  } catch (err) {
+    logger.error("[prequal] failed to raise provider-failure operational alert:", err);
+  }
 }
 
 // Single source of truth for prequal approval gating across the platform.
@@ -188,14 +273,54 @@ async function claimPrequalPull(
       consentText: FCRA_CONSENT_TEXT,
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ?? null,
-      termsVersion: process.env.CURRENT_TERMS_VERSION ?? "2026-01-01",
+      termsVersion: getCurrentTermsVersion(),
     },
   });
   return "claimed";
 }
 
+/**
+ * Persist the validated city/state/zip from a prequal submission onto the buyer.
+ *
+ * Prequal is the only step in the buyer journey that collects a validated
+ * location (the route enforces a 2-letter state and a 5-digit ZIP). It used to
+ * forward these to MicroBilt and discard them, leaving `buyers.city/state/zip`
+ * NULL — and `dealer-invitation.service` fails closed on an unplaceable buyer,
+ * so those buyers' auctions produced zero invitations.
+ *
+ * NEVER-OVERWRITE is structural, not a read-then-write: each field is its own
+ * conditional `updateMany` guarded on `<field>: null`. A buyer who already has
+ * the value simply does not match, so a concurrent admin edit can never be
+ * clobbered and there is no read to race against. Each field is guarded
+ * independently, so a buyer holding a ZIP but no city/state still gets both.
+ *
+ * `address` is deliberately NOT persisted here: the invitation matcher never
+ * reads it, so writing it would widen the stored PII for no functional gain.
+ */
+async function backfillBuyerLocation(buyerId: string, input: PrequalSubmission): Promise<void> {
+  const city = input.city?.trim() ?? "";
+  const state = input.state?.trim().toUpperCase() ?? "";
+  const zip = input.zip?.trim() ?? "";
+
+  await Promise.all([
+    city ? prisma.buyer.updateMany({ where: { id: buyerId, city: null }, data: { city } }) : null,
+    state ? prisma.buyer.updateMany({ where: { id: buyerId, state: null }, data: { state } }) : null,
+    zip ? prisma.buyer.updateMany({ where: { id: buyerId, zip: null }, data: { zip } }) : null,
+  ]);
+}
+
 export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSubmission) {
   if (!input.fcraConsent) throw new Error("FCRA consent required");
+
+  // Location backfill runs BEFORE the valid-prequal early return and before the
+  // pull, so it lands on every submission carrying a validated address —
+  // including a re-submission by an already-approved buyer, which is the path
+  // that heals an existing NULL row. A soft credit pull costs money and touches
+  // the consumer: a failed location write must never fail it, so this degrades
+  // to a logged error.
+  await backfillBuyerLocation(buyer.id, input).catch((err) =>
+    logger.error(`[prequal] buyer location backfill failed for ${buyer.id}:`, err),
+  );
 
   // Reuse only a still-valid APPROVED prequal — never re-pull MicroBilt for an
   // active approval. A DECLINED / PENDING / MANUAL_REVIEW / OFAC record (even
@@ -602,9 +727,23 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     }
   }
 
+  // ── Provider failure: record + alert, distinctly from a risk review ────────
+  // The DECISION above is unchanged and still fail-closed. What changes here is
+  // only that an integration outage is now recorded as one and raises an
+  // operational exception, instead of being indistinguishable from a buyer who
+  // is legitimately held for compliance review.
+  const isProviderError = isProviderErrorReason(result.reason);
+  if (isProviderError && result.reason) {
+    await recordProviderFailure({
+      buyerId: buyer.id,
+      prequalId: prequal.id,
+      reason: result.reason,
+      decision: finalDecision,
+    });
+  }
+
   // Admin ops alert: needs-review OR upstream provider error. Failure to send
   // must never block the buyer response.
-  const isProviderError = isProviderErrorReason(result.reason);
   if (needsReview || isProviderError) {
     try {
       await sendAdminPrequalAlertEmail({

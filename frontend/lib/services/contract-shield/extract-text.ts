@@ -8,6 +8,7 @@
 
 import "server-only";
 import { extractText, getDocumentProxy } from "unpdf";
+import { fetchAllowedContract } from "@/lib/security/safe-fetch";
 
 const CONTRACT_BUCKET = "dealer-contracts";
 
@@ -16,7 +17,11 @@ const CONTRACT_BUCKET = "dealer-contracts";
  * scanned/approved (one source of truth for the signed document). */
 export async function loadContractPdfBytes(documentUrl: string): Promise<Uint8Array> {
   if (/^https?:\/\//i.test(documentUrl)) {
-    const res = await fetch(documentUrl);
+    // SSRF guard: documentUrl can originate from a dealer-supplied field on
+    // POST /api/dealer/contracts/upload. fetchAllowedContract enforces https,
+    // an allowlisted storage host, no IP literals, and no redirects. The
+    // Supabase storage-path branch below remains the preferred path.
+    const res = await fetchAllowedContract(documentUrl);
     if (!res.ok) throw new Error(`Contract fetch failed (${res.status})`);
     return new Uint8Array(await res.arrayBuffer());
   }

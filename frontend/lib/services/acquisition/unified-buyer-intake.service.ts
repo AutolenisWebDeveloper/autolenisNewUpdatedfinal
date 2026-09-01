@@ -18,6 +18,7 @@
 import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { normalizePhone } from "@/lib/utils/phone";
 
 export type IntakeSource =
   | "zura_widget"
@@ -149,7 +150,7 @@ async function resolveBuyerId(
           userId: existingUser.id,
           firstName,
           lastName,
-          phone: input.phone ?? null,
+          phone: normalizePhone(input.phone) || null,
           zip: input.zip ?? null,
         },
       });
@@ -170,7 +171,7 @@ async function resolveBuyerId(
         userId: guestUser.id,
         firstName,
         lastName,
-        phone: input.phone ?? null,
+        phone: normalizePhone(input.phone) || null,
         zip: input.zip ?? null,
         isGuest: true,
       },

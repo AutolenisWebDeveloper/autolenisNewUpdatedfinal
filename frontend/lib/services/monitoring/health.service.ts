@@ -1,16 +1,18 @@
 // lib/services/monitoring/health.service.ts — System 23 health monitoring
 
 import { prisma } from "@/lib/prisma";
-import { INVENTORY_HEALTH_P1_THRESHOLD } from "@/lib/constants";
+import { INVENTORY_HEALTH_P1_THRESHOLD, PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
+import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 import { logger } from "@/lib/logger";
 import {
   detectDeadCrons,
   overdueCrons,
   reportOverdueCrons,
   detectFailedCrons,
+  unsuccessfulRunSummary,
   reportFailedCrons,
-  FAILED_CRON_STREAK_THRESHOLD,
+  failedStreakThresholdFor,
 } from "./dead-cron.service";
 import type { CronLiveness } from "./cron-schedule";
 
@@ -73,8 +75,50 @@ function checkResend(): boolean {
   return !!process.env.RESEND_API_KEY;
 }
 
-function checkMicroBilt(): boolean {
-  return !!(process.env.MICROBILT_CLIENT_ID && process.env.MICROBILT_CLIENT_SECRET);
+// Window over which recorded MicroBilt call outcomes decide whether the
+// integration is actually working.
+const MICROBILT_FAILURE_WINDOW_HOURS = 24;
+
+/**
+ * MicroBilt is healthy only when it is BOTH configured AND not currently failing.
+ *
+ * This used to return true whenever the two credential env vars were non-empty.
+ * Credentials were present throughout an ~8-week outage in which every iPredict
+ * call failed upstream, so thousands of consecutive health checks reported
+ * "healthy" while no buyer could be prequalified and no deposit could be taken.
+ * The presence of a secret is not evidence that a call succeeds; the recorded
+ * outcome of real calls is.
+ */
+async function checkMicroBilt(): Promise<boolean> {
+  const configured = !!(
+    process.env.MICROBILT_CLIENT_ID && process.env.MICROBILT_CLIENT_SECRET
+  );
+  if (!configured) return false;
+
+  try {
+    const since = new Date(Date.now() - MICROBILT_FAILURE_WINDOW_HOURS * 60 * 60 * 1000);
+    const failures = await prisma.complianceEvent.count({
+      where: { eventType: PREQUAL_PROVIDER_FAILURE_EVENT, createdAt: { gte: since } },
+    });
+    // ANY failure in the window marks the integration unhealthy — deliberately
+    // not a rate or a streak. Prequal volume is low (single digits per month),
+    // so a "3 failures before we call it down" rule would never trip during a
+    // total outage and would recreate exactly the silent-green failure this
+    // check exists to prevent. There is also no acceptable failure rate here:
+    // each failed pull is a buyer who cannot be approved and a deposit that
+    // cannot be taken. The signal self-clears once calls stop failing.
+    //
+    // This is intentionally stricter than the PlatformAlert escalation in
+    // prequal.service, which waits for a sustained failure before paging at P0.
+    // The two answer different questions: "is the integration serving its
+    // purpose right now?" versus "how loudly should we page about it?".
+    return failures === 0;
+  } catch (err) {
+    // An unreadable outcome log is not evidence of provider failure — do not
+    // flap the integration status on a transient query error.
+    logger.warn("[health] MicroBilt outcome check failed (reporting configured state):", err);
+    return configured;
+  }
 }
 
 export async function runHealthCheck(): Promise<HealthReport> {
@@ -88,19 +132,28 @@ export async function runHealthCheck(): Promise<HealthReport> {
     alerts.push("P0: Database connection failed");
   }
 
-  const [activeAuctions, pendingOFAC, contractFails, inventoryCount, activeInventory, stripeOk] = await Promise.all([
+  const [
+    activeAuctions,
+    pendingOFAC,
+    contractFails,
+    inventoryCount,
+    activeInventory,
+    stripeOk,
+    microbiltOk,
+  ] = await Promise.all([
     prisma.auction.count({ where: { status: "ACTIVE" } }),
     prisma.preQualification.count({ where: { checkOfacAlert: true, decision: "OFAC_ESCALATED" } }),
     prisma.contractScan.count({ where: { status: "FAIL" } }),
     prisma.inventoryItem.count(),
     prisma.inventoryItem.count({ where: { isActive: true } }),
     checkStripe(),
+    checkMicroBilt(),
   ]);
 
   const integrations: IntegrationStatus = {
     stripe: stripeOk,
     resend: checkResend(),
-    microbilt: checkMicroBilt(),
+    microbilt: microbiltOk,
   };
 
   const inventoryHealth = inventoryCount > 0 ? Math.round((activeInventory / inventoryCount) * 100) : 100;
@@ -110,7 +163,15 @@ export async function runHealthCheck(): Promise<HealthReport> {
   if (contractFails > 5) alerts.push(`P1: ${contractFails} contract scan failures unresolved`);
   if (!integrations.stripe) alerts.push("P1: Stripe API key invalid or unreachable");
   if (!integrations.resend) alerts.push("P1: Resend API key missing");
-  if (!integrations.microbilt) alerts.push("P1: MicroBilt credentials missing");
+  if (!integrations.microbilt) {
+    // Distinguishes "never configured" from "configured but failing every call" —
+    // the second is what silently blocked all prequals (and all revenue) for weeks.
+    alerts.push(
+      process.env.MICROBILT_CLIENT_ID && process.env.MICROBILT_CLIENT_SECRET
+        ? "P0: MicroBilt prequalification calls are failing — no buyer can be prequalified"
+        : "P1: MicroBilt credentials missing",
+    );
+  }
 
   const status = !dbOk ? "down" : alerts.some(a => a.startsWith("P0")) ? "degraded" : "healthy";
 
@@ -190,16 +251,20 @@ export async function runHealthCheckCycle(
     logger.warn("[health] dead-cron detection failed (best-effort):", e);
   }
 
-  // Failing-cron detection: a cron that FIRES but throws (a reconciler returning
-  // HTTP 500 every tick) is invisible to dead-cron detection. Surface a persistent
-  // FAILED streak as a P1 alert so the reconciler's only human-escalation channel
-  // actually reaches an operator. Best-effort and independently guarded.
+  // Failing-cron detection: a cron that FIRES but does not succeed is invisible to
+  // dead-cron detection, which only asks whether a run started. Two shapes of that
+  // — a reconciler returning HTTP 500 every tick, and a run killed mid-flight that
+  // leaves an orphaned RUNNING row behind — surface here as a P1 alert, so the
+  // handler's only human-escalation channel actually reaches an operator.
+  // Best-effort and independently guarded.
   try {
     const failing = await detectFailedCrons(now);
     for (const c of failing) {
-      if (c.consecutiveFailures >= FAILED_CRON_STREAK_THRESHOLD) {
+      // Per-cron threshold: a daily or weekly job alerts on its FIRST unsuccessful
+      // run, because its second run is a cadence away. See failedStreakThresholdFor.
+      if (c.consecutiveFailures >= failedStreakThresholdFor(c.cronName)) {
         report.alerts.push(
-          `P1: cron '${c.cronName}' failing — ${c.consecutiveFailures} consecutive failed run(s)`,
+          `P1: cron '${c.cronName}' failing — ${unsuccessfulRunSummary(c)}`,
         );
       }
     }
@@ -228,15 +293,20 @@ export interface SLAResult {
   prospectsUncontacted: number;
   /** PAID Stripe deposits missing provider-event evidence (reconciliation gaps). */
   providerEvidenceGaps: number;
+  /** PENDING deposits whose PaymentIntent settled at Stripe but never reached us. */
+  strandedPendingDeposits: number;
 }
 
 /**
- * Emit a sourcing-spine SLA breach notification through the existing SYSTEM_ALERT
- * channel, but at most once per SOURCING_ALERT_DEDUP_HOURS — a structural backlog
- * persists for days and sla-check fires every 30m, so an undeduped alert would
- * flood the channel. Best-effort: a notification write never fails the SLA check.
+ * Emit a condition-level notification through the existing SYSTEM_ALERT channel,
+ * but at most once per SOURCING_ALERT_DEDUP_HOURS — a structural backlog persists
+ * for days and sla-check fires every 30m, so an undeduped alert would flood the
+ * channel. Deduped on the title PREFIX, with the current count appended, so this
+ * is for conditions counted in aggregate (a sourcing backlog, a provider outage)
+ * rather than per-entity exceptions. Best-effort: a notification write never fails
+ * the SLA check.
  */
-async function emitSourcingAlertOnce(
+async function emitThrottledAlertOnce(
   titlePrefix: string,
   count: number,
   body: string,
@@ -256,59 +326,184 @@ async function emitSourcingAlertOnce(
   }
 }
 
-// Business-invariant (Program 1): a PAID deposit linked to a real Stripe
-// PaymentIntent must have provider-event evidence in `payment_provider_events`.
-// The Stripe webhook records that evidence for every payment it processes, so a
-// PAID+pi_ deposit with NO matching provider event means the deposit was flipped
-// PAID outside the webhook (admin mark-paid / override / launch-auction) OR a real
-// Stripe event was never delivered/recorded — a provider-vs-internal-state
-// inconsistency an operator should reconcile.
+// How long a deposit may sit PENDING with a real PaymentIntent and no provider
+// event before it is checked against Stripe. Stripe delivers in seconds and
+// retries for days, so an hour is far past any legitimate delivery latency while
+// staying short enough that a broken endpoint is caught the same morning.
+export const PENDING_EVIDENCE_WINDOW_MINUTES = 60;
+// Bound on rows examined per sweep — the PENDING branch makes one read-only
+// Stripe call per row, so a large backlog must not turn the health cron into a
+// rate-limit incident. Remaining rows are picked up by the next tick.
+const MAX_EVIDENCE_ROWS = 50;
+// Stripe PaymentIntent statuses meaning the money actually moved (or is
+// authorized and awaiting capture). Seeing one of these while our deposit is
+// still PENDING is definitive: the charge settled and the platform never learned
+// — the webhook did not deliver, or was rejected before it ran.
 //
-// It is deliberately TRUTHFUL and non-mutating: it raises a per-deposit SYSTEM_ALERT
-// for reconciliation review and NEVER fabricates a provider event from a deposit
-// row (a PaymentProviderEvent represents Stripe evidence, not an inference).
+// "processing" is deliberately NOT here: an in-flight payment (e.g. ACH) has no
+// terminal event yet, so the absence of provider evidence is expected, not a
+// defect. Alerting on it would be the false positive that makes the whole signal
+// unreadable.
+const MONEY_MOVED_PI_STATUSES = new Set(["succeeded", "requires_capture"]);
+// Stripe calls made per sweep. The DB row cap above bounds the query; this bounds
+// the provider round-trips so sla-check cannot run past its function timeout. A
+// systemic delivery failure is proven by the FIRST stranded deposit, so a small
+// budget detects it just as fast; the remainder is picked up next tick and the
+// truncation is logged rather than hidden.
+const MAX_PENDING_RECONCILES_PER_RUN = 10;
+const PI_RECONCILE_TIMEOUT_MS = 3000;
+
+/** retrievePaymentIntent with a hard time bound, so one slow call can't eat the cron. */
+async function retrievePaymentIntentBounded(paymentIntentId: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      retrievePaymentIntent(paymentIntentId),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("stripe retrieve timeout")), PI_RECONCILE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Business-invariant (Program 1): a deposit linked to a real Stripe PaymentIntent
+// must have provider-event evidence in `payment_provider_events`. The Stripe
+// webhook records that evidence for every payment it processes, so a real-PI
+// deposit with NO matching provider event is a provider-vs-internal-state
+// inconsistency an operator should reconcile. Two shapes:
+//
+//   • PAID + no evidence — the deposit was flipped PAID outside the webhook
+//     (admin mark-paid / override / launch-auction) OR a real Stripe event was
+//     never delivered/recorded.
+//   • PENDING + no evidence past the window — possible webhook NON-DELIVERY. The
+//     platform cannot tell this apart from an abandoned checkout on its own (both
+//     look like "intent created, nothing came back"), so this branch reconciles
+//     READ-ONLY against Stripe and raises the exception only when Stripe reports
+//     the money actually moved. That is the failure that can otherwise stay
+//     invisible indefinitely: a live charge with no auction, no invitations and
+//     no trace in the ledger.
+//
+// It is deliberately TRUTHFUL and non-mutating: it raises per-deposit
+// SYSTEM_ALERTs for reconciliation review, never flips a deposit, and NEVER
+// fabricates a provider event from a deposit row (a PaymentProviderEvent
+// represents Stripe evidence, not an inference).
 // Deposits with NO PaymentIntent id are admin/manual by construction and are
 // excluded — they are not Stripe payments and carry no provider evidence to miss.
-export async function checkDepositProviderEvidence(): Promise<{ gaps: number }> {
-  let rows: Array<{ id: string; pi: string }> = [];
+// Sandbox mock intents are excluded for the same reason.
+export async function checkDepositProviderEvidence(): Promise<{ gaps: number; strandedPending: number }> {
+  let rows: Array<{ id: string; pi: string; status: string }> = [];
+  // Computed here rather than as a Postgres interval built from a bound
+  // parameter: a plain timestamptz parameter has no cast ambiguity.
+  const pendingCutoff = new Date(Date.now() - PENDING_EVIDENCE_WINDOW_MINUTES * 60_000);
   try {
-    rows = await prisma.$queryRaw<Array<{ id: string; pi: string }>>`
-      SELECT d.id AS id, d.stripe_payment_intent_id AS pi
+    rows = await prisma.$queryRaw<Array<{ id: string; pi: string; status: string }>>`
+      SELECT d.id AS id, d.stripe_payment_intent_id AS pi, d.status::text AS status
       FROM deposits d
-      WHERE d.status = 'PAID'
-        AND d.stripe_payment_intent_id LIKE 'pi_%'
+      WHERE d.stripe_payment_intent_id LIKE 'pi_%'
+        AND d.stripe_payment_intent_id NOT LIKE 'pi_sandbox_mock_%'
+        AND (
+          d.status = 'PAID'
+          OR (
+            d.status = 'PENDING'
+            AND d.created_at < ${pendingCutoff}
+          )
+        )
         AND NOT EXISTS (
           SELECT 1 FROM payment_provider_events e
           WHERE e.payload -> 'data' -> 'object' ->> 'id' = d.stripe_payment_intent_id
         )
+      ORDER BY d.created_at ASC
+      LIMIT ${MAX_EVIDENCE_ROWS}
     `;
   } catch (e) {
     logger.warn("[health] deposit provider-evidence check failed (best-effort):", e);
-    return { gaps: 0 };
+    return { gaps: 0, strandedPending: 0 };
   }
+
+  let gaps = 0;
+  let strandedPending = 0;
+  let unreconcilable = 0;
+  let reconcilesUsed = 0;
+  let deferred = 0;
 
   for (const row of rows) {
-    const title = `Reconcile: PAID deposit lacks Stripe provider evidence: ${row.id}`;
-    try {
-      const existing = await prisma.notification.findFirst({
-        where: { title, type: "SYSTEM_ALERT" },
-        select: { id: true },
-      });
-      if (existing) continue;
-      await prisma.notification.create({
-        data: {
-          title,
-          body: `Deposit ${row.id} is PAID and linked to Stripe PaymentIntent ${row.pi}, but no payment_provider_events row records that PaymentIntent. Either it was marked PAID outside the Stripe webhook, or a real Stripe event was never delivered/recorded. Reconcile against Stripe (read-only) before relying on the ledger — do NOT fabricate a provider event. Review via /admin/operations.`,
-          type: "SYSTEM_ALERT",
-          actionUrl: "/admin/operations",
-        },
-      }).catch(() => {});
-    } catch (e) {
-      logger.warn(`[health] deposit-evidence alert failed for ${row.id} (best-effort):`, e);
+    if (row.status === "PENDING") {
+      if (reconcilesUsed >= MAX_PENDING_RECONCILES_PER_RUN) {
+        deferred += 1;
+        continue;
+      }
+      reconcilesUsed += 1;
+      // Reconcile read-only against the provider. An abandoned checkout
+      // (requires_payment_method / canceled) is the overwhelmingly common
+      // benign case and must stay silent, or the alert becomes noise nobody
+      // reads — which is indistinguishable from having no alert at all.
+      let piStatus: string | null = null;
+      try {
+        const intent = await retrievePaymentIntentBounded(row.pi);
+        piStatus = intent?.status ?? null;
+      } catch (e) {
+        unreconcilable += 1;
+        logger.warn(`[health] could not reconcile PENDING deposit ${row.id} against Stripe:`, e);
+        continue;
+      }
+      if (!piStatus || !MONEY_MOVED_PI_STATUSES.has(piStatus)) continue;
+
+      strandedPending += 1;
+      await raiseEvidenceAlert(
+        row.id,
+        `Stripe webhook not delivering — paid deposit stranded PENDING: ${row.id}`,
+        `Deposit ${row.id} is still PENDING, but Stripe reports PaymentIntent ${row.pi} as "${piStatus}" — the buyer's money moved and the platform never learned. No payment_provider_events row records that PaymentIntent, so the webhook did not run: no auction was created, no dealers were invited, and nothing downstream fired. ` +
+          `Check Stripe Dashboard → Developers → Webhooks: (1) an endpoint for POST /api/webhooks/stripe exists in LIVE mode on the production domain, (2) payment_intent.succeeded is subscribed, (3) the endpoint's signing secret matches STRIPE_WEBHOOK_SECRET in the production environment, (4) recent delivery attempts are 2xx — a 400 means the signing secret does not match, a 500 means STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET is unset, and no attempts at all means the endpoint is not registered or not reachable. ` +
+          `Resolve the delivery problem and let Stripe redeliver — do NOT fabricate a provider event, and do NOT flip the deposit by hand before reconciling. Review via /admin/operations.`,
+      );
+      continue;
     }
+
+    gaps += 1;
+    await raiseEvidenceAlert(
+      row.id,
+      `Reconcile: PAID deposit lacks Stripe provider evidence: ${row.id}`,
+      `Deposit ${row.id} is PAID and linked to Stripe PaymentIntent ${row.pi}, but no payment_provider_events row records that PaymentIntent. Either it was marked PAID outside the Stripe webhook, or a real Stripe event was never delivered/recorded. Reconcile against Stripe (read-only) before relying on the ledger — do NOT fabricate a provider event. Review via /admin/operations.`,
+    );
   }
 
-  return { gaps: rows.length };
+  if (deferred > 0) {
+    logger.info(
+      `[health] deposit provider-evidence: ${deferred} PENDING deposit(s) deferred to the next sweep ` +
+        `(per-run Stripe reconcile budget of ${MAX_PENDING_RECONCILES_PER_RUN} reached)`,
+    );
+  }
+
+  if (unreconcilable > 0) {
+    // A provider outage must not be silent either — but it is ONE condition, not
+    // one per deposit, so it gets a single deduped alert.
+    await emitThrottledAlertOnce(
+      "Cannot reconcile PENDING deposits against Stripe",
+      unreconcilable,
+      `${unreconcilable} PENDING deposit(s) with a real PaymentIntent could not be reconciled against Stripe (the API call failed). Until Stripe is reachable, a non-delivering webhook cannot be distinguished from an abandoned checkout. Verify STRIPE_SECRET_KEY and Stripe availability, then re-run /api/cron/sla-check.`,
+    );
+  }
+
+  return { gaps, strandedPending };
+}
+
+// One per-deposit reconciliation alert, deduped on its exact title so repeat
+// sweeps never duplicate it. Best-effort — alerting never fails the health cycle.
+async function raiseEvidenceAlert(depositId: string, title: string, body: string): Promise<void> {
+  try {
+    const existing = await prisma.notification.findFirst({
+      where: { title, type: "SYSTEM_ALERT" },
+      select: { id: true },
+    });
+    if (existing) return;
+    await prisma.notification.create({
+      data: { title, body, type: "SYSTEM_ALERT", actionUrl: "/admin/operations" },
+    }).catch(() => {});
+  } catch (e) {
+    logger.warn(`[health] deposit-evidence alert failed for ${depositId} (best-effort):`, e);
+  }
 }
 
 export async function checkSLAs(): Promise<SLAResult> {
@@ -361,7 +556,7 @@ export async function checkSLAs(): Promise<SLAResult> {
   });
   if (opportunitiesUncontacted > 0) {
     breached += opportunitiesUncontacted;
-    await emitSourcingAlertOnce(
+    await emitThrottledAlertOnce(
       SOURCING_ALERT_PREFIXES.opportunities,
       opportunitiesUncontacted,
       `${opportunitiesUncontacted} completed buyer opportunit(ies) discovered dealers but contacted none past ${SOURCING_SLA_HOURS}h — the request→dealer outreach spine is not reaching dealers. Check email-channel config and the intake-reconcile eligibility window.`,
@@ -382,7 +577,7 @@ export async function checkSLAs(): Promise<SLAResult> {
   });
   if (prospectsUncontacted > 0) {
     breached += prospectsUncontacted;
-    await emitSourcingAlertOnce(
+    await emitThrottledAlertOnce(
       SOURCING_ALERT_PREFIXES.prospects,
       prospectsUncontacted,
       `${prospectsUncontacted} dealer prospect(s) have a verified email but were never contacted past ${SOURCING_SLA_HOURS}h — dealer outreach is not dispatching. Verify the email channel is configured/enabled.`,
@@ -392,12 +587,21 @@ export async function checkSLAs(): Promise<SLAResult> {
   // Provider-evidence reconciliation invariant (Program 1). Isolated so a raw-query
   // hiccup can never fail the SLA cycle.
   let providerEvidenceGaps = 0;
+  let strandedPendingDeposits = 0;
   try {
-    ({ gaps: providerEvidenceGaps } = await checkDepositProviderEvidence());
-    breached += providerEvidenceGaps;
+    ({ gaps: providerEvidenceGaps, strandedPending: strandedPendingDeposits } =
+      await checkDepositProviderEvidence());
+    breached += providerEvidenceGaps + strandedPendingDeposits;
   } catch (e) {
     logger.warn("[health] provider-evidence invariant failed (best-effort):", e);
   }
 
-  return { breached, warnings, opportunitiesUncontacted, prospectsUncontacted, providerEvidenceGaps };
+  return {
+    breached,
+    warnings,
+    opportunitiesUncontacted,
+    prospectsUncontacted,
+    providerEvidenceGaps,
+    strandedPendingDeposits,
+  };
 }

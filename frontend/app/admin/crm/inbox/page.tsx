@@ -342,7 +342,10 @@ export default function InboxPage() {
 
   return (
     <div
-      className="flex h-[calc(100vh-56px)] flex-col bg-[var(--crm-bg-primary)]"
+      // Chrome above this panel: the CRM topbar (56px) on desktop, plus the admin
+      // mobile topbar (another 56px) below the lg breakpoint. Before Batch 2 the
+      // CRM shell owned the viewport and 56px was right everywhere.
+      className="flex h-[calc(100vh-112px)] lg:h-[calc(100vh-56px)] flex-col bg-[var(--crm-bg-primary)]"
       data-testid="crm-inbox"
     >
       {/* Top tabs */}

@@ -22,17 +22,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   const admin = await requireAdmin();
 
-  // CRM + Operations route in the Phase 2 CRM shell — full-viewport dark
-  // chrome with its own sidebar. The CRM layout owns the canvas; the default
-  // admin sidebar/chat widget would otherwise double up.
-  const pathname = headersList.get("x-pathname") ?? "";
-  const isCrmShell =
-    pathname.startsWith("/admin/crm") || pathname.startsWith("/admin/operations");
-
-  if (isCrmShell) {
-    return <>{children}</>;
-  }
-
+  // Batch 2 IA: CRM and Operations used to bypass this layout entirely and
+  // render their own full-viewport chrome, so entering the CRM replaced the
+  // admin sidebar with a second, separate one — 16 CRM routes that the main
+  // rail could not see, and a full repaint on every crossing. The Engage
+  // entries now live in AdminSidebar, and CrmShell keeps only its non-nav
+  // features (command palette, copilot, CRM token scope). One shell, one nav.
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F4F6FA]" data-testid="admin-portal">
       <AdminSidebar adminRole={admin.role} />

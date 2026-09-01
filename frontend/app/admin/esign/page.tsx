@@ -8,14 +8,25 @@ import ESignHubRowActions from "@/components/admin/ESignHubRowActions";
 
 export const dynamic = "force-dynamic";
 export default async function AdminESignPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
-  let envelopes: Awaited<ReturnType<typeof prisma.eSignEnvelope.findMany<{ include: { deal: { include: { buyer: true } } } }>>> = [];
+  // Explicit projection — an `include` does NOT narrow the parent's scalar list, so
+  // a bare include would still select the columns migrations 20261014/20261015 add
+  // but production does not have. Only these fields are rendered below.
+  const ENVELOPE_LIST_SELECT = {
+    id: true,
+    dealId: true,
+    status: true,
+    docusignEnvelopeId: true,
+    createdAt: true,
+    deal: { select: { buyer: { select: { firstName: true, lastName: true } } } },
+  } as const;
+  let envelopes: Awaited<ReturnType<typeof prisma.eSignEnvelope.findMany<{ select: typeof ENVELOPE_LIST_SELECT }>>> = [];
   let loadError: string | null = null;
 
   try {
     envelopes = await prisma.eSignEnvelope.findMany({
-      include: { deal: { include: { buyer: true } } },
+      select: ENVELOPE_LIST_SELECT,
       orderBy: { createdAt: "desc" }, take: 50,
     });
   } catch (err) {
@@ -47,7 +58,7 @@ export default async function AdminESignPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={env.status === "COMPLETED" ? "green" : env.status === "VOIDED" ? "destructive" : "amber"} className="text-xs">{env.status}</Badge>
-                <ESignHubRowActions dealId={env.dealId} envelopeId={env.id} status={env.status} />
+                <ESignHubRowActions dealId={env.dealId} envelopeId={env.id} status={env.status} adminRole={admin.role} />
               </div>
             </div>
           ))}

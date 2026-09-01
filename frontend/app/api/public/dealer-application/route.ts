@@ -17,9 +17,10 @@ import {
 
 const schema = z.object({
   dealershipName: z.string().min(1),
-  // dealershipType is optional — older forms (e.g. /dealer/apply) omit it;
-  // it defaults to "Independent" when not supplied.
-  dealershipType: z.string().min(1).optional().default("Independent"),
+  // Required. The second, divergent form at /dealer/apply that omitted this
+  // field is gone — it now redirects to the canonical /dealer-application, so
+  // there is no caller left to shim for.
+  dealershipType: z.string().min(1),
   state: z.string().length(2),
   city: z.string().min(1),
   zip: z.string().min(5),
@@ -28,8 +29,6 @@ const schema = z.object({
   contactEmail: z.string().email(),
   contactPhone: z.string().optional(),
   annualVolume: z.string().optional(),
-  // streetAddress is accepted and appended to notes for backwards compatibility
-  streetAddress: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -58,9 +57,7 @@ export async function POST(request: NextRequest) {
     verifiedPlaceId: false,
   });
 
-  // Merge streetAddress into notes if provided (legacy /dealer/apply form sends it)
   const mergedNotes = [
-    data.streetAddress ? `Address: ${data.streetAddress}` : "",
     data.notes ?? "",
     autoApprovalAnnotation(autoReview),
   ].filter(Boolean).join("\n") || null;
@@ -82,7 +79,7 @@ export async function POST(request: NextRequest) {
   const application = await prisma.dealerApplication.create({
     data: {
       dealershipName: data.dealershipName,
-      dealershipType: data.dealershipType ?? "Independent",
+      dealershipType: data.dealershipType,
       state: data.state,
       city: data.city,
       zip: data.zip,

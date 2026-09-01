@@ -4,16 +4,17 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { PenLine } from "lucide-react";
 import { AdminESignActions } from "@/components/admin/AdminESignActions";
+import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 export const dynamic = "force-dynamic";
 
 export default async function AdminDealESignPage({ params }: Props) {
   const { dealId } = await params;
-  await requireAdmin();
+  const admin = await requireAdmin();
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: { buyer: true, eSignEnvelope: true },
+    include: { buyer: true, eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT } },
   });
   if (!deal) notFound();
 
@@ -30,12 +31,12 @@ export default async function AdminDealESignPage({ params }: Props) {
           <p className="text-sm text-slate-500">Legacy E-Sign ID: {deal.eSignEnvelope.docusignEnvelopeId ?? "—"}</p>
           {deal.eSignEnvelope.sentAt && <p className="text-sm text-slate-500">Sent: {deal.eSignEnvelope.sentAt.toLocaleDateString()}</p>}
           {deal.eSignEnvelope.completedAt && <p className="text-sm text-slate-500">Completed: {deal.eSignEnvelope.completedAt.toLocaleDateString()}</p>}
-          <AdminESignActions dealId={dealId} envelopeStatus={deal.eSignEnvelope.status} />
+          <AdminESignActions dealId={dealId} envelopeStatus={deal.eSignEnvelope.status} adminRole={admin.role} />
         </div>
       ) : (
         <div className="text-center py-10 bg-white border border-slate-200 rounded-xl text-slate-400" data-testid="no-envelope">
           <p>No envelope created yet for this deal.</p>
-          <AdminESignActions dealId={dealId} envelopeStatus={null} />
+          <AdminESignActions dealId={dealId} envelopeStatus={null} adminRole={admin.role} />
         </div>
       )}
     </div>

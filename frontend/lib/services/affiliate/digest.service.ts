@@ -17,6 +17,7 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { countsTowardEarned } from "@/lib/services/affiliate/commission.service";
 import { sendAffiliateWeeklyDigest } from "@/lib/services/email/resend.service";
 import crypto from "crypto";
 import { AffiliateStatus } from "@prisma/client";
@@ -101,10 +102,10 @@ export async function sendWeeklyDigestForAffiliate(affiliateId: string, now: Dat
     where: { affiliateId },
     select: { amountCents: true, status: true },
   });
-  // Lifetime earned excludes REVERSED (clawed-back) commissions, matching
-  // getCommissionSummary and the portal's per-level breakdown.
+  // Lifetime earned under the shared ledger rule (M1): live rows plus negative
+  // REVERSED clawback offsets, matching getCommissionSummary.totalCents.
   const totalCentsLifetime = allCommissions
-    .filter((c) => c.status !== "REVERSED")
+    .filter(countsTowardEarned)
     .reduce((s, c) => s + c.amountCents, 0);
   const pendingCentsLifetime = allCommissions.filter((c) => c.status === "PENDING" || c.status === "APPROVED").reduce((s, c) => s + c.amountCents, 0);
 
@@ -148,19 +149,43 @@ export async function sendWeeklyDigestForAffiliate(affiliateId: string, now: Dat
   return { affiliateId, email: affiliate.user.email, status: "sent" };
 }
 
-export async function runWeeklyDigestBatch(now: Date = new Date()): Promise<{ total: number; sent: number; skipped: number; failed: number; results: DigestSendResult[] }> {
-  // Only ACTIVE affiliates with digest enabled, bounded to 500/run for cron timeout safety
-  const affiliates = await prisma.affiliate.findMany({
-    where: { status: AffiliateStatus.ACTIVE, weeklyDigestEnabled: true },
-    select: { id: true },
-    take: 500,
-  });
+// Monday 00:00 UTC of the ISO week containing d — the digest watermark cutoff.
+function isoWeekStartUtc(d: Date): Date {
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - (day - 1));
+  return date;
+}
 
+export async function runWeeklyDigestBatch(now: Date = new Date()): Promise<{ total: number; sent: number; skipped: number; failed: number; results: DigestSendResult[] }> {
+  // D14 — eligibility lives in SQL (not-yet-sent-this-week watermark) and the
+  // scan is a deterministic id-ordered cursor loop. The old `take: 500` with
+  // no orderBy and no watermark filter meant that beyond 500 ACTIVE
+  // affiliates, an arbitrary planner-dependent subset was served each week
+  // and the remainder might never receive a digest.
+  const weekStart = isoWeekStartUtc(now);
   const results: DigestSendResult[] = [];
-  for (const { id } of affiliates) {
-    // Sequential to avoid Resend API rate-limit cliffs; 500 * ~250ms = ~2 min max
-    const r = await sendWeeklyDigestForAffiliate(id, now);
-    results.push(r);
+  let cursor: string | undefined;
+  const BATCH = 500;
+  for (;;) {
+    const batch = await prisma.affiliate.findMany({
+      where: {
+        status: AffiliateStatus.ACTIVE,
+        weeklyDigestEnabled: true,
+        OR: [{ lastDigestSentAt: null }, { lastDigestSentAt: { lt: weekStart } }],
+      },
+      select: { id: true },
+      orderBy: { id: "asc" },
+      take: BATCH,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    });
+    if (batch.length === 0) break;
+    for (const { id } of batch) {
+      // Sequential to avoid Resend API rate-limit cliffs.
+      results.push(await sendWeeklyDigestForAffiliate(id, now));
+    }
+    cursor = batch[batch.length - 1].id;
+    if (batch.length < BATCH) break;
   }
   return {
     total: results.length,

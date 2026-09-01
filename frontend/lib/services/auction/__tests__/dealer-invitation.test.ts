@@ -22,6 +22,8 @@ let geocodeZipImpl: (zip: string) => Promise<{ lat: number; lng: number; source:
   async () => ({ lat: 32.7767, lng: -96.797, source: "static" });
 const invitedIds: string[] = []; // dealerIds that reached auctionInvitation.upsert
 const loadIncremented: string[][] = []; // dealer.updateMany id lists (load increment)
+// Fix 2 — AdminAuditLog rows written by the zero-invitation recorder.
+const auditRows: Array<Record<string, unknown>> = [];
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -64,6 +66,26 @@ mock.module("@/lib/prisma", {
         },
       },
       notification: { create: async () => ({}) },
+      // Fix 2 — the zero-invitation durable record. Reuses AdminAuditLog, which
+      // the admin auction view already queries and renders.
+      adminAuditLog: {
+        // Dedup is keyed on the CAUSE carried in metadata, read off the most
+        // recent matching row — not on the reason text, which embeds a radius
+        // and a dealer count that can move between retries.
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          [...auditRows]
+            .reverse()
+            .find(
+              (r) =>
+                r.entityType === where.entityType &&
+                r.entityId === where.entityId &&
+                r.action === where.action,
+            ) ?? null,
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          auditRows.push(data);
+          return data;
+        },
+      },
     },
   },
 });
@@ -100,6 +122,7 @@ beforeEach(() => {
   geocodeZipImpl = async () => ({ lat: 32.7767, lng: -96.797, source: "static" });
   invitedIds.length = 0;
   loadIncremented.length = 0;
+  auditRows.length = 0;
 });
 
 // ─── makeMatchBonus (pure) — bonus, never a gate ─────────────────────────────
@@ -224,4 +247,141 @@ test("inviteDealersToAuction EXCLUDES a coordless dealer through the real path (
   const count = await inviteDealersToAuction("a1", "b1");
   assert.equal(count, 1);
   assert.deepEqual(invitedIds, ["hascoords"]); // the coordless dealer never got in
+});
+
+// ─── Fix 2: a zero-invitation outcome leaves a durable record ────────────────
+// Auction dc009660 produced 0 invitations and closed ~2h into a 48h window with
+// no operator-visible signal: the Stripe webhook's `.catch()` only fires on a
+// throw, and a 0 return is a successful result. The matcher's fail-closed
+// behaviour is correct and unchanged — what was missing is the record of it.
+//
+// The record reuses AdminAuditLog with entityType "Auction", which
+// app/admin/auctions/[auctionId]/page.tsx already queries and renders. No new
+// table, no new query, no UI wiring.
+
+function zeroInviteRows() {
+  return auditRows.filter((r) => r.action === "AUCTION_ZERO_INVITATIONS");
+}
+
+test("zero invitations from an unplaceable buyer writes a durable AdminAuditLog record", async () => {
+  buyerRow = { zip: null, city: "Nowhereville", state: "ZZ" };
+  dealerRows = [{ id: "near", zip: null, latitude: 32.85, longitude: -96.79 }];
+  const { inviteDealersToAuction } = await load();
+
+  const count = await inviteDealersToAuction("a1", "b1");
+
+  assert.equal(count, 0);
+  const rows = zeroInviteRows();
+  assert.equal(rows.length, 1, "expected exactly one durable record");
+
+  const row = rows[0]!;
+  // Scoped so the admin auction view's existing query finds it.
+  assert.equal(row.entityType, "Auction");
+  assert.equal(row.entityId, "a1");
+  // System-actor sentinel, matching the existing precedent in dealer-agreement
+  // and buyer-signing services.
+  assert.equal(row.adminId, "system");
+  assert.equal(row.adminEmail, "system@autolenis.com");
+  // The reason must name the actual cause, not just "zero".
+  assert.match(String(row.reason), /not geocodable/i);
+
+  const meta = row.metadata as Record<string, unknown>;
+  assert.equal(meta.cause, "BUYER_NOT_GEOCODABLE");
+  assert.equal(meta.buyerId, "b1");
+  // The three fields the matcher actually reads, so an operator can see WHICH
+  // one is missing without opening the buyer record.
+  assert.equal(meta.zip, null);
+  assert.equal(meta.city, "Nowhereville");
+  assert.equal(meta.state, "ZZ");
+});
+
+test("zero invitations with a placeable buyer but no dealer in range is recorded with its own cause", async () => {
+  // Buyer IS placeable (Dallas); the only dealer is far outside the radius.
+  // Only 2 dealers exist platform-wide in production, so this is the live case
+  // once buyer locations are backfilled — it must be distinguishable.
+  buyerRow = { zip: null, city: "Dallas", state: "TX" };
+  dealerRows = [{ id: "faraway", zip: null, latitude: 47.6062, longitude: -122.3321 }]; // Seattle
+  const { inviteDealersToAuction } = await load();
+
+  const count = await inviteDealersToAuction("a1", "b1");
+
+  assert.equal(count, 0);
+  const rows = zeroInviteRows();
+  assert.equal(rows.length, 1);
+
+  const meta = rows[0]!.metadata as Record<string, unknown>;
+  assert.equal(meta.cause, "NO_DEALER_IN_RANGE");
+  assert.match(String(rows[0]!.reason), /within/i);
+  // Enough context to act: how many dealers were considered, and at what radius.
+  assert.equal(meta.activeDealersConsidered, 1);
+  assert.equal(typeof meta.radiusMiles, "number");
+});
+
+test("the durable record is deduped across the deposit-activation retry ladder", async () => {
+  // deposit-activation.service re-invites on every cron tick while an ACTIVE
+  // auction has zero invitations. Without dedup that floods the admin view,
+  // whose query takes only the 30 most recent rows.
+  buyerRow = { zip: null, city: "Nowhereville", state: "ZZ" };
+  dealerRows = [{ id: "near", zip: null, latitude: 32.85, longitude: -96.79 }];
+  const { inviteDealersToAuction } = await load();
+
+  await inviteDealersToAuction("a1", "b1");
+  await inviteDealersToAuction("a1", "b1");
+  await inviteDealersToAuction("a1", "b1");
+
+  assert.equal(zeroInviteRows().length, 1, "retries must not write a second identical row");
+});
+
+test("a changed cause writes a NEW record rather than being swallowed by dedup", async () => {
+  const { inviteDealersToAuction } = await load();
+
+  // First pass: buyer unplaceable.
+  buyerRow = { zip: null, city: "Nowhereville", state: "ZZ" };
+  dealerRows = [{ id: "faraway", zip: null, latitude: 47.6062, longitude: -122.3321 }];
+  await inviteDealersToAuction("a1", "b1");
+
+  // Location gets backfilled; now the buyer places but no dealer is in range.
+  buyerRow = { zip: null, city: "Dallas", state: "TX" };
+  await inviteDealersToAuction("a1", "b1");
+
+  const causes = zeroInviteRows().map((r) => (r.metadata as Record<string, unknown>).cause);
+  assert.deepEqual(causes, ["BUYER_NOT_GEOCODABLE", "NO_DEALER_IN_RANGE"]);
+});
+
+test("a successful invitation writes NO zero-invitation record", async () => {
+  buyerRow = { zip: null, city: "Dallas", state: "TX" };
+  geocodeZipImpl = async () => null;
+  dealerRows = [{ id: "hascoords", zip: null, latitude: 32.85, longitude: -96.79 }];
+  const { inviteDealersToAuction } = await load();
+
+  const count = await inviteDealersToAuction("a1", "b1");
+
+  assert.equal(count, 1);
+  assert.deepEqual(zeroInviteRows(), []);
+});
+
+test("dedup survives a radius or dealer-count change within the same cause", async () => {
+  // The reason text embeds the radius and the active-dealer count. If dedup were
+  // keyed on that string, onboarding a dealer or the coverage ladder escalating
+  // would write a fresh row on every cron tick and flush the admin view's
+  // 30-row window. Keying on the cause makes it immune.
+  buyerRow = { zip: null, city: "Dallas", state: "TX" };
+  const { inviteDealersToAuction } = await load();
+
+  dealerRows = [{ id: "far1", zip: null, latitude: 47.6062, longitude: -122.3321 }];
+  await inviteDealersToAuction("a1", "b1");
+
+  // A second dealer is onboarded — still out of range, so the cause is unchanged
+  // but the rendered reason ("0 of N active dealers") now differs.
+  dealerRows = [
+    { id: "far1", zip: null, latitude: 47.6062, longitude: -122.3321 },
+    { id: "far2", zip: null, latitude: 47.61, longitude: -122.34 },
+  ];
+  await inviteDealersToAuction("a1", "b1");
+
+  assert.equal(
+    zeroInviteRows().length,
+    1,
+    "a changed dealer count must not defeat dedup while the cause is the same",
+  );
 });

@@ -8,6 +8,7 @@ import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { emitDealStatusComms } from "../notifications/acquisition-comms";
 import { emitDealCompletionEvent } from "./deal-completion-event.service";
+import { buyerEnvelopeSelect } from "@/lib/services/esign/esign-schema-gate";
 
 // Valid forward state transitions. CANCELLED/REFUNDED are handled separately in
 // canTransition() because they are reachable from (almost) any state.
@@ -338,14 +339,16 @@ export async function advanceOnInsuranceSatisfied(
 
 export async function getDealForBuyer(buyerId: string, dealId?: string) {
   if (dealId) {
+    // Buyer-facing: the envelope is projected to the buyer allow-list, never the
+    // full forensic record (§11 — see esign-schema-gate.BUYER_SAFE_ENVELOPE_SELECT).
     return prisma.deal.findFirst({
       where: { id: dealId, buyerId },
-      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: true, pickup: true },
+      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: { select: buyerEnvelopeSelect() }, pickup: true },
     });
   }
   return prisma.deal.findFirst({
     where: { buyerId, status: { notIn: [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED] } },
-    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: true, pickup: true },
+    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: { select: buyerEnvelopeSelect() }, pickup: true },
     orderBy: { createdAt: "desc" },
   });
 }

@@ -27,6 +27,7 @@ export default async function AffiliateReportPage({ searchParams }: SP) {
   try {
     const [active, pending, suspended, signups, conversions, earned, paid, pend] = await Promise.all([
       prisma.affiliate.count({ where: { status: "ACTIVE" } }),
+      // Legacy rows only: accounts are auto-approved, nothing creates PENDING.
       prisma.affiliate.count({ where: { status: "PENDING" } }),
       prisma.affiliate.count({ where: { status: "SUSPENDED" } }),
       prisma.affiliateReferral.count({ where: { signedUpAt: createdRange } }),

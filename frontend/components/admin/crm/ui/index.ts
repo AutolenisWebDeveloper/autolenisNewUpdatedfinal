@@ -2,7 +2,7 @@
 export * from './tokens';
 export { Badge, StatusPill } from './Badge';
 export type { BadgeProps, StatusPillProps } from './Badge';
-export { Button } from './Button';
+export { Button, buttonClasses } from './Button';
 export type { ButtonProps } from './Button';
 export { DataTable } from './DataTable';
 export type { Column, DataTableProps } from './DataTable';
@@ -22,3 +22,6 @@ export type { SlideOverProps } from './SlideOver';
 export { Tabs } from './Tabs';
 export type { TabItem, TabsProps } from './Tabs';
 export { Toolbar, SearchField, SelectField } from './Toolbar';
+export { FieldLabel, NumberField, TextAreaField, FieldError } from './Field';
+export type { FieldLabelProps, NumberFieldProps, TextAreaFieldProps } from './Field';
+

@@ -43,6 +43,60 @@ function titleRank(title: string | null | undefined): number {
   return RANKED_TITLE_KEYWORDS.length; // unranked title → lowest priority
 }
 
+// ─── Phase 1.2 — People Search (the 0-CREDIT acquisition path) ──────────────
+//
+// The 3-stage reveal above starts from organizations/lookup, which needs the
+// dealer's domain. Website coverage across dealer_prospects is 133/1,532, so
+// that path cannot reach ~91% of the list. People Search keys on SIC code +
+// title + location instead and needs no domain, which makes it the primary way
+// candidates enter the system.
+//
+// Searching costs NOTHING — only reveal/enrichment draws a credit. Nothing in
+// this section may call a billable endpoint.
+
+/** SIC 5511 — new and used car dealers. */
+export const DEALER_SIC_CODES = ["5511"] as const;
+
+/** Decision-maker titles worth contacting at a rooftop, broad-to-specific. */
+export const DEALER_PERSON_TITLES = [
+  "dealer principal",
+  "general manager",
+  "general sales manager",
+  "used car manager",
+  "internet sales manager",
+  "sales manager",
+  "inventory manager",
+  "acquisition manager",
+] as const;
+
+/**
+ * One People Search hit. The last name arrives OBFUSCATED (e.g. "R.") because
+ * the record has not been revealed — that is expected at this stage and is not
+ * missing data. Matching to a rooftop uses the organization fields, which are
+ * returned in full.
+ */
+export interface ApolloSearchPerson {
+  id: string;
+  firstName: string | null;
+  lastNameObfuscated: string | null;
+  title: string | null;
+  linkedinUrl: string | null;
+  organization: {
+    id: string | null;
+    name: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    domain: string | null;
+  } | null;
+}
+
+export interface ApolloPeopleSearchPage {
+  people: ApolloSearchPerson[];
+  totalPages: number;
+  totalEntries: number;
+}
+
 export interface ApolloOrg {
   id: string;
   domain?: string | null;
@@ -79,6 +133,27 @@ export interface ApolloClient {
   peopleMatch(personId: string): Promise<ApolloRevealed | null>; // the paid reveal
 }
 
+/**
+ * The DISCOVERY seam, deliberately separate from ApolloClient.
+ *
+ * Discovery and reveal are different capabilities with different cost profiles:
+ * reveal spends credits, search does not. Folding peopleSearchByCriteria into
+ * ApolloClient would force every reveal-path fake to implement a method it never
+ * calls, and would let a caller holding a "client" reach a capability it has no
+ * business using. Two interfaces; the concrete client satisfies both.
+ */
+export interface ApolloSearchClient {
+  /** FREE. Criteria-driven discovery; never bills. */
+  peopleSearchByCriteria(input: {
+    sicCodes: readonly string[];
+    titles: readonly string[];
+    personLocations?: readonly string[];
+    organizationLocations?: readonly string[];
+    page: number;
+    perPage: number;
+  }): Promise<ApolloPeopleSearchPage>;
+}
+
 export interface ApolloAdapterInput {
   name: string;
   website?: string | null;
@@ -93,6 +168,16 @@ export interface ApolloAdapterDeps {
 /** True only when the tier is both configured (key) and explicitly enabled. */
 export function apolloEnabled(): boolean {
   return !!process.env.APOLLO_API_KEY && process.env.APOLLO_REVEAL_ENABLED === "true";
+}
+
+/**
+ * Gate for the FREE People Search path. Deliberately separate from
+ * apolloEnabled(): that flag governs SPENDING, and discovery costs nothing, so
+ * tying them together would force the owner to enable paid reveals in order to
+ * populate candidates. Both still require a key, and both default OFF.
+ */
+export function apolloPeopleSearchEnabled(): boolean {
+  return !!process.env.APOLLO_API_KEY && process.env.APOLLO_PEOPLE_SEARCH_ENABLED === "true";
 }
 
 /**
@@ -196,9 +281,23 @@ async function apolloFetch(
   }
 }
 
+/**
+ * Real Apollo client for the SEARCH path only. Gated on the search flag rather
+ * than the reveal flag, because searching does not spend. Returns the same
+ * object; the caller only reaches peopleSearchByCriteria.
+ */
+export function defaultApolloSearchClient(): ApolloSearchClient | null {
+  if (!apolloPeopleSearchEnabled()) return null;
+  return buildApolloClient();
+}
+
 /** Real Apollo client, or null when unconfigured/disabled (tier stays off). */
 export function defaultApolloClient(): ApolloClient | null {
   if (!apolloEnabled()) return null;
+  return buildApolloClient();
+}
+
+function buildApolloClient(): ApolloClient & ApolloSearchClient {
   return {
     async organizationsLookup({ name, domain }) {
       const json = (await apolloFetch("/organizations/lookup", {
@@ -226,6 +325,66 @@ export function defaultApolloClient(): ApolloClient | null {
           // (or has_email). A masked/unavailable status is treated as no email.
           hasEmail: p.has_email === true || p.email_status === "verified" || p.email_status === "likely",
         }));
+    },
+    async peopleSearchByCriteria({ sicCodes, titles, personLocations, organizationLocations, page, perPage }) {
+      // A FREE stage: no throwOnError, so a transport failure degrades to an
+      // empty page rather than throwing into the caller's pagination loop. It
+      // cannot have billed, because search does not bill.
+      const json = (await apolloFetch("/mixed_people/search", {
+        organization_sic_codes: [...sicCodes],
+        person_titles: [...titles],
+        include_similar_titles: true,
+        ...(personLocations?.length ? { person_locations: [...personLocations] } : {}),
+        ...(organizationLocations?.length ? { organization_locations: [...organizationLocations] } : {}),
+        page,
+        per_page: perPage,
+      })) as {
+        people?: Array<{
+          id?: string;
+          first_name?: string | null;
+          last_name?: string | null;
+          name?: string | null;
+          title?: string | null;
+          linkedin_url?: string | null;
+          organization?: {
+            id?: string | null;
+            name?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postal_code?: string | null;
+            primary_domain?: string | null;
+          } | null;
+        }>;
+        pagination?: { total_pages?: number; total_entries?: number };
+      } | null;
+
+      const people: ApolloSearchPerson[] = (json?.people ?? [])
+        .filter((p) => p.id)
+        .map((p) => ({
+          id: p.id as string,
+          firstName: p.first_name ?? null,
+          // Apollo returns the unrevealed surname already masked; store what it
+          // gave us rather than inventing a full name we do not have.
+          lastNameObfuscated: p.last_name ?? null,
+          title: p.title ?? null,
+          linkedinUrl: p.linkedin_url ?? null,
+          organization: p.organization
+            ? {
+                id: p.organization.id ?? null,
+                name: p.organization.name ?? null,
+                city: p.organization.city ?? null,
+                state: p.organization.state ?? null,
+                zip: p.organization.postal_code ?? null,
+                domain: p.organization.primary_domain ?? null,
+              }
+            : null,
+        }));
+
+      return {
+        people,
+        totalPages: json?.pagination?.total_pages ?? 0,
+        totalEntries: json?.pagination?.total_entries ?? 0,
+      };
     },
     async peopleMatch(personId) {
       // Deterministic single-lead-credit work-email enrichment. Reveal neither
