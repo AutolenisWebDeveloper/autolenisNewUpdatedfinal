@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { OperationsService } from '@/lib/services/operations.service';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
@@ -14,8 +14,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const actor = await requirePermissionActor("ops.replay");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  // Enforced directly (not via the shadow flag): replaying a dead-lettered job
+  // re-fires its arbitrary inherited side effects, so this is SUPER_ADMIN only.
+  // It previously had no role check, leaving it open to every authenticated admin.
+  const actorCheck = await requirePermissionActorStrict("ops.replay", { path: `/api/admin/operations/dlq/${id}/retry`, method: 'POST' });
+  if (!actorCheck.ok) return NextResponse.json({ error: actorCheck.code }, { status: actorCheck.status });
+  const actor = actorCheck.actor;
   const supabase = getServiceSupabase();
   const ops = new OperationsService(supabase);
 

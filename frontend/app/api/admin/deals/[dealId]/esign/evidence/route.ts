@@ -5,7 +5,7 @@
 // data — buyer/dealer endpoints return safe summaries. Authorization is OPS-gated
 // (same role that governs esign admin actions) and every export is audit-logged.
 import { NextRequest } from "next/server";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { toAdminEvidencePackage } from "@/lib/services/esign/esign-dto";
@@ -14,8 +14,11 @@ interface Props { params: Promise<{ dealId: string }> }
 
 export async function GET(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await requirePermission(request, "deals.esign.void");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
   if (!envelope) return adminError("NOT_FOUND", "No signing record for this deal", 404);

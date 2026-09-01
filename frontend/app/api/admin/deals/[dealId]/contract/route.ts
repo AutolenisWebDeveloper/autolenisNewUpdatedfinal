@@ -14,7 +14,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { contractDocumentPathSchema } from "@/lib/services/contract-shield/contract-document-ref";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { uploadContractForDealByAdmin, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
 
@@ -28,8 +28,11 @@ const schema = z.object({ documentUrl: contractDocumentPathSchema });
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await requirePermission(request, "deals.esign.void");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

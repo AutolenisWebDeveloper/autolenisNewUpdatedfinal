@@ -3,7 +3,7 @@
 // This unblocks auction creation for manual/administrative workflows.
 // AuditLog entry with override reason required.
 
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -21,8 +21,11 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { buyerId } = await params;
-  const admin = await requirePermission(request, "finance.deposit.override");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const adminCheck = await requirePermissionStrict(request, "finance.deposit.override");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const buyer = await prisma.buyer.findUnique({
     where: { id: buyerId },

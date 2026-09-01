@@ -62,9 +62,17 @@ mock.module("@/lib/services/dealer/dealer-contract.service", {
   },
 });
 
+// The route uses the always-enforcing gate (Finding 3), which returns a
+// discriminated result so a wrong role is 403 rather than "not authenticated".
+// Role enforcement itself is covered by
+// app/api/admin/__tests__/high-risk-route-enforcement.test.ts against the REAL
+// permission matrix; here we only control whether a caller is authenticated.
 mock.module("@/lib/auth/permissions", {
   namedExports: {
-    requirePermission: async () => (authenticated ? { adminId: "admin_1", email: "ops@autolenis.com", role: "OPERATIONS_ADMIN" } : null),
+    requirePermissionStrict: async () =>
+      authenticated
+        ? { ok: true, admin: { adminId: "admin_1", email: "ops@autolenis.com", role: "OPERATIONS_ADMIN" } }
+        : { ok: false, status: 401, code: "UNAUTHORIZED", message: "Not authenticated" },
   },
 });
 

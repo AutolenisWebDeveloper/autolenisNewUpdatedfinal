@@ -3,7 +3,7 @@
 // record. The original record is never modified. Affiliate is notified.
 // Requires reason (min 10 chars). FINANCE_ADMIN or SUPER_ADMIN only.
 
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
@@ -15,13 +15,18 @@ const schema = z.object({
   reason: z.string().min(10, "Reason must be at least 10 characters"),
 });
 
-const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
-  const admin = await requirePermission(request, "finance.commissions.reverse");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or FINANCE_ADMIN required", 403);
+  const adminCheck = await requirePermissionStrict(request, "finance.commissions.reverse");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
+  // Role check lives in the gate above, derived from PERMISSION_ROLES
+  // ("finance.commissions.*" = SUPER_ADMIN, FINANCE_ADMIN). A second hardcoded
+  // set here would be a copy that can silently drift from the matrix — which is
+  // exactly how the impersonation routes came to disagree with it.
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

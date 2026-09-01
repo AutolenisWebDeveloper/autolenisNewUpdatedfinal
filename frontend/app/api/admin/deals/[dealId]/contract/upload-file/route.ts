@@ -24,7 +24,7 @@
 // which is a separate operator action. Any authenticated admin can reach it today.
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { uploadContractForDealByAdmin, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
@@ -42,8 +42,11 @@ interface Props { params: Promise<{ dealId: string }> }
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await requirePermission(request, "deals.esign.void");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   if (!SAFE_ID.test(dealId)) return adminError("VALIDATION_ERROR", "Invalid deal id", 400);
 

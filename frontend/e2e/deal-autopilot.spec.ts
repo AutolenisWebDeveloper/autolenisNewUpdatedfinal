@@ -59,6 +59,8 @@ test.describe("authorization boundaries across the deal spine", () => {
     "/api/buyer/deals/some-deal-id/contract/download",
     "/api/dealer/deals/some-deal-id/contract",
     "/api/admin/deals/some-deal-id/esign/evidence",
+    // The RBAC shadow report renders audit records; anonymous callers get nothing.
+    "/admin/settings/rbac-shadow",
   ];
 
   for (const path of guardedGets) {
@@ -81,6 +83,11 @@ test.describe("authorization boundaries across the deal spine", () => {
     // ContractVersion, so an anonymous caller must never reach either.
     "/api/admin/deals/some-deal-id/contract/upload-file",
     "/api/dealer/contracts/upload-file",
+    // Money movement and ops replay — enforced directly, not via the shadow flag.
+    "/api/admin/affiliates/commissions/some-id/approve",
+    "/api/admin/affiliates/commissions/some-id/mark-paid",
+    "/api/admin/buyers/some-buyer-id/deposit/override",
+    "/api/admin/operations/dlq/some-id/retry",
   ];
 
   for (const path of guardedPosts) {

@@ -1,6 +1,6 @@
 // POST /api/admin/deals/[dealId]/esign/void
 // Voids an existing signing envelope. Requires reason (min 10 chars).
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -15,8 +15,11 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await requirePermission(request, "deals.esign.void");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

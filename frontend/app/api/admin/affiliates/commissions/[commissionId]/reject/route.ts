@@ -1,4 +1,4 @@
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -9,8 +9,11 @@ const schema = z.object({ reason: z.string().min(10, "Reason must be at least 10
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
-  const admin = await requirePermission(request, "finance.commissions.settle");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const adminCheck = await requirePermissionStrict(request, "finance.commissions.settle");
+  // Enforced directly (not via the shadow flag): this route had no role
+  // check at all, so every authenticated admin could reach it.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const commission = await prisma.commission.findUnique({
     where: { id: commissionId },

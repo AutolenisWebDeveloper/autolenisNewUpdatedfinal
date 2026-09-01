@@ -129,6 +129,87 @@ export async function requirePermission(
   return admin; // SHADOW: allow, recorded above
 }
 
+/** The roles the matrix admits for a permission. Single source of truth for
+ *  enforcement, for the shadow report, and for role-aware UI. */
+export function rolesFor(permission: Permission): readonly string[] {
+  return PERMISSION_ROLES[permission] as readonly string[];
+}
+
+/** Whether `role` is admitted for `permission`, per the matrix. */
+export function roleAllows(permission: Permission, role: string): boolean {
+  return rolesFor(permission).includes(role);
+}
+
+export type PermissionCheck =
+  | { ok: true; admin: AdminJwtPayload }
+  | { ok: false; status: 401; code: "UNAUTHORIZED"; message: string }
+  | { ok: false; status: 403; code: "FORBIDDEN"; message: string };
+
+/**
+ * ALWAYS-ENFORCING permission gate for the high-risk routes — money movement,
+ * e-sign void/evidence, contract attachment, ops replay.
+ *
+ * Why this exists alongside the shadow gate:
+ *
+ *  • It does not wait on RBAC_ENFORCE. Those routes had NO secondary role check,
+ *    so shadow mode left them open to every authenticated admin: a SUPPORT_ADMIN
+ *    could settle commissions, override a deposit, void an executed signature or
+ *    replay a dead-letter job. Flipping the global flag is a separate, riskier
+ *    decision (67 call sites, unknown production role distribution); this exposure
+ *    should not wait for it.
+ *
+ *  • It derives the allowed roles from PERMISSION_ROLES rather than from a role
+ *    set written into each route. The existing pattern duplicates the list at the
+ *    call site, and that has already drifted: the impersonation routes admit
+ *    SUPER_ADMIN or SUPPORT_ADMIN while the matrix says SUPER only. Deriving makes
+ *    that class of contradiction impossible.
+ *
+ *  • It separates 401 from 403. requirePermission returns null for BOTH "no
+ *    session" and "wrong role", and every caller reports that as 401 "Not
+ *    authenticated" — which would misdiagnose a role lockout as an expired
+ *    session. A denied role is FORBIDDEN and says so.
+ *
+ * Denials are audited as RBAC_DENY, distinct from RBAC_SHADOW_DENY, so the shadow
+ * report can tell a real block apart from a would-be one.
+ */
+export async function requirePermissionStrict(
+  request: NextRequest,
+  permission: Permission,
+): Promise<PermissionCheck> {
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return { ok: false, status: 401, code: "UNAUTHORIZED", message: "Not authenticated" };
+  }
+
+  if (roleAllows(permission, admin.role)) return { ok: true, admin };
+
+  await prisma.adminAuditLog.create({
+    data: {
+      adminId: admin.adminId,
+      adminEmail: admin.email,
+      action: "RBAC_DENY",
+      entityType: "RBAC",
+      entityId: permission,
+      metadata: {
+        permission,
+        role: admin.role,
+        path: request.nextUrl.pathname,
+        method: request.method,
+        allowedRoles: [...rolesFor(permission)],
+        enforced: true,
+      },
+    },
+  }).catch((err: unknown) => logger.error("[rbac] deny audit write failed:", err));
+
+  logger.error(`[rbac] DENY ${admin.role} -> ${permission} (${request.method} ${request.nextUrl.pathname})`);
+  return {
+    ok: false,
+    status: 403,
+    code: "FORBIDDEN",
+    message: `This action requires ${rolesFor(permission).join(" or ")}.`,
+  };
+}
+
 /**
  * Cookie/actor variant of requirePermission for the CRM routes that use
  * getAdminActor() (no NextRequest argument). Same shadow semantics — records a
@@ -169,4 +250,55 @@ export async function requirePermissionActor(
     return null;
   }
   return actor; // SHADOW: allow, recorded above
+}
+
+export type ActorPermissionCheck =
+  | { ok: true; actor: AdminActor }
+  | { ok: false; status: 401; code: "UNAUTHORIZED"; message: string }
+  | { ok: false; status: 403; code: "FORBIDDEN"; message: string };
+
+/**
+ * Always-enforcing actor variant, for the cookie-authenticated routes that use
+ * getAuthenticatedAdmin() instead of a NextRequest. Same semantics as
+ * requirePermissionStrict — matrix-derived roles, 401 vs 403, RBAC_DENY audit —
+ * and used for ops.replay, which re-fires a dead-lettered job's arbitrary
+ * inherited side effects and is the highest-privilege operation in the surface.
+ */
+export async function requirePermissionActorStrict(
+  permission: Permission,
+  ctx: { path?: string; method?: string } = {},
+): Promise<ActorPermissionCheck> {
+  const admin = await getAuthenticatedAdmin();
+  if (!admin) {
+    return { ok: false, status: 401, code: "UNAUTHORIZED", message: "Not authenticated" };
+  }
+
+  const actor: AdminActor = { adminId: admin.adminId, adminEmail: admin.email };
+  if (roleAllows(permission, admin.role)) return { ok: true, actor };
+
+  await prisma.adminAuditLog.create({
+    data: {
+      adminId: admin.adminId,
+      adminEmail: admin.email,
+      action: "RBAC_DENY",
+      entityType: "RBAC",
+      entityId: permission,
+      metadata: {
+        permission,
+        role: admin.role,
+        path: ctx.path ?? null,
+        method: ctx.method ?? null,
+        allowedRoles: [...rolesFor(permission)],
+        enforced: true,
+      },
+    },
+  }).catch((err: unknown) => logger.error("[rbac] deny audit write failed:", err));
+
+  logger.error(`[rbac] DENY ${admin.role} -> ${permission} (actor)`);
+  return {
+    ok: false,
+    status: 403,
+    code: "FORBIDDEN",
+    message: `This action requires ${rolesFor(permission).join(" or ")}.`,
+  };
 }
