@@ -41,8 +41,14 @@ export async function POST(request: NextRequest) {
   const buyer = await prisma.buyer.findUnique({ where: { id: buyerId } });
   if (!buyer) return adminError("NOT_FOUND", "Buyer not found", 404);
 
+  // Start on the same driven state as the other two creation paths
+  // (select-offer.service and the concierge offer/respond route). ACTIVE is a dead
+  // state: nothing in the codebase performs ACTIVE → FINANCING_PENDING, so a deal
+  // born here previously sat un-driven until an admin manually moved it, and the
+  // buyer's financing routes (which target FEE_PENDING) would throw
+  // DealTransitionError against it.
   const deal = await prisma.deal.create({
-    data: { buyerId, offerId, status: "ACTIVE" },
+    data: { buyerId, offerId, status: "FINANCING_PENDING" },
   });
 
   // Mark offer as accepted

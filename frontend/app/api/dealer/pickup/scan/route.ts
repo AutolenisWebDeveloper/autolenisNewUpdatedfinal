@@ -4,9 +4,15 @@
 // BuyerActivityEvent emitted, Resend completion email fired (best-effort).
 
 import { NextRequest } from "next/server";
+import { logger } from "@/lib/logger";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
-import { INSURANCE_SATISFIED, advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
+import {
+  INSURANCE_SATISFIED,
+  advanceDealStatus,
+  DealTransitionError,
+  InsuranceRequiredError,
+} from "@/lib/services/deal/deal.service";
 import { Resend } from "resend";
 
 // Lazy Resend client — constructed on first use. Prevents Next.js build-time
@@ -35,8 +41,23 @@ export async function POST(request: NextRequest) {
     return errorResponse("INVALID_TOKEN", "QR code not found or invalid.", 422);
   }
 
-  // Token must belong to one of this dealer's offers
-  if (pickup.deal.offer?.dealerId !== dealer.id) {
+  // Authorization: the token must belong to THIS dealer's deal. A concierge
+  // (vehicle-request) deal has no Offer, and VehicleRequestOffer carries no dealer
+  // identity — so it has no dealer at all and can never be scanned by anyone; it is
+  // completed by AutoLenis staff via the admin pickup-completion route.
+  //
+  // Both cases return the SAME response on purpose. Answering "this deal has no
+  // dealer" distinctly would make the scan endpoint a state oracle for anyone
+  // holding a token, ahead of the ownership check — and the QR nonce is not
+  // cryptographically strong (Math.random + a timestamp). The distinction is
+  // logged server-side instead, where support can actually use it.
+  const dealDealerId = pickup.deal.offer?.dealerId ?? null;
+  if (dealDealerId !== dealer.id) {
+    if (dealDealerId === null) {
+      logger.warn(
+        `[pickup/scan] dealer ${dealer.id} scanned concierge deal ${pickup.dealId} — no dealer on deal; completed by AutoLenis staff`,
+      );
+    }
     return errorResponse("INVALID_TOKEN", "QR code is not valid for this dealer.", 422);
   }
 
@@ -70,6 +91,16 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     if (err instanceof DealTransitionError) {
       return errorResponse("NOT_READY_FOR_PICKUP", "This deal is not ready for pickup completion.", 409);
+    }
+    // The seam re-checks the insurance hard gate at write time. Proof can be
+    // withdrawn between our pre-check above and the advance, so map that rejection
+    // to the same truthful 409 rather than letting it surface as a 500.
+    if (err instanceof InsuranceRequiredError) {
+      return errorResponse(
+        "INSURANCE_REQUIRED",
+        "Insurance proof is required before this pickup can be completed.",
+        409,
+      );
     }
     throw err;
   }

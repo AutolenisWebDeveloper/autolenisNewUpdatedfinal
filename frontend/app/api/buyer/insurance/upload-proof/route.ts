@@ -3,6 +3,7 @@
 // Validates file type (PDF/JPG/PNG) and size (≤ 10 MB)
 // Uploads to Supabase Storage `insurance-proofs` bucket
 // Updates deal.insuranceStatus to EXTERNAL_UPLOADED
+// Releases the insurance gate (INSURANCE_PENDING → CONTRACT_PENDING)
 // Creates buyer notification
 //
 // Required Supabase Storage configuration:
@@ -14,6 +15,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
+import { advanceOnInsuranceSatisfied } from "@/lib/services/deal/deal.service";
 
 const MAX_BYTES     = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
@@ -129,6 +131,13 @@ export async function POST(request: NextRequest) {
       data: { insuranceStatus: "EXTERNAL_UPLOADED" },
     });
   });
+
+  // Proof is now on file, so release the insurance gate and move the deal into the
+  // contract stage. Without this the deal stalls at INSURANCE_PENDING forever —
+  // this is the only buyer-facing path that satisfies insurance, and nothing else
+  // drives INSURANCE_PENDING → CONTRACT_PENDING. Idempotent and non-throwing: a
+  // failure here must never fail an upload that already succeeded.
+  await advanceOnInsuranceSatisfied(dealId, { actorId: buyer.id, actorRole: "BUYER" });
 
   // Notify buyer
   await prisma.notification.create({

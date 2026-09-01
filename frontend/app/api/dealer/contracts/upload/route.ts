@@ -2,8 +2,11 @@ import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { uploadDealerContract, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
 import { z } from "zod";
+import { contractDocumentPathSchema } from "@/lib/services/contract-shield/contract-document-ref";
 
-const schema = z.object({ dealId: z.string(), documentUrl: z.string().url(), mimeType: z.string().optional(), sizeBytes: z.number().int().optional() });
+// documentUrl is a bare storage path in the private contracts bucket, NOT a URL —
+// see contract-document-ref for why `.url()` was inverted here (and an SSRF).
+const schema = z.object({ dealId: z.string(), documentUrl: contractDocumentPathSchema, mimeType: z.string().optional(), sizeBytes: z.number().int().optional() });
 
 export async function POST(request: NextRequest) {
   const dealer = await getRequestDealer(request);

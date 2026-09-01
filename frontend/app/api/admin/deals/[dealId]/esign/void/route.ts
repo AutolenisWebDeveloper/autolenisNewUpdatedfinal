@@ -1,6 +1,6 @@
 // POST /api/admin/deals/[dealId]/esign/void
 // Voids an existing signing envelope. Requires reason (min 10 chars).
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -13,16 +13,14 @@ const schema = z.object({
   reason: z.string().min(10, "Reason must be at least 10 characters"),
 });
 
-// requirePermission is shadow-only (it records a would-be denial and allows), so
-// voiding a live signing envelope needs this hard check. OPS-scoped, matching
-// PERMISSION_ROLES["deals.esign.void"] and the sibling deals/[dealId]/action gate.
-const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "OPERATIONS_ADMIN"]);
-
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await requirePermission(request, "deals.esign.void");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
+  const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
+  // Hard-enforced (not via the shadow flag), and the allow-list is read from
+  // PERMISSION_ROLES rather than restated here: a duplicated inline role set is
+  // a second source of policy that can drift from the matrix it is meant to mirror.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

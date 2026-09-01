@@ -84,7 +84,15 @@ beforeEach(() => {
 });
 
 // ── flag OFF → QStash, byte-for-byte ────────────────────────────────────────
-test("deposit_reminder OFF → QStash dispatch with exact body + 24h delay, no enqueue", async () => {
+// UPDATED (QStash removal): this used to assert the opposite — that with the flag
+// OFF the workload dispatched to QStash at +24h. QStash has since been removed from
+// the stack, so that route enqueued into nothing: dispatch threw, the error was
+// swallowed into a dead-letter row, and no buyer was ever reminded. deposit_reminder
+// is now owned outright by the internal plane, with no flag consulted, so a missing
+// or reset flag row cannot silently kill the circle. The +1h delay is the internal
+// chain's own documented first-touch grace (the 86400 above mirrored the QStash
+// job's schedule, which no longer runs).
+test("deposit_reminder with the flag OFF still goes INTERNAL — QStash is never used", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "deposit_reminder",
@@ -92,12 +100,17 @@ test("deposit_reminder OFF → QStash dispatch with exact body + 24h delay, no e
     firstName: "Sam",
     email: "b@x.com",
   });
-  assert.equal(ctrl.enqueues.length, 0);
-  assert.equal(ctrl.dispatches.length, 1);
-  const d = ctrl.dispatches[0];
-  assert.equal(d.path, "/api/jobs/deposit-reminder");
-  assert.equal(d.delaySeconds, 86400);
-  assert.deepEqual(d.body, { buyerId: "b1", firstName: "Sam", email: "b@x.com", touchNumber: 1 });
+  assert.equal(ctrl.dispatches.length, 0, "the removed service must never be targeted");
+  assert.equal(ctrl.enqueues.length, 1);
+  const e = ctrl.enqueues[0];
+  assert.equal(e.sequence, "deposit_reminder_1");
+  assert.equal(e.baseKey, "deposit-reminder:b1");
+  assert.equal(e.entityId, "b1");
+  // CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7):
+  // touch 1 is the "here's your link back", enqueued with NO delay, so runAt is
+  // left undefined and enqueueLifecycleTouch defaults it to now. This previously
+  // asserted ~now+1h, the grace the owner overruled.
+  assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
 });
 
 test("auction_active OFF → QStash dispatch, immediate", async () => {
@@ -154,10 +167,11 @@ test("deal_complete OFF → QStash dispatch with dealId", async () => {
 });
 
 // ── flag ON → internal enqueue, correct mapping ─────────────────────────────
-test("deposit_reminder ON → internal enqueue (seq/baseKey/entity/24h runAt), no dispatch", async () => {
+// UPDATED (QStash removal): the flag is no longer consulted for this workload, so
+// setting it ON must be a no-op rather than the thing that enables delivery.
+test("deposit_reminder with the flag ON behaves identically — the flag is irrelevant now", async () => {
   ctrl.enabled[MOCK_FLAGS.LIFECYCLE_INTERNAL_DEPOSIT_REMINDER] = true;
   const { scheduleLifecycleWorkload } = await load();
-  const before = Date.now();
   await scheduleLifecycleWorkload({
     workload: "deposit_reminder",
     buyerId: "b1",
@@ -170,8 +184,11 @@ test("deposit_reminder ON → internal enqueue (seq/baseKey/entity/24h runAt), n
   assert.equal(e.sequence, "deposit_reminder_1");
   assert.equal(e.baseKey, "deposit-reminder:b1");
   assert.equal(e.entityId, "b1");
-  const runAt = (e.runAt as Date).getTime();
-  assert.ok(runAt >= before + 86400 * 1000 && runAt <= Date.now() + 86400 * 1000 + 5000, "runAt ~ now+24h");
+  // CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7):
+  // touch 1 is the "here's your link back", enqueued with NO delay, so runAt is
+  // left undefined and enqueueLifecycleTouch defaults it to now. This previously
+  // asserted ~now+1h, the grace the owner overruled.
+  assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
 });
 
 test("auction_active ON → internal enqueue keyed on auction, immediate (runAt undefined)", async () => {

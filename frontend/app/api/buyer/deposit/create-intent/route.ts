@@ -249,10 +249,12 @@ export async function POST(request: NextRequest) {
     // "$99 deposit" reminder sequence or the abandoned-deposit nurture. Only the
     // normal competitive path enrolls — everything below is gated on !concierge.
     if (!conciergeReviewToken) {
-      // Start the $99 deposit-conversion reminder via the lifecycle scheduler
-      // (single authority: QStash by default; internal lifecycle_touch once the
-      // LIFECYCLE_INTERNAL_DEPOSIT_REMINDER flag is cut over). Self-stops once the
-      // deposit is PAID (send-time guard), so re-creating an intent is safe.
+      // Start the $99 deposit-conversion reminder via the lifecycle scheduler.
+      // THIS IS THE SINGLE ENROLLMENT OWNER for the chain — onboarding/complete
+      // used to enroll too and claimed the touch-1 row before any deposit existed.
+      // Routing is the internal lifecycle_touch plane, unconditionally (no flag).
+      // Self-stops once the deposit is PAID (send-time guard), so re-creating an
+      // intent is safe.
       const buyerContact = await prisma.buyer.findUnique({
         where: { id: buyer.id },
         select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },

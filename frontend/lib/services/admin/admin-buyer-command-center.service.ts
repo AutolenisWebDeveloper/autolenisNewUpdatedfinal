@@ -4,7 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
-import { canTransition } from "@/lib/services/deal/deal.service";
+import { advanceDealStatus, canTransition, cancelDeal } from "@/lib/services/deal/deal.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -943,21 +943,19 @@ export async function cancelBuyerWorkflow(
   if (!deal) throw new Error("No active deal found for this buyer");
 
   const previousStatus = deal.status;
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: { status: DealStatus.CANCELLED },
-  });
 
-  await prisma.dealStatusHistory.create({
-    data: {
-      dealId,
-      fromStatus: previousStatus,
-      toStatus: DealStatus.CANCELLED,
-      actorId: adminId,
-      actorRole: "ADMIN",
-      reason,
-    },
-  });
+  // Route through the guarded seam rather than writing deal.status directly. The
+  // raw update here was the last unguarded state writer in the codebase: it
+  // skipped the compare-and-swap (so a cancel racing a concurrent advance
+  // overwrote the winner and recorded an already-stale fromStatus), the
+  // BuyerActivityEvent, and emitDealStatusComms — so the buyer was never told
+  // their deal had been cancelled. cancelDeal is the seam's terminal path and
+  // owns the DealStatusHistory row, which is why it is no longer written here;
+  // the ADMIN attribution the hand-written row carried is passed through instead.
+  // The seam declines when a concurrent writer moved the deal first, so the
+  // outcome is reported rather than assumed — an admin told "cancelled" about a
+  // deal that is still live would act on a false state.
+  const cancelled = await cancelDeal(dealId, reason, { actorId: adminId, actorRole: "ADMIN" });
 
   await prisma.adminAuditLog.create({
     data: {
@@ -967,11 +965,13 @@ export async function cancelBuyerWorkflow(
       entityType: "Deal",
       entityId: dealId,
       reason,
-      metadata: { buyerId, previousStatus },
+      // The attempt is audited either way; the outcome is recorded with it so a
+      // declined cancellation is traceable rather than looking like a success.
+      metadata: { buyerId, previousStatus, cancelled },
     },
   });
 
-  return { cancelled: true };
+  return { cancelled };
 }
 
 export async function moveBuyerWorkflowStage(
@@ -1001,20 +1001,21 @@ export async function moveBuyerWorkflowStage(
   }
 
   const previousStatus = deal.status;
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: { status: targetStatus },
-  });
 
-  await prisma.dealStatusHistory.create({
-    data: {
-      dealId,
-      fromStatus: previousStatus,
-      toStatus: targetStatus,
-      actorId: adminId,
-      actorRole: "ADMIN",
-      reason,
-    },
+  // Route through the guarded seam rather than writing deal.status directly. A raw
+  // update here was a second, unguarded state machine: it skipped the
+  // compare-and-swap, the buyer activity event, the customer comms, the insurance
+  // hard-gate, and — most consequentially — emitDealCompletionEvent, so a deal
+  // completed by an admin never emitted the canonical `purchase_completed` signal
+  // that affiliate settlement consumes. advanceDealStatus also owns the
+  // DealStatusHistory row (with this actor/reason), so it is no longer written here.
+  // `force` is passed through unchanged: the deliberate admin progressions keep
+  // their override, while the ad-hoc move tool keeps its guard.
+  await advanceDealStatus(dealId, targetStatus, {
+    actorId: adminId,
+    actorRole: "ADMIN",
+    reason,
+    force,
   });
 
   await prisma.adminAuditLog.create({

@@ -4,6 +4,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { computeJourney } from "@/lib/services/buyer/journey";
+import { advanceOnInsuranceSatisfied } from "@/lib/services/deal/deal.service";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,17 @@ export async function GET(request: NextRequest) {
         select: { stageId: true, type: true },
       }),
     ]);
+
+    // Self-heal the insurance gate on read (same idiom as ensureDealSigned): if a
+    // deal is sitting at INSURANCE_PENDING with proof already on file, release it
+    // into the contract stage. This converges deals that reached a satisfied
+    // insurance state by a path that did not itself advance them. Idempotent and
+    // non-throwing — a no-op for every deal that is not in exactly that state.
+    // Attributed to SYSTEM, not BUYER: reading a status page is not the buyer
+    // performing the transition.
+    if (activeDeal?.status === "INSURANCE_PENDING") {
+      await advanceOnInsuranceSatisfied(activeDeal.id);
+    }
 
     // Single fact-derived machine (lib/services/buyer/journey) — same logic the
     // buyer layout uses, so the sidebar and this API can never disagree (M-3).

@@ -26,18 +26,155 @@ export async function assertDealerOwnsDeal(dealId: string, dealerId: string): Pr
   if (!owned) throw new DealOwnershipError();
 }
 
-export async function uploadDealerContract(dealId: string, dealerId: string, documentUrl: string) {
-  // Authorization chokepoint — protects every caller, not just the HTTP route.
-  await assertDealerOwnsDeal(dealId, dealerId);
+/**
+ * Outcome of an admin Contract Shield approval. A refusal is a first-class,
+ * inspectable result rather than `null`, so the calling route can fail CLOSED
+ * with a specific reason instead of guessing why nothing was approved.
+ */
+export type AdminContractApproval =
+  | { ok: true; contractVersionId: string }
+  | {
+      ok: false;
+      code: "NO_LINKED_VERSION" | "VERSION_NOT_FOUND" | "SUPERSEDED_BY_NEWER_UPLOAD";
+      message: string;
+    };
 
+/**
+ * ADMIN OVERRIDE — mark the ContractVersion that a reviewed scan judged APPROVED.
+ *
+ * The automated scan is fail-closed: a WARNING/FAIL leaves the ContractVersion
+ * REJECTED. When an admin overrides that verdict in the Contract Shield review
+ * queue, the Deal is advanced to CONTRACT_APPROVED and the buyer is told to sign —
+ * but prepareBuyerSigningEnvelope requires a ContractVersion whose status is
+ * APPROVED. Without this the override produced a deal that could never be signed:
+ * the envelope prepare threw NoSignableDocumentError, the route swallowed it, and
+ * the deal dead-ended at CONTRACT_APPROVED.
+ *
+ * Lives here because this service owns ContractVersion (upload, versioning,
+ * supersede, scan verdict) — the override reuses that ownership rather than
+ * re-implementing version bookkeeping in an admin route.
+ *
+ * COMPLIANCE GATE. Approval binds to `contractVersionId` — the exact document the
+ * reviewed scan ran against (ContractScan.contractVersionId), NOT "the newest
+ * version". Approving the newest was a fail-OPEN defect: a dealer revision
+ * uploaded while the scan sat in the review queue became APPROVED without ever
+ * being scanned, and buyer-signing.service binds the buyer's binding signature and
+ * tamper hash to whichever version is APPROVED.
+ *
+ * Refuses, never guesses:
+ *   • NO_LINKED_VERSION         — the scan predates the contract_version_id column
+ *     (or is an admin override row with no document). The admin must re-scan; a
+ *     heuristic here would reintroduce the defect.
+ *   • VERSION_NOT_FOUND         — the linked version is gone, or belongs to another deal.
+ *   • SUPERSEDED_BY_NEWER_UPLOAD — a newer version landed after the reviewed scan.
+ *     Approving the reviewed one would sign a superseded document and approving the
+ *     newer one would sign an unreviewed document, so neither happens. This is the
+ *     clause that closes the upload-during-review race, independently of the link.
+ *
+ * A refusal writes nothing. Success supersedes any other APPROVED version,
+ * preserving the one-approved-version-per-deal invariant that uploadDealerContract
+ * maintains, and is idempotent.
+ */
+export async function approveContractVersionByAdmin(
+  dealId: string,
+  contractVersionId: string | null | undefined,
+): Promise<AdminContractApproval> {
+  if (!contractVersionId) {
+    return {
+      ok: false,
+      code: "NO_LINKED_VERSION",
+      message:
+        "This review is not linked to a contract version, so we cannot tell which document was reviewed. Re-scan the contract and approve the new review.",
+    };
+  }
+
+  const target = await prisma.contractVersion.findUnique({ where: { id: contractVersionId } });
+  if (!target || target.dealId !== dealId) {
+    return {
+      ok: false,
+      code: "VERSION_NOT_FOUND",
+      message: "The contract version this review targeted no longer exists on this deal. Re-scan the contract.",
+    };
+  }
+
+  // Upload-during-review pre-check: the reviewed document is only approvable while
+  // it is still the deal's current one. This gives the specific, actionable refusal
+  // in the ordinary (non-racing) case; the compare-and-set below is what actually
+  // decides a genuine race.
+  const newest = await prisma.contractVersion.findMany({
+    where: { dealId },
+    orderBy: { version: "desc" },
+    take: 1,
+  });
+  const latestVersion = newest[0]?.version ?? target.version;
+  if (latestVersion > target.version) {
+    return {
+      ok: false,
+      code: "SUPERSEDED_BY_NEWER_UPLOAD",
+      message:
+        "A newer contract version was uploaded after this review ran, so this verdict is stale. Review the latest scan instead.",
+    };
+  }
+
+  // COMPARE-AND-SET. The pre-check above read the version list; an upload
+  // committing between that read and this write would otherwise slip through —
+  // the read says "still current", the write approves a document that was
+  // superseded a moment later. Claiming the row conditionally on
+  // `status != SUPERSEDED` lets the database settle that race: because
+  // createContractVersionAndScan supersedes EVERY other version, a concurrent
+  // upload marks this target SUPERSEDED, the claim matches zero rows, and the
+  // approval refuses instead of binding a buyer's signature to a stale document.
+  // This is also the first write in the function, so a refusal still writes nothing.
+  const claimed = await prisma.contractVersion.updateMany({
+    where: { id: target.id, status: { not: "SUPERSEDED" } },
+    data: { status: "APPROVED", rejectionReason: null },
+  });
+  if (claimed.count === 0) {
+    return {
+      ok: false,
+      code: "SUPERSEDED_BY_NEWER_UPLOAD",
+      message:
+        "A newer contract version was uploaded while this approval was being processed, so this verdict is stale. Review the latest scan instead.",
+    };
+  }
+
+  // Only now retire any OTHER approved version, so approving never leaves two.
+  await prisma.contractVersion.updateMany({
+    where: { dealId, status: "APPROVED", id: { not: target.id } },
+    data: { status: "SUPERSEDED" },
+  });
+
+  return { ok: true, contractVersionId: target.id };
+}
+
+/**
+ * Version + store a contract for a deal and kick off the Contract Shield scan.
+ *
+ * Authorization-free by design: it is the shared pipeline behind BOTH entry points
+ * and each of those owns its own authorization —
+ *   • uploadDealerContract        → dealer, gated by assertDealerOwnsDeal
+ *   • uploadContractForDealByAdmin → admin, gated by requirePermission at the route
+ * Not exported, so no caller can reach it without passing through one of those.
+ */
+async function createContractVersionAndScan(dealId: string, documentUrl: string, uploadedBy: string) {
   const existing = await prisma.contractVersion.findMany({ where: { dealId }, orderBy: { version: "desc" }, take: 1 });
   const version = (existing[0]?.version ?? 0) + 1;
 
-  // Supersede old versions
-  if (existing.length) await prisma.contractVersion.updateMany({ where: { dealId, status: "APPROVED" }, data: { status: "SUPERSEDED" } });
-
+  // Create the replacement BEFORE retiring what it replaces: superseding first
+  // would leave the deal with no live version at all if the create then failed.
   const cv = await prisma.contractVersion.create({
-    data: { dealId, documentUrl, version, uploadedBy: dealerId, status: "UPLOADED" },
+    data: { dealId, documentUrl, version, uploadedBy, status: "UPLOADED" },
+  });
+
+  // Supersede EVERY other version for this deal, not only the APPROVED one. A
+  // newer document makes each earlier one obsolete — a REJECTED row is not
+  // re-approvable and an UPLOADED row must not keep occupying the scan queue.
+  // It also makes SUPERSEDED a complete marker, which is what lets
+  // approveContractVersionByAdmin settle the approve/upload race with a
+  // conditional update instead of a read followed by an unguarded write.
+  await prisma.contractVersion.updateMany({
+    where: { dealId, id: { not: cv.id }, status: { not: "SUPERSEDED" } },
+    data: { status: "SUPERSEDED" },
   });
 
   // Trigger the automatic scan on the REAL contract text. Fail-closed: a scan
@@ -47,6 +184,32 @@ export async function uploadDealerContract(dealId: string, dealerId: string, doc
   await scanContractVersion(cv.id).catch(() => {});
 
   return cv;
+}
+
+export async function uploadDealerContract(dealId: string, dealerId: string, documentUrl: string) {
+  // Authorization chokepoint — protects every caller, not just the HTTP route.
+  await assertDealerOwnsDeal(dealId, dealerId);
+  return createContractVersionAndScan(dealId, documentUrl, dealerId);
+}
+
+/**
+ * ADMIN/CONCIERGE upload path.
+ *
+ * A concierge (vehicle-request) deal has no Offer, and VehicleRequestOffer carries
+ * no dealer identity — so assertDealerOwnsDeal can never pass for one and the ONLY
+ * writer of ContractVersion was unreachable for that whole track. The consequence
+ * was structural: no ContractVersion → no APPROVED version → prepareBuyerSigningEnvelope
+ * fails → a concierge deal could never be signed and therefore never completed.
+ *
+ * This is the same pipeline the dealer path uses (identical versioning, supersede
+ * and fail-closed scan) with admin authorization instead of dealer ownership, so
+ * the concierge track joins the existing Contract Shield → e-sign flow rather than
+ * getting a parallel one. Authorization is enforced by the calling admin route.
+ */
+export async function uploadContractForDealByAdmin(dealId: string, documentUrl: string, adminId: string) {
+  const deal = await prisma.deal.findUnique({ where: { id: dealId }, select: { id: true } });
+  if (!deal) throw new DealOwnershipError();
+  return createContractVersionAndScan(dealId, documentUrl, adminId);
 }
 
 /**
@@ -77,7 +240,9 @@ export async function scanContractVersion(contractVersionId: string): Promise<vo
 
   try {
     const text = await extractContractText(cv.documentUrl);
-    const result = await scanContract(cv.dealId, text, cv.deal.offer?.dealerId ?? cv.uploadedBy);
+    // Pass cv.id so the ContractScan row records WHICH document it judged —
+    // the link the admin approval gate binds to.
+    const result = await scanContract(cv.dealId, text, cv.deal.offer?.dealerId ?? cv.uploadedBy, cv.id);
 
     if (result.status === "PASS") {
       await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "APPROVED", rejectionReason: null } });

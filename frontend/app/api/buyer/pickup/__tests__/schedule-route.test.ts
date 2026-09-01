@@ -14,6 +14,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 let dealStatus = "SIGNED";
 let esignStatus: string | null = "COMPLETED";
+// null models a CONCIERGE (vehicle-request) deal: no Offer, and VehicleRequestOffer
+// carries no dealer identity — so no dealership exists to confirm a proposed time.
+let dealerId: string | null = "dealer_1";
 let proposeResult: unknown = { ok: true, pickup: { id: "pickup_1", status: "PROPOSED" } };
 let proposeCalls: Array<{ dealId: string; buyerId: string; when: Date; location: string | null }> = [];
 
@@ -35,6 +38,7 @@ mock.module("@/lib/prisma", {
           buyerId: "buyer_1",
           status: dealStatus,
           eSignEnvelope: esignStatus ? { status: esignStatus } : null,
+          offer: dealerId ? { dealerId } : null,
         }),
       },
     },
@@ -84,6 +88,7 @@ const VALID_BODY = { scheduledAt: "2026-02-14T20:00:00Z", location: "123 Dealer 
 beforeEach(() => {
   dealStatus = "SIGNED";
   esignStatus = "COMPLETED";
+  dealerId = "dealer_1";
   proposeResult = { ok: true, pickup: { id: "pickup_1", status: "PROPOSED" } };
   proposeCalls = [];
 });
@@ -125,4 +130,18 @@ test("only a SIGNED deal may open an initial proposal (already-scheduled → 409
   const body = JSON.parse((await res.text()).trim());
   assert.equal(body.error.code, "INVALID_STATE");
   assert.equal(proposeCalls.length, 0);
+});
+
+test("a CONCIERGE deal (no dealership) cannot propose a pickup time — it would strand at PROPOSED", async () => {
+  // Only confirmPickup/counterAsDealer can move a pickup out of PROPOSED, and both
+  // require a dealerId. A concierge deal has none, so accepting the proposal would
+  // park the pickup permanently with a dealer nudge cron chasing nobody.
+  dealerId = null;
+  const POST = await loadPOST();
+  const res = await POST(post(VALID_BODY), { params: Promise.resolve({ dealId: "deal_1" }) });
+  assert.equal(res.status, 409);
+  const body = JSON.parse((await res.text()).trim());
+  assert.equal(body.error.code, "NO_DEALER_ON_DEAL");
+  assert.match(body.error.message, /concierge/i, "tell the buyer the truth: their concierge arranges it");
+  assert.equal(proposeCalls.length, 0, "no proposal may be created for a dealer-less deal");
 });

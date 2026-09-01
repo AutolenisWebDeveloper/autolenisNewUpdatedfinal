@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import AdminContractUpload from "@/components/admin/AdminContractUpload";
 import { Badge } from "@/components/ui/badge";
 import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +18,11 @@ import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
 const TABS = ["Overview", "Billing", "Insurance", "E-Sign", "Pickup", "Refunds", "Notes"] as const;
+
+// Stages where attaching (or replacing) the contract is still legitimate. After
+// CONTRACT_APPROVED the buyer is signing a specific version, and a new upload
+// supersedes it — so the control is not offered there.
+const CONTRACT_STAGE_STATUSES: string[] = ["CONTRACT_PENDING", "CONTRACT_REVIEW"];
 type Tab = typeof TABS[number];
 
 interface DealNote { id: string; adminEmail: string; content: string; createdAt: string }
@@ -28,7 +34,7 @@ const DEAL_STAGES = [
   "PICKUP_SCHEDULED", "PICKUP_COMPLETE", "COMPLETED",
 ];
 
-interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null }; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelope: { status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null } | null; pickup: { status: string; scheduledAt: string | null; location: string | null; qrCodeImage: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }
+interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null } | null; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelope: { status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null } | null; pickup: { status: string; scheduledAt: string | null; location: string | null; qrCodeImage: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }
 interface TimelineItem { stage: string; timestamp: string; description: string }
 interface AuditLogItem { id: string; action: string; adminEmail: string; reason: string | null; createdAt: string }
 
@@ -161,17 +167,17 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
               <h3 className="font-semibold text-slate-800 text-sm mb-4">Payments</h3>
               <div className="space-y-4">
                 {/* Deposit row */}
-                {deal.offer.auction?.deposit ? (
+                {deal.offer?.auction?.deposit ? (
                   <div className="border border-slate-100 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-semibold text-slate-800">$99 Auction Access Deposit</span>
                     </div>
                     <AdminPaymentActionsClient
                       type="deposit"
-                      depositId={deal.offer.auction.deposit.id}
+                      depositId={deal.offer.auction!.deposit!.id}
                       buyerId={deal.buyerId}
                       buyerEmail={deal.buyer.user.email}
-                      status={deal.offer.auction.deposit.status}
+                      status={deal.offer.auction!.deposit!.status}
                     />
                   </div>
                 ) : (
@@ -214,10 +220,28 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
               </div>
               <div className="bg-white border border-slate-200 rounded-xl p-5">
                 <p className="text-xs font-semibold text-slate-400 uppercase mb-3">Dealer</p>
-                <p className="font-semibold text-slate-800">{deal.offer.dealer.dealershipName}</p>
-                <p className="text-xs text-slate-500">{deal.offer.dealer.city}, {deal.offer.dealer.state} · {deal.offer.dealer.tier}</p>
+                {deal.offer ? (
+                  <>
+                    <p className="font-semibold text-slate-800">{deal.offer.dealer.dealershipName}</p>
+                    <p className="text-xs text-slate-500">{deal.offer.dealer.city}, {deal.offer.dealer.state} · {deal.offer.dealer.tier}</p>
+                  </>
+                ) : (
+                  // Concierge deal: Deal.offerId is null and VehicleRequestOffer
+                  // carries no dealer identity, so there is no dealership to show.
+                  <p className="text-sm text-slate-500" data-testid="deal-concierge-no-dealer">
+                    AutoLenis concierge — sourced directly, no dealer auction.
+                  </p>
+                )}
               </div>
             </div>
+
+            {/* Contract attachment — the only operator path for a concierge deal,
+                which has no dealer and therefore no dealer upload surface. Shown
+                while the deal is still in the contract stage; once it is approved
+                and signing, re-uploading would supersede the signed document. */}
+            {CONTRACT_STAGE_STATUSES.includes(deal.status) && (
+              <AdminContractUpload dealId={deal.id} />
+            )}
 
             {/* Contract Shield Status */}
             {deal.contractShieldStatus && (
@@ -233,10 +257,10 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <h3 className="font-semibold text-slate-800 text-sm mb-4">Billing Breakdown</h3>
               {[
-                { label: "Vehicle Price", value: `$${(deal.offer.vehiclePriceCents / 100).toLocaleString()}` },
-                { label: "Tax", value: `$${(deal.offer.taxCents / 100).toLocaleString()}` },
-                { label: "Dealer Fees", value: `$${(deal.offer.feesCents / 100).toLocaleString()}` },
-                { label: "OTD Total", value: `$${(deal.offer.otdPriceCents / 100).toLocaleString()}` },
+                { label: "Vehicle Price", value: deal.offer ? `$${(deal.offer.vehiclePriceCents / 100).toLocaleString()}` : "—" },
+                { label: "Tax", value: deal.offer ? `$${(deal.offer.taxCents / 100).toLocaleString()}` : "—" },
+                { label: "Dealer Fees", value: deal.offer ? `$${(deal.offer.feesCents / 100).toLocaleString()}` : "—" },
+                { label: "OTD Total", value: deal.offer ? `$${(deal.offer.otdPriceCents / 100).toLocaleString()}` : "—" },
                 { label: "Financing Path", value: deal.financingPath ?? "Not selected" },
                 { label: "Concierge Fee", value: deal.feePaidAt ? `$${(deal.feeAmountCents ?? PREMIUM_FEE_CENTS) / 100} — paid ${new Date(deal.feePaidAt).toLocaleDateString()}` : "Not yet paid" },
               ].map(f => (
@@ -297,7 +321,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
         )}
 
         {activeTab === "Refunds" && (() => {
-          const deposit = deal.offer.auction?.deposit ?? null;
+          const deposit = deal.offer?.auction?.deposit ?? null;
           const refunds: Array<{ id: string; label: string; amountCents: number; ref: string | null; when: string | null }> = [];
           if (deposit && deposit.status === "REFUNDED") {
             refunds.push({ id: `dep-${deposit.id}`, label: "Deposit refunded", amountCents: deposit.amountCents, ref: deposit.stripePaymentIntentId, when: null });

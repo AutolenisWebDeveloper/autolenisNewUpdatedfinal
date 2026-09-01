@@ -8,7 +8,8 @@
 
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -20,8 +21,11 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { id } = await params;
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Tier 1 (Finding 5): enforced directly from PERMISSION_ROLES.
+  // A credit decision on a buyer's external pre-approval.
+  const adminCheck = await requirePermissionStrict(request, "finance.preapproval.decide");
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const submission = await prisma.externalPreApproval.findUnique({
     where: { id },

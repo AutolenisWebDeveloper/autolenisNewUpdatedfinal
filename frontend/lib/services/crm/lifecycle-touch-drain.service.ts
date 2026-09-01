@@ -59,7 +59,8 @@ const STALE_MS = 10 * MIN; // > drain maxDuration; a stale 'sending' row is recl
 const MAX_ATTEMPTS = 4;
 
 export type LifecycleSequence =
-  | "deposit_reminder_1" | "deposit_reminder_2" | "deposit_reminder_3" | "deposit_reminder_4"
+  | "deposit_reminder_1" | "deposit_reminder_2" | "deposit_reminder_3"
+  | "deposit_reminder_4" | "deposit_reminder_5" | "deposit_reminder_6"
   | "auction_active" | "auction_midpoint" | "auction_closing"
   | "dealer_invited"
   | "offer_received" | "offer_follow_up_1" | "offer_follow_up_2"
@@ -114,7 +115,7 @@ const DASH = `${NOTIFY_APP_URL}/buyer/dashboard`;
 const DEPOSIT_CHECKOUT = `${NOTIFY_APP_URL}/buyer/deposit`;
 
 // Message bodies ported verbatim from app/api/jobs/<name>/route.ts, EXCEPT the
-// deposit-reminder set (re-cadenced 4 touches + truthful $99 copy, CTA → the
+// deposit-reminder set (re-cadenced 6 touches + truthful $99 copy, CTA → the
 // $99 checkout) and the pre-checkout form_submitted/check_form_completion set
 // (truthful $99 copy + a secure resume link). See deposit_reminder_1 /
 // form_submitted headers.
@@ -134,16 +135,41 @@ const DEPOSIT_CHECKOUT = `${NOTIFY_APP_URL}/buyer/deposit`;
 const auctionLiveGuard = async (buyerId: string): Promise<boolean> =>
   (await hasSelectedOffer(buyerId)) || !(await hasLiveAuction(buyerId));
 const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
-  // ── $99 deposit conversion (4 touches: +1h/+6h/+24h/+72h) ─────────────────
-  // Producer enrolls deposit_reminder_1 at run_at = now + 1h (the intentional
-  // first-touch grace: never chase a buyer who may still be completing checkout).
+  // ── $99 deposit conversion (6 touches: 0/+1h/+6h/+24h/+72h/day-7) ─────────
+  // Producer enrolls deposit_reminder_1 at run_at = now, so the first touch is due
+  // on the drain's next pass (the cron runs every 15 minutes — "immediate" means
+  // due immediately, not delivered to the second). The earlier +1h first-touch
+  // grace ("never chase a buyer who may still be completing checkout") is noted
+  // and OVERRULED by the owner's product decision: touch 1 is not a chase but a
+  // "here's your link back", so it leads rather than waits. Touches 2–5 keep the
+  // previous +1h/+6h/+24h/+72h cadence unchanged, and touch 6 adds a day-7 final
+  // notice; every offset below is cumulative from enrollment.
+  //
   // Each touch's guard (depositConversionResolved) re-reads live state at send
   // time and cancels the whole chain the instant the buyer no longer owes the $99
-  // (paid, or the pending intent is gone). Every message is truthful: the request
-  // is saved, the $99 is the next step, and dealer/auction fulfillment begins
-  // only AFTER payment — no fabricated dealer interest, bidding, offers, savings,
-  // urgency, or scarcity. CTA → the $99 checkout for the preserved request.
+  // (paid/refunded/failed/absent) or has been administratively halted. Every
+  // message is truthful: the request is saved, the $99 is the next step, and
+  // dealer/auction fulfillment begins only AFTER payment — no fabricated dealer
+  // interest, bidding, offers, savings, urgency, or scarcity. CTA → the $99
+  // checkout for the preserved request.
   deposit_reminder_1: {
+    entityType: "buyer",
+    guard: depositConversionResolved,
+    // IMMEDIATE (offset 0) — deliberately not a chase. The buyer has just left
+    // checkout with their request preserved, so this is the link back to it.
+    render: ({ firstName }) => ({
+      sms: `Hi ${firstName} — here's your link back to your saved AutoLenis request: autolenis.com/buyer/deposit. The ${DEPOSIT_AMOUNT_USD} Auction Access Deposit is the next step whenever you're ready.`,
+      emailSubject: "Here's your link back to your vehicle request",
+      emailHtml: renderEmail({
+        heading: "Here's your link back",
+        bodyHtml: `<p>Hi ${firstName},</p><p>Thanks for starting your AutoLenis vehicle request — everything you entered is saved, so you can pick up exactly where you left off.</p><p>Whenever you're ready, your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is the next step. Once it's paid, local dealers begin competing for your vehicle in a private auction.</p>`,
+        ctaText: `Return to your ${DEPOSIT_AMOUNT_USD} deposit`,
+        ctaUrl: DEPOSIT_CHECKOUT,
+      }),
+    }),
+    next: { sequence: "deposit_reminder_2", delayMs: 60 * MIN }, // +1h from enrollment
+  },
+  deposit_reminder_2: {
     entityType: "buyer",
     guard: depositConversionResolved,
     render: ({ firstName }) => ({
@@ -156,9 +182,9 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
         ctaUrl: DEPOSIT_CHECKOUT,
       }),
     }),
-    next: { sequence: "deposit_reminder_2", delayMs: 5 * 60 * MIN }, // +5h → +6h from enrollment
+    next: { sequence: "deposit_reminder_3", delayMs: 5 * 60 * MIN }, // +5h → +6h from enrollment
   },
-  deposit_reminder_2: {
+  deposit_reminder_3: {
     entityType: "buyer",
     guard: depositConversionResolved,
     render: ({ firstName }) => ({
@@ -171,9 +197,9 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
         ctaUrl: DEPOSIT_CHECKOUT,
       }),
     }),
-    next: { sequence: "deposit_reminder_3", delayMs: 18 * 60 * MIN }, // +18h → +24h from enrollment
+    next: { sequence: "deposit_reminder_4", delayMs: 18 * 60 * MIN }, // +18h → +24h from enrollment
   },
-  deposit_reminder_3: {
+  deposit_reminder_4: {
     entityType: "buyer",
     guard: depositConversionResolved,
     render: ({ firstName }) => ({
@@ -186,17 +212,37 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
         ctaUrl: DEPOSIT_CHECKOUT,
       }),
     }),
-    next: { sequence: "deposit_reminder_4", delayMs: 48 * 60 * MIN }, // +48h → +72h from enrollment
+    next: { sequence: "deposit_reminder_5", delayMs: 48 * 60 * MIN }, // +48h → +72h from enrollment
   },
-  deposit_reminder_4: {
+  deposit_reminder_5: {
     entityType: "buyer",
     guard: depositConversionResolved,
+    // Was the terminal touch and said so ("this is our last reminder"). With the
+    // day-7 final notice below, that claim is no longer true, so the finality —
+    // and only the finality — is removed; the rest of the copy is unchanged.
     render: ({ firstName }) => ({
-      sms: `${firstName}, this is our last reminder — your AutoLenis request is saved. Complete the ${DEPOSIT_AMOUNT_USD} Auction Access Deposit whenever you're ready: autolenis.com/buyer/deposit`,
-      emailSubject: "Last reminder: your saved vehicle request",
+      sms: `${firstName}, your AutoLenis request is saved and ready. Complete the ${DEPOSIT_AMOUNT_USD} Auction Access Deposit whenever you're ready: autolenis.com/buyer/deposit`,
+      emailSubject: "Your saved vehicle request is still ready",
       emailHtml: renderEmail({
-        heading: "Last reminder about your saved request",
-        bodyHtml: `<p>Hi ${firstName},</p><p>This is the last reminder we'll send. Your vehicle request is still saved, and your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is the only step left to let dealers compete. You can complete it any time.</p>`,
+        heading: "Your saved request is still ready",
+        bodyHtml: `<p>Hi ${firstName},</p><p>Your vehicle request is still saved, and your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is the only step left to let dealers compete. You can complete it any time.</p>`,
+        ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+        ctaUrl: DEPOSIT_CHECKOUT,
+      }),
+    }),
+    next: { sequence: "deposit_reminder_6", delayMs: 96 * 60 * MIN }, // +96h → day-7 (+168h) from enrollment
+  },
+  deposit_reminder_6: {
+    entityType: "buyer",
+    guard: depositConversionResolved,
+    // DAY-7 FINAL NOTICE (terminal). The finality claim is scoped to this series,
+    // which is the only claim the chain can actually keep.
+    render: ({ firstName }) => ({
+      sms: `${firstName}, final notice — your AutoLenis request stays saved. If you'd still like dealers to compete, the ${DEPOSIT_AMOUNT_USD} Auction Access Deposit is the only step left: autolenis.com/buyer/deposit`,
+      emailSubject: "Final notice: your saved vehicle request",
+      emailHtml: renderEmail({
+        heading: "Final notice about your saved request",
+        bodyHtml: `<p>Hi ${firstName},</p><p>This is the final notice in this series. Nothing is lost — your vehicle request stays on file, and your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> remains the only step left before dealers begin competing for it.</p><p>If now isn't the right time, no action is needed.</p>`,
         ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
         ctaUrl: DEPOSIT_CHECKOUT,
       }),
@@ -539,7 +585,8 @@ export function depositReminderBaseKey(buyerId: string): string {
 }
 
 const DEPOSIT_REMINDER_SEQUENCES: LifecycleSequence[] = [
-  "deposit_reminder_1", "deposit_reminder_2", "deposit_reminder_3", "deposit_reminder_4",
+  "deposit_reminder_1", "deposit_reminder_2", "deposit_reminder_3",
+  "deposit_reminder_4", "deposit_reminder_5", "deposit_reminder_6",
 ];
 
 // Proactively cancel a buyer's remaining $99 deposit-conversion touches (Section

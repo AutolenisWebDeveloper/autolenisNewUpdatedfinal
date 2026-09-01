@@ -279,7 +279,12 @@ test("drain returns NO_TABLE (dormant) when the table doesn't exist yet", async 
   assert.equal(r.status, "NO_TABLE");
 });
 
-test("deposit_reminder_1 sends (buyer), marks done, chains deposit_reminder_2 at +5h (→+6h from enroll)", async () => {
+// CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7).
+// Touch 1 is now the immediate "here's your link back" and chains touch 2 at +1h;
+// the four previously-numbered touches shifted to 2–5 and a day-7 touch 6 was
+// added. These three tests pinned the old numbering's deltas and are updated
+// deliberately, not deleted — the deltas below are the new cadence.
+test("deposit_reminder_1 (immediate) sends (buyer), marks done, chains deposit_reminder_2 at +1h", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = { r1: row() };
   const { drainDueLifecycleTouches } = await load();
@@ -298,10 +303,10 @@ test("deposit_reminder_1 sends (buyer), marks done, chains deposit_reminder_2 at
   assert.equal(np.sequence, "deposit_reminder_2");
   assert.equal(np.base_key, "deposit-reminder:b1", "chain reuses base_key");
   const runAt = new Date(np.run_at as string).getTime();
-  assert.ok(runAt >= before + 5 * HR - 10000 && runAt <= Date.now() + 5 * HR + 10000, "next ≈ +5h");
+  assert.ok(runAt >= before + 1 * HR - 10000 && runAt <= Date.now() + 1 * HR + 10000, "next ≈ +1h");
 });
 
-test("payment before Touch 2 stops Touch 2–4 (guard cancels a later touch too) (#8)", async () => {
+test("payment before Touch 2 stops Touch 2–6 (guard cancels a later touch too) (#8)", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_2" }) };
   ctrl.depositResolved = true;
@@ -312,7 +317,7 @@ test("payment before Touch 2 stops Touch 2–4 (guard cancels a later touch too)
   assert.equal(ctrl.nextScheduled.length, 0, "no Touch 3 is chained after conversion");
 });
 
-test("deposit_reminder_3 chains deposit_reminder_4 at +48h (→+72h from enroll)", async () => {
+test("deposit_reminder_3 chains deposit_reminder_4 at +18h (→+24h from enroll)", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_3" }) };
   const { drainDueLifecycleTouches } = await load();
@@ -322,16 +327,39 @@ test("deposit_reminder_3 chains deposit_reminder_4 at +48h (→+72h from enroll)
   assert.equal(ctrl.nextScheduled.length, 1);
   assert.equal(ctrl.nextScheduled[0].sequence, "deposit_reminder_4");
   const runAt = new Date(ctrl.nextScheduled[0].run_at as string).getTime();
-  assert.ok(runAt >= before + 48 * HR - 10000, "next ≈ +48h");
+  assert.ok(runAt >= before + 18 * HR - 10000, "next ≈ +18h");
 });
 
-test("deposit_reminder_4 is terminal — sends, no further chain", async () => {
+test("deposit_reminder_5 chains the day-7 final notice at +96h (→+168h from enroll)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_5" }) };
+  const { drainDueLifecycleTouches } = await load();
+  const before = Date.now();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  assert.equal(ctrl.nextScheduled.length, 1);
+  assert.equal(ctrl.nextScheduled[0].sequence, "deposit_reminder_6");
+  const runAt = new Date(ctrl.nextScheduled[0].run_at as string).getTime();
+  assert.ok(runAt >= before + 96 * HR - 10000, "next ≈ +96h → day-7 from enrollment");
+});
+
+test("deposit_reminder_4 is NOT terminal — it chains the +72h touch", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_4" }) };
   const { drainDueLifecycleTouches } = await load();
   const r = await drainDueLifecycleTouches();
   assert.equal(r.sent, 1);
-  assert.equal(ctrl.nextScheduled.length, 0, "4th touch ends the conversion window");
+  assert.equal(ctrl.nextScheduled.length, 1, "the chain continues past the old 4-touch ending");
+  assert.equal(ctrl.nextScheduled[0].sequence, "deposit_reminder_5");
+});
+
+test("deposit_reminder_6 (day-7 final notice) is terminal — sends, no further chain", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_6" }) };
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  assert.equal(ctrl.nextScheduled.length, 0, "the day-7 notice ends the conversion window");
 });
 
 test("CONVERSION GUARD: deposit_reminder_1 stops when depositConversionResolved (paid/no-pending) — no send, no chain", async () => {
@@ -573,9 +601,22 @@ test("cancelDepositReminderTouches moves pending/sending deposit_reminder_* rows
   assert.equal(r.canceled, 2);
   assert.equal(calls.payload?.status, "canceled");
   assert.equal(calls.payload?.last_error, "deposit_paid");
-  // scoped to this buyer's chain, the 4 deposit sequences, and only in-flight rows
+  // scoped to this buyer's chain, ALL SIX deposit sequences, and only in-flight rows
   assert.ok(calls.filters.some((f) => f[1] === "base_key" && f[2] === "deposit-reminder:b1"));
-  assert.ok(calls.filters.some((f) => f[0] === "in" && f[1] === "sequence"));
+  // Pinned by name: this list previously held four sequences and was asserted only
+  // as "an `in` on sequence exists", so extending the chain without extending the
+  // list would have left the day-7 (and +72h) rows outside the proactive cancel —
+  // stopped only by the send-time guard, with the defence-in-depth layer silently
+  // gone and no test failing.
+  const seqFilter = calls.filters.find((f) => f[0] === "in" && f[1] === "sequence");
+  assert.deepEqual(
+    (seqFilter?.[2] as string[]).slice().sort(),
+    [
+      "deposit_reminder_1", "deposit_reminder_2", "deposit_reminder_3",
+      "deposit_reminder_4", "deposit_reminder_5", "deposit_reminder_6",
+    ],
+    "every touch in the chain must be cancellable on conversion",
+  );
   assert.ok(calls.filters.some((f) => f[0] === "in" && f[1] === "status"));
 });
 

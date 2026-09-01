@@ -80,6 +80,7 @@ export default function AdminSettingsPage() {
   // placeholder rows were removed (no dead-ends).
   const SETTINGS_LINKS: Array<{ label: string; href: string }> = [
     { label: "Contract Shield Rules", href: "/admin/contract-shield/rules" },
+    { label: "RBAC Shadow Report", href: "/admin/settings/rbac-shadow" },
     { label: "Refinance Partner", href: "/admin/refinance/partner" },
     { label: "Referral Milestone Tiers", href: "/admin/referral-milestones" },
     { label: "Admin Accounts", href: "/admin/settings/admins" },

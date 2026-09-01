@@ -2,8 +2,14 @@
 // Audited impersonation sessions over the existing (previously orphaned)
 // /api/admin/support/impersonate + …/impersonation/[id]/end routes:
 // who / why / when is recorded per session; start requires a reason and the
-// routes are SUPER_ADMIN gated server-side (ruled policies 1 and 4).
+// routes are SUPER_ADMIN only, enforced server-side from PERMISSION_ROLES
+// ("support.impersonate") — impersonation grants full buyer PII and financials
+// while acting AS the buyer, so it takes the narrowest role (ruled policy 4).
+// The page itself stays readable by any admin: the session log is an audit
+// surface. Only the start control is SUPER_ADMIN-gated, so support staff are not
+// shown a button that can only fail.
 import { requireAdmin } from "@/lib/auth/admin-session";
+import { roleAllows } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/prisma";
 import { LifeBuoy, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +26,7 @@ export default async function AdminSupportPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const admin = await requireAdmin();
+  const canImpersonate = roleAllows("support.impersonate", admin.role);
   const { q } = await searchParams;
   const query = q?.trim() ?? "";
 
@@ -109,7 +116,13 @@ export default async function AdminSupportPage({
                       <p className="text-sm font-semibold text-slate-900">{name ?? u.email}</p>
                       <p className="text-xs text-slate-400">{u.email} · {u.role}</p>
                     </div>
-                    <StartImpersonationButton targetUserId={u.id} targetLabel={name ?? u.email} adminRole={admin.role} />
+                    {canImpersonate ? (
+                      <StartImpersonationButton targetUserId={u.id} targetLabel={name ?? u.email} adminRole={admin.role} />
+                    ) : (
+                      <span className="text-xs text-slate-400" data-testid="impersonate-not-permitted">
+                        SUPER_ADMIN only
+                      </span>
+                    )}
                   </div>
                 );
               })}

@@ -5,7 +5,7 @@
 // data — buyer/dealer endpoints return safe summaries. Authorization is OPS-gated
 // (same role that governs esign admin actions) and every export is audit-logged.
 import { NextRequest } from "next/server";
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { toAdminEvidencePackage } from "@/lib/services/esign/esign-dto";
@@ -14,16 +14,14 @@ import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gat
 
 interface Props { params: Promise<{ dealId: string }> }
 
-// requirePermission is shadow-only (it records a would-be denial and allows), so
-// exporting the raw forensic package (IP, user-agent, consent snapshot) needs this
-// hard check to be the OPS gate the header above describes.
-const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "OPERATIONS_ADMIN"]);
-
 export async function GET(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await requirePermission(request, "deals.esign.void");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
+  const adminCheck = await requirePermissionStrict(request, "deals.esign.void");
+  // Hard-enforced (not via the shadow flag), and the allow-list is read from
+  // PERMISSION_ROLES rather than restated here: a duplicated inline role set is
+  // a second source of policy that can drift from the matrix it is meant to mirror.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const envelope = await readEnvelopeForDeal(dealId);
   if (!envelope) return adminError("NOT_FOUND", "No signing record for this deal", 404);

@@ -114,7 +114,17 @@ function runBuiltinHeuristics(contractText: string): { score: number; fixList: F
   return { score, fixList };
 }
 
-export async function scanContract(dealId: string, contractText: string, dealerId: string): Promise<{
+/**
+ * Run the Contract Shield rules over a contract's text and persist the verdict.
+ *
+ * `contractVersionId` records WHICH document this verdict judged — the link the
+ * admin approval gate binds to. The only caller (scanContractVersion) always
+ * supplies it; the parameter is optional purely so the column stays nullable for
+ * rows written before it existed. Omitting it produces an UN-APPROVABLE scan
+ * (the gate hard-refuses a null link) rather than one that approves the wrong
+ * document, which is the fail-closed direction.
+ */
+export async function scanContract(dealId: string, contractText: string, dealerId: string, contractVersionId?: string): Promise<{
   score: number;
   status: string;
   fixList: FixItem[];
@@ -175,7 +185,7 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   const version = (existingScans[0]?.version ?? 0) + 1;
 
   await prisma.contractScan.create({
-    data: { dealId, score, status, fixList: fixList as object[], version, scannedAt: new Date() },
+    data: { dealId, score, status, fixList: fixList as object[], version, scannedAt: new Date(), contractVersionId: contractVersionId ?? null },
   });
 
   await prisma.deal.update({

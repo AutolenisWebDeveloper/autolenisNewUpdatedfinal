@@ -7,7 +7,7 @@
 // Requires reason (min 10 chars)
 // FINANCE_ADMIN or SUPER_ADMIN only
 
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -20,7 +20,6 @@ const schema = z.object({
   reason: z.string().min(10, "Reason must be at least 10 characters"),
 });
 
-const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
 
 // Thrown inside the transaction when the compare-and-set matches 0 rows —
 // a concurrent transition already moved this commission.
@@ -28,9 +27,16 @@ class TransitionConflictError extends Error {}
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
-  const admin = await requirePermission(request, "finance.commissions.reverse");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or FINANCE_ADMIN required", 403);
+  const adminCheck = await requirePermissionStrict(request, "finance.commissions.reverse");
+  // Hard-enforced (not via the shadow flag), and the allow-list is read from
+  // PERMISSION_ROLES rather than restated here: a duplicated inline role set is
+  // a second source of policy that can drift from the matrix it is meant to mirror.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
+  // Role check lives in the gate above, derived from PERMISSION_ROLES
+  // ("finance.commissions.*" = SUPER_ADMIN, FINANCE_ADMIN). A second hardcoded
+  // set here would be a copy that can silently drift from the matrix — which is
+  // exactly how the impersonation routes came to disagree with it.
 
   const commission = await prisma.commission.findUnique({ where: { id: commissionId } });
   if (!commission) return adminError("NOT_FOUND", "Commission not found", 404);

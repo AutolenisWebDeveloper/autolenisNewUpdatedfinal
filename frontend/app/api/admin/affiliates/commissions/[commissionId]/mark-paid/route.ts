@@ -1,4 +1,4 @@
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
@@ -17,16 +17,14 @@ const schema = z.object({
   note:             z.string().max(500).optional(),
 });
 
-// requirePermission is shadow-only (it records a would-be denial and allows), so
-// settling a real affiliate payout needs this hard check — same gate the reverse/
-// and clawback/ siblings already enforce.
-const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
-
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
-  const admin = await requirePermission(request, "finance.commissions.settle");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or FINANCE_ADMIN required", 403);
+  const adminCheck = await requirePermissionStrict(request, "finance.commissions.settle");
+  // Hard-enforced (not via the shadow flag), and the allow-list is read from
+  // PERMISSION_ROLES rather than restated here: a duplicated inline role set is
+  // a second source of policy that can drift from the matrix it is meant to mirror.
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const commission = await prisma.commission.findUnique({
     where: { id: commissionId },

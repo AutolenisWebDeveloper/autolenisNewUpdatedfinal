@@ -3,7 +3,12 @@
 // Proves the hard requirement: NO dead-letter recovery path requires Inngest.
 //   1. recognized migrated events replay to their INTERNAL owner (email/sms →
 //      outbox, dealer.award → emitDealerAwardOutcomes, lead.* → scheduleLeadNurture);
-//   2. qstash:* rows re-publish through QStash (dispatch), not internal reemit;
+//   2. qstash:* rows TERMINALIZE — QStash has been removed from the stack, so
+//      re-publishing them was worse than a no-op: dispatch() swallows its own
+//      failure and writes a FRESH dead-letter row, while the drainer deleted the
+//      old one and counted a success. The retry cap never bit (each cycle created
+//      a row with auto_retry_count 0), so every abandoned deposit left a row
+//      churning forever. They are now pinned terminal and kept for visibility;
 //   3. an UNKNOWN event never dispatches anywhere and is terminalized in place
 //      (auto_retry_count pinned at the cap + a sanitized TERMINAL reason) — no
 //      silent loss, no infinite loop;
@@ -143,12 +148,32 @@ test("dealer.award replays via emitDealerAwardOutcomes; lead.* via scheduleLeadN
   assert.equal(calls.nurture[0].sequence, "form_abandonment");
 });
 
-test("qstash:* rows re-publish through QStash, not internal reemit", async () => {
+test("qstash:* rows TERMINALIZE — never re-published into the removed service", async () => {
   ctrl.dueRows = [due("qstash:/api/jobs/deposit-reminder", { path: "/api/jobs/deposit-reminder", body: { buyerId: "b" } }, "r1")];
-  await (await newOps()).autoDrainDeadLetterJobs({ minAgeMs: 0 });
-  assert.equal(calls.dispatch.length, 1);
-  assert.equal(calls.email.length + calls.sms.length + calls.dealer.length + calls.nurture.length, 0);
-  assert.deepEqual(ctrl.deleted, ["r1"]);
+  const r = await (await newOps()).autoDrainDeadLetterJobs({ minAgeMs: 0, maxAutoRetries: 3 });
+
+  assert.equal(calls.dispatch.length, 0, "QStash is gone — re-publishing enqueues into nothing");
+  assert.equal(calls.email.length + calls.sms.length + calls.dealer.length + calls.nurture.length, 0,
+    "and a qstash row has no internal owner to re-drive either");
+  assert.deepEqual(ctrl.deleted, [], "kept for operator visibility rather than silently dropped");
+  assert.equal(ctrl.terminalized.length, 1, "pinned terminal so no future scan picks it up");
+  assert.equal(ctrl.terminalized[0].payload.auto_retry_count, 3);
+  assert.match(String(ctrl.terminalized[0].payload.error_message), /TERMINAL/);
+  assert.equal(r.failed, 1);
+});
+
+test("the churn loop is closed: a qstash row cannot spawn a replacement row", async () => {
+  // The loop was: drainer re-publishes -> dispatch throws -> dispatch writes a NEW
+  // dead-letter row (auto_retry_count 0) -> drainer deletes the OLD row and counts
+  // a success. The cap never applied because every cycle produced a fresh row.
+  // Terminalizing in place breaks it: nothing is dispatched, so nothing new is
+  // written, and the original row is excluded from every later scan.
+  ctrl.dueRows = [due("qstash:/api/jobs/deposit-reminder", { path: "/api/jobs/deposit-reminder", body: { buyerId: "b" } }, "r1")];
+  const r = await (await newOps()).autoDrainDeadLetterJobs({ minAgeMs: 0, maxAutoRetries: 3 });
+
+  assert.equal(calls.dispatch.length, 0, "no dispatch means no replacement row can be created");
+  assert.equal(r.reemitted, 0, "a terminalized row is not a re-emission");
+  assert.deepEqual(ctrl.deleted, []);
 });
 
 test("UNKNOWN event: never dispatched, terminalized in place (no loss, no loop)", async () => {

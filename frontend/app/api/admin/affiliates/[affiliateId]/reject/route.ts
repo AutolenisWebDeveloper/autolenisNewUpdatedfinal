@@ -6,7 +6,8 @@
 
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/prisma";
 import { rejectAffiliateByAdmin } from "@/lib/services/admin/admin-affiliate-command-center.service";
 import { sendAffiliateRejectionEmail } from "@/lib/services/email/resend.service";
@@ -20,8 +21,11 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { affiliateId } = await params;
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Tier 1 (Finding 5): enforced directly from PERMISSION_ROLES.
+  // Gates whether an affiliate can earn commissions.
+  const adminCheck = await requirePermissionStrict(request, "affiliates.account_state");
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   let body: unknown = {};
   try { body = await request.json(); } catch { /* body optional */ }

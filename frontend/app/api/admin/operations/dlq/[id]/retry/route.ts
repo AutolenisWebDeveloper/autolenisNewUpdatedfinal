@@ -14,14 +14,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const auth = await requirePermissionActorStrict("ops.replay");
-  if (!auth.ok) {
-    return NextResponse.json(
-      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
-      { status: auth.status },
-    );
-  }
-  const actor = auth.actor;
+  // Enforced directly (not via the shadow flag): replaying a dead-lettered job
+  // re-fires its arbitrary inherited side effects, so this is SUPER_ADMIN only.
+  // It previously had no role check, leaving it open to every authenticated admin.
+  const actorCheck = await requirePermissionActorStrict("ops.replay", { path: `/api/admin/operations/dlq/${id}/retry`, method: 'POST' });
+  if (!actorCheck.ok) return NextResponse.json({ error: actorCheck.code }, { status: actorCheck.status });
+  const actor = actorCheck.actor;
   const supabase = getServiceSupabase();
   const ops = new OperationsService(supabase);
 

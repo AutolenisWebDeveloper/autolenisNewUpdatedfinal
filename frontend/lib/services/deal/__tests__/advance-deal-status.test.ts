@@ -16,6 +16,8 @@ interface DealRow {
   status: DealStatus;
   buyerId: string;
   insuranceStatus: InsuranceStatus;
+  feePaidAt: Date | null;
+  feeRefundedAt: Date | null;
 }
 
 interface Ctrl {
@@ -24,6 +26,8 @@ interface Ctrl {
   // (simulating another writer winning the race) and mutates the row to
   // `raceTo` before the caller re-reads.
   raceTo: DealStatus | null;
+  /** When true, deal.findUnique throws — simulates a DB failure mid-drive. */
+  throwOnFind: boolean;
   updateManyCalls: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   updateCalls: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   historyCreates: Array<Record<string, unknown>>;
@@ -36,7 +40,10 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       deal: {
-        findUnique: async () => ({ ...ctrl.deal }),
+        findUnique: async () => {
+          if (ctrl.throwOnFind) throw new Error("simulated DB failure");
+          return { ...ctrl.deal };
+        },
         update: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
           ctrl.updateCalls.push(args);
           Object.assign(ctrl.deal, args.data);
@@ -75,8 +82,9 @@ async function load() { return import("../deal.service"); }
 
 beforeEach(() => {
   ctrl = {
-    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED },
+    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null, feeRefundedAt: null },
     raceTo: null,
+    throwOnFind: false,
     updateManyCalls: [],
     updateCalls: [],
     historyCreates: [],
@@ -140,4 +148,204 @@ test("insurance hard-gate blocks COMPLETED without proof on file", async () => {
   const { advanceDealStatus, InsuranceRequiredError } = await load();
   await assert.rejects(() => advanceDealStatus("d1", "COMPLETED"), (e: unknown) => e instanceof InsuranceRequiredError);
   assert.deepEqual(ctrl.completionEmits, []);
+});
+
+// ── Insurance-gate driver: INSURANCE_PENDING → CONTRACT_PENDING ──────────────
+// This edge previously had NO automatic driver: the only buyer-facing insurance
+// path (upload-proof) wrote insuranceStatus directly and never advanced, so every
+// self-service deal stranded at INSURANCE_PENDING until an admin intervened.
+
+test("proof on file advances INSURANCE_PENDING → CONTRACT_PENDING through the guarded seam", async () => {
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  const advanced = await advanceOnInsuranceSatisfied("d1");
+  assert.equal(advanced, true);
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING");
+  // Went through advanceDealStatus: CAS + history + comms, not a raw write.
+  assert.equal(ctrl.updateManyCalls[0]?.where.status, "INSURANCE_PENDING");
+  assert.equal(ctrl.historyCreates.length, 1);
+  assert.deepEqual(ctrl.commsCalls, [{ dealId: "d1", status: "CONTRACT_PENDING" }]);
+});
+
+for (const satisfied of [InsuranceStatus.VERIFIED, InsuranceStatus.POLICY_BOUND, InsuranceStatus.EXTERNAL_UPLOADED]) {
+  test(`every INSURANCE_SATISFIED value releases the gate (${satisfied})`, async () => {
+    ctrl.deal.status = "INSURANCE_PENDING";
+    ctrl.deal.insuranceStatus = satisfied;
+    const { advanceOnInsuranceSatisfied } = await load();
+    assert.equal(await advanceOnInsuranceSatisfied("d1"), true);
+    assert.equal(ctrl.deal.status, "CONTRACT_PENDING");
+  });
+}
+
+test("unsatisfied insurance does NOT advance — the gate holds", async () => {
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.QUOTE_REQUESTED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false);
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING");
+  assert.equal(ctrl.updateManyCalls.length, 0, "no swap attempted while proof is missing");
+});
+
+test("no-op when the deal is not at INSURANCE_PENDING (never skips or rewinds a stage)", async () => {
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false);
+  assert.equal(ctrl.deal.status, "FEE_PAID");
+  assert.equal(ctrl.updateManyCalls.length, 0);
+});
+
+test("idempotent — re-driving an already-advanced deal does nothing", async () => {
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), true);
+  const swapsAfterFirst = ctrl.updateManyCalls.length;
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false, "second call is a no-op");
+  assert.equal(ctrl.updateManyCalls.length, swapsAfterFirst, "no second swap");
+  assert.equal(ctrl.historyCreates.length, 1, "exactly one history row");
+});
+
+test("never throws — a DB failure while driving the gate is swallowed", async () => {
+  ctrl.throwOnFind = true;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false, "returns false instead of throwing");
+});
+
+test("NEVER rewinds: losing the race to a deal that moved on to CONTRACT_REVIEW must not pull it back", async () => {
+  // CONTRACT_REVIEW → CONTRACT_PENDING is a LEGAL transition (contract re-submit),
+  // so without a from-guard the race loser re-resolves against the fresh state and
+  // legally writes the deal BACKWARDS — stranding a passing Contract Shield deal.
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.raceTo = "CONTRACT_REVIEW"; // another writer advances past us mid-flight
+  const { advanceOnInsuranceSatisfied } = await load();
+  await advanceOnInsuranceSatisfied("d1");
+  assert.equal(ctrl.deal.status, "CONTRACT_REVIEW", "the deal must stay where the winner put it");
+  assert.equal(
+    ctrl.historyCreates.length,
+    0,
+    "no history row claiming an insurance-driven advance that never legitimately happened",
+  );
+});
+
+test("ARRIVING at INSURANCE_PENDING with proof already on file releases the gate immediately", async () => {
+  // upload-proof has no deal-status check, so a buyer can submit proof at any
+  // stage. If they do it BEFORE the deal reaches INSURANCE_PENDING, the driver
+  // no-ops at upload time — and without a re-check on arrival the deal strands at
+  // INSURANCE_PENDING with satisfied proof, which is the exact bug the driver exists
+  // to prevent.
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "INSURANCE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "the gate must release on arrival, not only on upload");
+  assert.deepEqual(
+    ctrl.historyCreates.map((h) => h.toStatus),
+    ["INSURANCE_PENDING", "CONTRACT_PENDING"],
+    "both hops recorded",
+  );
+});
+
+test("arriving at INSURANCE_PENDING WITHOUT proof still parks the deal there", async () => {
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "INSURANCE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "no proof, no release — the gate still holds");
+});
+
+test("expectedFrom guards advanceDealStatus against advancing from any other state", async () => {
+  ctrl.deal.status = "CONTRACT_REVIEW";
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "CONTRACT_PENDING", { expectedFrom: "INSURANCE_PENDING" });
+  assert.equal(ctrl.deal.status, "CONTRACT_REVIEW", "no write when the deal is not in the expected state");
+  assert.equal(ctrl.updateManyCalls.length, 0);
+});
+
+// ── Fee ladder: self-completing on arrival ──────────────────────────────────
+// The only driver of FEE_PAID -> INSURANCE_PENDING was the Stripe webhook, so an
+// admin "mark fee paid" stranded the deal at FEE_PAID forever. And a fee paid while
+// the deal was still BEFORE FEE_PENDING was banked (feePaidAt set, which is also the
+// duplicate-charge guard) but never advanced — wedging the deal permanently.
+
+test("arriving at FEE_PAID with the fee already recorded continues to INSURANCE_PENDING", async () => {
+  ctrl.deal.status = "FEE_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", force: true });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "a paid fee must not strand the deal at FEE_PAID");
+});
+
+test("arriving at FEE_PENDING with the fee ALREADY paid settles the whole ladder", async () => {
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "a fee paid before the fee stage must not wedge the deal");
+  assert.deepEqual(
+    ctrl.historyCreates.map((h) => h.toStatus),
+    ["FEE_PENDING", "FEE_PAID", "INSURANCE_PENDING"],
+    "every hop is recorded truthfully rather than force-skipped",
+  );
+});
+
+test("arriving at FEE_PENDING with NO fee paid parks the deal there (still awaiting payment)", async () => {
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = null;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "FEE_PENDING", "no payment, no advance");
+});
+
+test("the fee ladder chains into the insurance gate when proof is already on file", async () => {
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "fee ladder then insurance gate, both already satisfied");
+});
+
+// ── Cascade-safety regressions found in independent review ──────────────────
+
+test("a CAS loser whose winner CASCADED past the target no-ops instead of throwing", async () => {
+  // The winner's arrival hooks can carry the deal several hops. The loser then
+  // re-resolves against a state from which the original target is no longer
+  // reachable. That must be an idempotent no-op (someone else did the work), not a
+  // DealTransitionError surfacing as a 500 on a buyer's double-click.
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.raceTo = "INSURANCE_PENDING"; // winner cascaded well past FEE_PENDING
+  const { advanceDealStatus } = await load();
+  const moved = await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "BUYER" });
+  assert.equal(moved, false, "the race loser reports it did not move the deal");
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "and must not drag the deal backwards");
+});
+
+test("the idempotent data-merge path still runs the arrival hooks", async () => {
+  // mark-paid calls advanceDealStatus(FEE_PAID, {data:{feePaidAt}}) on a deal an
+  // admin already parked at FEE_PAID. Returning early after merging `data` wrote
+  // feePaidAt but never settled the ladder — stranding the deal at FEE_PAID.
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.feePaidAt = null;
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", data: { feePaidAt: new Date() } });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "recording the fee must settle the ladder even on the no-op path");
+});
+
+test("a REFUNDED fee does not re-drive the ladder", async () => {
+  // The refund route deliberately leaves feePaidAt set. Ops must be able to park a
+  // refunded deal back on FEE_PENDING to re-collect without it instantly advancing.
+  ctrl.deal.status = "FEE_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.feeRefundedAt = new Date();
+  const { settleFeeLadderIfPaid } = await load();
+  assert.equal(await settleFeeLadderIfPaid("d1"), false);
+  assert.equal(ctrl.deal.status, "FEE_PENDING", "a refunded fee is not a paid fee");
 });

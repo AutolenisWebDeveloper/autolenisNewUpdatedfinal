@@ -3,7 +3,8 @@
 // Requires admin auth + reason note. Audit logged.
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { restoreBuyerByAdmin } from "@/lib/services/admin/admin-buyer-command-center.service";
@@ -16,8 +17,11 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { buyerId } = await params;
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Tier 1 (Finding 5): enforced directly from PERMISSION_ROLES.
+  // Buyer lifecycle; OPS, not a compliance freeze.
+  const adminCheck = await requirePermissionStrict(request, "buyers.account_state");
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const buyer = await prisma.buyer.findUnique({ where: { id: buyerId }, select: { id: true } });
   if (!buyer) return adminError("NOT_FOUND", "Buyer not found", 404);
