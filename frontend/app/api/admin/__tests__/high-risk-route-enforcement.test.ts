@@ -74,6 +74,12 @@ mock.module("@/lib/services/dealer/dealer-contract.service", {
 mock.module("@/lib/supabase", {
   namedExports: { createServiceSupabaseClient: () => forbiddenService() },
 });
+mock.module("@/lib/services/admin/admin-support.service", {
+  namedExports: {
+    startImpersonation: async () => forbiddenService(),
+    endImpersonation: async () => forbiddenService(),
+  },
+});
 
 interface Case {
   name: string;
@@ -116,6 +122,21 @@ const CASES: Case[] = [
     name: "buyer deposit override (money)",
     module: "@/app/api/admin/buyers/[buyerId]/deposit/override/route",
     method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "FINANCE_ADMIN",
+  },
+  {
+    // OWNER RULING: impersonation is the highest-trust admin action (full buyer
+    // PII and financials, acting AS them), so it takes the narrowest role.
+    // permissions.ts:57 already said SUPER only (ruled policy 4), but both routes
+    // admitted SUPER_ADMIN *or* SUPPORT_ADMIN — the matrix and the route
+    // disagreed, and shadow mode meant the route's wider list won.
+    name: "start impersonation",
+    module: "@/app/api/admin/support/impersonate/route",
+    method: "POST", body: { targetUserId: "u1", reason: "a sufficiently long reason" }, allowedRole: "SUPER_ADMIN",
+  },
+  {
+    name: "end impersonation",
+    module: "@/app/api/admin/support/impersonation/[id]/end/route",
+    method: "POST", params: { id: "imp_1" }, allowedRole: "SUPER_ADMIN",
   },
   {
     name: "DLQ retry (ops.replay — re-fires arbitrary side effects)",

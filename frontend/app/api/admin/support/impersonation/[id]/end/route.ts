@@ -1,4 +1,4 @@
-import { requirePermission } from "@/lib/auth/permissions";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
@@ -8,11 +8,15 @@ interface Props { params: Promise<{ id: string }> }
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { id: impersonationId } = await params;
-  const admin = await requirePermission(request, "support.impersonate");
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (admin.role !== "SUPER_ADMIN" && admin.role !== "SUPPORT_ADMIN") {
-    return adminError("FORBIDDEN", "Insufficient permissions", 403);
-  }
+  // OWNER RULING (policy 4): impersonation is the highest-trust admin action —
+  // full buyer PII and financials, acting AS the buyer — so it takes the
+  // NARROWEST role. This previously admitted SUPPORT_ADMIN as well, which
+  // contradicted PERMISSION_ROLES["support.impersonate"] = SUPER_ADMIN; shadow
+  // mode meant the route's wider list won and support could impersonate. The
+  // role now comes from the matrix alone, so the two cannot disagree again.
+  const adminCheck = await requirePermissionStrict(request, "support.impersonate");
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
   try {
     await endImpersonation(impersonationId);
     await createAuditLog(admin, request, {
