@@ -23,12 +23,40 @@ export async function hasPaidDeposit(buyerId: string): Promise<boolean> {
 //   • no PENDING deposit remains — the competitive intent was cancelled, expired,
 //     or otherwise abandoned/failed (nothing left to complete → not eligible).
 //     If the buyer later restarts checkout, create-intent re-enrolls idempotently.
-// A single query fetches both facts so the guard is one round-trip.
+//     DepositStatus is PENDING | PAID | REFUNDED | FAILED, so REFUNDED and FAILED
+//     stop the chain by virtue of leaving PENDING — widening the status filter
+//     below would silently un-stop them (a test pins that filter for exactly this
+//     reason).
+//   • the buyer has been administratively halted — suspended, disabled, archived
+//     or purged. An admin freezing or retiring an account is an unambiguous "stop
+//     contacting this person", and continuing to market them into completing a
+//     purchase ignores that decision. This is checked here rather than only at
+//     enqueue time because a buyer is far more likely to be frozen DURING the
+//     72-hour window than before it.
+//     Note: pauseBuyerWorkflow is NOT the relevant control — it pauses an ACTIVE
+//     auction, and a buyer who has not paid the $99 has no active auction yet, so
+//     it can never apply to this stage.
+// Fails CLOSED: a buyer row that cannot be found stops the chain.
 export async function depositConversionResolved(buyerId: string): Promise<boolean> {
-  const deposits = await prisma.deposit.findMany({
-    where: { buyerId, status: { in: ["PAID", "PENDING"] } },
-    select: { status: true },
-  });
+  const [deposits, buyer] = await Promise.all([
+    prisma.deposit.findMany({
+      where: { buyerId, status: { in: ["PAID", "PENDING"] } },
+      select: { status: true },
+    }),
+    prisma.buyer.findUnique({
+      where: { id: buyerId },
+      select: { suspendedAt: true, disabledAt: true, archivedAt: true, purgedAt: true },
+    }),
+  ]);
+
+  if (!buyer) return true;
+  const halted =
+    buyer.suspendedAt !== null ||
+    buyer.disabledAt !== null ||
+    buyer.archivedAt !== null ||
+    buyer.purgedAt !== null;
+  if (halted) return true;
+
   const hasPaid = deposits.some((d) => d.status === "PAID");
   const hasPending = deposits.some((d) => d.status === "PENDING");
   return hasPaid || !hasPending;
