@@ -339,6 +339,39 @@ test("re-enrolment mid-chain does not restart or duplicate the sequence", async 
   assert.equal(table.find((r) => r.sequence === "deposit_reminder_1")!.status, "done", "the sent touch stays done");
 });
 
+// ── Why the chain has exactly ONE enroller ─────────────────────────────────
+// Enrollment is idempotent on UNIQUE(base_key, sequence) — deliberately, because
+// that is what makes no-duplicate-sends hold. The corollary is that the FIRST
+// writer of touch 1 owns the row for good: if its guard cancels the touch, a
+// later enrollment for the same buyer is silently swallowed and the chain never
+// runs. That is exactly what a second enroller (onboarding/complete, which fired
+// before any deposit existed) caused once touch 1 became immediate.
+//
+// This pins the hazard rather than the call sites — the call-site invariant is
+// enforced in app/api/buyer/deposit/__tests__/deposit-reminder-single-owner.test.ts.
+// It also fails if anyone "fixes" this by letting a cancelled row be revived,
+// which would trade away the idempotency the no-duplicate-send property rests on.
+
+test("a cancelled touch 1 permanently blocks re-enrollment — hence a single enroller", async () => {
+  // Enrol with nothing to convert (the onboarding-before-checkout shape).
+  deposits = [];
+  await enroll();
+  const summary = await drain();
+  assert.equal(summary.canceled, 1, "the guard cancels a touch with no deposit to chase");
+
+  // The buyer now genuinely starts checkout, and enrollment is attempted again.
+  deposits = [{ status: "PENDING" }];
+  await enroll();
+
+  assert.equal(table.length, 1, "no new row — the upsert is ignored on the existing key");
+  assert.equal(table[0]!.status, "canceled", "and the existing row stays cancelled");
+
+  fastForward();
+  const after = await drain();
+  assert.equal(after.sent, 0, "the chain is dead for this buyer — six touches become zero");
+  assert.deepEqual(smsSends, []);
+});
+
 // ── The two NEW touches are subject to EVERY guard ──────────────────────────
 // A new touch must not bypass a gate by virtue of being new, so each gate is
 // asserted against deposit_reminder_1 and deposit_reminder_6 specifically.

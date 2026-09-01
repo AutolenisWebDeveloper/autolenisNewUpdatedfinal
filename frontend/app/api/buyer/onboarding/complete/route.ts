@@ -4,7 +4,6 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
-import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 
 export const dynamic = "force-dynamic";
 
@@ -47,14 +46,16 @@ export async function POST(request: NextRequest) {
     select: { onboardingComplete: true, termsAcceptedAt: true, termsVersion: true },
   });
 
-  // Lifecycle — start the deposit-activation reminder sequence 24h out (internal
-  // vs QStash chosen per the deposit-reminder activation flag; default QStash).
-  scheduleLifecycleWorkload({
-    workload: "deposit_reminder",
-    buyerId: buyer.id,
-    firstName: buyer.firstName,
-    email: buyer.user.email,
-  }).catch(() => {});
+  // NO deposit-reminder enrollment here. That chain recovers an abandoned
+  // CHECKOUT, and onboarding finishes before checkout can start (the wizard
+  // routes to /buyer/prequal), so enrolling here claims the chain's touch-1 row —
+  // keyed UNIQUE(base_key, sequence) on `deposit-reminder:{buyerId}` — before
+  // there is any deposit to chase. The send-time guard then cancels that touch,
+  // and the cancelled row silently swallows the real enrollment made by
+  // /api/buyer/deposit/create-intent, which is the single owner of this chain.
+  // (This route also had no concierge check, unlike create-intent, so any
+  // concierge buyer routed through onboarding was enrolled in the generic
+  // "$99 deposit" sequence that create-intent deliberately withholds from them.)
 
   return successResponse(updated);
 }
