@@ -8,7 +8,8 @@
     "memory",
     "playwright",
     "context7",
-    "graphify"
+    "graphify",
+    "marketcheck"
   ],
   "hooks": {
     "SessionStart": [

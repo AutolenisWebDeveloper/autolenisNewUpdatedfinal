@@ -37,6 +37,14 @@
     "graphify": {
       "type": "http",
       "url": "https://api.graphify.com/mcp"
+    },
+    "marketcheck": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@marketcheck/mcp-client"],
+      "env": {
+        "MARKETCHECK_API_KEY": "${MARKETCHECK_API_KEY}"
+      }
     }
   }
 }
