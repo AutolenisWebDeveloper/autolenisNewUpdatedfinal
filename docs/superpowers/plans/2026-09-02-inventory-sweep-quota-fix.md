@@ -938,7 +938,21 @@ labels for `SyncRunStatus`; `SELECT count(*) FROM inventory_sources WHERE type='
 (expect 1). Post-apply: `SELECT center_zip, radius_miles, monthly_call_budget, max_calls_per_run,
 rows_per_call FROM inventory_sources WHERE type='MARKETCHECK'` → expect `76011 / 100 / 400 / 10 / 50`.
 
-### Rollout — five phases, destructive step last
+### Rollout — six phases, destructive step last
+
+> **HARD ORDERING CONSTRAINT (owner, 2026-09-02).** `enforce` is the *last* step, and it does not
+> happen until the DFW catalogue has actually populated. Enforcing before the new market is in the
+> database is strictly worse than doing nothing.
+>
+> Verified read-only against production on 2026-09-02: of the 148 active rows, the 95 the sweep
+> deactivates are 94 NY + 1 TX, and **all 53 survivors are New York — not one is Texas.** Flipping
+> `enforce` today would leave the public catalogue at 53 stale New York listings and **zero cars in
+> the market AutoLenis is repointing to.** ("Mostly New York" understates it; it is all of them.)
+>
+> The order is therefore: **apply the migration → repoint to 76011/100mi → let the sweep run 2–3
+> days → confirm the catalogue is Texas-majority → only then flip `enforce`.** Phase 6 must not
+> begin until phase 5's gate passes. There is no rush: the stale rows have been wrong for three
+> months, and two more days of them costs nothing next to shipping an empty catalogue.
 
 1. **Env only, no deploy.** Nothing reads them yet. *Rollback:* delete the variables.
 2. **Deploy the code, migration still unapplied.** Market resolves from env to DFW (the `10001`
@@ -953,8 +967,40 @@ rows_per_call FROM inventory_sources WHERE type='MARKETCHECK'` → expect `76011
    `stopReason` ∈ {`PAGE_CAP`,`PROVIDER_CEILING`,`NUM_FOUND_REACHED`}, `status = COMPLETED`,
    `calls_used_this_cycle = 10`, **`maxDistMiles <= 100`**, and `external_dealer_state` starting to
    show `TX` — the cheapest proof the repoint actually took rather than silently falling back.
-5. **The only destructive step.** After 1–2 days of dry-run evidence (`candidates` ≈ 95,
-   `breakdown` 100% `dealerId`-null, `aborted:false`), snapshot then set
+5. **Let the DFW catalogue populate. This is the gate on phase 6 — do not skip it.** Leave
+   `INVENTORY_STALE_SWEEP_MODE=dry_run` and let 2–3 daily sweeps land. Each sweep ingests up to 500
+   Arlington-area listings, so Texas should overtake New York on the first or second run. **Both**
+   conditions must hold before phase 6:
+
+   * **Texas-majority.** More active rows in TX than in every other state combined, and the count
+     rising run over run — not one lucky row. Today this query returns `NY 147 / TX 1`, 148 active
+     in total (`(blank)` is now empty; it was 10 rows in the 2026-08 snapshot):
+
+     ```sql
+     SELECT coalesce(nullif(trim(external_dealer_state), ''), '(blank)') AS state,
+            count(*) AS active_rows
+       FROM inventory_items
+      WHERE is_active
+      GROUP BY 1
+      ORDER BY 2 DESC;
+     ```
+
+     `external_dealer_state` is the column that carries geography — the adapter writes
+     `external_dealer_*`, never the bare `city`/`state`/`zip` columns, which are blank on every
+     active row.
+
+   * **Dry-run evidence stable across two consecutive days:** `candidates` ≈ 95, `breakdown` 100%
+     `dealerId`-null, `aborted:false`.
+
+   If Texas is *not* climbing, the repoint silently fell back — do not proceed. Go back to phase 4's
+   checks (`configSource`, `market.zip`, `maxDistMiles`) and diagnose. Sweeping the wrong market and
+   then enforcing is the one combination that empties the catalogue.
+
+   *Known interaction, already flagged and still open:* MarketCheck's default sort is distance
+   ascending, so those ~500 rows all sit within ~1.1 miles of 76011. The gate still passes — they
+   are Texas — but the catalogue will be Arlington, not DFW, until the sort question is decided.
+
+6. **The only destructive step.** Once phase 5's gate has passed, snapshot then set
    `INVENTORY_STALE_SWEEP_MODE=enforce`.
 
 ```sql
@@ -975,7 +1021,77 @@ hard-deleted, `priceHistory` survives, and no `AuctionVehicle` row is touched (0
 `monthly_call_budget = 0` → freezes spend while leaving the source configured. **Never set
 `monthly_call_budget = NULL`** — that means unmetered.
 
-### Blast radius the owner must accept before phase 5
+### Quota forensics — the September deadline, and one unresolved question
+
+Owner question (2026-09-02): *does a request rejected with HTTP 429 count against the monthly
+allowance?* Answer: **unresolved from here** — but the forensics change what the question is worth
+asking about, and give a zero-cost test that settles it.
+
+**Provider mechanics, from MarketCheck's published docs.** Quota and rate are two separate limits
+with separate headers: `Quota-Limit` / `Quota-Remaining` / `Quota-Reset-Time` for the monthly
+allowance, `RateLimit-Remaining` for the per-second throttle. Quota is metered **at account level
+across all API keys**, and the documented reset is the first of the following month at `00:00:00Z`.
+The docs do not say whether a 429 decrements `Quota-Remaining`. `docs.marketcheck.com` and
+`api.marketcheck.com` are both blocked by this sandbox's egress proxy, so neither the primary text
+nor a live header read was available to confirm it here.
+
+**What production actually shows** (read-only, 2026-09-02):
+
+| Fact | Source |
+| --- | --- |
+| The crons started **2026-08-20 02:00:01** — four days before the first `inventory_sync_runs` row. | `cron_job_logs` |
+| **The very first execution was already `MarketCheck HTTP 429`**, on a real 134 ms round trip. Not one call had succeeded before it. | `cron_job_logs.result` |
+| Aug 20 → Aug 24 05:00: **114 executions, all 429, and not one `inventory_sync_runs` row** (98 priority + 16 full). `ensureInventorySource()` ran after the adapters, so `sourceId` was null and the run-row write was skipped — the calls went out, the ledger did not see them. | `cron_job_logs` vs `inventory_sync_runs` |
+| Aug 24 05:00 → Aug 31 00:01: **191 more, all 429**, recorded `DEFERRED`. | `inventory_sync_runs` |
+| **Total: 305 consecutive rejections and zero successful calls, across 11 days.** | both |
+| Recovery was abrupt and mid-month: 429 at `00:01:16.536`, success at `00:01:33.164` — **17 seconds later**, `fetched=44`. No 429 since. | `inventory_sync_runs` |
+| Current cycle: Aug 31 = 27, Sep 1 = 28, Sep 2 = 28 → **83 successful, 0 rejected.** | `inventory_sync_runs` |
+| `inventory-sync-full` ran ~4×/day, not daily. 24 priority + 4 full = the observed **28 calls/day**. | 55 executions / 14 days |
+| The second consumer — the admin search tool, on `marketcheck-prod.apigee.net` — **last ran 2026-06-26**. Not part of the Aug/Sep spend. | `admin_inventory_search_runs` |
+
+**AutoLenis never drew down a MarketCheck allowance before 2026-08-31.** Zero successful calls in
+11 days. So the premise behind the question — that August's rejections may have eaten into a 500-call
+budget — cannot be tested against August: there was no successful consumption to compete with, and
+whatever blocked the key originated **outside this codebase** (a trial already spent before the key
+was wired in, an unactivated plan, or an account-level block). The abrupt mid-month recovery is not
+the calendar reset the docs describe, which is a second thing the dashboard should explain.
+
+**The zero-cost test that settles it.** Read `Quota-Reset-Time` on the dashboard first — it names the
+cycle boundary. Then:
+
+| If the current cycle began **2026-08-31** (recovery, i.e. the 305 rejections are inside it) | Reading |
+| --- | --- |
+| `Quota-Remaining` ≈ **417** (500 − 83 successful) | rejections **do not** count |
+| `Quota-Remaining` ≈ **112** (500 − 83 − 305) | rejections **do** count |
+
+If instead the cycle began **2026-09-01**, the rejections sit in a closed cycle and September holds
+only 56 successful calls with no rejections at all — `Quota-Remaining` ≈ 444 either way, and the
+question stays open until a 429 happens with quota still on the clock.
+
+**It does not gate this rollout, whichever way it lands.** `tryConsumeCall()` debits the ledger
+**before** the fetch and fail-closed, so it counts *attempts*, not successes. If a 429 costs no
+provider quota the ledger merely over-counts (safe); if it does, the ledger matches the provider
+exactly. **It cannot under-count either way**, so no budget number here changes on the answer.
+
+**Headroom does need revisiting — for a different reason than expected.** The run count has
+historically understated provider calls, not because of 429 accounting but because **114 calls left
+no run record at all.** Any budget sized from `inventory_sync_runs` alone would have been short by
+that much. The ledger closes this for metered runs, but note its limit: **it only meters once the
+`inventory_sources` row exists.** In phase 2, before the migration, `sourceId` is null and the budget
+is process-local — the bound there is the cron cadence, 1 sweep/day × 10 calls = **310/month**, not
+the ledger.
+
+**Deadline.** At the still-deployed 28 calls/day, and 83 of 500 spent by 2026-09-02, the next 429
+wall lands **~17–18 September**. That is when this fix has to be live.
+
+**Known gap, flagged not fixed** (outside this change's scope): all 305 rejected executions wrote
+`cron_job_logs.status = 'COMPLETED'`, because `withCronRun` marks the run by whether the callback
+threw, and `runInventorySync` returns `outcome: "DEFERRED"` rather than throwing. The corrected
+status now lands on `inventory_sync_runs.status` and in the cron result JSON's `outcome`, so the
+evidence is there — but any alert reading `cron_job_logs.status` alone would still have watched this
+outage report success for 11 days.
+
+### Blast radius the owner must accept before phase 6
 
 Verified, and **not caused by this change** — caused by missing `isActive` filters that predate it:
 
