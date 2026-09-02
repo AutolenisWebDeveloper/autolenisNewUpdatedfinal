@@ -395,85 +395,87 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     // swallowed — and a non-zero count blocks this run's sweep (see below).
     try {
 
-    // VIN identity: normalize + shape-validate. A malformed VIN is NOT written to
-    // the global @unique slot — it falls through to the no-VIN create path so it
-    // can never collide with or overwrite a valid record.
-    const normalizedVin = vehicle.vin ? normalizeVin(vehicle.vin) : undefined;
-    const vin = normalizedVin && isValidVin(normalizedVin) ? normalizedVin : undefined;
+      // VIN identity: normalize + shape-validate. A malformed VIN is NOT written to
+      // the global @unique slot — it falls through to the no-VIN create path so it
+      // can never collide with or overwrite a valid record.
+      const normalizedVin = vehicle.vin ? normalizeVin(vehicle.vin) : undefined;
+      const vin = normalizedVin && isValidVin(normalizedVin) ? normalizedVin : undefined;
 
-    if (vin) {
-      const existing = await prisma.inventoryItem.findFirst({ where: { vin } });
-      const priceHistory = existing
-        ? [...((existing.priceHistory as Array<{ price: number; date: string }>) ?? []), { price: vehicle.priceCents, date: new Date().toISOString() }].slice(-24)
-        : [{ price: vehicle.priceCents, date: new Date().toISOString() }];
+      if (vin) {
+        const existing = await prisma.inventoryItem.findFirst({ where: { vin } });
+        const priceHistory = existing
+          ? [...((existing.priceHistory as Array<{ price: number; date: string }>) ?? []), { price: vehicle.priceCents, date: new Date().toISOString() }].slice(-24)
+          : [{ price: vehicle.priceCents, date: new Date().toISOString() }];
 
-      await prisma.inventoryItem.upsert({
-        where: { vin },
-        create: {
-          ...geography,
-          vin,
-          year: vehicle.year,
-          make: vehicle.make,
-          model: vehicle.model,
-          trim: vehicle.trim,
-          mileage: vehicle.mileage,
-          priceCents: vehicle.priceCents,
-          images: vehicle.images,
-          description: vehicle.description,
-          lane,
-          isActive: true,
-          lastSeenAt: new Date(),
-          sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
-          priceHistory,
-          externalDealerName: vehicle.externalDealerName,
-          externalDealerPhone: vehicle.externalDealerPhone,
-          externalDealerCity: vehicle.externalDealerCity,
-          externalDealerState: vehicle.externalDealerState,
-          externalListingUrl: vehicle.externalListingUrl,
-        },
-        update: {
-          ...geography,
-          priceCents: vehicle.priceCents,
-          mileage: vehicle.mileage,
-          images: vehicle.images.length > 0 ? vehicle.images : undefined,
-          // NEVER restamp lane or provenance on a DEALER-OWNED row. assignLane()
-          // can only return LANE_2/LANE_3, so an aggregator run that happened to
-          // carry a dealer's VIN used to demote that dealer's LANE_1 listing and
-          // overwrite sourceAdapter from "dealer_manual" to "marketcheck" —
-          // silently converting dealer inventory into aggregator inventory.
-          ...(existing?.dealerId ? {} : { lane, sourceAdapter: vehicle.sourceAdapter }),
-          isActive: true,
-          lastSeenAt: new Date(),
-          priceHistory,
-        },
-      });
-    } else {
-      // No usable VIN — create only (no unique key to upsert on).
-      await prisma.inventoryItem.create({
-        data: {
-          ...geography,
-          year: vehicle.year,
-          make: vehicle.make,
-          model: vehicle.model,
-          trim: vehicle.trim,
-          mileage: vehicle.mileage,
-          priceCents: vehicle.priceCents,
-          images: vehicle.images,
-          description: vehicle.description,
-          lane,
-          isActive: true,
-          lastSeenAt: new Date(),
-          sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
-          priceHistory: [{ price: vehicle.priceCents, date: new Date().toISOString() }],
-          externalDealerName: vehicle.externalDealerName,
-          externalDealerCity: vehicle.externalDealerCity,
-          externalDealerState: vehicle.externalDealerState,
-          externalListingUrl: vehicle.externalListingUrl,
-        },
-      });
-    }
-    upserted++;
-    upsertedByPlan.set(planIndex, (upsertedByPlan.get(planIndex) ?? 0) + 1);
+        await prisma.inventoryItem.upsert({
+          where: { vin },
+          create: {
+            ...geography,
+            vin,
+            year: vehicle.year,
+            make: vehicle.make,
+            model: vehicle.model,
+            trim: vehicle.trim,
+            mileage: vehicle.mileage,
+            priceCents: vehicle.priceCents,
+            images: vehicle.images,
+            description: vehicle.description,
+            lane,
+            isActive: true,
+            lastSeenAt: new Date(),
+            sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
+            priceHistory,
+            externalDealerName: vehicle.externalDealerName,
+            externalDealerPhone: vehicle.externalDealerPhone,
+            externalDealerCity: vehicle.externalDealerCity,
+            externalDealerState: vehicle.externalDealerState,
+            externalListingUrl: vehicle.externalListingUrl,
+          },
+          update: {
+            priceCents: vehicle.priceCents,
+            mileage: vehicle.mileage,
+            images: vehicle.images.length > 0 ? vehicle.images : undefined,
+            // A DEALER-OWNED row keeps its own lane, provenance and address. An
+            // aggregator run that happens to carry a dealer's VIN must not rewrite
+            // any of them: assignLane() can only return LANE_2/LANE_3, so it would
+            // demote the dealer's LANE_1 listing, flip sourceAdapter from
+            // "dealer_manual" to "marketcheck", and overwrite the location the
+            // dealer entered with a third-party claim — silently converting dealer
+            // inventory into aggregator inventory. Freshness IS still refreshed:
+            // the feed genuinely saw the vehicle.
+            ...(existing?.dealerId ? {} : { ...geography, lane, sourceAdapter: vehicle.sourceAdapter }),
+            isActive: true,
+            lastSeenAt: new Date(),
+            priceHistory,
+          },
+        });
+      } else {
+        // No usable VIN — create only (no unique key to upsert on).
+        await prisma.inventoryItem.create({
+          data: {
+            ...geography,
+            year: vehicle.year,
+            make: vehicle.make,
+            model: vehicle.model,
+            trim: vehicle.trim,
+            mileage: vehicle.mileage,
+            priceCents: vehicle.priceCents,
+            images: vehicle.images,
+            description: vehicle.description,
+            lane,
+            isActive: true,
+            lastSeenAt: new Date(),
+            sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
+            priceHistory: [{ price: vehicle.priceCents, date: new Date().toISOString() }],
+            externalDealerName: vehicle.externalDealerName,
+            externalDealerCity: vehicle.externalDealerCity,
+            externalDealerState: vehicle.externalDealerState,
+            externalListingUrl: vehicle.externalListingUrl,
+          },
+        });
+      }
+      upserted++;
+      upsertedByPlan.set(planIndex, (upsertedByPlan.get(planIndex) ?? 0) + 1);
     } catch (e) {
       upsertFailures++;
       logger.warn(`[inventory-orchestrator] upsert failed for ${vehicle.sourceKey}:`, e);

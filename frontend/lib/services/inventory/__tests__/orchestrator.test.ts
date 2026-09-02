@@ -531,12 +531,17 @@ test("REGRESSION: an aggregator run never demotes a dealer's own row", async () 
   assert.equal(update.lastSeenAt instanceof Date, true, "freshness IS still refreshed");
 });
 
-test("an aggregator row with no dealer still gets its lane and provenance restamped", async () => {
+test("an aggregator row with no dealer still gets its lane, provenance and geography restamped", async () => {
   process.env.MARKETCHECK_API_KEY = "test-key";
   sourceRows = [marketRow()];
   existingItem = { id: "item_1", dealerId: null, priceHistory: [] };
   captureRequestedUrls([
-    { vin: "1HGCM82633A004352", build: { year: 2021, make: "Honda", model: "Accord" }, price: 25000 },
+    {
+      vin: "1HGCM82633A004352",
+      build: { year: 2021, make: "Honda", model: "Accord" },
+      price: 25000,
+      dealer: { name: "Dallas Motors", city: "Dallas", state: "TX", zip: "75201" },
+    },
   ]);
   const { runInventorySync } = await load();
 
