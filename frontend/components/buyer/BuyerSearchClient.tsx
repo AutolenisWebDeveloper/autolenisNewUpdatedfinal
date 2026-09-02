@@ -231,8 +231,16 @@ export default function BuyerSearchClient({
       setShortlistCount(newCount);
       showToast(`Added to your shortlist (${newCount}/5)`);
     } else {
-      const d = await res.json() as { error?: { code?: string } };
-      if (d.error?.code === "SHORTLIST_FULL") showToast("Your shortlist is full.", "error");
+      // Surface whatever the server said. This used to react ONLY to
+      // SHORTLIST_FULL, so every other rejection — including the freshness gate's
+      // LISTING_NOT_SHORTLIST_ELIGIBLE, which explains that the listing has not
+      // been confirmed by its source in over 30 days — left the button doing
+      // nothing at all with no feedback.
+      const d = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
+      showToast(
+        d.error?.message ?? "Could not add this vehicle to your shortlist. Please try again.",
+        "error",
+      );
     }
   }
 
