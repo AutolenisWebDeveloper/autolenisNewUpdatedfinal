@@ -385,3 +385,18 @@ never executes. Import-time coupling is coupling.
 **Suggested improvement:** Add a checklist item to the background-jobs / scheduler guidance: for any repeating selector over a bounded batch, state explicitly what happens to permanently-failed items on the NEXT run, and prove forward progress is guaranteed regardless of the failure count. Concretely — if selection is `filter(...).slice(0, cap)` over a fixed-order source, ask whether a stuck item can reoccupy its slot indefinitely; if so, partition the pool and reserve the majority of the cap for un-attempted work. Also worth a rule: emit per-pool counters (new vs retry) rather than one total, so the pathology is visible in the run record.
 
 **Principle:** Idempotence and progress are different properties, and a repeating job needs both. Skip rules written to prevent duplicate work only establish "nothing is done twice concurrently"; they say nothing about whether the frontier advances. Any bounded, repeating selector over an ordered candidate set needs an explicit liveness argument — and when a known-bad item can consume the same slot every cycle, documenting it as intended behaviour is not a substitute for bounding it.
+
+### Observation 24: A sweep guard using a lane label as a proxy for ownership silently protected the rows it was meant to remove
+
+**Status:** OPEN
+**Date:** 2026-09-02
+**Session context:** Diagnosing why an inventory stale sweep ran 336 times in 7 days and deactivated nothing while 95 rows sat 3+ months stale and still active.
+**Skill:** autolenis-inventory-intelligence
+**Type:** open-source
+**Phase/Area:** Core rules & invariants — rule 5 ("Freshness is explicit") and the lane model table.
+
+**Issue:** The sweep filtered `lane != LANE_1` as shorthand for "never auto-deactivate dealer-verified inventory". The skill's own lane table defines LANE_1 as "Active AutoLenis dealer AND the vehicle is explicitly linked" — two conditions — but the code checked only the label. 95 rows carried LANE_1 with `dealer_id IS NULL`, written by an older ingestion path and still reachable today via an admin route that hardcodes `lane: "LANE_1"` with no dealer. The guard therefore permanently protected rows nobody owned, and the cron truthfully reported `deactivated: 0` every run. Nothing was broken; the predicate was simply not the invariant. A second defect hid in the same clause: Prisma `{ lt: cutoff }` on a nullable column silently excludes NULLs, so a row with `last_seen_at IS NULL` was unreachable by any sweep.
+
+**Suggested improvement:** In the lane-model section, state that LANE_1 is a *two-part* claim and that any query using lane as a stand-in for dealer ownership must assert `dealerId` explicitly. Add to rule 5 that a freshness predicate over a nullable timestamp needs an explicit NULL branch (`{ OR: [{ lastSeenAt: { lt } }, { AND: [{ lastSeenAt: null }, { createdAt: { lt } }] }] }`), and that exclusion lists over nullable columns must be written as `{ OR: [{ col: null }, { col: { notIn } }] }` — never a bare `NOT ... in`, because SQL `NULL NOT IN (...)` is NULL and silently re-protects every row it was meant to catch.
+
+**Principle:** When a guard clause encodes a business invariant, it must test the invariant, not a label that usually correlates with it — and a cron that reports zero work done is evidence about the predicate, not proof that there is no work to do. In three-valued logic, every predicate over a nullable column needs its NULL branch written out, or the rows most likely to be broken are exactly the rows it cannot see.
