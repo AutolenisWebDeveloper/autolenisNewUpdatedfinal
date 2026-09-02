@@ -11,6 +11,17 @@ interface SearchResult {
 
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 
+// Why the admin is looking at these rows. "Internal DB (fallback)" used to cover three very
+// different situations — and a fourth, worse one: `source` was set to "marketcheck" BEFORE
+// the request, so a failed provider call returned an empty list still labelled MarketCheck.
+// An empty market and a broken integration must not look identical.
+const SOURCE_LABELS: Record<string, string> = {
+  marketcheck: "MarketCheck API",
+  db: "Internal DB",
+  db_provider_error: "Internal DB — MarketCheck call failed",
+  db_budget_exhausted: "Internal DB — monthly MarketCheck budget spent",
+};
+
 export default function AdminInventorySearchTool() {
   const [form, setForm] = useState({
     make: "", model: "", yearMin: "", yearMax: "", zip: "", maxPrice: "", condition: "all",
@@ -136,7 +147,7 @@ export default function AdminInventorySearchTool() {
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm text-slate-500">
               {results.length} result{results.length !== 1 ? "s" : ""} found
-              {source && <span className="ml-2 text-xs bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full capitalize">{source === "marketcheck" ? "MarketCheck API" : source === "db" ? "Internal DB" : "Internal DB (fallback)"}</span>}
+              {source && <span className="ml-2 text-xs bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">{SOURCE_LABELS[source] ?? "Internal DB (fallback)"}</span>}
             </p>
           </div>
           {results.length === 0 ? (

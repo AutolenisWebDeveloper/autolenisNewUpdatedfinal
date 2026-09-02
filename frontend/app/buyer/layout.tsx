@@ -11,6 +11,7 @@ import SessionExpiryWatcher from "@/components/buyer/SessionExpiryWatcher";
 import { requireBuyer } from "@/lib/auth/session";
 import { isBuyerAccessDisabled } from "@/lib/auth/buyer-status";
 import { prisma } from "@/lib/prisma";
+import { countAvailableItems } from "@/lib/services/shortlist/shortlist.service";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { computeJourney } from "@/lib/services/buyer/journey";
 import { needsTermsAcceptance } from "@/lib/auth/terms";
@@ -196,7 +197,10 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     const [shortlist, deal, deposit, auction] = await Promise.all([
       prisma.shortlist.findUnique({
         where: { buyerId: buyer.id },
-        select: { _count: { select: { items: true } } },
+        // The item IDS, not a _count aggregate: the journey stage must advance on
+        // AVAILABLE candidates, and a raw row count cannot tell a live listing from one
+        // the stale sweep deactivated.
+        select: { items: { select: { inventoryItemId: true } } },
       }),
       prisma.deal.findFirst({
         where: { buyerId: buyer.id },
@@ -206,7 +210,9 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
       prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, select: { id: true } }),
       prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, select: { id: true } }),
     ]);
-    shortlistCount = shortlist?._count.items ?? 0;
+    // Counts AVAILABLE candidates. A buyer whose every saved car has sold has not
+    // completed the shortlist stage, however many rows the table holds.
+    shortlistCount = shortlist ? await countAvailableItems(shortlist.items) : 0;
     activeDeal = deal;
     depositPaid = !!deposit;
     activeAuction = !!auction;

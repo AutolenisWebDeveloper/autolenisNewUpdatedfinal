@@ -56,7 +56,20 @@ export async function POST(request: NextRequest) {
       mileage: data.mileage,
       images: data.imageUrl ? [data.imageUrl] : [],
       sourceAdapter: "manual_admin",
-      lane: "LANE_1",
+      // LANE_3, not LANE_1. LANE_1 asserts an active AutoLenis dealer AND an explicitly
+      // linked vehicle; this row has no dealerId, so the label was false and it drove a
+      // "Verified — directly from a verified AutoLenis dealer partner" badge for a car
+      // with no dealer relationship. This route is also how the 95 phantom LANE_1 rows in
+      // production were minted, which the stale sweep's `lane != LANE_1` guard then
+      // protected forever.
+      lane: "LANE_3",
+      // Stamps the curator so the stale sweep can exempt this row on the invariant
+      // (admin-entered vehicles have no feed to be re-seen in) rather than on provenance
+      // string matching.
+      addedByAdminId: admin.adminId,
+      // Without this, lastSeenAt is NULL and the row is invisible to every freshness
+      // query — the second defect behind the un-sweepable production rows.
+      lastSeenAt: new Date(),
       isActive: true,
     },
   });
