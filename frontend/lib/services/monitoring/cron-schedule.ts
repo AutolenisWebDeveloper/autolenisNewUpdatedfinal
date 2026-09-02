@@ -53,7 +53,6 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "social-video-queue": { intervalMinutes: 10 },
   "coverage-hold-reconcile": { intervalMinutes: 15 },
   "dlq-drain": { intervalMinutes: 15 },
-  "inventory-stale-sweep": { intervalMinutes: 30 },
   "sla-check": { intervalMinutes: 30 },
   "refinance-outreach-drain": { intervalMinutes: 15 }, // QStash non-deal parity (dormant: no producer until owner cutover)
   "outreach-touch-drain": { intervalMinutes: 15 }, // QStash non-deal parity: affiliate/referral touches (dormant until owner cutover)
@@ -63,7 +62,6 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "affiliates": { intervalMinutes: HOUR },
   "contract-shield": { intervalMinutes: HOUR },
   "dealer-invitation-reminder": { intervalMinutes: HOUR },
-  "inventory-sync-priority": { intervalMinutes: HOUR },
   "trust-check": { intervalMinutes: HOUR },
   "vehicle-offer-expire": { intervalMinutes: HOUR },
   "esign-envelope-expiry": { intervalMinutes: HOUR }, // stale prepared-but-unsigned signing envelopes → EXPIRED
@@ -72,7 +70,20 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "social-status-sync": { intervalMinutes: 2 * HOUR },
   "prequal-message-delivery": { intervalMinutes: 4 * HOUR },
   "sessions": { intervalMinutes: 6 * HOUR },
-  "inventory-sync-full": { intervalMinutes: 6 * HOUR },
+  // The ONLY scheduled MarketCheck spender. One daily walk of <=10 calls x 50 rows = 500
+  // listings, which is the provider's own deep-paging ceiling — a second daily run could not
+  // reach a listing the first did not. It ran every 6h alongside an HOURLY
+  // inventory-sync-priority (28 calls/day against a 500/month plan), which produced 191
+  // consecutive HTTP 429 runs in 2026-08. inventory-sync-priority is now DE-SCHEDULED: its
+  // route made an identical query with a smaller row count, so it was a strictly-smaller
+  // prefix of this sweep costing ~730 calls/month on its own. The route is retained as the
+  // manual re-run lever (cron-secret gated, budget-gated, one call) and must therefore NOT
+  // appear in this registry, or it reads as OVERDUE forever.
+  "inventory-sync-full": { intervalMinutes: DAY },
+  // Makes ZERO provider calls, so its old */30 cadence cost no quota — but it could not do
+  // useful work either: last_seen_at is written by ingestion and nothing else, so running
+  // more often than the sync cannot change any row's outcome. Runs 30 min after the sync.
+  "inventory-stale-sweep": { intervalMinutes: DAY },
   "inventory-match-refresh": { intervalMinutes: 6 * HOUR }, // Batch 1 — recompute request↔inventory matches after sync
 
   "saved-search-match": { intervalMinutes: 6 * HOUR }, // migrated off Inngest cron `0 */6 * * *`
