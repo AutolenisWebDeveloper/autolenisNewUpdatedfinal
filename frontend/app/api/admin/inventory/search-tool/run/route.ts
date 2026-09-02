@@ -6,6 +6,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { InventorySourceType } from "@prisma/client";
+import { resolveMarketConfig } from "@/lib/services/inventory/inventory-source-config.service";
+import { cycleKeyFor, rollCycleForward, tryConsumeCall } from "@/lib/services/inventory/inventory-call-budget.service";
 
 const schema = z.object({
   make: z.string().optional(),
@@ -59,8 +62,30 @@ export async function POST(request: NextRequest) {
   let results: ResultItem[] = [];
   let source = "db";
 
+  // This route is the SECOND consumer of MARKETCHECK_API_KEY, on a different host
+  // (marketcheck-prod.apigee.net), one call per admin click, and it was outside every
+  // budget. Low volume historically (28 in April, 4 in May, 7 in June) so it is not the
+  // cause of the 429 storm — but a monthly cap that only counts the orchestrator is not a
+  // real cap. It now draws from the same per-credential ledger, and falls back to the
+  // internal DB when the ledger refuses.
+  let budgetAllowed = false;
   if (marketCheckKey) {
-    source = "marketcheck";
+    const resolved = await resolveMarketConfig(InventorySourceType.MARKETCHECK, "MarketCheck");
+    if (resolved.ok && resolved.config.sourceId && resolved.config.configSource === "row") {
+      const cycleKey = cycleKeyFor(new Date());
+      await rollCycleForward(resolved.config.sourceId, cycleKey);
+      budgetAllowed = await tryConsumeCall(
+        resolved.config.sourceId, cycleKey, resolved.config.monthlyCallBudget,
+      );
+    } else {
+      // No ledger to draw from (source inactive, unconfigured, or the migration is not yet
+      // applied). Allow the call only when the source is not explicitly disabled — the
+      // is_active kill switch must hold here too.
+      budgetAllowed = resolved.ok;
+    }
+  }
+
+  if (marketCheckKey && budgetAllowed) {
     try {
       const qp = new URLSearchParams({ api_key: marketCheckKey, rows: "24", start: "0" });
       if (params.make) qp.set("make", params.make);
@@ -76,7 +101,12 @@ export async function POST(request: NextRequest) {
         signal: AbortSignal.timeout(10000),
       });
 
+      // `source` is set from the RESPONSE, not before the request. It used to be assigned
+      // "marketcheck" before the fetch, so a non-OK response returned an empty result list
+      // still labelled as coming from MarketCheck — an empty market and a failed provider
+      // call looked identical to the admin reading the screen.
       if (mcRes.ok) {
+        source = "marketcheck";
         const mcData = await mcRes.json() as { listings?: MarketCheckListing[] };
         const listings: MarketCheckListing[] = mcData.listings ?? [];
         const vins = listings.map(l => l.vin).filter(Boolean) as string[];
@@ -101,13 +131,20 @@ export async function POST(request: NextRequest) {
       }
     } catch (err) {
       logger.error("[search-tool/run] MarketCheck error:", err);
-      source = "db_fallback";
+      source = "db_provider_error";
     }
+    if (source !== "marketcheck" && source !== "db_provider_error") {
+      // A non-OK HTTP response: the provider answered, but not with listings.
+      source = "db_provider_error";
+    }
+  } else if (marketCheckKey) {
+    // The key exists but the ledger refused. Say so rather than silently presenting the
+    // internal DB as if it were a live provider search.
+    source = "db_budget_exhausted";
   }
 
   // Fallback to internal DB
-  if (!marketCheckKey || source === "db_fallback") {
-    source = "db";
+  if (source !== "marketcheck") {
     // Build a raw where clause to avoid complex Prisma typing
     const conditions: string[] = ["is_active = true"];
     const values: unknown[] = [];

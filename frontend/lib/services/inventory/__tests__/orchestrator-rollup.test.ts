@@ -44,3 +44,35 @@ test("all NOT_CONFIGURED → NOT_CONFIGURED (never SUCCESS)", () => {
 test("FAILED + ZERO_RESULTS (no success) → FAILED, not PARTIAL", () => {
   assert.equal(rollUpOutcome(["FAILED", "ZERO_RESULTS"]), "FAILED");
 });
+
+// ── PARTIAL and BUDGET_EXHAUSTED ─────────────────────────────────────────────
+//
+// These are plain `.some()` string comparisons, NOT a compile-checked switch, so adding a
+// member to AdapterOutcome does not fail the build here — it falls silently through every
+// branch and lands on NOT_CONFIGURED. That is exactly what had happened to PARTIAL: the
+// enum member existed and a run that ingested 150 vehicles reported itself as an
+// unconfigured provider. Every member of the union is pinned below.
+
+test("a PARTIAL adapter makes the whole run PARTIAL, not NOT_CONFIGURED", () => {
+  assert.equal(rollUpOutcome(["PARTIAL"]), "PARTIAL");
+  assert.equal(rollUpOutcome(["SUCCESS", "PARTIAL"]), "PARTIAL");
+  assert.equal(rollUpOutcome(["PARTIAL", "ZERO_RESULTS"]), "PARTIAL");
+});
+
+test("a deliberate spend-stop is reported as itself, never as an empty market", () => {
+  assert.equal(rollUpOutcome(["BUDGET_EXHAUSTED"]), "BUDGET_EXHAUSTED");
+  assert.equal(rollUpOutcome(["BUDGET_EXHAUSTED", "ZERO_RESULTS"]), "BUDGET_EXHAUSTED",
+    '"we did not ask" and "we asked and it was empty" are different facts');
+  assert.equal(rollUpOutcome(["SUCCESS", "BUDGET_EXHAUSTED"]), "SUCCESS",
+    "one source stopping on budget does not spoil another source's real success");
+});
+
+test("every AdapterOutcome member maps to something other than the NOT_CONFIGURED fallthrough", () => {
+  const members = ["SUCCESS", "ZERO_RESULTS", "NOT_CONFIGURED", "DEFERRED", "FAILED",
+    "PARTIAL", "BUDGET_EXHAUSTED"] as const;
+  for (const m of members) {
+    const got = rollUpOutcome([m]);
+    if (m === "NOT_CONFIGURED") assert.equal(got, "NOT_CONFIGURED");
+    else assert.notEqual(got, "NOT_CONFIGURED", `${m} must not fall through to NOT_CONFIGURED`);
+  }
+});

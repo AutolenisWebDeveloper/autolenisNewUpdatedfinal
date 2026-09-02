@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { MAX_SHORTLIST_ITEMS } from "@/lib/constants";
+import { countAvailableItems } from "@/lib/services/shortlist/shortlist.service";
 
 // POST /api/buyer/shortlist — add item
 export async function POST(request: NextRequest) {
@@ -23,8 +24,9 @@ export async function POST(request: NextRequest) {
     include: { items: true },
   });
 
-  // MAX_SHORTLIST_ITEMS enforcement
-  if (shortlist.items.length >= MAX_SHORTLIST_ITEMS) {
+  // MAX_SHORTLIST_ITEMS enforcement, counting AVAILABLE candidates only. Counting rows
+  // would lock a buyer whose saved cars have sold out of adding their replacements.
+  if (await countAvailableItems(shortlist.items) >= MAX_SHORTLIST_ITEMS) {
     return errorResponse("SHORTLIST_FULL", `Shortlist is limited to ${MAX_SHORTLIST_ITEMS} vehicles`, 400);
   }
 

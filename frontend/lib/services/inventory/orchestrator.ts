@@ -21,6 +21,8 @@ import { InventoryLane, InventorySourceType, SyncRunStatus } from "@prisma/clien
 import { normalizeVin, isValidVin } from "@/lib/utils/vin";
 import type { NormalizedVehicle, AdapterRunResult, AdapterOutcome, SearchParams } from "./adapters/IInventoryAdapter";
 import { MarketCheckAdapter } from "./adapters/marketcheck.adapter";
+import { resolveMarketConfig, MAX_CALLS_PER_SWEEP } from "./inventory-source-config.service";
+import { cycleKeyFor, rollCycleForward, makeCallBudget, makeStaticBudget } from "./inventory-call-budget.service";
 
 // Built-in adapters. Adapter#search() owns its own no-op behavior when not configured.
 const ADAPTERS = [new MarketCheckAdapter()];
@@ -58,6 +60,10 @@ function outcomeToStatus(outcome: AdapterOutcome): SyncRunStatus {
     case "NOT_CONFIGURED": return SyncRunStatus.NOT_CONFIGURED;
     case "DEFERRED": return SyncRunStatus.DEFERRED;
     case "FAILED": return SyncRunStatus.FAILED;
+    // Some pages landed and some did not. PARTIAL already existed in the enum and was
+    // unreachable; a paginated walk is the first thing that can legitimately produce it.
+    case "PARTIAL": return SyncRunStatus.PARTIAL;
+    case "BUDGET_EXHAUSTED": return SyncRunStatus.BUDGET_EXHAUSTED;
   }
 }
 
@@ -102,14 +108,20 @@ function deduplicateVehicles(results: AdapterRunResult[]): NormalizedVehicle[] {
 // sources are SKIPPED, not scored — so an all-unconfigured run yields null health,
 // never a misleading 100%.
 function computeHealthScore(results: AdapterRunResult[]): number | null {
-  const attempted = results.filter(r => r.outcome !== "NOT_CONFIGURED");
+  // BUDGET_EXHAUSTED is excluded from the denominator for the same reason NOT_CONFIGURED
+  // is: no request was refused upstream, we declined to send one. Scoring a deliberate,
+  // correct spend-stop as a health failure would page an operator every night for the rest
+  // of the month. It surfaces through its own once-per-cycle alert instead.
+  const attempted = results.filter(r => r.outcome !== "NOT_CONFIGURED" && r.outcome !== "BUDGET_EXHAUSTED");
   if (attempted.length === 0) return null;
+  // PARTIAL is deliberately NOT healthy: pages went missing.
   const healthy = attempted.filter(r => r.outcome === "SUCCESS" || r.outcome === "ZERO_RESULTS").length;
   return Math.round((healthy / attempted.length) * 100);
 }
 
 export interface AdapterOutcomeSummary {
   adapter: string;
+  /** Distinct vehicles that survived normalize() and in-adapter dedup. */
   count: number;
   duration: number;
   configured: boolean;
@@ -117,19 +129,34 @@ export interface AdapterOutcomeSummary {
   upserted: number;
   syncRunId: string | null;
   error?: string;
+  // Yield evidence. `count` alone cannot distinguish "the market is small" from "9 of 10
+  // pages went missing", which is precisely the ambiguity that let short runs record
+  // COMPLETED for months.
+  apiCallsUsed?: number;
+  rawListings?: number;
+  numFound?: number | null;
+  stopReason?: string | null;
+  coverage?: string;
+  maxDistMiles?: number | null;
 }
 
 export interface OrchestratorRunResult {
   totalFetched: number;
   totalAfterDedup: number;
   upserted: number;
-  deactivated: number;
+  /** Provider HTTP calls dispatched across all adapters — the number the monthly cap is
+   *  spent against. Recorded in CronJobLog.result so spend is auditable per run. */
+  apiCallsUsed: number;
+  /** Where market config came from: the inventory_sources row, or the env fallback. */
+  configSource: "row" | "env" | null;
+  /** The market actually swept, for the run record. */
+  market: { zip: string; radiusMiles: number } | null;
   /** How many sources were actually configured (credential/feed present). */
   configuredSources: number;
   /** How many sources actually ran a fetch (configured, not NOT_CONFIGURED). */
   attemptedSources: number;
   /** Roll-up outcome for the whole run. PARTIAL = some sources succeeded, some failed. */
-  outcome: "SUCCESS" | "PARTIAL" | "ZERO_RESULTS" | "NOT_CONFIGURED" | "DEFERRED" | "FAILED";
+  outcome: "SUCCESS" | "PARTIAL" | "ZERO_RESULTS" | "NOT_CONFIGURED" | "DEFERRED" | "FAILED" | "BUDGET_EXHAUSTED";
   adapterResults: AdapterOutcomeSummary[];
   /** null when no configured source ran — NEVER defaulted to 100. */
   healthScore: number | null;
@@ -143,6 +170,13 @@ export interface OrchestratorRunResult {
 export function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult["outcome"] {
   const hasSuccess = outcomes.some(o => o === "SUCCESS");
   const hasFailure = outcomes.some(o => o === "FAILED" || o === "DEFERRED");
+  // An adapter that itself came back PARTIAL makes the whole run PARTIAL. These are plain
+  // string comparisons, NOT a compile-checked switch, so a new AdapterOutcome added to the
+  // union does not fail the build here — it falls silently through every branch and lands
+  // on NOT_CONFIGURED. That is exactly what happened to PARTIAL: it existed in the enum and
+  // this function reported a run that ingested 150 vehicles as an unconfigured provider.
+  // Every member of the union must therefore be named explicitly.
+  if (outcomes.some(o => o === "PARTIAL")) return "PARTIAL";
   // A run where some sources succeeded and others failed is PARTIAL — never a
   // clean SUCCESS that hides the failure.
   if (hasSuccess && hasFailure) return "PARTIAL";
@@ -151,6 +185,9 @@ export function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult
   // sibling ZERO_RESULTS into looking like a clean, healthy empty run.
   if (outcomes.some(o => o === "FAILED")) return "FAILED";
   if (outcomes.some(o => o === "DEFERRED")) return "DEFERRED";
+  // A deliberate spend-stop outranks ZERO_RESULTS: "we did not ask" and "we asked and the
+  // market was empty" are different facts, and only one of them needs an operator.
+  if (outcomes.some(o => o === "BUDGET_EXHAUSTED")) return "BUDGET_EXHAUSTED";
   if (outcomes.some(o => o === "ZERO_RESULTS")) return "ZERO_RESULTS";
   return "NOT_CONFIGURED";
 }
@@ -158,13 +195,73 @@ export function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult
 export async function runInventorySync(params: SearchParams = {}, mode: "full" | "priority" = "full"): Promise<OrchestratorRunResult> {
   const startedAt = new Date();
 
-  // Run all adapters in parallel — each independently failure-isolated
-  const adapterResults = await Promise.all(
-    ADAPTERS.map(adapter => adapter.search({
+  // ── Resolve the swept market from config ──────────────────────────────────
+  // Geography used to be `params.zip ?? "10001"` inside the adapter, and both crons passed
+  // an empty params object, so the NYC fallback ALWAYS won. It is now config, resolved from
+  // the inventory_sources row with an env fallback that keeps the code correct while the
+  // migration is unapplied. An explicit caller argument still wins over both.
+  const resolved = await resolveMarketConfig(InventorySourceType.MARKETCHECK, "MarketCheck");
+
+  let searchParams: SearchParams = { ...params };
+  let configSource: "row" | "env" | null = null;
+  let market: { zip: string; radiusMiles: number } | null = null;
+  let budget = undefined as SearchParams["budget"];
+  let configFailure: { outcome: AdapterOutcome; error: string } | null = null;
+
+  if (resolved.ok) {
+    const c = resolved.config;
+    configSource = c.configSource;
+    market = { zip: c.zip, radiusMiles: c.radiusMiles };
+
+    // A priority run is a manual re-check, not a sweep: one call, never ten.
+    const granted = mode === "priority" ? 1 : Math.min(c.maxCallsPerRun, MAX_CALLS_PER_SWEEP);
+    const cycleKey = cycleKeyFor(startedAt);
+
+    if (c.configSource === "row" && c.sourceId) {
+      await rollCycleForward(c.sourceId, cycleKey);
+      budget = makeCallBudget(c.sourceId, cycleKey, c.monthlyCallBudget, granted);
+    } else {
+      // Config came from env, so the ledger columns do not exist yet. The compiled
+      // per-sweep grant is still a hard bound: worst case 10 x 31 = 310 calls/month.
+      budget = makeStaticBudget(granted);
+    }
+
+    searchParams = {
+      zip: c.zip,
+      radius: c.radiusMiles,
+      make: c.make,
+      model: c.model,
+      yearMin: c.yearMin,
+      yearMax: c.yearMax,
+      priceMaxCents: c.priceMaxCents,
+      rowsPerCall: c.rowsPerCall,
+      maxCalls: granted,
+      budget,
+      // An explicit caller argument (e.g. an admin one-off) overrides resolved config.
       ...params,
-      maxResults: mode === "full" ? 100 : 25,
-    }))
-  );
+    };
+  } else {
+    // A schema/config gap is NOT_CONFIGURED (an ops gap, not a health incident); a real
+    // read failure is DEFERRED so a deploy-order mistake reads as the incident it is.
+    configFailure = resolved.reason === "config_read_error"
+      ? { outcome: "DEFERRED", error: resolved.error ?? "config read failed" }
+      : { outcome: "NOT_CONFIGURED", error: resolved.reason === "source_inactive" ? "source is inactive" : "no market configured" };
+  }
+
+  // Run all adapters in parallel — each independently failure-isolated.
+  // When config could not be resolved, no adapter is invoked at all: zero HTTP calls.
+  const adapterResults: AdapterRunResult[] = configFailure
+    ? ADAPTERS.map(a => ({
+        adapter: a.name,
+        vehicles: [],
+        duration: 0,
+        configured: configFailure!.outcome !== "NOT_CONFIGURED",
+        outcome: configFailure!.outcome,
+        error: configFailure!.error,
+        fetchedAt: startedAt,
+        apiCallsUsed: 0,
+      }))
+    : await Promise.all(ADAPTERS.map(adapter => adapter.search(searchParams)));
 
   const totalFetched = adapterResults.reduce((sum, r) => sum + r.vehicles.length, 0);
 
@@ -176,6 +273,21 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
 
   // Upsert to database with lane assignment + provenance. Track per-adapter upsert
   // counts so each source's InventorySyncRun reflects what IT actually ingested.
+  // Prefetch existing rows for every VIN in ONE query. This used to be a findFirst per
+  // vehicle inside the loop; at 500 vehicles that is 500 round-trips inside a serverless
+  // function, which pagination would have turned from slow into a timeout.
+  const candidateVins = uniqueVehicles
+    .map(v => (v.vin ? normalizeVin(v.vin) : undefined))
+    .filter((v): v is string => !!v && isValidVin(v));
+  const existingByVin = new Map<string, { priceHistory: unknown }>();
+  if (candidateVins.length > 0) {
+    const rows = await prisma.inventoryItem.findMany({
+      where: { vin: { in: candidateVins } },
+      select: { vin: true, priceHistory: true },
+    });
+    for (const r of rows) if (r.vin) existingByVin.set(r.vin, { priceHistory: r.priceHistory });
+  }
+
   const upsertedByAdapter = new Map<string, number>();
   let upserted = 0;
   for (const vehicle of uniqueVehicles) {
@@ -188,7 +300,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     const vin = normalizedVin && isValidVin(normalizedVin) ? normalizedVin : undefined;
 
     if (vin) {
-      const existing = await prisma.inventoryItem.findFirst({ where: { vin } });
+      const existing = existingByVin.get(vin);
       const priceHistory = existing
         ? [...((existing.priceHistory as Array<{ price: number; date: string }>) ?? []), { price: vehicle.priceCents, date: new Date().toISOString() }].slice(-24)
         : [{ price: vehicle.priceCents, date: new Date().toISOString() }];
@@ -255,16 +367,11 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     upsertedByAdapter.set(vehicle.sourceAdapter, (upsertedByAdapter.get(vehicle.sourceAdapter) ?? 0) + 1);
   }
 
-  // ENH-5: Stale sweep — deactivate vehicles not seen in this run (full sync only)
-  let deactivated = 0;
-  if (mode === "full") {
-    const cutoff = new Date(Date.now() - 48 * 3600000); // 48 hours
-    const staleResult = await prisma.inventoryItem.updateMany({
-      where: { lastSeenAt: { lt: cutoff }, lane: { not: InventoryLane.LANE_1 }, isActive: true },
-      data: { isActive: false },
-    });
-    deactivated = staleResult.count;
-  }
+  // The stale sweep used to run here too, with a SECOND copy of the same wrong predicate
+  // (`lane != LANE_1`, no NULL branch on lastSeenAt). It now lives in exactly one place —
+  // stale-sweep.service.ts, driven by the inventory-stale-sweep cron, under a dry-run
+  // default and a blast-radius breaker. Ingestion must not silently deactivate rows as a
+  // side effect: a sweep that hides inside a sync is a sweep nobody can dry-run.
 
   const completedAt = new Date();
   const healthScore = computeHealthScore(adapterResults);
@@ -294,9 +401,14 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           select: { id: true },
         });
         syncRunId = runRow.id;
+        // `select` is REQUIRED, not stylistic. Without it Prisma returns every column the
+        // model declares, so the moment schema.prisma names a column the database does not
+        // have yet (the window between deploy and migrate) this throws P2022 — silently,
+        // inside the catch below, taking the run accounting with it.
         await prisma.inventorySource.update({
           where: { id: sourceId },
           data: { lastRunAt: completedAt, lastRunStatus: r.outcome, vehiclesLastCount: r.vehicles.length },
+          select: { id: true },
         }).catch(() => {});
       } catch (e) {
         logger.warn(`[inventory-orchestrator] InventorySyncRun write failed for ${r.adapter}:`, e);
@@ -311,12 +423,56 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
       upserted: perAdapterUpserted,
       syncRunId,
       error: r.error,
+      apiCallsUsed: r.apiCallsUsed,
+      rawListings: r.rawListings,
+      numFound: r.numFound,
+      stopReason: r.stopReason ?? null,
+      coverage: r.coverage,
+      maxDistMiles: r.maxDistMiles,
     });
   }
 
   const configuredSources = adapterResults.filter(r => r.configured).length;
-  const attemptedSources = adapterResults.filter(r => r.outcome !== "NOT_CONFIGURED").length;
+  // "Actually ran a fetch" excludes BUDGET_EXHAUSTED for the same reason it excludes
+  // NOT_CONFIGURED: zero HTTP requests were dispatched. Counting a deliberate spend-stop as
+  // an attempt would make the health denominator claim work that never happened.
+  const attemptedSources = adapterResults.filter(
+    r => r.outcome !== "NOT_CONFIGURED" && r.outcome !== "BUDGET_EXHAUSTED",
+  ).length;
   const overall = rollUpOutcome(adapterResults.map(r => r.outcome));
+
+  // A fully budget-exhausted sweep makes zero calls, so it is excluded from the health
+  // denominator and healthScore is null — which means the block below cannot fire and the
+  // run would otherwise be SILENT. That is the exact failure shape this whole change exists
+  // to prevent: ingestion stops and nobody is told. It gets its own alert, deduped to ONCE
+  // PER CYCLE by a title lookup, so a month-long exhaustion produces one greppable alert
+  // rather than thirty.
+  if (adapterResults.some(r => r.outcome === "BUDGET_EXHAUSTED")) {
+    const cycleKey = cycleKeyFor(startedAt);
+    const title = `Inventory call budget exhausted (${cycleKey})`;
+    try {
+      const existingAlert = await prisma.notification.findFirst({
+        where: { title, type: "SYSTEM_ALERT" },
+        select: { id: true },
+      });
+      if (!existingAlert) {
+        await prisma.notification.create({
+          data: {
+            title,
+            body:
+              `The MarketCheck monthly call budget for ${cycleKey} is spent, so the inventory ` +
+              `sweep made no provider calls and the catalogue will not refresh until the cycle ` +
+              `rolls over. Raise inventory_sources.monthly_call_budget only if the provider plan ` +
+              `allows it — the cap exists because 28 calls/day previously produced 191 ` +
+              `consecutive HTTP 429 runs.`,
+            type: "SYSTEM_ALERT",
+          },
+        });
+      }
+    } catch (e) {
+      logger.warn("[inventory-orchestrator] budget-exhausted alert failed:", e);
+    }
+  }
 
   // ENH-14: Alert only on a genuine failure among sources that actually ran — never
   // for an unconfigured source (that is an ops config gap, not a health incident).
@@ -334,7 +490,9 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     totalFetched,
     totalAfterDedup: uniqueVehicles.length,
     upserted,
-    deactivated,
+    apiCallsUsed: adapterResults.reduce((n, r) => n + (r.apiCallsUsed ?? 0), 0),
+    configSource,
+    market,
     configuredSources,
     attemptedSources,
     outcome: overall,
@@ -345,23 +503,17 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   };
 }
 
-// Bootstrap seed — ENH deploy hook
+// Bootstrap seed — ENH deploy hook.
+//
+// This used to loop over a hardcoded NY/LA/Chicago/Houston/Atlanta array, ignoring whatever
+// market was configured. Under pagination that would be up to 50 provider calls per button
+// press — a tenth of the entire monthly allowance, spent by any SUPER_ADMIN clicking a
+// fire-and-forget POST, on four markets AutoLenis does not serve.
+//
+// It now runs ONE budget-gated priority sweep of the configured market, which is also the
+// last hardcoded geography removed from the codebase.
 export async function bootstrapInventory(): Promise<void> {
-  const defaultMarkets = [
-    { city: "New York", state: "NY", zip: "10001" },
-    { city: "Los Angeles", state: "CA", zip: "90001" },
-    { city: "Chicago", state: "IL", zip: "60601" },
-    { city: "Houston", state: "TX", zip: "77001" },
-    { city: "Atlanta", state: "GA", zip: "30301" },
-  ];
-
-  for (const market of defaultMarkets) {
-    await runInventorySync({
-      zip: market.zip,
-      radius: 50,
-      maxResults: 20,
-    }, "priority").catch(err => {
-      logger.error(`Bootstrap failed for ${market.city}:`, err);
-    });
-  }
+  await runInventorySync({}, "priority").catch(err => {
+    logger.error("[inventory-bootstrap] failed:", err);
+  });
 }

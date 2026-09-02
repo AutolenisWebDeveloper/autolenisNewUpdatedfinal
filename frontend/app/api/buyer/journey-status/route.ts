@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { countAvailableItems } from "@/lib/services/shortlist/shortlist.service";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { computeJourney } from "@/lib/services/buyer/journey";
 import { advanceOnInsuranceSatisfied } from "@/lib/services/deal/deal.service";
@@ -44,7 +45,9 @@ export async function GET(request: NextRequest) {
     const journey = computeJourney({
       onboardingComplete: buyer.onboardingComplete,
       prequalValid: isPrequalValid(prequal),
-      shortlistCount: shortlist?.items.length ?? 0,
+      // AVAILABLE candidates, not rows — the sidebar and this API share computeJourney,
+      // so they must also share the definition of "has a shortlist".
+      shortlistCount: shortlist ? await countAvailableItems(shortlist.items) : 0,
       depositPaid: !!deposit,
       activeAuction: !!activeAuction,
       deal: activeDeal
