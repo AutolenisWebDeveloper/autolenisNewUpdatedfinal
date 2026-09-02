@@ -66,10 +66,21 @@ async function ensureInventorySource(type: InventorySourceType, name: string): P
  * different pending column on the same table is a real schema problem and surfaces.
  */
 function isMissingMarketColumnError(e: unknown): boolean {
-  const err = e as { code?: unknown; meta?: { column?: unknown }; message?: unknown } | null;
+  const err = e as
+    | { code?: unknown; meta?: { column?: unknown; target?: unknown }; message?: unknown }
+    | null;
   if (err?.code !== "P2022" && err?.code !== "42703") return false;
-  const column = String(err?.meta?.column ?? err?.message ?? "");
-  return column.includes("market_");
+  // P2022 is raised by the Rust query engine, and which key carries the column
+  // name has moved between Prisma versions (`meta.column`, `meta.target`) while
+  // the message has always contained it ("The column `x` does not exist in the
+  // current database."). Check all three rather than betting on one shape — a
+  // guard that silently stops matching would turn the pre-migration window back
+  // into an outage without any signal that it had.
+  const haystack = [err?.meta?.column, err?.meta?.target, err?.message]
+    .filter((v) => v !== undefined && v !== null)
+    .map((v) => String(v))
+    .join(" ");
+  return haystack.includes("market_");
 }
 
 /** One adapter run against one configured market. */

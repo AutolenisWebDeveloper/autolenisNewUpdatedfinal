@@ -347,6 +347,36 @@ test("REGRESSION: a missing market column (P2022) degrades to env, it does not t
   assert.equal(result.outcome, "ZERO_RESULTS");
 });
 
+test("the P2022 guard matches every shape the engine has used for the column name", async () => {
+  // P2022 comes from the Rust query engine; which meta key carries the column has
+  // moved between Prisma versions. All three shapes must degrade to the env fallback.
+  const shapes: Array<Error & { code?: string; meta?: Record<string, unknown> }> = [
+    Object.assign(new Error("boom"), { code: "P2022", meta: { column: "market_zip" } }),
+    Object.assign(new Error("boom"), { code: "P2022", meta: { target: "market_zip" } }),
+    Object.assign(new Error("The column `inventory_sources.market_zip` does not exist in the current database."), { code: "P2022" }),
+  ];
+  for (const shape of shapes) {
+    process.env.MARKETCHECK_API_KEY = "test-key";
+    process.env.INVENTORY_DEFAULT_MARKET_ZIP = "75201";
+    sourceRowsThrow = shape;
+    const urls = captureRequestedUrls();
+    const { runInventorySync } = await load();
+
+    await runInventorySync({}, "full");
+    assert.ok(urls[0]?.includes("zip=75201"), `shape ${JSON.stringify(shape.meta ?? shape.message)} did not degrade to env`);
+    sourceRowsThrow = null;
+  }
+});
+
+test("a P2022 on a DIFFERENT column is NOT swallowed — that is a real schema problem", async () => {
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  process.env.INVENTORY_DEFAULT_MARKET_ZIP = "75201";
+  sourceRowsThrow = Object.assign(new Error("The column `inventory_sources.some_other_col` does not exist"), { code: "P2022" });
+  const { runInventorySync } = await load();
+
+  await assert.rejects(() => runInventorySync({}, "full"), /some_other_col/);
+});
+
 test("a non-P2022 database error is NOT swallowed", async () => {
   process.env.MARKETCHECK_API_KEY = "test-key";
   sourceRowsThrow = Object.assign(new Error("connection refused"), { code: "P1001" });
