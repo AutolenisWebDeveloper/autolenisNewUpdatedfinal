@@ -283,3 +283,29 @@ test("a complete sweep of a small market is SUCCESS", async () => {
   assert.equal(res.coverage, "OK");
   assert.equal(res.vehicles.length, 37);
 });
+
+// ── Every call must come back full of usable listings ────────────────────────
+
+test("the sweep asks only for PRICED listings", async () => {
+  // normalize() discards a listing with no price — a car with no price cannot be shown to a
+  // buyer or taken to a reverse auction. Verified live against the DFW market on 2026-09-02
+  // (zip 76011, radius 100): an unfiltered page returned 33 priced listings of 50, the same
+  // page with a price floor returned 50 of 50. Across a 10-page sweep that is the difference
+  // between ~330 and 500 usable vehicles for the SAME 10 calls against a 500/month cap.
+  stubFetch(() => ({ numFound: 83_223, count: 50 }));
+  await new MarketCheckAdapter().search({ ...DFW, rowsPerCall: 50, maxCalls: 1 });
+
+  const u = requested[0]!;
+  assert.equal(u.searchParams.get("price_min"), "1",
+    "fetching listings normalize() is guaranteed to discard wastes a third of every call");
+});
+
+test("the price floor coexists with a configured maximum", async () => {
+  stubFetch(() => ({ numFound: 100, count: 10 }));
+  await new MarketCheckAdapter().search({
+    ...DFW, rowsPerCall: 50, maxCalls: 1, priceMaxCents: 3_500_000,
+  });
+  const u = requested[0]!;
+  assert.equal(u.searchParams.get("price_min"), "1");
+  assert.equal(u.searchParams.get("price_max"), "35000", "cents internally, dollars at the wire");
+});

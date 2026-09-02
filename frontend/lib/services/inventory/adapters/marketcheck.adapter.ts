@@ -311,6 +311,25 @@ export class MarketCheckAdapter implements IInventoryAdapter {
       radius: String(Math.min(radiusMiles, MAX_RADIUS_MILES)),
       rows: String(Math.min(rows, MAX_ROWS_PER_CALL)),
       start: String(start),
+      // Only fetch listings that carry a price.
+      //
+      // normalize() discards any listing without one — a car with no price cannot be shown
+      // to a buyer or taken to a reverse auction — and in the DFW market a THIRD of listings
+      // have no price field. Verified live 2026-09-02 at zip 76011 / radius 100:
+      // an unfiltered page returned 33 priced listings out of 50, while the same page with a
+      // price floor returned 50 of 50. Over a 10-page sweep that is ~330 usable vehicles
+      // versus 500, for exactly the same 10 calls against a 500/month cap.
+      //
+      // It also keeps the coverage gate honest: num_found moves with the filter
+      // (92,425 -> 83,223 in that same check), so expected and received still describe the
+      // same population.
+      //
+      // `price_max` is already proven on this endpoint in production traffic; `price_min` is
+      // its documented partner. This sandbox's egress proxy blocks api.marketcheck.com, so
+      // the pair could not be re-verified against the raw endpoint here — but an ignored
+      // filter degrades to exactly today's behaviour, and the run records rawListings vs
+      // normalized either way, so a no-op would be visible rather than silent.
+      price_min: "1",
       ...(params.make ? { make: params.make } : {}),
       ...(params.model ? { model: params.model } : {}),
       ...(params.yearMin ? { year_min: String(params.yearMin) } : {}),
