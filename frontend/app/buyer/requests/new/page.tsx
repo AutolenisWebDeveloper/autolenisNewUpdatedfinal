@@ -197,6 +197,14 @@ export default function NewRequestPage() {
     }
     const features = sp.get("features");
     if (features) fromUrl.features = features.split(",").map(s => s.trim()).filter(Boolean);
+    // Seeded by "Find one like this near me" on an unavailable shortlist vehicle, so a
+    // sold listing routes into a live search instead of a dead end.
+    const trim = sp.get("trim");
+    if (trim) fromUrl.trim = trim;
+    const maxMileage = sp.get("maxMileage");
+    if (maxMileage && (MILEAGE_STOPS as readonly string[]).includes(maxMileage)) {
+      fromUrl.maxMileage = maxMileage as MileageOption;
+    }
 
     if (Object.keys(fromUrl).length > 0) {
       setForm(prev => ({ ...prev, ...fromUrl }));
