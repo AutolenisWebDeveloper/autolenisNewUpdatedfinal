@@ -103,34 +103,49 @@ export async function POST(request: NextRequest) {
   // dealId), so the record goes there rather than into a new field. Writing both
   // in a transaction means the deal can never claim an uploaded proof that has
   // no pointer behind it.
-  await prisma.$transaction(async (tx) => {
-    const existing = await tx.insurancePolicy.findFirst({
-      where: { dealId, buyerId: buyer.id, isExternal: true },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    if (existing) {
-      // Re-upload before verification supersedes the previous proof in place.
-      await tx.insurancePolicy.update({
-        where: { id: existing.id },
-        data: { proofUrl: proofPath, status: "ACTIVE", verifiedAt: null, verifiedBy: null },
+  //
+  // Wrapped: if the write fails the proof is NOT on file, so the gate below must
+  // not run and the buyer must be told. Letting the error escape the handler
+  // returns an unstructured framework 500 — no error envelope, no correlation id,
+  // and no log line naming the deal whose evidence was lost — while every other
+  // failure path in this route returns errorResponse.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.insurancePolicy.findFirst({
+        where: { dealId, buyerId: buyer.id, isExternal: true },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
       });
-    } else {
-      await tx.insurancePolicy.create({
-        data: {
-          buyerId: buyer.id,
-          dealId,
-          proofUrl: proofPath,
-          isExternal: true,
-          status: "ACTIVE",
-        },
+      if (existing) {
+        // Re-upload before verification supersedes the previous proof in place.
+        await tx.insurancePolicy.update({
+          where: { id: existing.id },
+          data: { proofUrl: proofPath, status: "ACTIVE", verifiedAt: null, verifiedBy: null },
+        });
+      } else {
+        await tx.insurancePolicy.create({
+          data: {
+            buyerId: buyer.id,
+            dealId,
+            proofUrl: proofPath,
+            isExternal: true,
+            status: "ACTIVE",
+          },
+        });
+      }
+      await tx.deal.update({
+        where: { id: dealId },
+        data: { insuranceStatus: "EXTERNAL_UPLOADED" },
       });
-    }
-    await tx.deal.update({
-      where: { id: dealId },
-      data: { insuranceStatus: "EXTERNAL_UPLOADED" },
     });
-  });
+  } catch (err) {
+    logger.error(`[upload-proof] proof write failed for deal ${dealId} — gate NOT released:`, err);
+    return errorResponse(
+      "INTERNAL_ERROR",
+      "We couldn't record your proof of insurance. Please try again.",
+      500,
+    );
+  }
 
   // Proof is now on file, so release the insurance gate and move the deal into the
   // contract stage. Without this the deal stalls at INSURANCE_PENDING forever —
