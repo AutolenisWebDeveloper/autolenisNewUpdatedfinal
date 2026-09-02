@@ -22,7 +22,10 @@ const calls = {
   itemUpdateMany: [] as Call[],
   itemFindMany: [] as Call[],
   itemFindFirst: [] as Call[],
+  notifications: [] as Call[],
 };
+let existingAlert: unknown = null;
+let ledgerRefuses = false;
 let existingItem: unknown = null;
 
 mock.module("@/lib/prisma", {
@@ -48,12 +51,20 @@ mock.module("@/lib/prisma", {
           monthlyCallBudget: 400, callsUsedThisCycle: 0, budgetCycleKey: "2026-09" }),
         upsert: async ({ where }: Call) => { calls.sourceUpsert.push({ where }); return { id: "src_1" }; },
         update: async (args: Call) => { calls.sourceUpdate.push(args); return { id: "src_1" }; },
-        updateMany: async () => ({ count: 1 }),
+        // The ledger draw: count 0 means "refused".
+        updateMany: async (args: Call) => {
+          const w = args.where as { OR?: unknown[] };
+          if (Array.isArray(w.OR)) return { count: 1 };   // cycle rollover always applies
+          return { count: ledgerRefuses ? 0 : 1 };
+        },
       },
       inventorySyncRun: {
         create: async ({ data }: Call) => { calls.syncRun.push(data as Call); return { id: "run_1" }; },
       },
-      notification: { create: async () => ({ id: "n_1" }) },
+      notification: {
+        findFirst: async () => existingAlert,
+        create: async ({ data }: Call) => { calls.notifications.push(data as Call); return { id: "n_1" }; },
+      },
     },
   },
 });
@@ -68,6 +79,7 @@ const origKey = process.env.MARKETCHECK_API_KEY;
 beforeEach(() => {
   calls.itemUpsert = []; calls.itemCreate = []; calls.syncRun = []; calls.sourceUpsert = []; calls.sourceUpdate = [];
   calls.itemUpdateMany = []; calls.itemFindMany = []; calls.itemFindFirst = [];
+  calls.notifications = []; existingAlert = null; ledgerRefuses = false;
   existingItem = null;
 });
 afterEach(() => {
@@ -249,4 +261,40 @@ test("a priority run is granted exactly ONE call, never a ten-page sweep", async
   const result = await runInventorySync({}, "priority");
   assert.equal(fetches, 1, "priority is a manual re-check, not a sweep");
   assert.equal(result.apiCallsUsed, 1);
+});
+
+// ── A budget-exhausted sweep must never be silent ────────────────────────────
+
+test("a fully budget-exhausted sweep alerts — it is excluded from health, so nothing else would", async () => {
+  // BUDGET_EXHAUSTED makes zero HTTP calls, so it is excluded from the health denominator
+  // and healthScore is null — which means the <70 health alert CANNOT fire. Without its own
+  // alert the run is completely silent, which is the exact failure shape this change exists
+  // to prevent: ingestion stops and nobody is told.
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  let fetches = 0;
+  globalThis.fetch = (async () => { fetches++; return { ok: true, status: 200, statusText: "OK", json: async () => ({ listings: [] }) }; }) as unknown as typeof fetch;
+
+  const { runInventorySync } = await load();
+  // Ledger at the cap: every draw is refused.
+  ledgerRefuses = true;
+  const result = await runInventorySync({}, "full");
+
+  assert.equal(fetches, 0, "a spent budget must dispatch nothing");
+  assert.equal(result.outcome, "BUDGET_EXHAUSTED");
+  assert.equal(result.healthScore, null, "excluded from the denominator, never scored 0");
+  assert.equal(result.attemptedSources, 0, "zero calls is not an attempt");
+  assert.equal(calls.syncRun[0]!.status, "BUDGET_EXHAUSTED");
+  assert.equal(calls.notifications.length, 1, "exactly one alert");
+  assert.match(String(calls.notifications[0]!.title), /budget exhausted/i);
+});
+
+test("the budget alert is deduped to once per cycle, not once per run", async () => {
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  globalThis.fetch = (async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ listings: [] }) })) as unknown as typeof fetch;
+  const { runInventorySync } = await load();
+  ledgerRefuses = true;
+  existingAlert = { id: "already_alerted" };   // the cycle already raised one
+  await runInventorySync({}, "full");
+  assert.equal(calls.notifications.length, 0,
+    "a month-long exhaustion must produce ONE greppable alert, not thirty");
 });

@@ -433,8 +433,46 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   }
 
   const configuredSources = adapterResults.filter(r => r.configured).length;
-  const attemptedSources = adapterResults.filter(r => r.outcome !== "NOT_CONFIGURED").length;
+  // "Actually ran a fetch" excludes BUDGET_EXHAUSTED for the same reason it excludes
+  // NOT_CONFIGURED: zero HTTP requests were dispatched. Counting a deliberate spend-stop as
+  // an attempt would make the health denominator claim work that never happened.
+  const attemptedSources = adapterResults.filter(
+    r => r.outcome !== "NOT_CONFIGURED" && r.outcome !== "BUDGET_EXHAUSTED",
+  ).length;
   const overall = rollUpOutcome(adapterResults.map(r => r.outcome));
+
+  // A fully budget-exhausted sweep makes zero calls, so it is excluded from the health
+  // denominator and healthScore is null — which means the block below cannot fire and the
+  // run would otherwise be SILENT. That is the exact failure shape this whole change exists
+  // to prevent: ingestion stops and nobody is told. It gets its own alert, deduped to ONCE
+  // PER CYCLE by a title lookup, so a month-long exhaustion produces one greppable alert
+  // rather than thirty.
+  if (adapterResults.some(r => r.outcome === "BUDGET_EXHAUSTED")) {
+    const cycleKey = cycleKeyFor(startedAt);
+    const title = `Inventory call budget exhausted (${cycleKey})`;
+    try {
+      const existingAlert = await prisma.notification.findFirst({
+        where: { title, type: "SYSTEM_ALERT" },
+        select: { id: true },
+      });
+      if (!existingAlert) {
+        await prisma.notification.create({
+          data: {
+            title,
+            body:
+              `The MarketCheck monthly call budget for ${cycleKey} is spent, so the inventory ` +
+              `sweep made no provider calls and the catalogue will not refresh until the cycle ` +
+              `rolls over. Raise inventory_sources.monthly_call_budget only if the provider plan ` +
+              `allows it — the cap exists because 28 calls/day previously produced 191 ` +
+              `consecutive HTTP 429 runs.`,
+            type: "SYSTEM_ALERT",
+          },
+        });
+      }
+    } catch (e) {
+      logger.warn("[inventory-orchestrator] budget-exhausted alert failed:", e);
+    }
+  }
 
   // ENH-14: Alert only on a genuine failure among sources that actually ran — never
   // for an unconfigured source (that is an ops config gap, not a health incident).
