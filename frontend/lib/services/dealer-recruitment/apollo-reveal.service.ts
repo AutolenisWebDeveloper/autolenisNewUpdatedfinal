@@ -12,6 +12,10 @@
 //  - Reveal-cache: a fresh prior reveal for the rooftop is reused with no draw.
 //  - Fail-closed: a missing hit / adapter error refunds the credit + records EMPTY
 //    and returns null; the waterfall falls through to skip. Never fabricates.
+//  - Diagnosable: an EMPTY row records WHICH adapter stage produced it
+//    (emptyStage), so a cycle of empties can be told apart from a cycle that
+//    never resolved an organization. Diagnostic only — it changes nothing about
+//    what is drawn, refunded, or asked of Apollo.
 
 import { logger } from "@/lib/logger";
 import type { PrismaClient } from "@prisma/client";
@@ -115,17 +119,40 @@ export async function revealRooftopContact(
   // real spend and overspend the cap.
   let outcome: Awaited<ReturnType<typeof apolloResolveAndReveal>>;
   try {
-    outcome = await resolveAndReveal({ name: input.name, website: input.website, city: input.city, state: input.state });
+    // rooftopId is passed for the adapter's free-stage funnel logs only — it is
+    // never sent to Apollo and does not alter the request or its cost.
+    outcome = await resolveAndReveal({
+      rooftopId: input.rooftopId,
+      name: input.name,
+      website: input.website,
+      city: input.city,
+      state: input.state,
+    });
   } catch (err) {
     // The adapter is fail-closed and shouldn't throw; if it does we can't know
-    // whether the paid call billed, so assume it did (never undercount).
+    // whether the paid call billed, so assume it did (never undercount). The
+    // stage is recorded as match_error for the same reason: an unknown failure
+    // past the free stages is treated as the paid stage, which is the
+    // conservative reading and the one that matches billed:true.
     logger.warn(`[apollo-reveal] adapter threw for rooftop ${input.rooftopId}:`, err);
-    outcome = { kind: "empty", billed: true };
+    outcome = { kind: "empty", billed: true, stage: "match_error" };
   }
   if (outcome.kind === "empty") {
     if (!outcome.billed) await refundCredits(cycleKey, REVEAL_COST_CREDITS, { prisma });
+    logger.info(
+      `[apollo-reveal] empty — rooftop=${input.rooftopId} stage=${outcome.stage} billed=${outcome.billed}`,
+    );
     await prisma.apolloReveal
-      .update({ where: { id: claimId }, data: { status: "EMPTY", creditsCost: outcome.billed ? REVEAL_COST_CREDITS : 0 } })
+      .update({
+        where: { id: claimId },
+        data: {
+          status: "EMPTY",
+          creditsCost: outcome.billed ? REVEAL_COST_CREDITS : 0,
+          // WHICH stage produced the empty. Diagnostic; creditsCost above is
+          // still decided solely by `billed` and is untouched by this field.
+          emptyStage: outcome.stage,
+        },
+      })
       .catch(() => {});
     return null;
   }

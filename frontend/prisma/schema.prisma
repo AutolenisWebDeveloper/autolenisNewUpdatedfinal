@@ -4021,6 +4021,16 @@ model ApolloReveal {
   creditsCost  Int      @default(0) @map("credits_cost")
   consumer     String   @default("live") // "live" | "backfill"
   status       String   @default("PENDING") // PENDING | REVEALED | EMPTY
+  /// WHICH adapter stage produced an EMPTY: disabled | no_org | no_people |
+  /// free_stage_error | no_match | match_no_email | match_error. Null on
+  /// PENDING/REVEALED rows and on EMPTY rows written before this column existed.
+  /// In practice a stored row never reads "disabled": revealRooftopContact
+  /// returns before claiming a row when the tier is off, so a flag-off attempt
+  /// leaves no row at all rather than an EMPTY one. The value exists because the
+  /// adapter can still return it to a caller that injects a null client.
+  /// Diagnostic only — creditsCost is still decided solely by whether Apollo
+  /// billed, and this field never feeds the ledger.
+  emptyStage   String?  @map("empty_stage")
   email        String?
   emailStatus  String?  @map("email_status")
   contactName  String?  @map("contact_name")

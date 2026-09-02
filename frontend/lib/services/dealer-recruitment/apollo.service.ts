@@ -115,6 +115,53 @@ export interface ApolloRevealed {
   title?: string | null;
 }
 
+/**
+ * WHICH of the three stages produced an `empty` outcome.
+ *
+ * Diagnosis only. Every empty reveal used to look alike, so a cycle that
+ * returned nothing could not be told apart from one that never resolved a
+ * single organization — this names the drop-off point. It carries no billing
+ * meaning of its own: `billed` remains the sole authority on whether the ledger
+ * refunds, and each stage keeps exactly the `billed` value it had before this
+ * field existed.
+ *
+ *   disabled          no client at all — no API key, or APOLLO_REVEAL_ENABLED
+ *                     is not "true". Nothing was asked of Apollo.  (not billed)
+ *   no_org            stage 1 (organizations/lookup) resolved no canonical
+ *                     organization.                                (not billed)
+ *   no_people         stage 2 (people search) returned zero people for the
+ *                     organization.                                (not billed)
+ *   free_stage_error  stage 1 or 2 THREW — the paid call was never
+ *                     reached.                                     (not billed)
+ *   no_match          stage 3 (people/match) matched no person: a clean 200,
+ *                     which Apollo does not charge for.            (not billed)
+ *   match_no_email    stage 3 matched a person carrying no work email — Apollo
+ *                     charges for the match regardless.                (BILLED)
+ *   match_error       stage 3 errored, so whether Apollo charged is unknowable;
+ *                     treated as charged, never undercount.            (BILLED)
+ *
+ * READ no_org / no_people WITH CARE. The free stages fail CLOSED: apolloFetch is
+ * called without throwOnError there, so an HTTP 429/500, a timeout, or a network
+ * error inside organizations/lookup or people search collapses to null rather
+ * than throwing. With the live client those transport failures therefore surface
+ * as `no_org` / `no_people`, NOT as `free_stage_error` — which in practice fires
+ * only when an injected client throws. That fail-closed shape is deliberate and
+ * predates this field (a free-stage error costs nothing, so treating it as "no
+ * result" is safe), so nothing here changes it. To tell a true miss from a throttled
+ * or timed-out one, read the warn apolloFetch already emits immediately before
+ * returning that null — `[apollo] HTTP <status> on <path>` for a non-2xx, or
+ * `[apollo] request failed on <path>` for a timeout/network error. Neither warn
+ * carries the rooftop, so pair it with the stage-1/stage-2 info line that does.
+ */
+export type ApolloEmptyStage =
+  | "disabled"
+  | "no_org"
+  | "no_people"
+  | "free_stage_error"
+  | "no_match"
+  | "match_no_email"
+  | "match_error";
+
 // Outcome of a reveal attempt, carrying whether Apollo was (or may have been)
 // BILLED so the ledger only refunds a genuinely free no-op. Apollo charges a lead
 // credit when people/match MATCHES a person, even if it unlocks no email — so a
@@ -123,7 +170,7 @@ export interface ApolloRevealed {
 // no people / no person matched) is `billed:false` (refund).
 export type ApolloRevealOutcome =
   | { kind: "revealed"; email: string; name: string | null; title: string | null }
-  | { kind: "empty"; billed: boolean };
+  | { kind: "empty"; billed: boolean; stage: ApolloEmptyStage };
 
 // The seam the orchestration depends on — injectable so the 3-stage logic is
 // unit-tested without live HTTP.
@@ -159,6 +206,12 @@ export interface ApolloAdapterInput {
   website?: string | null;
   city?: string | null;
   state?: string | null;
+  /**
+   * The rooftop this reveal is for. DIAGNOSTIC ONLY — never sent to Apollo, and
+   * it changes neither what is asked nor what is billed. It exists so the
+   * free-stage logs of a single run read as a per-rooftop drop-off funnel.
+   */
+  rooftopId?: string | null;
 }
 
 export interface ApolloAdapterDeps {
@@ -183,7 +236,8 @@ export function apolloPeopleSearchEnabled(): boolean {
 /**
  * Resolve a dealer to a revealed internet-sales contact. Never throws (fail-closed).
  * Returns an ApolloRevealOutcome: `revealed` with the email, or `empty` carrying
- * whether Apollo was billed (so the ledger refunds only a genuinely free no-op).
+ * whether Apollo was billed (so the ledger refunds only a genuinely free no-op)
+ * plus the `stage` that produced the empty, so a run of empties can be diagnosed.
  * Callers MUST have already drawn a credit — stage 3 (people/match) is the paid call.
  */
 export async function apolloResolveAndReveal(
@@ -191,7 +245,13 @@ export async function apolloResolveAndReveal(
   deps?: Partial<ApolloAdapterDeps>,
 ): Promise<ApolloRevealOutcome> {
   const client = deps?.client ?? defaultApolloClient();
-  if (!client) return { kind: "empty", billed: false }; // no key / disabled → fail closed, not billed
+  // no key / disabled → fail closed, not billed
+  if (!client) return { kind: "empty", billed: false, stage: "disabled" };
+
+  // Rooftop key for the free-stage funnel logs. Absent only when a caller other
+  // than the reveal orchestration drives the adapter; "unknown" keeps the line
+  // shape stable so a grep never silently misses a row.
+  const rooftop = input.rooftopId ?? "unknown";
 
   // Stages 1–2 are FREE (org lookup + people search). A failure here is never billed.
   let target: ApolloPerson;
@@ -201,7 +261,11 @@ export async function apolloResolveAndReveal(
       name: input.name,
       domain: normalizeWebsiteHost(input.website),
     });
-    if (!org) return { kind: "empty", billed: false };
+    // INFO, not warn: an unresolved org is an ordinary outcome for a dealer
+    // Apollo does not carry, not a fault. Logged BEFORE the miss return so the
+    // funnel shows the drop-off rather than only the rows that got through.
+    logger.info(`[apollo] stage 1 org lookup — rooftop=${rooftop} org=${org?.id ?? "none"} dealer="${input.name}"`);
+    if (!org) return { kind: "empty", billed: false, stage: "no_org" };
 
     // Stage 2 — people by org + ranked titles; pick the BEST-TITLE-ranked person
     // and reveal that one. Selection is title-first and does NOT gate on the
@@ -211,15 +275,17 @@ export async function apolloResolveAndReveal(
     // the tier would silently reveal nothing. We accept that some reveals come back
     // empty. The flag is used only as a tiebreaker among equal titles.
     const people = await client.peopleSearch({ organizationId: org.id, titles: APOLLO_SALES_TITLES });
-    if (people.length === 0) return { kind: "empty", billed: false };
+    logger.info(`[apollo] stage 2 people search — rooftop=${rooftop} org=${org.id} people=${people.length}`);
+    if (people.length === 0) return { kind: "empty", billed: false, stage: "no_people" };
     target = [...people].sort((a, b) => {
       const byTitle = titleRank(a.title) - titleRank(b.title);
       if (byTitle !== 0) return byTitle;
       return (b.hasEmail ? 1 : 0) - (a.hasEmail ? 1 : 0); // tie → prefer a flagged email
     })[0];
   } catch (err) {
-    logger.warn(`[apollo] resolve (free stages) failed for "${input.name}":`, err);
-    return { kind: "empty", billed: false }; // never reached the paid call → not billed
+    logger.warn(`[apollo] resolve (free stages) failed — rooftop=${rooftop} dealer="${input.name}":`, err);
+    // never reached the paid call → not billed
+    return { kind: "empty", billed: false, stage: "free_stage_error" };
   }
 
   // Stage 3 — the PAID people/match. Apollo charges a lead credit when it matches a
@@ -227,14 +293,16 @@ export async function apolloResolveAndReveal(
   // treated as billed → the ledger keeps the credit (conservative: never undercount).
   try {
     const revealed = await client.peopleMatch(target.id);
-    if (revealed === null) return { kind: "empty", billed: false }; // no person matched → not billed
-    if (!revealed.email) return { kind: "empty", billed: true }; // matched, no email → billed
+    // no person matched → not billed
+    if (revealed === null) return { kind: "empty", billed: false, stage: "no_match" };
+    // matched, no email → billed
+    if (!revealed.email) return { kind: "empty", billed: true, stage: "match_no_email" };
     return { kind: "revealed", email: revealed.email, name: revealed.name ?? null, title: revealed.title ?? null };
   } catch (err) {
     // The billable call errored — we cannot know whether Apollo charged, so assume
     // it did (never undercount). Ledger keeps the credit; the cycle claim goes EMPTY.
-    logger.warn(`[apollo] people/match failed for "${input.name}":`, err);
-    return { kind: "empty", billed: true };
+    logger.warn(`[apollo] people/match failed — rooftop=${rooftop} dealer="${input.name}":`, err);
+    return { kind: "empty", billed: true, stage: "match_error" };
   }
 }
 
