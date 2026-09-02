@@ -1726,6 +1726,7 @@ enum SyncRunStatus {
   NOT_CONFIGURED // provider credential/feed absent — source skipped, NOT scored as healthy
   ZERO_RESULTS // source queried successfully but returned no listings (a legitimate result)
   DEFERRED // transient failure (timeout / 429 / 5xx) — will be retried next run
+  BUDGET_EXHAUSTED // we deliberately stopped to protect the provider's monthly call cap — not a provider failure, not an empty market
 }
 
 enum InventorySourceType {
@@ -2403,6 +2404,30 @@ model InventorySource {
   lastRunStatus     String?             @map("last_run_status")
   vehiclesLastCount Int?                @map("vehicles_last_count")
   createdAt         DateTime            @default(now()) @map("created_at")
+
+  // ── Swept market — geography is CONFIG, never a code literal ───────────────
+  // marketcheck.adapter.ts carried `zip: params.zip ?? "10001"` and both crons called
+  // runInventorySync({}), so the NYC fallback always won and the market could not be
+  // changed without a deploy. A source with no centerZip and no INVENTORY_SWEEP_ZIP
+  // fallback is NOT_CONFIGURED and makes zero calls — never a silent default market.
+  centerZip           String? @map("center_zip")
+  radiusMiles         Int?    @map("radius_miles") // clamped to 1..100 in code (provider ceiling)
+  filterMake          String? @map("filter_make")
+  filterModel         String? @map("filter_model")
+  filterYearMin       Int?    @map("filter_year_min")
+  filterYearMax       Int?    @map("filter_year_max")
+  filterPriceMaxCents Int?    @map("filter_price_max_cents") // integer cents
+
+  // ── Sweep shape + monthly provider call budget ─────────────────────────────
+  // 28 calls/day against a 500/month plan produced 191 consecutive HTTP 429 runs
+  // (2026-08-24..31) and a silently frozen catalogue. The ledger lives on the source row
+  // so the cap is per-credential, with no new table and no rollover cron.
+  rowsPerCall        Int     @default(50) @map("rows_per_call")
+  maxCallsPerRun     Int     @default(10) @map("max_calls_per_run")
+  monthlyCallBudget  Int?    @map("monthly_call_budget") // NULL = unmetered (CUSTOM dealer feeds only)
+  callsUsedThisCycle Int     @default(0) @map("calls_used_this_cycle")
+  budgetCycleKey     String? @map("budget_cycle_key") // "YYYY-MM" UTC, roll-FORWARD only
+
   syncRuns          InventorySyncRun[]
 
   // Batch 1 — idempotent source registration: one source row per (type, name)

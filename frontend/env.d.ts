@@ -294,5 +294,28 @@ declare namespace NodeJS {
     ENABLE_BUFFER_PUBLISHING?: string;      // "true" enables Buffer publishing
     ENABLE_AUTO_PUBLISH?: string;           // "true" auto-schedules ready posts
     ENABLE_CREATOR_DISTRIBUTION?: string;   // "true" enables creator network
+
+    // ── Inventory sweep: market, budget, stale-sweep safety ───────────────────
+    // All optional. The DB row on inventory_sources is the primary source of
+    // truth; these are the fallback that lets the code run correctly BEFORE the
+    // market-config migration is applied (Prisma raises P2022 on unmigrated
+    // columns, which resolveMarketConfig degrades to this tier).
+    //
+    // INVENTORY_SWEEP_ZIP has NO built-in default. Unset in both tiers means
+    // NOT_CONFIGURED and zero provider calls — never a silent fallback market.
+    // The previous behaviour was an inline `?? "10001"` in the adapter, which is
+    // why 100% of production inventory was New York.
+    INVENTORY_SWEEP_ZIP?: string;             // 5-digit US zip, e.g. 76011 (DFW centroid)
+    INVENTORY_SWEEP_RADIUS_MILES?: string;    // clamped to 1..100 in code regardless
+    // Monthly MarketCheck call cap. Unset falls back to a compiled default, never
+    // to "unmetered" — a misconfigured environment must not be the reason an
+    // unbounded spend is permitted.
+    MARKETCHECK_MONTHLY_CALL_BUDGET?: string;
+    // dry_run (default) | enforce | off. Anything unrecognised reads as dry_run:
+    // the destructive mode is opted into explicitly, never reached by a typo.
+    INVENTORY_STALE_SWEEP_MODE?: string;
+    // Blast-radius breaker. Above this many candidates the sweep deactivates
+    // nothing and raises one alert instead.
+    INVENTORY_SWEEP_MAX_DEACTIVATIONS?: string;
   }
 }
