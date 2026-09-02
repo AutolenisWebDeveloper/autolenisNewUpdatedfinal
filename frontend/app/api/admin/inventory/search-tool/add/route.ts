@@ -58,6 +58,14 @@ export async function POST(request: NextRequest) {
       sourceAdapter: "manual_admin",
       lane: "LANE_1",
       isActive: true,
+      // Attribution and freshness, both previously unset. Without addedByAdminId a
+      // deliberately curated row is indistinguishable from an orphan — and it is
+      // exactly what exempts it from the stale sweep (see isSweepExempt in
+      // lib/services/inventory/inventory-eligibility.ts). Without lastSeenAt the
+      // row has no age at all: `lastSeenAt < cutoff` is UNKNOWN for NULL, which is
+      // how 95 rows stayed active for four months.
+      addedByAdminId: admin.adminId,
+      lastSeenAt: new Date(),
     },
   });
 

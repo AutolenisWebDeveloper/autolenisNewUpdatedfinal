@@ -47,7 +47,13 @@ export async function PATCH(request: NextRequest) {
     await prisma.$transaction([
       prisma.inventoryItem.updateMany({
         where: { id: { in: movedIds } },
-        data: { lane },
+        // Record WHO moved these rows and refresh freshness. On 2026-06-23 a single
+        // batch through this endpoint moved 123 aggregator rows LANE_3 -> LANE_1
+        // writing `{ lane }` and nothing else; 95 of them then held the sweep's
+        // "dealer-verified Lane 1" exemption with no dealer and no lastSeenAt, and
+        // stayed publicly visible for four months. Attribution is what makes a
+        // deliberate curation distinguishable from an orphan.
+        data: { lane, addedByAdminId: admin.adminId, lastSeenAt: new Date() },
       }),
       prisma.adminAuditLog.createMany({
         data: toMove.map(it => ({

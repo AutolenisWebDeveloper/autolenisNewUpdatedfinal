@@ -89,6 +89,13 @@ export async function PATCH(request: NextRequest, { params }: Props) {
       ...(data.lane          !== undefined ? { lane: data.lane } : {}),
       ...(data.images        !== undefined ? { images: data.images } : {}),
       ...(data.isActive      !== undefined ? { isActive: data.isActive } : {}),
+      // An admin edit is a human confirming the listing, so it refreshes freshness
+      // the same way a feed sighting does (see inventory-eligibility.ts). Setting
+      // the lane also records WHO curated the row: `lane` alone is not evidence of
+      // curation, and a lane change with no attribution is exactly what produced
+      // the 95 LANE_1 rows with no dealer that the stale sweep could never reach.
+      lastSeenAt: new Date(),
+      ...(data.lane !== undefined ? { addedByAdminId: admin.adminId } : {}),
     },
   });
 

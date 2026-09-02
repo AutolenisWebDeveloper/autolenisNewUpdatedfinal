@@ -188,6 +188,30 @@ declare namespace NodeJS {
     // (or unset) keeps Whisper STT active.
     VOICE_USE_WHISPER?: string;
 
+    // ─── Inventory market configuration ──────────────────────────────────────
+    // WHICH GEOGRAPHY the inventory aggregator is queried with.
+    //
+    // The served market used to be a hardcoded `zip ?? "10001"` (Manhattan) in
+    // the MarketCheck adapter, and both sync crons ran with no params — so the
+    // catalogue came out 93% New York for a business serving Dallas-Fort Worth.
+    //
+    // These are the FALLBACK layer. The database is authoritative: the market_*
+    // columns on the inventory_sources row win over env (see
+    // lib/services/inventory/market-config.ts). Env exists so the market can be
+    // re-pointed with one Vercel variable before that migration is applied, and
+    // so a fresh environment has a market at all.
+    //
+    // Optional, and there is NO compiled-in default: with none of these set and
+    // no configured source row, the aggregator reports NOT_CONFIGURED and ingests
+    // nothing. That is deliberate — a wrong market is worse than no market.
+    INVENTORY_DEFAULT_MARKET_ZIP?: string;    // centre postal code, e.g. "75201" (Dallas)
+    INVENTORY_DEFAULT_RADIUS_MILES?: string;  // search radius in miles; defaults to 75
+    INVENTORY_DEFAULT_MARKET_LABEL?: string;  // cosmetic, e.g. "Dallas-Fort Worth"
+
+    // MarketCheck — inventory aggregator. The adapter no-ops (NOT_CONFIGURED)
+    // when unset; it is never treated as a healthy empty sync.
+    MARKETCHECK_API_KEY?: string;
+
     // Optional
     REDIS_URL?: string;
     DEV_EMAIL_TO?: string; // Must NOT be set in production

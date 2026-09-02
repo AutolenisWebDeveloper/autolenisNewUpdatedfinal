@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { InventoryLane, Prisma } from "@prisma/client";
 import { lookupZip, haversineMiles, boundingBox } from "@/lib/utils/zip-coords";
+import { listingFreshness } from "@/lib/services/inventory/inventory-eligibility";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +110,7 @@ export async function GET(request: NextRequest) {
         city: true, state: true,
         externalDealerCity: true, externalDealerState: true,
         dealerId: true, sourceAdapter: true,
+        lastSeenAt: true, createdAt: true,
       },
     }),
   ]);
@@ -154,13 +156,26 @@ export async function GET(request: NextRequest) {
   const start = center ? (page - 1) * pageSize : 0;
   const items = computed.slice(start, start + pageSize);
 
-  // Serialize Decimal to number for JSON
-  const serialized = items.map(it => ({
-    ...it,
-    latitude: it.latitude !== null ? Number(it.latitude) : null,
-    longitude: it.longitude !== null ? Number(it.longitude) : null,
-    distanceMiles: it.distanceMiles !== null ? Math.round(it.distanceMiles * 10) / 10 : null,
-  }));
+  // Serialize Decimal to number for JSON, and attach freshness.
+  //
+  // FRESHNESS IS A LABEL, NOT A FILTER. `where` above is unchanged — every active
+  // listing stays visible, searchable, and paginated exactly as before. This field
+  // only lets the UI say "last seen 12 days ago" or withhold a shortlist button.
+  const freshnessNow = new Date();
+  const serialized = items.map(it => {
+    const f = listingFreshness(it, freshnessNow);
+    return {
+      ...it,
+      latitude: it.latitude !== null ? Number(it.latitude) : null,
+      longitude: it.longitude !== null ? Number(it.longitude) : null,
+      distanceMiles: it.distanceMiles !== null ? Math.round(it.distanceMiles * 10) / 10 : null,
+      freshness: {
+        lastSeenAt: f.lastSeenAt,
+        isStale: f.isStale,
+        shortlistEligible: f.shortlistEligible,
+      },
+    };
+  });
 
   return NextResponse.json({
     success: true,

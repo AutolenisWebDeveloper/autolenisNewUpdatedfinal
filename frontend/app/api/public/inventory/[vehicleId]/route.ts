@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { listingFreshness } from "@/lib/services/inventory/inventory-eligibility";
 
 export async function GET(
   _request: NextRequest,
@@ -18,7 +19,7 @@ export async function GET(
       latitude: true, longitude: true,
       externalListingUrl: true, externalDealerName: true,
       externalDealerCity: true, externalDealerState: true,
-      createdAt: true,
+      createdAt: true, lastSeenAt: true,
     },
   });
 
@@ -36,12 +37,17 @@ export async function GET(
     _count: true,
   });
 
+  // Freshness is a LABEL. The lookup above still requires only isActive — the
+  // detail page stays reachable for every active listing, however old.
+  const f = listingFreshness(item);
+
   return NextResponse.json({
     success: true,
     data: {
       ...item,
       latitude: item.latitude !== null ? Number(item.latitude) : null,
       longitude: item.longitude !== null ? Number(item.longitude) : null,
+      freshness: { lastSeenAt: f.lastSeenAt, isStale: f.isStale, shortlistEligible: f.shortlistEligible },
       marketContext: {
         avgPriceCents: sameMakeModel._avg.priceCents ?? null,
         sampleSize: sameMakeModel._count,

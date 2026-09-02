@@ -2405,6 +2405,24 @@ model InventorySource {
   createdAt         DateTime            @default(now()) @map("created_at")
   syncRuns          InventorySyncRun[]
 
+  // Market configuration — WHICH GEOGRAPHY this source is queried with.
+  //
+  // Before these columns the served market was a hardcoded `params.zip ?? "10001"`
+  // (Manhattan) in the MarketCheck adapter, unreachable from the database or the
+  // environment. One row = one (adapter, market) pair, which @@unique([type, name])
+  // already models: a second market for the same adapter is a second row.
+  // Resolution order and the deliberate absence of a default market are documented
+  // in lib/services/inventory/market-config.ts.
+  marketLabel         String?  @map("market_label")
+  marketZip           String?  @map("market_zip")
+  marketLat           Decimal? @map("market_lat") @db.Decimal(10, 7)
+  marketLng           Decimal? @map("market_lng") @db.Decimal(10, 7)
+  marketRadiusMiles   Int?     @map("market_radius_miles")
+  marketMakes         String[] @default([]) @map("market_makes")
+  marketPriceMaxCents Int?     @map("market_price_max_cents")
+  marketYearMin       Int?     @map("market_year_min")
+  marketYearMax       Int?     @map("market_year_max")
+
   // Batch 1 — idempotent source registration: one source row per (type, name)
   // so the orchestrator can find-or-create without racing duplicates.
   @@unique([type, name])

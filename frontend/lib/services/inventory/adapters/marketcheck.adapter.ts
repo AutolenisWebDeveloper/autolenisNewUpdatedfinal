@@ -1,5 +1,14 @@
 // MarketCheck adapter — production inventory aggregator.
-// Activates when MARKETCHECK_API_KEY is set. Skips gracefully otherwise.
+// Activates when MARKETCHECK_API_KEY is set AND a market centre is supplied.
+// Skips gracefully otherwise.
+//
+// The centre used to be `params.zip ?? "10001"` — Manhattan — and both sync crons
+// called the orchestrator with no params, so every scheduled run queried New York
+// regardless of where the business actually operates. There is no default market
+// any more: an uncentred search reports NOT_CONFIGURED and ingests nothing, which
+// is the same anti-fake-success posture this adapter already takes for a missing
+// API key. A wrong market is worse than no market.
+// See lib/services/inventory/market-config.ts for how the centre is resolved.
 //
 // API: https://www.marketcheck.com/automotive-api/
 // Endpoint: GET /v2/search/car/active?api_key=...&zip=...&radius=...&rows=...
@@ -9,6 +18,7 @@
 import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 import { buildSourceKey } from "./IInventoryAdapter";
+import { DEFAULT_RADIUS_MILES } from "../market-config";
 
 interface MarketCheckListing {
   id?: string;
@@ -63,6 +73,24 @@ export class MarketCheckAdapter implements IInventoryAdapter {
         duration: Date.now() - start,
         configured: false,
         outcome: "NOT_CONFIGURED",
+        fetchedAt: new Date(),
+      };
+    }
+
+    // No centre — no search. A postal code, or BOTH coordinates.
+    const hasCentre = Boolean(params.zip) || (params.lat !== undefined && params.lng !== undefined);
+    if (!hasCentre) {
+      logger.warn(
+        "[MarketCheck adapter] no market centre configured — skipping. Set the InventorySource market columns, " +
+          "or INVENTORY_DEFAULT_MARKET_ZIP in env, to activate this source.",
+      );
+      return {
+        adapter: this.name,
+        vehicles: [],
+        duration: Date.now() - start,
+        configured: false,
+        outcome: "NOT_CONFIGURED",
+        error: "no_market_configured",
         fetchedAt: new Date(),
       };
     }
@@ -123,15 +151,27 @@ export class MarketCheckAdapter implements IInventoryAdapter {
     }
   }
 
+  // Callers must have established a centre before this runs (see search()).
   private buildApiUrl(params: SearchParams, apiKey: string): string {
+    // MarketCheck accepts a postal-code centre or a lat/long centre; both take radius.
+    const centre: Record<string, string> = params.zip
+      ? { zip: params.zip }
+      : { latitude: String(params.lat), longitude: String(params.lng) };
+
+    // `makes` (market config) and `make` (a single-make search) are the same
+    // provider parameter — MarketCheck takes a comma-separated list.
+    const makeFilter = params.makes && params.makes.length > 0
+      ? params.makes.join(",")
+      : params.make;
+
     const query = new URLSearchParams({
       api_key: apiKey,
       car_type: "used",
       include_facets: "false",
-      zip: params.zip ?? "10001",
-      radius: String(params.radius ?? 100),
+      ...centre,
+      radius: String(params.radius ?? DEFAULT_RADIUS_MILES),
       rows: String(Math.min(params.maxResults ?? 50, 50)),
-      ...(params.make ? { make: params.make } : {}),
+      ...(makeFilter ? { make: makeFilter } : {}),
       ...(params.model ? { model: params.model } : {}),
       ...(params.yearMin ? { year_min: String(params.yearMin) } : {}),
       ...(params.yearMax ? { year_max: String(params.yearMax) } : {}),
@@ -161,6 +201,7 @@ export class MarketCheckAdapter implements IInventoryAdapter {
         externalDealerPhone: listing.dealer?.phone,
         externalDealerCity: listing.dealer?.city,
         externalDealerState: listing.dealer?.state,
+        externalDealerZip: listing.dealer?.zip,
         externalListingUrl: listing.vdp_url,
         sourceAdapter: this.name,
         sourceUrl: "https://www.marketcheck.com",

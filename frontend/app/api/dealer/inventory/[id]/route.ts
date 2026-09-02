@@ -51,7 +51,15 @@ export async function PATCH(request: NextRequest, { params }: Props) {
   try {
     const updated = await prisma.inventoryItem.update({
       where: { id },
-      data: { ...rest, ...(condition ? { condition: condition.toLowerCase() } : {}) },
+      data: {
+        ...rest,
+        ...(condition ? { condition: condition.toLowerCase() } : {}),
+        // A dealer edit IS a confirmation that this listing is still real. Without
+        // stamping it, a dealer with no feed who updates a price every week would
+        // still watch every listing fall out of shortlist eligibility 30 days after
+        // creation (lib/services/inventory/inventory-eligibility.ts).
+        lastSeenAt: new Date(),
+      },
     });
     return successResponse({ item: updated });
   } catch (err) {

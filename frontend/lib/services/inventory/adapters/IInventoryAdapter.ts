@@ -18,6 +18,8 @@ export interface NormalizedVehicle {
   externalDealerPhone?: string;
   externalDealerCity?: string;
   externalDealerState?: string;
+  /** Listing postal code. Carries the geography the public radius filter needs. */
+  externalDealerZip?: string;
   externalListingUrl?: string;
 
   // Deduplication key: VIN (primary) or composite (fallback)
@@ -60,11 +62,17 @@ export interface IInventoryAdapter {
 
 export interface SearchParams {
   make?: string;
+  /** Multi-make filter from market configuration. `make` stays the single-make form. */
+  makes?: string[];
   model?: string;
   yearMin?: number;
   yearMax?: number;
+  /** Provider-facing price ceiling in DOLLARS (priceCents is the stored unit). */
   priceMax?: number;
   zip?: string;
+  /** Explicit centre, used when a market is configured by coordinates instead of a postal code. */
+  lat?: number;
+  lng?: number;
   radius?: number;
   maxResults?: number;
 }
