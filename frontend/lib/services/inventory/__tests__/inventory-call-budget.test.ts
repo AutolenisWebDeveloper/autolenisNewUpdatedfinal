@@ -23,11 +23,15 @@ function ledger(initial: { budgetCycleKey: string | null; callsUsedThisCycle: nu
       inventorySource: {
         async updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
           calls.push(args);
-          const w = args.where as Record<string, any>;
+          const w = args.where as {
+            OR?: unknown[];
+            budgetCycleKey?: string | null;
+            callsUsedThisCycle?: { lte?: number };
+          };
 
           // Rollover shape: OR [ key null, key < cycleKey ]
           if (Array.isArray(w.OR)) {
-            const target = (args.data as Record<string, any>).budgetCycleKey as string;
+            const target = (args.data as { budgetCycleKey: string }).budgetCycleKey;
             const matches = row.budgetCycleKey === null || row.budgetCycleKey < target;
             if (!matches) return { count: 0 };
             row.budgetCycleKey = target;
