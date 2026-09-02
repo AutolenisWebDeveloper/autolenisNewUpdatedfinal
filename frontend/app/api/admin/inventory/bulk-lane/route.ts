@@ -30,10 +30,28 @@ export async function PATCH(request: NextRequest) {
   // Snapshot current lanes for audit integrity (only items that actually exist).
   const existing = await prisma.inventoryItem.findMany({
     where: { id: { in: ids } },
-    select: { id: true, lane: true, vin: true },
+    select: { id: true, lane: true, vin: true, dealerId: true },
   });
 
   if (existing.length === 0) return adminError("NOT_FOUND", "No matching vehicles found", 404);
+
+  // LANE_1 is a two-part claim: an active AutoLenis dealer AND an explicitly linked
+  // vehicle. This route is the live mechanism by which an operator could manufacture the
+  // phantom class — LANE_1 with no dealer — that the stale sweep's `lane != LANE_1` guard
+  // then protected forever, and that renders a "verified dealer partner" badge for a car
+  // with no dealer relationship. Reject rather than silently minting one.
+  if (lane === InventoryLane.LANE_1) {
+    const withoutDealer = existing.filter(it => it.dealerId === null).map(it => it.id);
+    if (withoutDealer.length > 0) {
+      return adminError(
+        "VALIDATION_ERROR",
+        `LANE_1 requires a linked dealer. ${withoutDealer.length} of ${existing.length} selected ` +
+        `vehicle(s) have no dealer: ${withoutDealer.slice(0, 10).join(", ")}` +
+        `${withoutDealer.length > 10 ? ` (+${withoutDealer.length - 10} more)` : ""}`,
+        400,
+      );
+    }
+  }
 
   // Only update the items that need to change lanes.
   const toMove = existing.filter(it => it.lane !== lane);

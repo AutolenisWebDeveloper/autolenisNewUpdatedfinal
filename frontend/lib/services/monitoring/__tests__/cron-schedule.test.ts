@@ -79,3 +79,52 @@ test("CRON_STALENESS has no stale entries absent from vercel.json", () => {
   const orphans = Object.keys(CRON_STALENESS).filter((name) => !scheduled.has(name));
   assert.deepEqual(orphans, [], `registry entries with no schedule: ${orphans.join(", ")}`);
 });
+
+// ── Inventory spend ceiling, pinned by test rather than by comment ───────────
+
+test("no scheduled cron reaching runInventorySync fires more than once per day", () => {
+  // This is the quota guarantee. The old shape was inventory-sync-priority hourly (24/day)
+  // plus inventory-sync-full every 6h (4/day) = 28 provider calls/day, ~850/month against a
+  // 500/month plan — which produced 191 consecutive HTTP 429 runs in 2026-08.
+  //
+  // A comment cannot stop someone restoring an hourly schedule. This assertion can.
+  const SPENDERS = ["inventory-sync-full", "inventory-sync-priority"];
+  const scheduled = (vercel.crons as Array<{ path: string; schedule: string }>)
+    .filter((c) => SPENDERS.some((s) => c.path === `/api/cron/${s}`));
+
+  assert.equal(scheduled.length, 1, "exactly one scheduled MarketCheck spender");
+  assert.equal(scheduled[0]!.path, "/api/cron/inventory-sync-full");
+
+  // A daily cron is "<minute> <hour> * * *" — no step, no list, no wildcard hour.
+  const [minute, hour, dom, month, dow] = scheduled[0]!.schedule.split(/\s+/);
+  for (const [name, field] of [["minute", minute], ["hour", hour]] as const) {
+    assert.ok(/^\d+$/.test(String(field)), `${name} must be a single fixed value, got "${field}"`);
+  }
+  assert.deepEqual([dom, month, dow], ["*", "*", "*"], "every day, once");
+
+  // 1 run/day x 10 calls x 31 days = 310, inside a 400 ledger cap and a 500 provider cap.
+  assert.ok(10 * 31 < 400);
+});
+
+test("inventory-sync-priority is de-scheduled in BOTH files, or it alerts forever", () => {
+  const paths = (vercel.crons as Array<{ path: string }>).map((c) => c.path);
+  assert.equal(paths.includes("/api/cron/inventory-sync-priority"), false);
+  // A registry entry with no schedule goes OVERDUE and pages an operator nightly. The two
+  // completeness assertions above already pin this in both directions; this names the
+  // specific cron so the reason survives.
+  assert.equal("inventory-sync-priority" in CRON_STALENESS, false);
+});
+
+test("the stale sweep runs AFTER the sync, never racing an in-flight walk", () => {
+  const crons = vercel.crons as Array<{ path: string; schedule: string }>;
+  const sync = crons.find((c) => c.path === "/api/cron/inventory-sync-full")!;
+  const sweep = crons.find((c) => c.path === "/api/cron/inventory-stale-sweep")!;
+  const mins = (s: string) => {
+    const [m, h] = s.split(/\s+/);
+    return Number(h) * 60 + Number(m);
+  };
+  assert.ok(mins(sweep.schedule) > mins(sync.schedule),
+    "the sweep must evaluate a just-refreshed catalogue");
+  assert.equal(mins(sweep.schedule) - mins(sync.schedule), 30);
+  assert.equal(CRON_STALENESS["inventory-stale-sweep"]!.intervalMinutes, 24 * 60);
+});

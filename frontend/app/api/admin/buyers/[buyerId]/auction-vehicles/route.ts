@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { isShortlistItemAvailable } from "@/lib/services/shortlist/shortlist-availability";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -70,6 +71,31 @@ export async function POST(request: NextRequest, { params }: Props) {
     select: { id: true },
   });
   if (!auction) return adminError("NOT_FOUND", "Auction not found for this buyer", 404);
+
+  // An unavailable vehicle must never be carried into an auction. Dealers would be invited
+  // to bid on a car that has left the market, and the buyer would be shown offers on
+  // something they cannot buy. Free-form entries (no inventoryItemId) are unaffected —
+  // those are concierge-sourced and have no listing to go stale.
+  const linkedIds = vehicles
+    .map(v => v.inventoryItemId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (linkedIds.length > 0) {
+    const rows = await prisma.inventoryItem.findMany({
+      where: { id: { in: linkedIds } },
+      select: { id: true, isActive: true, priceCents: true },
+    });
+    const byId = new Map(rows.map(r => [r.id, r]));
+    const unavailable = linkedIds.filter(id => !isShortlistItemAvailable(byId.get(id) ?? null));
+    if (unavailable.length > 0) {
+      return adminError(
+        "VALIDATION_ERROR",
+        `${unavailable.length} vehicle(s) are no longer available and cannot be auctioned: ` +
+        `${unavailable.slice(0, 10).join(", ")}` +
+        `${unavailable.length > 10 ? ` (+${unavailable.length - 10} more)` : ""}`,
+        400,
+      );
+    }
+  }
 
   const created = await prisma.auctionVehicle.createMany({
     data: vehicles.map(v => ({

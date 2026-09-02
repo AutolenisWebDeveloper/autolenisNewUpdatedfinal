@@ -58,3 +58,70 @@ test("LANE_1 dealer inventory is fresh while active even without a recent lastSe
 test("freshnessCutoff is exactly the window behind now", () => {
   assert.equal(freshnessCutoff(NOW).getTime(), NOW.getTime() - FRESHNESS_WINDOW_MS);
 });
+
+// ── Freshness exemption must be the SAME set the stale sweep exempts ──────────
+//
+// Before this change `executableSupplyWhere` exempted LANE_1 unconditionally, exactly
+// as the stale sweep did. Both were standing in for "dealer-verified". The 95 production
+// orphans (LANE_1, dealer_id NULL) were therefore treated as permanently fresh by
+// matching AND permanently protected by the sweep. They only failed to surface to buyers
+// because they also have no provenance and lose on the separate provenance clause — a
+// second accident, not a design.
+
+test("LANE_1 with NO dealer is NOT freshness-exempt (the 95 prod orphans)", () => {
+  assert.equal(
+    isExecutableSupply(
+      { ...base, lane: "LANE_1", dealerId: null, sourceAdapter: "marketcheck", lastSeenAt: STALE },
+      NOW,
+    ),
+    false,
+    "a LANE_1 label without a dealer must not buy a permanent freshness exemption",
+  );
+});
+
+test("admin-curated rows stay executable when stale — they have no feed to refresh them", () => {
+  assert.equal(
+    isExecutableSupply(
+      { ...base, lane: "LANE_3", dealerId: null, sourceAdapter: null, addedByAdminId: "a1", lastSeenAt: STALE },
+      NOW,
+    ),
+    true,
+  );
+});
+
+test("CROSS-CHECK: nothing is both freshness-exempt and stale-sweepable", async () => {
+  const { isStaleSweepable } = await import("@/lib/services/inventory/stale-sweep.service");
+  const lanes = ["LANE_1", "LANE_2", "LANE_3"];
+  const dealerIds = [null, "d1"];
+  const adminIds = [null, "a1"];
+  const adapters = [null, "marketcheck", "manual_admin", "csv_upload_admin"];
+  const seenAts = [null, STALE, FRESH];
+
+  let checked = 0;
+  for (const lane of lanes) {
+    for (const dealerId of dealerIds) {
+      for (const addedByAdminId of adminIds) {
+        for (const sourceAdapter of adapters) {
+          for (const lastSeenAt of seenAts) {
+            const item = { ...base, lane, dealerId, addedByAdminId, sourceAdapter, lastSeenAt };
+            // "Exempt from the freshness clock" == executable despite a stale/absent lastSeenAt.
+            const exempt =
+              lastSeenAt !== FRESH &&
+              isExecutableSupply(item, NOW) &&
+              (lastSeenAt === null || lastSeenAt < freshnessCutoff(NOW));
+            const sweepable = isStaleSweepable(
+              { ...item, createdAt: STALE },
+              NOW,
+            );
+            assert.ok(
+              !(exempt && sweepable),
+              `row is both freshness-exempt and sweepable: ${JSON.stringify(item)}`,
+            );
+            checked++;
+          }
+        }
+      }
+    }
+  }
+  assert.equal(checked, 3 * 2 * 2 * 4 * 3, "the full matrix was exercised");
+});

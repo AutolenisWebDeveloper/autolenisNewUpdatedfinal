@@ -8,6 +8,7 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { MAX_SHORTLIST_ITEMS } from "@/lib/constants";
+import { countAvailableItems } from "@/lib/services/shortlist/shortlist.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -74,7 +75,9 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
 
   // Enforce max shortlist limit
-  if (shortlist.items.length >= MAX_SHORTLIST_ITEMS) {
+  // Counts AVAILABLE candidates, matching the buyer-facing route — an admin must not see a
+  // different cap from the buyer they are helping.
+  if (await countAvailableItems(shortlist.items) >= MAX_SHORTLIST_ITEMS) {
     return adminError(
       "SHORTLIST_FULL",
       `Shortlist is full — max ${MAX_SHORTLIST_ITEMS} items allowed`,

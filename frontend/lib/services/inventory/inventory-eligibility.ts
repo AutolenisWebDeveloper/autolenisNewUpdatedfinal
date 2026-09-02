@@ -10,9 +10,9 @@
 //        Orphan rows with NONE of these (e.g. the historical 206 unowned items whose
 //        provenance was dropped before Batch 1) are NEVER treated as executable supply,
 //        and are NEVER silently rewritten — they simply do not qualify.
-//   4. fresh                              — LANE_1 dealer-owned inventory is fresh while
-//        active (dealers manage their own archive state; the stale sweep never touches
-//        LANE_1); external LANE_2/LANE_3 listings must have been seen within the window.
+//   4. fresh                              — dealer-MANAGED inventory (LANE_1 AND a real
+//        dealerId) and admin-entered rows are exempt (they have no feed to be re-seen
+//        in); every other listing must have been seen within the window.
 //
 // This is the single source of truth for eligibility, shared by request matching,
 // buyer matching, and (later) sourcing — so "existing" and "executable" never diverge.
@@ -38,8 +38,26 @@ export function executableSupplyWhere(now: Date = new Date()): Prisma.InventoryI
       { priceCents: { gt: 0 } },
       // Attributable provenance — excludes orphan (unowned, unsourced) rows.
       { OR: [{ dealerId: { not: null } }, { sourceAdapter: { not: null } }, { addedByAdminId: { not: null } }] },
-      // Freshness — LANE_1 exempt (dealer-managed), external must be recently seen.
-      { OR: [{ lane: "LANE_1" }, { lastSeenAt: { gte: cutoff } }] },
+      // Freshness. Exempt only rows that genuinely have no feed to be re-seen in:
+      // dealer-MANAGED inventory (LANE_1 *and* an actual dealerId — the label alone is
+      // not the invariant) and admin-entered vehicles. Everything else must have been
+      // seen inside the window.
+      //
+      // `{ lane: "LANE_1" }` alone used to grant a permanent exemption, which meant the
+      // 95 production orphans (LANE_1, dealer_id NULL) read as forever-fresh here and
+      // forever-protected in the stale sweep — the same wrong proxy in both places. They
+      // stayed invisible to buyers only because they also lose the provenance clause
+      // above, which is an accident rather than a design.
+      //
+      // Kept in lock-step with staleSweepWhere() in stale-sweep.service.ts: a row must
+      // never be both exempt here and sweepable there (cross-checked by test).
+      {
+        OR: [
+          { AND: [{ lane: "LANE_1" }, { dealerId: { not: null } }] },
+          { addedByAdminId: { not: null } },
+          { lastSeenAt: { gte: cutoff } },
+        ],
+      },
     ],
   };
 }
@@ -64,6 +82,9 @@ export function isExecutableSupply(
   if (!(item.priceCents > 0)) return false;
   const hasProvenance = item.dealerId != null || item.sourceAdapter != null || item.addedByAdminId != null;
   if (!hasProvenance) return false;
-  const fresh = item.lane === "LANE_1" || (item.lastSeenAt != null && item.lastSeenAt >= freshnessCutoff(now));
+  const exemptFromFreshness =
+    (item.lane === "LANE_1" && item.dealerId != null) || item.addedByAdminId != null;
+  const fresh =
+    exemptFromFreshness || (item.lastSeenAt != null && item.lastSeenAt >= freshnessCutoff(now));
   return fresh;
 }
