@@ -115,12 +115,20 @@ test("no row and no env is NOT_CONFIGURED — never a silent fallback market", a
 });
 
 test("the NYC literal is gone from the adapter and the market array from the orchestrator", () => {
-  const adapter = readFileSync(
-    join(process.cwd(), "lib/services/inventory/adapters/marketcheck.adapter.ts"), "utf8");
-  assert.ok(!/["']10001["']/.test(adapter), "marketcheck.adapter.ts must not carry a fallback zip");
+  // Comments are stripped first. Both files explain in prose WHY the old literals were a
+  // defect, and a naive text match would fail on the explanation — pressuring the author to
+  // delete the reasoning instead of keeping the guarantee. (Same rule the migration
+  // correspondence tests use.)
+  const code = (rel: string) =>
+    readFileSync(join(process.cwd(), rel), "utf8")
+      .split("\n").map((l) => l.split("//")[0]).join("\n");
 
-  const orch = readFileSync(join(process.cwd(), "lib/services/inventory/orchestrator.ts"), "utf8");
-  assert.ok(!/["']90001["']|["']60601["']|["']77001["']|["']30301["']/.test(orch),
+  const adapter = code("lib/services/inventory/adapters/marketcheck.adapter.ts");
+  assert.ok(!/["']10001["']/.test(adapter),
+    "marketcheck.adapter.ts must not carry a fallback zip in executable code");
+
+  const orch = code("lib/services/inventory/orchestrator.ts");
+  assert.ok(!/["']90001["']|["']60601["']|["']77001["']|["']30301["']|["']10001["']/.test(orch),
     "orchestrator.ts must not carry a hardcoded market array");
 });
 
