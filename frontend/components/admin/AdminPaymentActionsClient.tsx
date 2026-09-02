@@ -123,9 +123,12 @@ function ActionModal({ title, warning, onCancel, onConfirm }: ModalProps) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminPaymentActionsClient(props: Props) {
-  // UX only. mark-paid, waive (deposit/override) and refund all hard-deny
-  // outside ["SUPER_ADMIN","FINANCE_ADMIN"]; the send-link routes are auth-only
-  // and stay open to every admin.
+  // UX only. mark-paid, waive (deposit/override), refund AND both send-link
+  // routes hard-deny outside ["SUPER_ADMIN","FINANCE_ADMIN"]. send-link WAS
+  // auth-only; the RBAC sweep gave it requirePermissionStrict(
+  // "finance.payment_link.send") — MONEY-tier, the same roles as its siblings —
+  // so it is gated here too. The server decides; this only avoids offering a
+  // button that answers 403.
   const mayMutate = canUse("payments.mutate", props.adminRole);
   const denied = deniedReason("payments.mutate");
   const [modal, setModal] = useState<string | null>(null);
@@ -182,7 +185,9 @@ export default function AdminPaymentActionsClient(props: Props) {
           <>
             <button
               onClick={() => setModal("send-link")}
-              className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
+              disabled={!mayMutate}
+              title={mayMutate ? undefined : denied}
+              className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Send $99 Payment Link
             </button>
@@ -287,7 +292,9 @@ export default function AdminPaymentActionsClient(props: Props) {
         <>
           <button
             onClick={() => setModal("send-link")}
-            className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
+            disabled={!mayMutate}
+            title={mayMutate ? undefined : denied}
+            className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Send $400 Payment Link
           </button>

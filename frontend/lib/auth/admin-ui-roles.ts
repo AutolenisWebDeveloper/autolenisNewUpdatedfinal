@@ -69,6 +69,11 @@ export const ADMIN_UI_CAPABILITIES = {
       "app/api/admin/payments/concierge-fee/[dealId]/refund/route.ts",
       // The "Waive Deposit" control posts here.
       "app/api/admin/buyers/[buyerId]/deposit/override/route.ts",
+      // Send-link was auth-only until the RBAC sweep gave both routes
+      // requirePermissionStrict("finance.payment_link.send") — MONEY-tier,
+      // identical to the roles above, so it belongs to this capability.
+      "app/api/admin/payments/deposit/send-link/route.ts",
+      "app/api/admin/payments/concierge-fee/send-link/route.ts",
     ],
   },
   /** Record a payout or claw a commission back. */

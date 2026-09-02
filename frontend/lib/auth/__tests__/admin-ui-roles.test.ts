@@ -26,6 +26,7 @@ import {
   CONTENT_CAPABILITY_ROLES,
   type ContentCapability,
 } from "../content-permissions";
+import { rolesFor, type Permission } from "../permissions";
 
 const ALL_ROLES = [
   "SUPER_ADMIN",
@@ -41,6 +42,8 @@ const ALL_ROLES = [
  *   const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"])
  *   if (!["SUPER_ADMIN", "OPERATIONS_ADMIN"].includes(admin.role))
  *   if (admin.role !== "SUPER_ADMIN")
+ *   requirePermissionStrict(request, "finance.deposit.override")
+ *   requirePermissionActorStrict("comms.reply")
  * Only these forms deny today; requirePermission() alone is shadow-mode and is
  * deliberately not treated as enforcement.
  */
@@ -78,6 +81,30 @@ function enforcedRolesIn(source: string): Set<string> {
     for (const r of mapped) roles.add(r);
   }
 
+  // The strict enforcers the RBAC sweep introduced:
+  //   requirePermissionStrict(request, "x")   — request first, permission second
+  //   requirePermissionActorStrict("x")       — permission first, no request
+  // Both DENY: each returns { ok: false } when roleAllows(permission, admin.role)
+  // is false and writes an RBAC_DENY audit row. Only the shadow-mode
+  // requirePermission() still lets the request through, which is why it stays
+  // absent from this list.
+  //
+  // As with requireContentCapability above, the role names are not literal in
+  // the route file, so they resolve through PERMISSION_ROLES — the same map the
+  // SERVER consults — never through a list restated here, which would let the
+  // mirror agree with itself instead of with the route.
+  const permissionForms = [
+    /requirePermissionStrict\(\s*[A-Za-z_$][\w$]*\s*,\s*"([a-z_.]+)"/g,
+    /requirePermissionActorStrict\(\s*"([a-z_.]+)"/g,
+  ];
+  for (const re of permissionForms) {
+    for (const m of source.matchAll(re)) {
+      const mapped = rolesFor(m[1] as Permission);
+      assert.ok(mapped, `route names an unknown permission: ${m[1]}`);
+      for (const r of mapped) roles.add(r);
+    }
+  }
+
   return roles;
 }
 
@@ -93,7 +120,8 @@ describe("admin UI role mirror — matches the server, exactly", () => {
         assert.ok(
           enforced.size > 0,
           `${routePath} performs no hard role check, so the UI must not gate on it. ` +
-            `Only requirePermissionActorStrict() and explicit role checks deny today; ` +
+            `Only requirePermissionStrict(), requirePermissionActorStrict(), ` +
+            `requireContentCapability() and explicit role checks deny today; ` +
             `requirePermission() alone is shadow-mode and still allows the request.`,
         );
 

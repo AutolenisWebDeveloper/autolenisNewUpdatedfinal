@@ -364,7 +364,9 @@ function DepositsTab({ deposits, adminRole }: { deposits: DepositRow[]; adminRol
         </button>
         <button
           onClick={() => setModal({ type: "new_link_deposit" })}
-          className="inline-flex items-center gap-2 border border-al-primary text-al-primary text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-al-primary/5 transition-colors"
+          disabled={!mayMutate}
+          title={mayMutate ? undefined : denied}
+          className="inline-flex items-center gap-2 border border-al-primary text-al-primary text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-al-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           data-testid="deposit-send-link-btn">
           <Link2 size={15} /> Send Payment Link
         </button>
@@ -637,7 +639,9 @@ function ServiceFeesTab({ conciergeFees, adminRole }: { conciergeFees: Concierge
         </button>
         <button
           onClick={() => setModal({ type: "new_link_fee" })}
-          className="inline-flex items-center gap-2 border border-al-primary text-al-primary text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-al-primary/5 transition-colors"
+          disabled={!mayMutate}
+          title={mayMutate ? undefined : denied}
+          className="inline-flex items-center gap-2 border border-al-primary text-al-primary text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-al-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           data-testid="fee-send-link-btn">
           <Link2 size={15} /> Send Payment Link
         </button>
