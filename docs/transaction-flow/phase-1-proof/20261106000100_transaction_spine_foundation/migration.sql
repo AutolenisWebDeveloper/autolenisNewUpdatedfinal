@@ -167,9 +167,9 @@ ALTER TABLE "vehicle_requests"
   ADD COLUMN IF NOT EXISTS "consent_surface"                   TEXT,
   ADD COLUMN IF NOT EXISTS "stated_budget_cents"               INTEGER,
   ADD COLUMN IF NOT EXISTS "expected_down_payment_cents"       INTEGER,
-  ADD COLUMN IF NOT EXISTS "co_buyer_elected"                  BOOLEAN
-  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
+  ADD COLUMN IF NOT EXISTS "co_buyer_elected"                  BOOLEAN,
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"             TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason"     TEXT;
 
 -- ── deposits (§3 rule 10, §23, §26 dispute) ─────────────────────────────────────────────────────
 ALTER TABLE "deposits"
@@ -378,8 +378,8 @@ ALTER TABLE "buyer_opportunities"
   ADD COLUMN IF NOT EXISTS "consent_version"     TEXT,
   ADD COLUMN IF NOT EXISTS "consent_text_hash"   TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip"          TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT
-  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT,
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason" TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 -- Lane 2–4 attribution & consent (N1): the two submission records that carry neither today.
@@ -395,8 +395,8 @@ ALTER TABLE "dealer_applications"
   ADD COLUMN IF NOT EXISTS "consent_version"     TEXT,
   ADD COLUMN IF NOT EXISTS "consent_text_hash"   TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip"          TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT
-  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT,
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason" TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 ALTER TABLE "affiliates"
@@ -411,8 +411,8 @@ ALTER TABLE "affiliates"
   ADD COLUMN IF NOT EXISTS "consent_version"     TEXT,
   ADD COLUMN IF NOT EXISTS "consent_text_hash"   TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip"          TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT
-  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT,
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason" TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 ALTER TABLE "refinance_applications"

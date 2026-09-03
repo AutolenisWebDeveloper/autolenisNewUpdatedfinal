@@ -1,5 +1,10 @@
--- Verifies every object the Phase 1 pair is expected to produce. Reports one row per missing object;
--- zero rows means every expected object exists. Read-only.
+-- Verifies every object the Phase 1 pair is expected to produce.
+--
+-- CONTRACT: every returned row carries a `status`. Exactly one row has status 'TOTAL' and reports
+-- how many objects were checked; every other row has status 'MISSING' and names one object that
+-- should exist and does not (or one that should NOT exist and does). The gate is:
+--     PASS  <=>  no row has status = 'MISSING'
+-- A silent, zero-row result is NOT a pass — it means the query did not run. Read-only.
 WITH expected_enum_labels(typname, label) AS (VALUES
   ('VehicleRequestStatus','DRAFT'),('VehicleRequestStatus','PAYMENT_REQUIRED'),('VehicleRequestStatus','RADIUS_AUTHORIZATION_REQUIRED'),
   ('DealStatus','DEALER_CONFIRMATION'),('DealStatus','RECAP_PENDING'),('DealStatus','DEALER_EXECUTED'),('DealStatus','FUNDING_PENDING'),
@@ -120,29 +125,36 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('queue_items'),('post_completion_obligations'),('deal_corrections'),('inventory_query_cache'),
   ('comms_outbox'),('lifecycle_touch_schedule'),('idempotency_keys'),('jobs_dead_letter')
 )
-SELECT 'enum_label' AS kind, typname || '.' || label AS object FROM expected_enum_labels e
+SELECT 'MISSING' AS status, 'enum_label' AS kind, typname || '.' || label AS object FROM expected_enum_labels e
   WHERE NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_enum v ON v.enumtypid=t.oid
                     WHERE t.typname=e.typname AND v.enumlabel=e.label)
-UNION ALL SELECT 'enum_type', name FROM expected_types WHERE to_regtype(quote_ident(name)) IS NULL
-UNION ALL SELECT 'table', name FROM expected_tables WHERE to_regclass('public.'||quote_ident(name)) IS NULL
-UNION ALL SELECT 'column', tbl || '.' || col FROM expected_columns c
+UNION ALL SELECT 'MISSING', 'enum_type', name FROM expected_types WHERE to_regtype(quote_ident(name)) IS NULL
+UNION ALL SELECT 'MISSING', 'table', name FROM expected_tables WHERE to_regclass('public.'||quote_ident(name)) IS NULL
+UNION ALL SELECT 'MISSING', 'column', tbl || '.' || col FROM expected_columns c
   WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns
                     WHERE table_schema='public' AND table_name=c.tbl AND column_name=c.col)
-UNION ALL SELECT 'index', name FROM expected_indexes i
+UNION ALL SELECT 'MISSING', 'index', name FROM expected_indexes i
   WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname=i.name)
-UNION ALL SELECT 'foreign_key', name FROM expected_fks f
+UNION ALL SELECT 'MISSING', 'foreign_key', name FROM expected_fks f
   WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=f.name AND contype='f')
-UNION ALL SELECT 'check_constraint', name FROM expected_checks k
+UNION ALL SELECT 'MISSING', 'check_constraint', name FROM expected_checks k
   WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=k.name AND contype='c')
-UNION ALL SELECT 'trigger', name FROM expected_triggers g
+UNION ALL SELECT 'MISSING', 'trigger', name FROM expected_triggers g
   WHERE NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname=g.name AND NOT tgisinternal)
-UNION ALL SELECT 'rls_enabled', name FROM expected_rls r
+UNION ALL SELECT 'MISSING', 'rls_enabled', name FROM expected_rls r
   WHERE NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                     WHERE n.nspname='public' AND c.relname=r.name AND c.relrowsecurity)
-UNION ALL SELECT 'rls_policy_present_unexpectedly', r.name FROM expected_rls r
+UNION ALL SELECT 'MISSING', 'rls_policy_present_unexpectedly', r.name FROM expected_rls r
   WHERE EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename=r.name)
 -- Phase 1 is additive: the LIVE unique on deal_id must still be here afterwards. Its removal is the
 -- signatures-phase cutover, not this wave. Flag it if this wave dropped it.
-UNION ALL SELECT 'live_constraint_wrongly_dropped', 'e_sign_envelopes_deal_id_key'
+UNION ALL SELECT 'MISSING', 'live_constraint_wrongly_dropped', 'e_sign_envelopes_deal_id_key'
   WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_key')
-ORDER BY 1,2;
+-- Positive evidence: what this run actually checked. Always exactly one row.
+UNION ALL SELECT 'TOTAL', 'expected_objects_checked',
+  ((SELECT count(*) FROM expected_enum_labels) + (SELECT count(*) FROM expected_types)
+   + (SELECT count(*) FROM expected_tables) + (SELECT count(*) FROM expected_columns)
+   + (SELECT count(*) FROM expected_indexes) + (SELECT count(*) FROM expected_fks)
+   + (SELECT count(*) FROM expected_checks) + (SELECT count(*) FROM expected_triggers)
+   + (SELECT count(*) FROM expected_rls) * 2 + 1)::text
+ORDER BY 1 DESC, 2, 3;

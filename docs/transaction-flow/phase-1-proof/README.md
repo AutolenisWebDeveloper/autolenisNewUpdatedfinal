@@ -1,98 +1,138 @@
-# Phase 1 migration proof
+# Phase 1 migration proof — against production's physical schema
 
-**This directory is evidence, not Phase 1.** The two `migration.sql` files here are a materialised
-copy of the statements §8.2 specifies for the Phase 1 wave. They are deliberately **not** in
-`frontend/prisma/migrations/`, so nothing in this directory begins Phase 1, changes the Prisma
-chain, or affects a deploy. Their only job is to answer one question with evidence rather than
-assertion: *would the wave, as written, actually apply?*
+This directory holds the executable proof that the two Phase 1 migration directories apply cleanly,
+produce every object they are supposed to produce, and are idempotent — **starting from the physical
+schema production actually has today**, not from an empty database replayed through the repository's
+migration chain.
 
-Nothing here was ever pointed at production. Production was read **read-only** (`SELECT` on
-`pg_type`, `pg_attribute`, `pg_constraint`, `pg_indexes`) to learn its server version and the exact
-definitions of the four adopted background tables.
+Run it with `./run-proof.sh` against a disposable PostgreSQL **17.6** server on loopback. The script
+refuses any non-loopback host, any database name outside `autolenis_prodbase` / `autolenis_e2e*`, and
+any server that is not PostgreSQL 17.x. It never reads a production DSN and never writes to
+production.
 
-## What was proven
+## Why the baseline had to change
 
-| # | Claim | Result |
-| --- | --- | --- |
-| 1 | Production's PostgreSQL version, read-only | `PostgreSQL 17.6 on aarch64-unknown-linux-gnu`, `server_version_num` 170006 |
-| 2 | The proof runs on the same major/minor version | Isolated instance: `PostgreSQL 17.6 on x86_64-pc-linux-gnu`, `server_version_num` 170006. **16.13 was not used as a substitute.** |
-| 3 | A schema baseline was restored | `prisma migrate deploy`, 103 migrations, exit 0 |
-| 4 | Restored object counts recorded | tables 223 · columns 2684 · indexes 576 · FK constraints 117 · enum types 89 · enum values 466 · functions 41 · triggers 5 · RLS-enabled 39 · policies 0 · migrations recorded 103 |
-| 5 | Every statement of both directories materialised | `20261106000000_transaction_spine_enums/migration.sql` (41 `ALTER TYPE`), `20261106000100_transaction_spine_foundation/migration.sql` (916 lines) |
-| 6 | The complete pair applies, in order | enums exit 0, foundation exit 0 |
-| 7 | Every expected object exists | `verify.sql` → **0 rows**. It checks 268 objects: 41 enum labels, 8 enum types, 14 tables, 121 columns, 21 named indexes, 47 foreign keys, 2 triggers, 14 RLS-enabled tables — and separately asserts 0 policies on them and that the replaced `e_sign_envelopes_deal_id_key` is gone |
-| 8 | The complete pair applies a second time | enums exit 0, foundation exit 0 |
-| 9 | The second application changed nothing | object census `diff` → empty; `verify.sql` → 0 rows |
-| 10 | Failures reported, not edited out | Two defects the proof found are recorded below and were fixed |
+An earlier version of this proof began from `prisma migrate deploy` on an empty database. That proves
+the **repository's migration chain** is internally consistent. It does not prove the migrations are
+compatible with **production's current physical schema**, and the two are measurably different:
 
-Post-wave census (second application byte-identical): tables 237 · columns 3136 · indexes 629 ·
-FK constraints 164 · enum types 97 · enum values 538 · functions 43 · triggers 7 ·
-RLS-enabled tables 53 · **policies 0** · migrations recorded 103 (unchanged — nothing here touches
-the Prisma ledger).
+| | chain replay | production |
+| --- | ---: | ---: |
+| tables | 223 | **249** |
+| columns | 2,684 | **2,976** |
+| indexes | 576 | **679** |
+| enum types | 89 | **88** |
+| triggers | 5 | **29** |
+| policies | 0 | **23** |
+| materialized views | 0 | **1** |
 
-The enum-value delta is 72 = 41 `ALTER TYPE … ADD VALUE` labels + 31 labels belonging to the
-8 new enum types.
+That gap is not cosmetic. Four of the tables this wave adopts (`comms_outbox`,
+`lifecycle_touch_schedule`, `idempotency_keys`, `jobs_dead_letter`) **already exist in production** but
+do **not** exist in a chain replay. Against the chain, `CREATE TABLE IF NOT EXISTS` creates them from
+the migration's own definition and everything downstream matches trivially. Against production it is a
+no-op and the migration must cope with the columns, constraints and indexes production already has.
+Only the production baseline exercises that path.
 
-## Why the wave is two directories — re-proven on 17.6
+## What this proves, and what it does not
 
-The earlier evidence for the split was executed against PostgreSQL 16.13. That is no longer the
-basis for the claim. On the isolated 17.6 instance:
+**PROVES.** Both directories apply, in order, each inside a single transaction (the way Prisma runs
+them), against production's physical schema; all 311 expected objects exist afterwards; a second
+application of both directories changes nothing — neither the object census nor the *definitions* of
+tables, columns, indexes, constraints, enums, triggers, policies or functions (compared by digest).
+
+**DOES NOT PROVE.** Anything about `_prisma_migrations`. The restore deliberately carries **no
+ledger**. Ledger correctness is a separate question, addressed in §6 of the implementation workflow,
+and nothing in this directory should be read as evidence about it.
+
+## How the baseline was obtained
+
+`pg_dump` could not be used: this session holds no production DSN, and the only available client is
+16.13, which refuses to dump a 17.6 server. The baseline was therefore synthesised **read-only** from
+production's `pg_catalog` via `SELECT`s, and every generated statement is committed here under
+`production-baseline/`. No row of application data, no role password and no connection string appears
+anywhere in these files — there is not a single `INSERT` or `COPY`.
+
+**Zero objects were denied.** Every function body, trigger definition, policy expression, constraint
+and index definition was readable. Two Supabase-platform extensions are **NOT RESTORABLE** on a stock
+PostgreSQL server and are recorded as such in `production-baseline/01-extensions-enums.sql` rather than
+silently dropped:
+
+- `pg_stat_statements` 1.11 (schema `extensions`)
+- `supabase_vault` 0.3.1 (schema `vault`)
+
+Neither is referenced by any column default, constraint or index in the application schema, so their
+absence does not change the objects this proof applies to.
+
+`production-baseline/42-roles-auth-stub.sql` is **restore scaffolding, not production**. Production's
+policies reference the Supabase-managed roles (`service_role`, `authenticated`, `anon`) and the
+`auth` schema, none of which live in `public` and none of which this proof reproduces. Without stubs
+the 23 policies could not be stored at all. The stubs are excluded from every census and are not
+evidence about production's auth implementation.
+
+## Fidelity of the baseline
+
+The restored database is compared with production on eight independent digests over the full `public`
+schema — not counts, but the sorted definitions themselves. All eight match:
+
+| digest | value |
+| --- | --- |
+| tables | `20a57af430e216a81e3f78037f2e8710` |
+| columns (name, type, nullability, default) | `9cbd2c69756985508661eb5df43b929c` |
+| indexes (full `indexdef`) | `e70929fd3a3f35b05ada4dd6c94b3da3` |
+| constraints (full `pg_get_constraintdef`) | `3cb59e667290ee423a36bb46c01252f4` |
+| enum labels (in sort order) | `b3da03427662d577eeeec93be5f6a950` |
+| triggers (full `pg_get_triggerdef`) | `6ae2e83c90749678d184e61fc8edac4d` |
+| policies (cmd, roles, USING, WITH CHECK) | `0b3104b3280862b0c442f588f931224f` |
+| functions (full `pg_get_functiondef`) | `55b65dd6d0c412dc24a910338b2aa01b` |
+
+Reproduce with `production-baseline/digests.sql`, which is written to run unchanged against either
+side.
+
+## Baseline census
 
 ```
-BEGIN;
-ALTER TYPE split_probe ADD VALUE IF NOT EXISTS 'DRAFT';
-CREATE UNIQUE INDEX split_probe_one_open ON split_probe_vr (buyer_id) WHERE status IN ('SUBMITTED','DRAFT');
-ERROR:  unsafe use of new value "DRAFT" of enum type split_probe
-HINT:  New enum values must be committed before they can be used.
+enum_types=88   enum_labels=464   tables=249   columns=2976
+pk=248          unique=35         check=29     fk=135
+indexes=679     matviews=1        functions=12 triggers=29
+policies=23     rls_enabled=249
 ```
 
-The same two statements in two transactions both succeed (exit 0) and `split_probe_one_open`
-appears in `pg_indexes`.
+## What the proof found
 
-The proof also found a **second** object with the same dependency, which the plan had missed:
-`audit_logs.action` is the `AdminActionType` enum, not a text column, so the legacy-path partial
-index `WHERE action = 'LEGACY_PATH_WRITE'` needs its label committed by the first directory too.
-§8.2 now says so.
+Running against the production baseline caught a defect the chain-based proof had not: the four
+`ALTER TABLE` statements that add `ip_unavailable_reason` / `consent_ip_unavailable_reason` were each
+missing the comma terminating the preceding clause, so `20261106000100` was **syntactically invalid**
+and would have failed on deploy. Fixed, and the proof re-run from a clean restore.
 
-## The enforcement objects were exercised, not just created
+It had earlier caught a second dependency the plan had missed: `audit_logs.action` is the
+`AdminActionType` **enum**, not text, so the legacy-path partial index needs `LEGACY_PATH_WRITE`
+committed by the first directory before the second can reference it in a predicate.
 
-| Object | Probe | Result |
-| --- | --- | --- |
-| Partial unique index | second open Vehicle Request for one buyer | `ERROR: duplicate key value violates unique constraint "vehicle_requests_one_open_per_buyer_key"` |
-| Same index, §23.4 | `DEAL_CREATED` request + a new `SUBMITTED` one | both persist (2 rows) — a completed deal does not block a new $99 request |
-| Shortlist cap trigger | sixth `shortlist_items` insert | `ERROR: shortlist sl-proof already holds the maximum of 5 candidates` (P0001) |
-| Candidate cap trigger | sixth `auction_vehicles` insert for one request | `ERROR: vehicle request vr-1 already holds the maximum of 5 candidates` (P0001) |
+## Why two directories
 
-Each probe ran inside a transaction that was rolled back, so the verified state is unchanged.
+PostgreSQL will not let a transaction use an enum label that the same transaction added
+(`unsafe use of new value`). Prisma wraps each migration file in one transaction. Every new label
+therefore lands in `20261106000000_transaction_spine_enums`, and everything that *uses* those labels —
+defaults, `CHECK`s, index predicates — lands in `20261106000100_transaction_spine_foundation`.
 
-## Scope of the proof, stated honestly
+Relatedly, `CREATE INDEX CONCURRENTLY` is illegal inside a transaction and so can never appear in a
+Prisma migration; the enforcement indexes here are plain `CREATE INDEX`.
 
-- **The maximal set was applied.** Statements §8.2 marks owner-gated (`OfferStatus.NOT_SELECTED`,
-  `inventory_query_cache`, the `refinance_applications` partner columns) are included and marked, so
-  the proof covers the superset. Each is a single guarded statement that can be deleted without
-  reordering anything else; omitting them does not change the result for the rest.
-- **This does not prove production is ready.** §5.6 found three buyers holding 2–5 rows in the open
-  set, so `vehicle_requests_one_open_per_buyer_key` cannot be created in production until §13-D2's
-  owner-run cleanup completes. The proof establishes that the statement is valid SQL that produces
-  the intended object on an empty database — nothing more.
-- **`CREATE INDEX CONCURRENTLY` appears nowhere in the wave.** Prisma runs each migration file in one
-  transaction, where it is illegal. The parity rows that prescribed it have been corrected.
-- **Where §8.2 does not enumerate a value set** (sourcing-case status, co-buyer role, obligation
-  type, correction kind), these files use `text` — with a `CHECK` where §8.2 does give the values —
-  rather than inventing enum labels the plan has not decided.
+## Phase 1 is additive
 
-## Reproducing it
+`verify.sql` asserts, among the 311 expected objects, that `e_sign_envelopes_deal_id_key` is **still
+present** after the wave. Replacing that live constraint is the signatures-phase
+expand/backfill/verify/cutover/contract sequence, not this one. If a future edit to Phase 1 drops it,
+the verifier fails.
+
+## The verifier's contract
+
+`verify.sql` returns one row per problem, plus exactly one `TOTAL` row reporting how many objects it
+checked.
 
 ```
-# isolated instance only — never a Supabase host, never production
-export PGHOST=127.0.0.1 PGPORT=55432 PGUSER=<local> PGDATABASE=autolenis_e2e
-psql --single-transaction -v ON_ERROR_STOP=1 -f 20261106000000_transaction_spine_enums/migration.sql
-psql --single-transaction -v ON_ERROR_STOP=1 -f 20261106000100_transaction_spine_foundation/migration.sql
-psql -v ON_ERROR_STOP=1 -f verify.sql          # 0 rows = every expected object exists
-# then repeat all three; the census must not move and verify.sql must still return 0 rows
+PASS  <=>  no row has status = 'MISSING'
 ```
 
-Tooling used for the run recorded above: node v22.22.2 · pnpm 10.33.0 · prisma 5.22.0 ·
-psql client 16.13 against a 17.6 server · git 2.43.0. Every command ran **locally in this session**;
-none of it ran in CI. The commit that carries these files, and the head SHA the results correspond
-to, are named in the pull request.
+A silent zero-row result is **not** a pass — it means the query did not run. `run-proof.sh` enforces
+both halves.
