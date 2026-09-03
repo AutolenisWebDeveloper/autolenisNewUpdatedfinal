@@ -943,49 +943,63 @@ model NudgeEvent {
 }
 
 model InventoryItem {
-  id                  String           @id @default(uuid())
-  dealerId            String?          @map("dealer_id")
-  lane                InventoryLane    @default(LANE_3)
-  vin                 String?          @unique
-  year                Int
-  make                String
-  model               String
-  trim                String?
-  mileage             Int?
-  priceCents          Int              @map("price_cents")
-  condition           String? // "new" | "used"
-  bodyType            String?          @map("body_type")
-  exteriorColor       String?          @map("exterior_color")
-  interiorColor       String?          @map("interior_color")
-  engine              String?
-  transmission        String?
-  drivetrain          String?
-  fuelType            String?          @map("fuel_type")
-  city                String?
-  state               String?
-  zip                 String?
-  description         String?
-  features            String[]         @default([])
-  priceHistory        Json             @default("[]") @map("price_history")
-  latitude            Decimal?         @db.Decimal(10, 7)
-  longitude           Decimal?         @db.Decimal(10, 7)
-  externalListingUrl  String?          @map("external_listing_url")
-  externalDealerName  String?          @map("external_dealer_name")
-  externalDealerPhone String?          @map("external_dealer_phone")
-  externalDealerCity  String?          @map("external_dealer_city")
-  externalDealerState String?          @map("external_dealer_state")
-  images              String[]
-  isActive            Boolean          @default(true) @map("is_active")
-  lastSeenAt          DateTime?        @map("last_seen_at")
-  sourceAdapter       String?          @map("source_adapter")
-  addedByAdminId      String?          @map("added_by_admin_id")
-  createdAt           DateTime         @default(now()) @map("created_at")
-  updatedAt           DateTime         @updatedAt @map("updated_at")
-  dealer              Dealer?          @relation(fields: [dealerId], references: [id])
-  auctionVehicles     AuctionVehicle[]
+  id                   String           @id @default(uuid())
+  dealerId             String?          @map("dealer_id")
+  lane                 InventoryLane    @default(LANE_3)
+  vin                  String?          @unique
+  year                 Int
+  make                 String
+  model                String
+  trim                 String?
+  mileage              Int?
+  priceCents           Int              @map("price_cents")
+  condition            String? // "new" | "used"
+  bodyType             String?          @map("body_type")
+  exteriorColor        String?          @map("exterior_color")
+  interiorColor        String?          @map("interior_color")
+  engine               String?
+  transmission         String?
+  drivetrain           String?
+  fuelType             String?          @map("fuel_type")
+  city                 String?
+  state                String?
+  zip                  String?
+  description          String?
+  features             String[]         @default([])
+  priceHistory         Json             @default("[]") @map("price_history")
+  latitude             Decimal?         @db.Decimal(10, 7)
+  longitude            Decimal?         @db.Decimal(10, 7)
+  externalListingUrl   String?          @map("external_listing_url")
+  externalDealerName   String?          @map("external_dealer_name")
+  externalDealerPhone  String?          @map("external_dealer_phone")
+  externalDealerCity   String?          @map("external_dealer_city")
+  externalDealerState  String?          @map("external_dealer_state")
+  // The rest of the provider's `dealer` object. Persisted so a swept listing can be resolved
+  // to the rooftop physically holding the car: 0 of 148 active rows carry a dealer_id, so
+  // without these a listing names a dealership we cannot match to anything we own.
+  externalDealerStreet String?          @map("external_dealer_street")
+  externalDealerZip    String?          @map("external_dealer_zip")
+  externalDealerEmail  String?          @map("external_dealer_email")
+  externalDealerType   String?          @map("external_dealer_type")
+  // The provider's own identifiers. Strongest available join key when name/address are noisy.
+  mcRooftopId          String?          @map("mc_rooftop_id")
+  mcDealerId           String?          @map("mc_dealer_id")
+  // Resolved holding rooftop. Nullable: resolution is best-effort and never blocks ingest.
+  rooftopId            String?          @map("rooftop_id")
+  images               String[]
+  isActive             Boolean          @default(true) @map("is_active")
+  lastSeenAt           DateTime?        @map("last_seen_at")
+  sourceAdapter        String?          @map("source_adapter")
+  addedByAdminId       String?          @map("added_by_admin_id")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+  dealer               Dealer?          @relation(fields: [dealerId], references: [id])
+  rooftop              DealerRooftop?   @relation(fields: [rooftopId], references: [id])
+  auctionVehicles      AuctionVehicle[]
 
   @@index([lane, isActive])
   @@index([sourceAdapter])
+  @@index([rooftopId])
   @@map("inventory_items")
 }
 
@@ -2428,7 +2442,7 @@ model InventorySource {
   callsUsedThisCycle Int     @default(0) @map("calls_used_this_cycle")
   budgetCycleKey     String? @map("budget_cycle_key") // "YYYY-MM" UTC, roll-FORWARD only
 
-  syncRuns          InventorySyncRun[]
+  syncRuns InventorySyncRun[]
 
   // Batch 1 — idempotent source registration: one source row per (type, name)
   // so the orchestrator can find-or-create without racing duplicates.
@@ -2444,6 +2458,10 @@ model InventorySyncRun {
   vehiclesFetched     Int             @default(0) @map("vehicles_fetched")
   vehiclesUpserted    Int             @default(0) @map("vehicles_upserted")
   vehiclesDeactivated Int             @default(0) @map("vehicles_deactivated")
+  // Provider calls this run actually spent. The monthly cap is spent against THIS, not against
+  // the run count: 114 August calls produced no run row at all, so a budget sized from run
+  // counts was short by exactly that much.
+  apiCallsUsed        Int             @default(0) @map("api_calls_used")
   healthScore         Int?            @map("health_score")
   error               String?
   startedAt           DateTime        @default(now()) @map("started_at")
@@ -4011,6 +4029,7 @@ model DealerRooftop {
   prospects        DealerProspect[]
   contacts         DealerContactProfile[]
   candidates       ApolloPersonCandidate[]
+  inventoryItems   InventoryItem[]
 
   // websiteHost lookups are served by its @unique index (above) — no separate
   // @@index (that would drift from the migration, which creates only the unique).

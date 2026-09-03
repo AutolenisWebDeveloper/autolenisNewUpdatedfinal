@@ -40,10 +40,13 @@ const SORT_OPTIONS = [
   { value: "distance",   label: "Distance" },
 ];
 
+// Provenance, not a guarantee. A swept listing is third-party sourced and unconfirmed until a
+// dealer bids on it; every LANE_1 row in production carries a null dealer_id, so "Verified" was
+// asserting a dealer relationship that did not exist on a single row.
 const LANE_INFO: Record<string, { label: string; variant: "green" | "blue" | "gray" }> = {
-  LANE_1: { label: "Verified", variant: "green" },
-  LANE_2: { label: "Partner",  variant: "blue" },
-  LANE_3: { label: "Market",   variant: "gray" },
+  LANE_1: { label: "Dealer listed", variant: "green" },
+  LANE_2: { label: "Partner",       variant: "blue" },
+  LANE_3: { label: "Market listed", variant: "gray" },
 };
 
 interface Vehicle {

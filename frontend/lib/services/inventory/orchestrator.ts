@@ -16,12 +16,18 @@
 // TrueCar, Edmunds web-scrape stubs — they returned [] and inflated healthScore.
 
 import { logger } from "@/lib/logger";
+import {
+  resolveListingRooftops,
+  type ListingDealerFacts,
+  type ResolutionResult,
+} from "./listing-rooftop-resolution.service";
 import { prisma } from "@/lib/prisma";
 import { InventoryLane, InventorySourceType, SyncRunStatus } from "@prisma/client";
 import { normalizeVin, isValidVin } from "@/lib/utils/vin";
 import type { NormalizedVehicle, AdapterRunResult, AdapterOutcome, SearchParams } from "./adapters/IInventoryAdapter";
 import { MarketCheckAdapter } from "./adapters/marketcheck.adapter";
 import { resolveMarketConfig, MAX_CALLS_PER_SWEEP } from "./inventory-source-config.service";
+import { raiseBudgetAlert } from "./inventory-budget-alert.service";
 import { cycleKeyFor, rollCycleForward, makeCallBudget, makeStaticBudget } from "./inventory-call-budget.service";
 
 // Built-in adapters. Adapter#search() owns its own no-op behavior when not configured.
@@ -71,7 +77,19 @@ function outcomeToStatus(outcome: AdapterOutcome): SyncRunStatus {
 // LANE_1: Dealer has an active AutoLenis account AND vehicle is explicitly linked
 // LANE_2: External listing from a known dealer network (partner-adjacent)
 // LANE_3: Open-market listing — no direct dealer relationship
-export function assignLane(
+export /** The subset of a normalized vehicle that rooftop matching reads. */
+function listingFactsFor(id: string, v: NormalizedVehicle): ListingDealerFacts {
+  return {
+    id,
+    externalDealerName: v.externalDealerName ?? null,
+    externalDealerPhone: v.externalDealerPhone ?? null,
+    externalDealerZip: v.externalDealerZip ?? null,
+    externalDealerCity: v.externalDealerCity ?? null,
+    externalDealerState: v.externalDealerState ?? null,
+  };
+}
+
+function assignLane(
   vehicle: NormalizedVehicle,
   activeDealerNames: string[]
 ): InventoryLane {
@@ -160,6 +178,8 @@ export interface OrchestratorRunResult {
   adapterResults: AdapterOutcomeSummary[];
   /** null when no configured source ran — NEVER defaulted to 100. */
   healthScore: number | null;
+  /** Listing -> rooftop linking for this run. `null` when resolution could not run at all. */
+  rooftopResolution: ResolutionResult | null;
   startedAt: Date;
   completedAt: Date;
 }
@@ -207,6 +227,9 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   let market: { zip: string; radiusMiles: number } | null = null;
   let budget = undefined as SearchParams["budget"];
   let configFailure: { outcome: AdapterOutcome; error: string } | null = null;
+  // Held for the post-run budget check. Only a metered (row-configured) source has a ledger to
+  // read back; an env-configured run has no calls_used_this_cycle to compare against.
+  let meteredLedger: { sourceId: string; monthlyCallBudget: number | null; cycleKey: string } | null = null;
 
   if (resolved.ok) {
     const c = resolved.config;
@@ -220,6 +243,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     if (c.configSource === "row" && c.sourceId) {
       await rollCycleForward(c.sourceId, cycleKey);
       budget = makeCallBudget(c.sourceId, cycleKey, c.monthlyCallBudget, granted);
+      meteredLedger = { sourceId: c.sourceId, monthlyCallBudget: c.monthlyCallBudget, cycleKey };
     } else {
       // Config came from env, so the ledger columns do not exist yet. The compiled
       // per-sweep grant is still a hard bound: worst case 10 x 31 = 310 calls/month.
@@ -289,6 +313,10 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   }
 
   const upsertedByAdapter = new Map<string, number>();
+  // Rows ingested this run, with the dealer facts rooftop resolution needs. Collected here so
+  // resolution runs ONCE over the batch after ingestion rather than issuing a rooftop query per
+  // vehicle — a 500-car sweep against a ~1,400-row graph.
+  const ingested: ListingDealerFacts[] = [];
   let upserted = 0;
   for (const vehicle of uniqueVehicles) {
     const lane = assignLane(vehicle, activeDealerNames);
@@ -305,7 +333,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
         ? [...((existing.priceHistory as Array<{ price: number; date: string }>) ?? []), { price: vehicle.priceCents, date: new Date().toISOString() }].slice(-24)
         : [{ price: vehicle.priceCents, date: new Date().toISOString() }];
 
-      await prisma.inventoryItem.upsert({
+      const row = await prisma.inventoryItem.upsert({
         where: { vin },
         create: {
           vin,
@@ -326,6 +354,19 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           externalDealerPhone: vehicle.externalDealerPhone,
           externalDealerCity: vehicle.externalDealerCity,
           externalDealerState: vehicle.externalDealerState,
+          externalDealerStreet: vehicle.externalDealerStreet,
+          externalDealerZip: vehicle.externalDealerZip,
+          externalDealerEmail: vehicle.externalDealerEmail,
+          externalDealerType: vehicle.externalDealerType,
+          mcRooftopId: vehicle.mcRooftopId,
+          mcDealerId: vehicle.mcDealerId,
+          // The item's OWN geography. Declared since the model was written, never populated —
+          // so distance was NULL on every row and the public ZIP+radius filter matched nothing.
+          city: vehicle.city,
+          state: vehicle.state,
+          zip: vehicle.zip,
+          latitude: vehicle.latitude,
+          longitude: vehicle.longitude,
           externalListingUrl: vehicle.externalListingUrl,
         },
         update: {
@@ -337,11 +378,34 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           lastSeenAt: new Date(),
           sourceAdapter: vehicle.sourceAdapter, // keep provenance current
           priceHistory,
+          // Refresh the dealer object on every sighting. A rooftop that moves, corrects its
+          // address, or changes hands would otherwise keep its first-seen coordinates forever,
+          // and every distance shown for its cars would stay quietly wrong.
+          externalDealerName: vehicle.externalDealerName,
+          externalDealerPhone: vehicle.externalDealerPhone,
+          externalDealerCity: vehicle.externalDealerCity,
+          externalDealerState: vehicle.externalDealerState,
+          externalDealerStreet: vehicle.externalDealerStreet,
+          externalDealerZip: vehicle.externalDealerZip,
+          externalDealerEmail: vehicle.externalDealerEmail,
+          externalDealerType: vehicle.externalDealerType,
+          mcRooftopId: vehicle.mcRooftopId,
+          mcDealerId: vehicle.mcDealerId,
+          city: vehicle.city,
+          state: vehicle.state,
+          zip: vehicle.zip,
+          latitude: vehicle.latitude,
+          longitude: vehicle.longitude,
+          externalListingUrl: vehicle.externalListingUrl,
         },
+        // Narrowed: an unnarrowed upsert returns every declared column and raises P2022 while
+        // this migration is unapplied — which would abort ingestion outright.
+        select: { id: true },
       });
+      ingested.push(listingFactsFor(row.id, vehicle));
     } else {
       // No usable VIN — create only (no unique key to upsert on).
-      await prisma.inventoryItem.create({
+      const created = await prisma.inventoryItem.create({
         data: {
           year: vehicle.year,
           make: vehicle.make,
@@ -357,11 +421,25 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
           priceHistory: [{ price: vehicle.priceCents, date: new Date().toISOString() }],
           externalDealerName: vehicle.externalDealerName,
+          externalDealerPhone: vehicle.externalDealerPhone,
           externalDealerCity: vehicle.externalDealerCity,
           externalDealerState: vehicle.externalDealerState,
+          externalDealerStreet: vehicle.externalDealerStreet,
+          externalDealerZip: vehicle.externalDealerZip,
+          externalDealerEmail: vehicle.externalDealerEmail,
+          externalDealerType: vehicle.externalDealerType,
+          mcRooftopId: vehicle.mcRooftopId,
+          mcDealerId: vehicle.mcDealerId,
+          city: vehicle.city,
+          state: vehicle.state,
+          zip: vehicle.zip,
+          latitude: vehicle.latitude,
+          longitude: vehicle.longitude,
           externalListingUrl: vehicle.externalListingUrl,
         },
-      }).catch(() => {}); // Ignore duplicates
+        select: { id: true },
+      }).catch(() => null); // Ignore duplicates
+      if (created) ingested.push(listingFactsFor(created.id, vehicle));
     }
     upserted++;
     upsertedByAdapter.set(vehicle.sourceAdapter, (upsertedByAdapter.get(vehicle.sourceAdapter) ?? 0) + 1);
@@ -372,6 +450,16 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   // stale-sweep.service.ts, driven by the inventory-stale-sweep cron, under a dry-run
   // default and a blast-radius breaker. Ingestion must not silently deactivate rows as a
   // side effect: a sweep that hides inside a sync is a sweep nobody can dry-run.
+
+  // Link each ingested listing to the rooftop physically holding the car. Enrichment, not a
+  // precondition: it MATCHES the existing rooftop graph and never extends it, and every failure
+  // mode is contained — a listing with no rooftop is still a perfectly good listing.
+  let rooftopResolution: ResolutionResult | null = null;
+  try {
+    rooftopResolution = await resolveListingRooftops(ingested);
+  } catch (err) {
+    logger.warn("[inventory-orchestrator] rooftop resolution failed (non-fatal):", err);
+  }
 
   const completedAt = new Date();
   const healthScore = computeHealthScore(adapterResults);
@@ -393,6 +481,9 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
             vehiclesFetched: r.vehicles.length,
             vehiclesUpserted: perAdapterUpserted,
             vehiclesDeactivated: 0, // deactivation is cross-source; reported at run level below
+            // The monthly cap is spent against calls, not runs. Recording it here is what makes
+            // a run's real spend legible: 114 August calls produced no run row at all.
+            apiCallsUsed: r.apiCallsUsed ?? 0,
             healthScore: r.outcome === "NOT_CONFIGURED" ? null : (r.outcome === "FAILED" || r.outcome === "DEFERRED" ? 0 : 100),
             error: r.error ?? null,
             startedAt,
@@ -447,31 +538,48 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   // to prevent: ingestion stops and nobody is told. It gets its own alert, deduped to ONCE
   // PER CYCLE by a title lookup, so a month-long exhaustion produces one greppable alert
   // rather than thirty.
-  if (adapterResults.some(r => r.outcome === "BUDGET_EXHAUSTED")) {
-    const cycleKey = cycleKeyFor(startedAt);
-    const title = `Inventory call budget exhausted (${cycleKey})`;
-    try {
-      const existingAlert = await prisma.notification.findFirst({
-        where: { title, type: "SYSTEM_ALERT" },
-        select: { id: true },
-      });
-      if (!existingAlert) {
-        await prisma.notification.create({
-          data: {
-            title,
-            body:
-              `The MarketCheck monthly call budget for ${cycleKey} is spent, so the inventory ` +
-              `sweep made no provider calls and the catalogue will not refresh until the cycle ` +
-              `rolls over. Raise inventory_sources.monthly_call_budget only if the provider plan ` +
-              `allows it — the cap exists because 28 calls/day previously produced 191 ` +
-              `consecutive HTTP 429 runs.`,
-            type: "SYSTEM_ALERT",
-          },
+  // Month-to-date consumption against the configured budget. Read back AFTER the run so the
+  // calls this sweep just spent are included — checking before would always report the previous
+  // sweep's position and warn a day late.
+  //
+  // Both thresholds go through the one alert primitive: 80% while there is still room to act,
+  // and exhausted when there is not. An exhausted-only alert fires when the month is already
+  // lost, which is exactly how a frozen catalogue went unnoticed for 11 days.
+  const budgetExhausted = adapterResults.some(r => r.outcome === "BUDGET_EXHAUSTED");
+  if (meteredLedger || budgetExhausted) {
+    const cycleKey = meteredLedger?.cycleKey ?? cycleKeyFor(startedAt);
+    const configuredBudget = meteredLedger?.monthlyCallBudget ?? null;
+
+    // Month-to-date position, for the WARNING threshold and for honest numbers in the body.
+    // Best-effort: this read must never be able to suppress the exhausted alert below.
+    let used: number | null = null;
+    if (meteredLedger) {
+      try {
+        const ledger = await prisma.inventorySource.findUnique({
+          where: { id: meteredLedger.sourceId },
+          // Narrowed: an unnarrowed read raises P2022 while the market-config migration is
+          // unapplied, and would take the whole alert down with it.
+          select: { callsUsedThisCycle: true },
         });
+        used = ledger?.callsUsedThisCycle ?? null;
+      } catch (e) {
+        logger.warn("[inventory-orchestrator] budget ledger read failed:", e);
       }
-    } catch (e) {
-      logger.warn("[inventory-orchestrator] budget-exhausted alert failed:", e);
     }
+
+    // EXHAUSTED is driven by the ADAPTER OUTCOME, not by the ledger read. The adapter was
+    // refused its draw, which is authoritative and costs nothing to know; making the alert
+    // depend on a second query would let a transient read failure silence the one signal that
+    // a frozen catalogue produces. `max` keeps the real month-to-date figure when it is higher.
+    const snapshot = budgetExhausted
+      ? {
+          callsUsedThisCycle: Math.max(used ?? 0, configuredBudget ?? 1),
+          monthlyCallBudget: configuredBudget ?? 1,
+          cycleKey,
+        }
+      : { callsUsedThisCycle: used ?? 0, monthlyCallBudget: configuredBudget, cycleKey };
+
+    await raiseBudgetAlert(snapshot);
   }
 
   // ENH-14: Alert only on a genuine failure among sources that actually ran — never
@@ -491,6 +599,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     totalAfterDedup: uniqueVehicles.length,
     upserted,
     apiCallsUsed: adapterResults.reduce((n, r) => n + (r.apiCallsUsed ?? 0), 0),
+    rooftopResolution,
     configSource,
     market,
     configuredSources,

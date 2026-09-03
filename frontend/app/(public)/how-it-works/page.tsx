@@ -59,7 +59,7 @@ const STEPS = [
     n: "02",
     title: "Choose Your Vehicles",
     icon: Search,
-    body: "Browse verified inventory filtered to your exact budget. Add up to 5 vehicles to your private shortlist — these are what dealers compete to sell you.",
+    body: "Browse sourced listings filtered to your exact budget. Add up to 5 vehicles to your private shortlist — these are what dealers compete to sell you, and what they quote is what is confirmed.",
     tag: "Budget-filtered · Up to 5 vehicles",
   },
   {
