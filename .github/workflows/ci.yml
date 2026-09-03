@@ -87,6 +87,13 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: pnpm db:report-target
 
+      # `test:all` deliberately does NOT include `test:concurrency`. This job has no database:
+      # the DSN below is a placeholder that points at nothing, which is fine for suites that only
+      # need a Prisma client to construct at import time, and useless for a suite that writes rows.
+      # The destructive suite therefore runs in the e2e job, against that job's own ephemeral
+      # `autolenis_e2e` service. Re-adding it to `test:all` puts a destructive suite back in a job
+      # whose DSN is `secrets.DATABASE_URL || <placeholder>` — an unknown target — so
+      # `isolated-database.test.ts` fails the build if it reappears there.
       - name: Unit & integration tests (full matrix)
         run: pnpm test:all
         env:

@@ -6,6 +6,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   assertIsolatedDatabase,
@@ -444,5 +445,48 @@ describe("sanitized classification: answer what a secret points at without revea
     assert.ok(!serialized.includes("secretpass"), "must not leak the password");
     assert.ok(!serialized.includes("postgresql://"), "must not leak the DSN");
     assert.deepEqual(Object.keys(c).sort(), ["classification", "database", "detail", "host", "projectRef"]);
+  });
+});
+
+describe("wiring: a destructive suite must never sit in a job that has no disposable database", () => {
+  // CI caught this the hard way. `test:concurrency` writes rows, and it was inside `test:all`,
+  // which the `ci` job runs with `DATABASE_URL: secrets.DATABASE_URL || <placeholder>` — an
+  // unknown target. The old fail-open guard hid it by skipping; the fail-closed guard turned it
+  // into a build failure, which is the correct signal and the wrong place to be running it at all.
+  // The suite now runs only in the e2e job, against that job's own ephemeral autolenis_e2e
+  // service. These tests make the arrangement structural instead of remembered.
+  const pkg = JSON.parse(
+    readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+  ) as { scripts: Record<string, string> };
+
+  test("test:concurrency exists as its own script, so it stays reachable for coverage-check", () => {
+    assert.ok(pkg.scripts["test:concurrency"], "test:concurrency script must exist");
+    assert.match(pkg.scripts["test:concurrency"], /select-offer-concurrency\.test\.ts/);
+  });
+
+  test("test:all does NOT run the destructive concurrency suite", () => {
+    assert.ok(
+      !pkg.scripts["test:all"].includes("test:concurrency"),
+      "test:all runs in a job with no disposable database. Putting test:concurrency back into it " +
+        "points a row-writing suite at secrets.DATABASE_URL || <placeholder>. Run it in the e2e " +
+        "job, which provisions POSTGRES_DB=autolenis_e2e on localhost.",
+    );
+  });
+
+  test("test:all DOES run both non-destructive guard suites", () => {
+    for (const s of ["test:isolated-db", "test:parity-ledger"]) {
+      assert.ok(pkg.scripts["test:all"].includes(s), `${s} must be in test:all`);
+    }
+  });
+
+  test("the e2e job is the only workflow step that runs test:concurrency, and it forces CI=true", () => {
+    const wf = readFileSync(new URL("../../../../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const runs = wf.split("\n").filter((l) => /run:\s*pnpm test:concurrency/.test(l));
+    assert.equal(runs.length, 1, "exactly one step may run the destructive suite");
+    // The step must be preceded by an explicit CI: "true" so a refusal fails rather than skips.
+    const idx = wf.indexOf("run: pnpm test:concurrency");
+    const preceding = wf.slice(Math.max(0, idx - 400), idx);
+    assert.match(preceding, /CI:\s*"true"/, 'the step must set CI: "true" so a refusal fails the build');
+    assert.match(preceding, /autolenis_e2e/, "the step must be documented as targeting the ephemeral service");
   });
 });
