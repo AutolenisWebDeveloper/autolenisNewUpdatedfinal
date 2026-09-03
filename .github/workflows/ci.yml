@@ -172,6 +172,37 @@ jobs:
       - name: Drift — chain-built database vs schema.prisma
         run: pnpm db:check-drift
 
+      # Ledger drift: does _prisma_migrations agree with the physical schema?
+      # A chain-built database is complete by construction, so this pass proves
+      # only that the checker does not false-positive. The step below is the one
+      # that proves it WORKS — see scripts/check-ledger-drift.ts for the incident.
+      - name: Ledger — _prisma_migrations vs the physical schema
+        run: pnpm db:check-ledger
+
+      # The detection test. Deleting a ledger row for an already-applied migration
+      # reproduces exactly the state production was in on 2026-09-03: the objects
+      # exist, the row does not. `prisma migrate status` calls that "not yet
+      # applied" and is wrong. The checker must FAIL here, or it is decorative.
+      - name: Ledger check detects a deleted row (must fail, then restore)
+        run: |
+          set -euo pipefail
+          VICTIM=20261105000000_inventory_dealer_provenance_and_call_accounting
+          ROW=$(psql "$DATABASE_URL" -tAc \
+            "select migration_name from _prisma_migrations where migration_name='$VICTIM'")
+          test "$ROW" = "$VICTIM"
+          psql "$DATABASE_URL" -q -c \
+            "delete from _prisma_migrations where migration_name='$VICTIM'"
+
+          if pnpm db:check-ledger; then
+            echo "::error::check-ledger PASSED against a database with a deleted ledger row."
+            exit 1
+          fi
+          echo "check-ledger correctly failed on the removed row."
+
+          # Restore by the documented repair path, so the repair is tested too.
+          pnpm exec prisma migrate resolve --applied "$VICTIM"
+          pnpm db:check-ledger
+
       # The documented fresh-provision runbook (prisma/MIGRATIONS.md) is the
       # Prisma chain PLUS the 15 numbered CRM/workflow files. Before Batch 7,
       # 14 of the 15 failed on a fresh database — a misnamed acquisition table

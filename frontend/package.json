@@ -58,6 +58,7 @@
     "test:integration": "tsx --test tests/integration/*.itest.ts",
     "test:coverage-check": "tsx scripts/check-test-coverage.ts",
     "db:check-drift": "tsx scripts/check-migration-drift.ts",
+    "db:check-ledger": "tsx scripts/check-ledger-drift.ts",
     "test:e2e-autopilot": "playwright test --config playwright.config.ts",
     "test:visual": "playwright test --config playwright.visual.config.ts",
     "test:visual:update": "playwright test --config playwright.visual.config.ts --update-snapshots",
