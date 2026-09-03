@@ -49,7 +49,7 @@ The two files were supplied as session uploads. The repository had no `docs/tran
 directory at `0cd399f`; the verified copies were placed at the canonical paths (byte-identical, hashes
 re-computed after the copy) and are committed with this document.
 
-Content markers required by the master prompt — all **VERIFIED**:
+Content markers required by the master prompt — **VERIFIED except one, which does not match**:
 
 | Marker | Where | Result |
 | --- | --- | --- |
@@ -57,7 +57,16 @@ Content markers required by the master prompt — all **VERIFIED**:
 | §23 "Plans, upgrades and downgrades" | line 1124 | present |
 | 21 transaction stages | `## Stage 1` … `## Stage 21` (lines 345–1006) | 21 |
 | 31 implementation steps | §33 table, lines 1529–1559 | 31 |
-| 26 data-model entries in §32 | §32 table, lines 1496–1520 | 26 |
+| 26 data-model entries in §32 | §32 table, lines 1496–1520 | **25 — marker does not match** |
+
+**The one mismatch, stated plainly.** The expected marker is 26 data-model entries in §32; the file
+contains **25** (`vehicle_requests` … `vehicle_offers`, lines 1496–1520, the table ending at 1520).
+The SHA-256 hash of the file matches the expected value exactly, so this is unambiguously the intended
+Markdown — the marker count is off by one, not the file. Consequences, both small and both recorded
+rather than silently absorbed: §10.1's schema rows map 25 §32 objects, not 26, and the completeness
+critic's requirement inventory counted §32 as 26 atoms, so its total of 1,109 is one high. Neither
+changes a status, a phase, or a required change. **ASSUMPTION** (owner may correct): the marker was
+written from an earlier draft of §32.
 
 ---
 
@@ -118,7 +127,7 @@ this repository these resolve as follows (VERIFIED against `.claude/skills/`):
   `_prisma_migrations`, and row counts. No `INSERT/UPDATE/DELETE/DDL` was issued.
 - **Migration replay:** a local PostgreSQL 16.13 cluster (`pg_ctlcluster 16 main`), empty databases,
   `pnpm exec prisma migrate deploy` at three commits. Databases and worktrees were removed afterwards.
-- **MarketCheck:** official documentation via web fetch plus a bounded number of sandbox calls through
+- **MarketCheck:** official documentation via web fetch plus a bounded number of **live, read-only** calls through
   the MarketCheck MCP (investigation only; it is not, and must not become, a runtime dependency).
 
 ---
@@ -357,7 +366,7 @@ and the Vehicle-Request-scoped auction lineage required by Stage 2, Stage 5a and
 (see §10). The 10 legacy NULL-location rows are documented for an owner-run backfill in
 `docs/plans/BUYER-LOCATION-BACKFILL.md` (not executed; §13).
 
-**Regression coverage required (phase that fixes it — §8 Phase 3 intake/eligibility):** synthetic
+**Regression coverage required — §8 Phase 2 (the location gate and the eligibility predicate land there; §8.2 Phase 2 schedules both suites, and §13-D3 is needed before them). The launch-readiness half of this defect — an auction may not open with zero invitations — is asserted again in Phase 5:** synthetic
 buyer with NULL location → eligibility recheck refuses `PAYMENT_REQUIRED` with the field named; synthetic
 paid request with location → sourcing case opens and the null-location predicate is never reached;
 synthetic buyer whose location is deleted after payment → launch readiness holds with an owner rather
@@ -413,7 +422,7 @@ another buyer's normalised phone, raise an Operations exception ("possible dupli
 audited human merge (no admin merge exists today). **Owner confirmation requested (§13-D3):** that the
 pair above is the duplicate meant by §9C. The fix design does not change either way.
 
-**Regression coverage required (§8 Phase 3):** (i) two concurrent Lane 1 submissions with the same
+**Regression coverage required — §8 Phase 2** (identity resolution, the one-open-request attach and the attribution defaults are all Phase 2 deliverables): (i) two concurrent Lane 1 submissions with the same
 normalized verified email → one buyer, one open Vehicle Request (DB partial unique index + service
 CAS); (ii) case/whitespace variants of one email → one buyer; (iii) same phone and name with a
 different verified email → **two** buyers and no merge (rule 16 negative test); (iv) claim-token resend
@@ -423,13 +432,33 @@ unavailable with reason.
 
 ---
 
+### 7.3 A third live exposure, found while mapping rather than while reproducing
+
+Not one of the two defects the master prompt named, but it belongs in this section because it is live in
+production right now and the plan's schedule turns on it.
+
+`POST /api/buyer/financing/apply` (`app/api/buyer/financing/apply/route.ts:17,81-97`) accepts a Social
+Security number, income, employment and date of birth from any authenticated buyer whose deal is at
+`FINANCING_PENDING`, encrypts them, and writes a `credit_applications` row. The buyer page no longer
+renders the form (`app/buyer/financing/page.tsx:88-108`), so the exposure is not reachable by clicking —
+but the route is not gated, and the table exists with a partial unique index ready to receive rows.
+Production currently holds **0 rows** (§5.2), so nothing has been collected.
+
+This directly contradicts §2 of the specification ("collects a Social Security number anywhere in the buy
+transaction — never"). It is why Phase 1 replaces the handler with a bodyless 410 rather than waiting for
+the Phase 7 retirement, and why §13-D6 is marked urgent: every phase the decision waits is a phase the
+route stays callable. **Status: VERIFIED by reading the route and by the production row count. Not
+reproduced** — reproducing it would mean submitting a real Social Security number, which §7 forbids.
+
+---
+
 ## §8 Dependency-ordered implementation phases
 
 ### 8.0 Ordering rules honoured
 
 | Constraint (master §9A) | How this plan satisfies it |
 | --- | --- |
-| **C1 — Schema first, behaviour second** | Phase 1 is a single additive migration wave covering §32 as corrected by the parity map (new tables, nullable columns, enum values; every statement idempotent; no drops/renames/NOT NULL on existing tables; zero behaviour change) and lands the three enforcement objects (partial unique index, DB-level shortlist cap, build-failing `credit_applications` test). |
+| **C1 — Schema first, behaviour second** | Phase 1 is a single additive migration wave covering §32 as corrected by the parity map (new tables, nullable columns, enum values; every statement idempotent; no renames and no NOT NULL on existing tables) and lands the three enforcement objects (partial unique index, DB-level shortlist cap, build-failing `credit_applications` test). **Two stated exceptions to "schema only", both deliberate and both named in §8.2 rather than hidden:** (a) the wave replaces the live `POST /api/buyer/financing/apply` route with a bodyless 410 — a behaviour change, taken because the route is an authenticated SSN, income and date-of-birth intake and therefore a standing §2 violation (§13-D6); (b) the e-sign envelope's unique `deal_id` becomes a partial unique on `(deal_id, signer_kind)` — a constraint swap, not a pure addition, needed for the co-buyer signer (§13-D30), with its own restore statement in `rollback.sql`. Everything else in the wave is additive and behaviour-free. The wave ships as two ordered migration directories because PostgreSQL forbids using a new enum label in the transaction that adds it (§8.2, VERIFIED against PostgreSQL 16.13). |
 | **C2 — Operational writers before intake** | Phase 2 opens with the canonical `queue_items` writer, the `comms_outbox` dispatcher foundation, and the build-failing direct-send rule; only then does the same phase touch intake. Every later phase's communications and exceptions route through them from the first commit. |
 | **C3 — Inventory and qualified results before sourcing** | Phase 4 (§33 steps 28, 30, 31; §22a) precedes Phase 5 (§33 steps 6–9, 29), so sourcing resolves candidates against a populated rooftop pool. |
 | **C4 — Final phase is acceptance only** | Phase 11 adds no capability: verification, gap closure, §13 reconciliation, `ACCEPTANCE-REPORT.md`. |
@@ -465,8 +494,38 @@ The §12 preflight is re-asserted at the start of every phase before any Playwri
 
 #### Phase 1 — Schema foundation & enforcement objects
 
-*One additive, idempotent migration directory* (`frontend/prisma/migrations/20261106000000_transaction_spine_foundation/` — the chain's directory names run ahead of the calendar (the latest is `20261105000000`, today is 2026-09-03) and Prisma orders lexicographically, so the new directory continues the sequence rather than using the real date),
-paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or writes a new field.
+*One additive, idempotent migration wave in **two ordered directories***, paired `schema.prisma`
+changes, `rollback.sql`, and tests.
+
+- `frontend/prisma/migrations/20261106000000_transaction_spine_enums/` — **every `ALTER TYPE … ADD VALUE`
+  and nothing else.**
+- `frontend/prisma/migrations/20261106000100_transaction_spine_foundation/` — tables, columns, indexes,
+  triggers, constraints; free to reference the labels the first directory committed.
+
+The chain's directory names run ahead of the calendar (the latest is `20261105000000`, today is
+2026-09-03) and Prisma orders lexicographically, so both directories continue the sequence rather than
+using the real date.
+
+**Why two directories and not one.** PostgreSQL refuses to use an enum label inside the transaction that
+added it, and Prisma runs each migration file in its own transaction. A single directory that adds
+`DRAFT`, `PAYMENT_REQUIRED` and `RADIUS_AUTHORIZATION_REQUIRED` to `VehicleRequestStatus` and then names
+those labels in the partial unique index predicate — which is exactly what enforcement object 1 does —
+fails on deploy. **VERIFIED** by executing it against PostgreSQL 16.13 in this session:
+
+```
+BEGIN;
+ALTER TYPE st ADD VALUE IF NOT EXISTS 'DRAFT';
+CREATE UNIQUE INDEX vr_one_open ON vr (buyer_id) WHERE status IN ('SUBMITTED','DRAFT');
+ERROR:  unsafe use of new value "DRAFT" of enum type st
+HINT:  New enum values must be committed before they can be used.
+```
+
+The same two statements in two transactions both succeed and the index is created. Splitting the wave
+costs nothing: it is still one additive, idempotent, behaviour-free schema wave in one phase, satisfying
+constraint C1, and CI's from-zero replay exercises both directories in order. Every other object in the
+lists below lands in the second directory unless it is an enum value.
+
+Zero route reads or writes a new field.
 
 - **Fulfilment record** `vehicle_requests`: `entry_type` (new enum `VehicleRequestEntryType`
   {`INVENTORY_SELECTION`,`CUSTOM_REQUEST`}), `inventory_item_id` FK, `pre_qualification_id` FK,
@@ -596,23 +655,77 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   (§5.2: all four present, RLS enabled with zero policies; `lifecycle_touch_sequence_allowed` already
   lists 19 sequences, so the repo's manual SQL is the stale side and no constraint swap runs in
   production; §13-D24).
+- **Objects the area maps add to this wave (reconciled after the second review).** Constraint C1 allows
+  exactly one schema wave, so anything a later phase's behaviour needs must land here. Six area tables
+  each ended with a "not in the Phase 1 list — add" note; those notes were never folded into the list
+  above, which would have left Phases 2, 5, 6, 7 and 9 unbuildable as written. They are folded in now,
+  grouped by the area that raised them (§10 carries the row-level citation for each):
+
+  - *Intake and attribution* — `vehicle_requests.acquisition_channel` (NOT NULL DEFAULT `'direct'`),
+    `utm_content`, `affiliate_id` FK; the same attribution set on `buyer_opportunities`;
+    consent columns (`consent_version`, `consent_text_hash`, `consent_ip`, `consent_surface`) on the
+    consent-bearing rows; `buyers.latitude`, `longitude`, `geocoded_at`, `geocode_source`;
+    `vehicle_requests.stated_budget_cents`, `expected_down_payment_cents`, `co_buyer_elected`;
+    `interested_in_buying` on the refinance lead (the §7 crossover flag).
+  - *Payment* — payment facts rather than more deposit statuses: `payment_provider_events` gains the
+    processing / disputed / reconciliation-pending timestamps the §26 rows need, and `deposits` gains
+    `refund_reason` typed by the existing `RefundReason` enum, which today has no field anywhere.
+  - *Sourcing* — `sourcing_cases` and `sourcing_candidates` (above), plus the band and state timestamps
+    the ladder writes; `deposits.disputed_at`; `auction_invitations.distance_miles`;
+    `dealer_rooftops.operating_status` (+ `operating_status_checked_at`); `circumvention_attempts.dealer_id`.
+  - *Offers* — partial unique index `offers (auction_id, rooftop_id, auction_vehicle_id) WHERE status =
+    'SUBMITTED'` (one live offer per rooftop per candidate); `offers.is_disqualified` +
+    `disqualified_reason`; `auction_vehicles.candidate_status` gains `REVALIDATION_PENDING`; the
+    zero-offer review fact rides `queue_items.exception_code`, so no new enum value unless §13-D11
+    chooses otherwise. Owner-gated, written only if chosen: `OfferStatus.NOT_SELECTED` and
+    `auctions.relaunched_at` / `relaunch_count` (§13-D39).
+  - *Deal-early* — `FinancingAuditEventType` gains `TERMS_LOCKED`, `FINANCING_COMPLETED`,
+    `FINANCING_FAILED`, `FINANCING_EXPIRED`, `CASH_CONFIRMED`, `EVIDENCE_ATTACHED` (§13-D19 keeps the
+    existing hash chain as the trail); `financing_audit_events.deal_id` and `.financing_id`;
+    `dealer_scorecard_snapshots.reaffirmation_failure_count`. Owner-gated: the
+    `identity_firewall_entries` release columns (§13-D38).
+  - *Pickup and completion* — `PickupStatus` gains `NO_SHOW` and `RELEASED`; `pickups.fulfillment_mode`,
+    `no_show_party`, `no_show_at`, `vehicle_prepared_at` and the dealer readiness checklist jsonb;
+    the buyer possession-discrepancy facts `odometer_at_possession`, `vin_match` and
+    `possession_discrepancy jsonb` (the §11.7 amendment that was recorded but not folded in);
+    `deal_corrections` (append-only: deal_id, kind, before/after jsonb, reason, actor, created_at);
+    `dealer_scorecard_snapshots.no_show_count`, `contract_delay_count`, `overdue_obligation_count`;
+    trade-in `appraisal_changed_at` and `final_allowance_cents`.
+  - *Queue* — `queue_items.assigned_admin_id` is a guarded FK to `users` with `ON DELETE SET NULL` and a
+    Prisma relation, not a bare id column.
+
+  Every item above is additive. The enum additions go in the first migration directory, everything else
+  in the second. Items marked owner-gated are written into the migration only if that decision selects
+  them; the wave is authored so each is a single guarded statement that can be omitted without
+  reordering the rest.
 - **Legacy-path instrumentation** (master rule 7): no new table — the compatibility adapters write
   `audit_logs` rows with action `LEGACY_PATH_WRITE`, `entity`, `caller`, and the legacy path name;
   a partial index `(action, created_at) WHERE action = 'LEGACY_PATH_WRITE'` backs the counter query
   surfaced on the admin operations dashboard.
 - **Enforcement object 3** — `frontend/prisma/__tests__/credit-applications-frozen.test.ts`: scans
-  `app/api/{buyer,dealer,admin/deals,admin/auctions,admin/vehicle-requests,webhooks,cron}/**` and
-  `lib/services/{deal,auction,offer,deposit,payment,pickup,esign,contract,contract-shield,insurance,
-  financing,prequal,vehicle-request,buyer,trade-in,shortlist,comms}/**` for `creditApplication`,
+  the whole of `app/**`, `lib/**`, `components/**` and `scripts/**` for `creditApplication`,
   `credit_applications`, `CreditApplication`; fails the build on any reference not in an explicit
-  allowlist. The allowlist at Phase 1 contains the **read-only** references that exist today (buyer
+  allowlist. **The scan is repository-wide on purpose** (corrected in the second review): an earlier
+  draft scanned a hand-listed set of route and service trees that could not see three of the four
+  reference sites its own allowlist named — the admin financing-review routes, the admin pages and the
+  `components/admin` control all sit outside it — so the guard would have passed while the references it
+  exists to track were invisible. That draft also listed `lib/services/deposit/**`, a directory that does
+  not exist (deposit logic lives in `lib/services/payment/`), copied from a stale skill map. Scanning
+  everything and allowlisting explicitly is the only version of this test that can be trusted; it also
+  costs nothing, since the scan is a string search over the tree. The allowlist at Phase 1 contains the **read-only** references that exist today (buyer
   financing page read, admin financing-review queue, dormant orchestrator/review-queue services —
   listed in §10 area *deal-early*), each tagged with the phase that removes it (Phase 7); the test also
   fails if an allowlisted file no longer references the model (stale entry). **The one write path —
   `app/api/buyer/financing/apply/route.ts`, which today accepts SSN, income, employment and date of
   birth from an authenticated buyer at `FINANCING_PENDING` and inserts a `credit_applications` row
   (§10 *deal-early*; the buyer page no longer renders the form but the API stays callable) — is
-  deliberately NOT allowlisted.** Phase 1 replaces it with a bodyless 410 handler (no request parsing,
+  deliberately NOT allowlisted.** **The complete allowlist, enumerated from the tree on 2026-09-03
+  (VERIFIED — twelve files reference the model, excluding tests):** `app/admin/financing-reviews/page.tsx`,
+  `app/admin/manual-reviews/page.tsx`, `app/buyer/financing/page.tsx`,
+  `lib/services/financing/{compliance-rule,credit-application,financing-audit,financing-orchestrator,
+  review-queue}.service.ts` and `lib/services/financing/lender/{lender-service,mock-lender-adapter,types}.ts`
+  — every one tagged Phase 7, the phase that removes it. The twelfth is the apply route, which is
+  **not** allowlisted. Phase 1 replaces it with a bodyless 410 handler (no request parsing,
   no SSN field anywhere) and deletes its test, so the build fails if the write path is ever restored.
   This is the only behaviour change inside the schema wave; it is included because the route is a live
   §2 violation ("never collects a Social Security number anywhere in the buy transaction"). See §13-D6.
@@ -621,10 +734,32 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   objects run against the local Postgres in CI's migration job (unique-index violation, trigger raise,
   allowlist scan), `pnpm typecheck`, `pnpm lint`, `pnpm test:all`, `pnpm build`. Playwright:
   NOT APPLICABLE (no behaviour). Visual: NOT APPLICABLE.
-- **Owner-gated:** production deploy of the wave (§13-D1 ledger resolve first, then
-  `prisma migrate deploy`; verify schema + ledger after); §13-D5, D6, D7, D8.
-- **Rollback:** `rollback.sql` drops only the objects this wave created (guarded); enum values are
-  append-only and stay.
+- **Owner-gated:** **§13-D1** (reconcile the six ledger rows) then **§13-D2** (clean the three buyers
+  holding multiple open Vehicle Requests) must both complete before **§13-D13** (the production
+  `prisma migrate deploy`, verifying physical schema *and* ledger afterwards). Decisions that must be
+  answered before the wave is authored: **§13-D5** (which statuses count as an open request — the index
+  predicate below hard-codes an answer), **§13-D6** (freeze mechanics, including the 410), **§13-D7**
+  (`InsuranceStatus` additions), **§13-D11** (`QueueItemType` and the `queue_items` shape), **§13-D24**
+  (adopting the raw-SQL background tables), **§13-D43** (RLS posture — both the tables this wave creates
+  and the five existing tables that have none), **§13-D49** (how contract state is represented) and
+  **§13-D50** (the freeze test's exemptions). **§13-D51** is not a Phase 1 gate but is listed here because
+  it is the earliest safety item in the plan: it asks what the CI `DATABASE_URL` secret points at, and
+  the answer matters on the next CI run, not at Phase 1.
+  **§13-D8** gates only the inventory cache table inside this wave. **§13-D33** records that the e-sign
+  and contract-scan schema is already in production, so this wave adds nothing there.
+- **Rollback:** `rollback.sql` drops only the objects **this wave itself created** — guarded, and with an
+  explicit deny-list so the four adopted tables can never be dropped by it. `comms_outbox`,
+  `lifecycle_touch_schedule`, `idempotency_keys` and `jobs_dead_letter` already exist in production with
+  live rows (§5.2); the wave adopts them with `CREATE TABLE IF NOT EXISTS`, which creates nothing, so a
+  rollback that "drops what the wave created" must not touch them. The file names them in a comment and
+  the Phase 1 test asserts `rollback.sql` contains no `DROP TABLE` for any of the four. Enum values are
+  append-only and stay; the columns added to adopted tables are dropped individually by name. The one
+  constraint swap (e-sign `deal_id`) carries its own restore statement, since a guarded "drop what we
+  created" cannot recreate a constraint the wave replaced.
+- **Behaviour rollback:** the 410 on the credit-application route is code, not SQL, so `rollback.sql`
+  cannot undo it. It reverts by reverting the phase's commit; the phase's own test
+  (`credit-applications-frozen.test.ts` plus a route test asserting 410 with no request parsing)
+  replaces the deleted apply-route test, so the new behaviour ships covered rather than untested.
 
 #### Phase 2 — Operational writers, then Lane 1 intake, identity, and Stages 1–3
 
@@ -636,9 +771,16 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   resolve its parent raises `ORPHAN_EXCEPTION` through this writer and is **never** silently
   re-parented or duplicated into a parallel transaction. Today only the payment half exists
   (unroutable payment → Finance alert). Implemented as one `assertParentResolvable()` helper called by
-  each creation path, a reconciler pass that sweeps existing rows with a null parent (the 8 deposits
-  and 7 auctions without a Vehicle Request, §5.5), and a build-failing rule that no service may write a
-  parent id onto an existing row of these classes outside the audited re-parent admin action. Admin surface:
+  each creation path, a reconciler pass that sweeps existing rows with a null parent, and a build-failing
+  rule that no service may write a
+  parent id onto an existing row of these classes outside the audited re-parent admin action.
+  **What the sweep will actually find, re-probed 2026-09-03 (VERIFIED):** `auctions` 7 rows, **6** with
+  `vehicle_request_id` NULL (§7.1, not 7 — an earlier draft of this bullet said 7 and cited the wrong
+  section); `deposits` 8 rows, all of which need attaching because the column itself does not exist
+  until this wave (§5.2); `offers`, `deals`, `pickups` and `contract_versions` are **empty in production
+  today**, so for those four classes the rule ships as a guard against future orphans rather than as a
+  cleanup. Each recovered row raises one `ORPHAN_EXCEPTION` for a human to resolve; nothing is
+  auto-re-parented. Admin surface:
   extend the existing operations dashboard (`app/admin/...` ops queue) — no new page family.
 - `lib/services/comms/comms-outbox.service.ts` — extend to the §27 contract: `enqueueTransactional()`
   (trigger, recipient, template + required content, run_at, dedup/idempotency key, cancel_key, refs),
@@ -655,6 +797,16 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   entries fail.
 - Compatibility adapters: each allowlisted legacy sender is wrapped to write the `LEGACY_PATH_WRITE`
   audit row (caller from `new Error().stack`), so the counter starts at Phase 2.
+- **Two further build-failing rules land here, not in Phase 1**, so that every executable "you may not
+  write this" check lives together and the schema-first wave keeps exactly three enforcement objects
+  (master §9A C1; §11.5 ruling 9): **(a) role boundary (§2)** — no code path may make AutoLenis the
+  seller of record, issue a title, registration or temporary tag, or release a vehicle; the test forbids
+  new issuance symbols anywhere under the transaction trees and pins the two admin release actions to
+  the audited exception path (§10 area *control*, `B2-01…03`). **(b) scope (§35)** — no parallel
+  website, no replacement architecture, no unrelated code change; the check fails when a phase's diff
+  adds a route family, service directory or table outside that phase's declared scope list, or touches
+  `ENABLE_AUTO_PUBLISH` or `SOCIAL_AUTOMATION_MODE` (§10 area *control*, `G35-01`). §35 is re-asserted
+  as an acceptance item in Phase 11.
 - **QStash neutralisation (no replacement vendor, master §6):** `@upstash/qstash`, `lib/qstash/*` and
   16 `app/api/jobs/*` consumers are still in the tree while the repo's own history declares the vendor
   removed, so every flag-OFF lifecycle workload (`lifecycle_internal_{auction,dealer_invited,offer,
@@ -686,6 +838,11 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   shows one request; duplicate submit creates nothing; refinance form stays in Lane 2. Visual: changed
   public forms → `test:visual` (harness exists).
 
+- **Owner-gated:** **§13-D3** (confirm the duplicate-buyer pair, before the regression tests), **§13-D45** (the OFAC
+  control on the external pre-approval route), **§13-D46** (consent capture on every Lane 1 surface),
+  **§13-D47** (purge the PII already sitting in `notifications.metadata`) and **§13-D23** (QStash decommission confirmation, before the producers are cut over). **§13-D17** is an acknowledgement that four existing tests encode rules this phase and Phases 3–5 replace.
+- **Rollback:** Every deliverable is new code behind no schema change: the queue writer, the dispatcher and the three build rules revert by reverting their commits; the intake repointing reverts by restoring the previous handler import in each surface. The dispatcher is introduced alongside the existing senders (allowlisted, not deleted), so a revert leaves sending working. `COMMS_TRANSPORT=capture` is preview-only and never set in production.
+
 #### Phase 3 — Payment gate, money model, plans, settlement opens the sourcing case
 - §5a eligibility recheck (named failure per missing item) → `PAYMENT_REQUIRED`; one PaymentIntent per
   Vehicle Request (`deposits.vehicle_request_id`), provider-side existing-obligation check before a new
@@ -704,10 +861,21 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   seeded). The auction is no longer created at settlement; the deposit-activation reconciler's
   `create_auction`/`invite` branches are neutralised behind a monitored adapter and its `close`-on-zero
   branch is retired in favour of Phase 5's readiness hold (§8.4).
-- §22/§23: plan snapshots, Premium $400 balance with $99 credit (never $499 in one go), upgrade window
-  open at settlement/close at funding clearance, downgrade before/after settlement, re-upgrade, concierge
-  assignment + ownership move, touchpoint 1 (receipt line), suppression guardrails, fee reconciliation
-  from the settled ledger, commission settlement at completion with reversal on refund/chargeback.
+  **Sequencing guard — Phase 3 must not ship to production before Phase 5.** Phase 3 removes the only
+  path that currently invites dealers, and the replacement (launch readiness plus the invitation
+  service) does not exist until Phase 5. Shipping Phase 3 alone would leave every paid buyer with an
+  open sourcing case and no dealer ever invited. So the legacy adapter is written to keep creating and
+  inviting **by default**, behind `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` (off), and only Phase 5 turns
+  it on once readiness can launch. Until that flip, Phase 3's new path runs in preview only. This is the
+  one place in the plan where a phase's production behaviour deliberately waits for a later phase, and
+  it is stated here rather than assumed.
+- §22/§23: plan snapshots, Premium $400 balance with $99 credit (never $499 in one go), the upgrade
+  window **opening** at settlement — its close predicate needs `deals.funding_cleared_at`, which nothing
+  writes until Phase 8, so the close lands there (§11.6 ruling 2–3) — downgrade before/after settlement,
+  re-upgrade, concierge assignment + ownership move, touchpoint 1 (receipt line), suppression guardrails,
+  fee reconciliation from the settled ledger, and the **ledger shape only** for affiliate commission:
+  settlement fires at Deal completion (Phase 9) and its reversal hook is read by the cancellation
+  orchestration (Phase 10), per §11.6 ruling 4–5.
 - **Money-path defects the payment verification surfaced (§10 area *payment*), fixed at the cause in
   this phase with failing-first regression tests:** (1) a card decline flips the deposit
   `PENDING → FAILED` and `FAILED` is terminal (`lib/payments/deposit-state.ts:12-41`), while Stripe
@@ -731,6 +899,10 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   created; declined card then successful retry settles once and opens the case once; Premium balance
   checkout math.
 
+- **Owner-gated:** **§13-D48** (legal-approved refund-policy copy, before the checkout disclosure ships),
+  **§13-D10** (backfill the 10 NULL-location buyers, before any can pass eligibility), **§13-D12** (enable the settlement reconciler in production — a money path), and **§13-D27** (acknowledgement: the six-touch series runs on the every-minute outbox drain).
+- **Rollback:** The settlement side-effect change is behind the legacy adapter, so the previous behaviour is restored by flipping the adapter back and reverting the commit; no deposit row is rewritten. The reconciler is env-gated (`DEPOSIT_SETTLEMENT_RECONCILE_ENABLED`), so production reverts by unsetting the flag without a deploy. Plan snapshots are append-only: a revert stops writing them and leaves history intact.
+
 #### Phase 4 — Inventory, qualified results, shortlist candidates, co-buyer, trade packet
 - Adapter corrections from §9 (request `dealer` + `mc_dealership` + `build`; read ids from
   `mc_dealership`; keep `dealer.website`; reject `dist > radius`; classify 422 by message; read
@@ -750,6 +922,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
 - Gates: inventory suites (`marketcheck-*` tests re-fixtured to the real payload shape), shortlist cap
   concurrency test against the DB trigger, Playwright: approved buyer → qualified results → shortlist 5 →
   sixth refused → out-of-radius card offers the request path; visual: inventory/detail/shortlist pages.
+
+- **Owner-gated:** **§13-D8** (MarketCheck terms — gates the cache table and any rooftop minting) and **§13-D16** (approved-amount filtering on the buyer search).
+- **Rollback:** The adapter changes are additive fields and stricter parsing; reverting the commit restores the previous adapter. The cache table, if D8 permits it, is a pure read-through — dropping it degrades to live queries. No inventory row is deleted; the qualified-results service is new and unreferenced until its surface ships.
 
 #### Phase 5 — Dealer sourcing, invitations, launch readiness, identity firewall
 - Sourcing case service (server-side 100→150→250 ladder; band-by-band expansion; buyer authorisation
@@ -784,6 +959,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
 - Regression for defect #1 at the launch gate. Gates: auction suites, state-machine tests for the
   sourcing statuses, Playwright: paid request → sourcing case → readiness → launch with N invitations;
   zero-coverage path → radius authorisation screen.
+
+- **Owner-gated:** **§13-D35** (sealed-auction semantics), **§13-D36** (`MIN_COVERAGE_DEALERS` soft hold), **§13-D37** (dealer portal access model), **§13-D42** (dealer termination criteria) and **§13-D44** (retire the untargeted dealer broadcast). Note the split ruled in §11.6: this phase builds the identity firewall; Phase 7 performs the lift.
+- **Rollback:** Invitations are written to `auction_invitations`, which Phase 1 created and which the legacy `outside_auction_invites` reader still covers, so a revert falls back to the existing invite path. The sourcing case is a new record consulted only by new code. Suppression on the dispatcher is a strictly safer default; reverting it re-enables sends that were previously unfiltered.
 
 #### Phase 6 — Offers, ranking, close, selection, Deal lineage, Premium invitation
 - Offer model/validation per §8a/§8b (arithmetic, budget, VIN/criteria, one live offer per rooftop per
@@ -820,6 +998,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
 - Gates: offer/best-price suites, `test:concurrency`, Playwright: dealer submits via token link → buyer
   report → selection → Deal row lineage asserted → Premium interstitial declinable and non-blocking.
 
+- **Owner-gated:** **§13-D39** (relaunch design — it decides whether `auctions.deposit_id` uniqueness is relaxed), **§13-D40** (over-ceiling offers: reject at submit or record and disqualify) and **§13-D41** (`DEALER_CONFIRMATION` insertion and whether existing deals are backfilled).
+- **Rollback:** The junk-fee unit correction carries a data backfill of `offers.junk_fee_items`; it is written as a reversible transform with the pre-image retained in the same row until Phase 10, so a revert restores the prior representation. New deal statuses are additive and the transition map accepts both entries, so a revert leaves in-flight deals legal. Retiring the admin selection route is a delete: reverting restores it.
+
 #### Phase 7 — Reaffirmation, recap, financing checkpoints, `credit_applications` freeze
 - `dealer_reaffirmations` flow with 24-hour deadline, 12-hour reminder, identity firewall lift + secure
   handoff (co-buyer + trade packet) at confirmation, condition-disclosure acknowledgement, material changes
@@ -840,6 +1021,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   in the Postgres enum with code refusing to write them (§13-D18).
 - Gates: deal state-machine suites (new statuses), financing suites, Playwright: dealer reaffirms →
   buyer acknowledges → recap → terms locked (cash and external).
+
+- **Owner-gated:** **§13-D9** (physical removal of `credit_applications`, retention-gated), **§13-D18** (`FinancingStatus` migration semantics), **§13-D19** (audit trail for the new checkpoints), **§13-D20** (outside-winner lineage), **§13-D21** (permission tier for recording checkpoints), **§13-D22** (acknowledgement: the identity-firewall lift covers every dealer surface), **§13-D25** (retire `financing_review_tasks` with D9), **§13-D26** (`holds` cron repurposed) and **§13-D38** (`identity_firewall_entries` release semantics).
+- **Rollback:** Reaffirmation and recap are new records and new statuses; a revert stops creating them and the transition map still accepts the direct entry to `FINANCING_PENDING`, so in-flight deals are unaffected. The credit-application freeze completes here by deletion — reverting restores the routes, which is why the Phase 1 410 (not the deletion) is the control that must never be reverted.
 
 #### Phase 8 — Contract, Contract Shield, signatures, dealer execution, funding clearance, insurance review
 - Contract request dispatched durably from the `CONTRACT_PENDING` transition with `document_requests`
@@ -868,6 +1052,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   `contract_scans.contract_version_id` (§5.2), so the "LOCAL/STAGING ONLY" annotations are stale (§13-D33).
 - Gates: contract-shield/esign/insurance suites, Playwright: upload → Shield hold → correction → approve →
   sign (buyer + co-buyer) → dealer execution → funding clearance → insurance review.
+
+- **Owner-gated:** **§13-D4** (e-sign evidence activation — compliance-gated), **§13-D28** (insurance leaves the contract-entry path), **§13-D29** (dealer execution mechanics), **§13-D30** (co-buyer signer identity), **§13-D31** (`EXTERNAL_UPLOADED` disposition), **§13-D32** (the Finance role for Stage 14) and **§13-D34** (dealer upload during review). **§13-D33** records that the e-sign and contract-scan schema is already in production; only its ledger rows were missing.
+- **Rollback:** E-sign stays behind `ESIGN_EXECUTED_ARTIFACT_ENABLED`, so production reverts by unsetting the flag. The insurance gate change is a predicate swap in one service with the old predicate retained behind the legacy adapter for one phase. Contract versions and scans are append-only: a revert stops writing new rows and never rewrites a signed artefact.
 
 #### Phase 9 — Pickup readiness through post-completion
 - `PICKUP_READINESS` checklist (13 items, each with owner/status/action/deadline), strict turn-taking
@@ -899,6 +1086,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
 - Gates: pickup suites incl. token single-use and concurrent completion attempts; Playwright: readiness →
   schedule → token → dealer scan → buyer confirms → completed once.
 
+- **Owner-gated:** No new owner decision blocks this phase; it consumes **§13-D4** (e-sign activation, for the executed artefact) and the Phase 1 wave objects this phase's facts live in.
+- **Rollback:** The cryptographic token replaces the non-crypto nonce in one service; reverting restores the previous generator, and outstanding tokens are invalidated by the revoke-and-reissue path rather than by data rewrite. Completion becomes one atomic writer — reverting restores the previous writers, which is why the phase must not delete them until its Playwright journey is green.
+
 #### Phase 10 — Control-plane completion
 - One cancellation orchestration (`FROZEN_PENDING_RELEASE` after execution); every §26 row raises through
   the writer; every §27.1 row is enqueued through the dispatcher; the direct-send allowlist reaches zero;
@@ -925,6 +1115,9 @@ paired `schema.prisma` changes, `rollback.sql`, and tests. Zero route reads or w
   stalls the deal at `FEE_PENDING` instead of reverting to Standard (§26 #43) — the reversion rule lands
   with the plan snapshot in Phase 3 and is exercised at funding clearance in Phase 8.
 
+- **Owner-gated:** **§13-D14** (physical removal of legacy paths, only after 30 days of zero `LEGACY_PATH_WRITE` in production) and **§13-D23** (QStash dependency, routes and env names deleted here).
+- **Rollback:** This phase mostly deletes: every deletion reverts by reverting the commit, and nothing it removes has carried production traffic for the 30 days the counter proves. The cancellation orchestration is new code behind the existing `cancelDeal` seam.
+
 #### Phase 11 — Acceptance
 - §13 reconciliation, form walk, four scenarios and every branch, `ACCEPTANCE-REPORT.md`, live-only
   items listed as UNVERIFIED. No new capability.
@@ -944,7 +1137,7 @@ the register has at least one enqueue/raise site.
 | `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI (writes canonical `offers`) | keep as intake; no drop |
 | Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |
-| In-app credit application route/UI (`credit_applications`) | 7 | table retained (0 rows) pending retention sign-off | owner-gated drop |
+| In-app credit application route/UI (`credit_applications`) | **1** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410, the schema wave's single behaviour change — §8.2 Phase 1, §13-D6), then **7** for the remaining read paths (buyer financing page, admin review queue, dormant services) | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
 | Non-crypto pickup QR nonce | 9 | none | removed in phase |
 | Admin inventory search tool's inline provider client | 4 | none | removed in phase |
 | QStash producers (`lib/qstash/*`, four live callers) and the 16 `app/api/jobs/*` consumers, `@upstash/qstash`, `QSTASH_*` env | 2 (workloads internal-by-default; touches via dispatcher) | none — vendor already dead | 10 (dependency, routes, env names deleted; §13-D23) |
@@ -999,8 +1192,6 @@ minting are designed to be switched off if confirmation is refused.
 ## §10 Requirement-to-code parity map (by area)
 
 Each area below is the verified table produced from the area map (finder pass + adversarial verification pass + gap-fill rounds). Columns: Ref · Document & section · Requirement · Current route / service / model / component / email / cron / queue / admin action · Status · Stronger safeguard to preserve · Exact required change · Phase · Test level · Acceptance evidence · Owner-gated dependency · Legacy path affected · Final disposition. The raw area maps (with their evidence quotes, duplicates, safeguards, legacy paths, out-of-scope findings, UNVERIFIED items and owner questions) are committed under `docs/transaction-flow/parity/`.
-
-**Reading the refs.** Each area numbered its own rows, so a bare ref is ambiguous across areas (173 ids are reused). Every cross-reference in this document is therefore qualified `area/Ref` — `control/E26-00b`, `schema/I1`, `pickup/R19.2` — and the same convention applies when a row is cited in a phase report.
 
 ### 10.1 Data model & schema (§4, §32, §28, §6.2, §12b–c, comms_outbox shape) — 185 rows
 
@@ -1124,7 +1315,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 | S11 | MD §32 L1506 | `FinancingStatus` + 7 values (P0) | 4/11 (prisma/schema.prisma:1711-1716) | MISSING | none | Same as R65 | 1 | integration | see R65 | prod deploy 20261106000000 (§13-D1) | none | TO IMPLEMENT |
 | S12 | MD §32 L1507 | `financing` + 9 columns (P0) | Financing: dealId @unique, path, selectedAt, lenderName, approvedAmountCents, aprRate, termMonths, monthlyPaymentCents, status (prisma/schema.prisma:2059-2073) | MISSING | `dealId @unique` | Same as R67 | 1 | integration | see R67 | prod deploy 20261106000000 (§13-D1) | none | TO IMPLEMENT |
 | S13 | MD §32 L1508 | `external_pre_approvals` + `deal_id` (P0) | `buyerId` only (prisma/schema.prisma:2015-2034) | MISSING | none | Same as R69 | 1 | integration | see R69 | prod deploy 20261106000000 (§13-D1) | none | TO IMPLEMENT |
-| S14a | MD §32 L1509 | `credit_applications` FREEZE — build-failing guard against transaction-route references | `CreditApplication` (prisma/schema.prisma:5744-5795) + `Deal.creditApplications[]` (642); written by lib/services/financing/financing-orchestrator.service.ts and app/api/buyer/financing/apply/route.ts:9,71-97; production 0 rows | BROKEN | `credit_applications_one_active_per_deal` partial unique (migrations/20261007000000); AES-GCM PII encryption | Enforcement object 3: `prisma/__tests__/credit-applications-frozen.test.ts` scanning the listed trees with an allowlist of today's references tagged Phase 7; stale entries fail | 1 | unit | test fails on any new reference; allowlist equals current references (deal-early area list) | §13-D6 alternative | none | TO IMPLEMENT |
+| S14a | MD §32 L1509 | `credit_applications` FREEZE — build-failing guard against transaction-route references | `CreditApplication` (prisma/schema.prisma:5744-5795) + `Deal.creditApplications[]` (611); written by lib/services/financing/financing-orchestrator.service.ts and app/api/buyer/financing/apply/route.ts:9,71-97; production 0 rows | BROKEN | `credit_applications_one_active_per_deal` partial unique (migrations/20261007000000); AES-GCM PII encryption | Enforcement object 3: `prisma/__tests__/credit-applications-frozen.test.ts` scanning the listed trees with an allowlist of today's references tagged Phase 7; stale entries fail | 1 | unit | test fails on any new reference; allowlist equals current references (deal-early area list) | §13-D6 alternative | none | TO IMPLEMENT |
 | S14b | MD §32 L1509; §8.4 | Retire in-app credit application route/UI; keep table until retention sign-off | app/api/buyer/financing/apply/route.ts; review-queue/orchestrator references | BROKEN | keep table (do not drop) | Route returns 410 + redirect to external-financing screen; UI removed; orchestrator/review-queue references neutralised; allowlist → zero | 7 | unit, integration, playwright | frozen test allowlist empty; Playwright buyer financing page shows no in-app application | §13-D9 retention sign-off before any drop | app/api/buyer/financing/apply; buyer financing page | OWNER-GATED |
 | S15a | MD §32 L1510; §15 | `InsuranceStatus` + `UNDER_REVIEW` (and REJECTED/EXPIRED) | 8 values (prisma/schema.prisma:1493-1502); production identical (WORKFLOW §5.3) | MISSING | FAILED retained for history (§13-D7) | `ALTER TYPE ... ADD VALUE` x3; add `insurance_policies.rejection_reason/reviewed_by/reviewed_at/covers_co_buyer/vin` | 1 | integration | migration job; pg_enum assert 11 | prod deploy 20261106000000 (§13-D1); §13-D7 | none | TO IMPLEMENT |
 | S15b | MD §32 L1510; §15 | `EXTERNAL_UPLOADED` must not advance or release the vehicle | `EXTERNAL_UPLOADED` in `INSURANCE_SATISFIED` (lib/services/deal/deal.service.ts:41-45; app/api/dealer/pickup/scan/route.ts:76); upload-proof auto-drives INSURANCE_PENDING → CONTRACT_PENDING (app/api/buyer/insurance/upload-proof/route.ts:6,138,151-153); string sets AdminBuyerCommandCenter.tsx:857, app/buyer/insurance/page.tsx:74 | BROKEN | release gate exists (deal completion + pickup scan) | Remove EXTERNAL_UPLOADED from satisfied set; upload → `UNDER_REVIEW` + `queue_items` review; only VERIFIED/POLICY_BOUND release; expiry blocks | 8 | unit, state-machine, playwright | insurance suite: upload does not advance; scan refused until VERIFIED; Playwright upload → Shield/insurance review → release | none | upload-proof auto-advance; INSURANCE_SATISFIED consumers | TO IMPLEMENT |
@@ -1152,7 +1343,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 | C9 | MD §27 L1290; §28.2 L1420 | Delivery status incl. `delivered` | Terminal sent/suppressed/skipped/failed; `provider_id` only; no delivery webhook state | PARTIAL | none | Resend/Twilio status webhooks mark `delivered` (+ `delivered_at`); CHECK widened in R88 | 2 | integration | webhook suite: provider delivered event → row `delivered`; unknown id ignored | none | none | TO EXTEND |
 | C10 | MD §27 L1290 | Retry policy | Linear backoff `attempt*60s` (:461) | ALREADY CORRECT | none | none (policy stays code-level; `next_attempt_at` persisted) | 2 | unit | backoff unit test | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | C11 | MD §27 L1290 | Cancellation rule | No `cancelled` status, no cancel API | MISSING | none | Columns `cancel_key`, `cancelled_at`, `cancel_reason` (Phase 1); `cancelByKey()` invoked on transaction state change | 2 | unit, integration | dispatcher suite: cancel before send → `cancelled`, no provider call; cancel after send → no-op | none | none | TO IMPLEMENT |
-| C12 | MD §27 L1290; §26 | Terminal failure raises an Operations exception | `logger.error(... dead-lettered ...)` only (:450); nothing to jobs_dead_letter | MISSING | terminal FAILED never re-emitted from DLQ | On max attempts: `terminal_failed_at` + `raiseException(COMMS_EXCEPTION, 'Communication terminal failure')` | 2 | unit, integration | dispatcher suite: 4th failure → queue_items row with idempotency key; second run no duplicate | none | none | TO IMPLEMENT |
+| C12 | MD §27 L1290; §26 | Terminal failure raises an Operations exception | `logger.error(... dead-lettered ...)` only (:450); nothing to jobs_dead_letter | MISSING | terminal FAILED never re-emitted from DLQ | On max attempts: `terminal_failed_at` + `raiseException(COMMS_EXCEPTION, 'Communication terminal failure')` Cross-referenced with `jobs/A6` — one change, two views (§11.5 ruling 5). | 2 | unit, integration | dispatcher suite: 4th failure → queue_items row with idempotency key; second run no duplicate | none | none | TO IMPLEMENT |
 | C13 | MD §27 L1290 | RLS on `comms_outbox` | No `ENABLE ROW LEVEL SECURITY` for comms_outbox in prisma/ or migrations/; production: RLS enabled, zero policies (WORKFLOW §5.4) | PARTIAL | deny-all (no policies) pattern; app connects as table owner | Guarded `ENABLE ROW LEVEL SECURITY` in the formalising migration; no policies (a policy would open access) | 1 | integration | migration job; `pg_class.relrowsecurity` assert | prod deploy 20261106000000 (§13-D1) | none | TO EXTEND |
 | C14 | MD §27 L1290 | Prisma parity: table visible to the drift gate and chain | Absent from schema.prisma and from prisma/MIGRATIONS.md raw-table list (L43-47); drift script compares chain vs schema only (scripts/check-migration-drift.ts:1-30) | MISSING | none | Prisma model `CommsOutbox` + `CREATE TABLE IF NOT EXISTS` migration matching manual SQL exactly; service keeps supabase-js or moves to Prisma | 1 | integration | `pnpm db:check-drift` count does not rise; from-zero replay creates the table; re-apply on prod-shaped DB is a no-op | prod deploy 20261106000000 (§13-D1) | lib/services/comms/comms-outbox.service.ts (supabase-js access) | TO CONSOLIDATE |
 | I1 | MD §5 rule 5/6; §4.1 L149 | DB-level "one open request per buyer" | Only `vehicle_requests(buyer_id, status)` non-unique (init L816); precedent `credit_applications_one_active_per_deal` (migrations/20261007000000); production: 3 buyers hold 2-5 open rows (WORKFLOW §5.6) | MISSING | partial-unique precedent | `CREATE UNIQUE INDEX CONCURRENTLY vehicle_requests_one_open_per_buyer_key ON vehicle_requests(buyer_id) WHERE status IN (open set incl. DRAFT, excl. DEAL_CREATED + terminals)`; raw SQL (Prisma cannot express) | 1 | integration, concurrency | `prisma/__tests__/one-open-request-index.test.ts`: second open row → 23505; pre-check query returns 0 violators | §13-D2 owner-run cleanup of the 3 buyers; §13-D5 DRAFT semantics | `promoteOpportunity` (P2002 at runtime until R1a) | OWNER-GATED |
@@ -1233,7 +1424,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 
 ### 10.2 Intake lanes & every public form/CTA (§5–§9, rules 16/17) — 103 rows
 
-Status counts: ALREADY CORRECT 10, PARTIAL 36, BROKEN 10, MISSING 32, DUPLICATED 7, UNVERIFIED 8 · Phase counts: P1 11, P2 71, P3 3, P4 11, P5 3, P6 1, P7 1, P10 1, P11 1
+Status counts: ALREADY CORRECT 10, PARTIAL 36, BROKEN 10, MISSING 32, DUPLICATED 7, UNVERIFIED 8 · Phase counts: P1 11, P2 71, P3 1, P4 11, P5 3, P6 2, P7 1, P9 1, P10 1, P11 1
 
 # Intake — FINAL parity table
 
@@ -1275,13 +1466,13 @@ Schema note: four column sets that Phase 2 Part B writes are **not enumerated in
 | R20b | MD §6.2 L282; HTML LANES[0].forms[10] | Trade never floats: S1/S17/S20 create a `TradeInSubmission` bound to the open VR; JSON blobs migrated | S1 → `BuyerOpportunity.tradeInDetails` JSON `unified-buyer-intake.service.ts:235`; `/complete` → VR notes `complete/route.ts:93-100,155-168`; portal `lib/services/trade-in/trade-in.service.ts:11-26` buyer-level | MISSING | none | Bind on create; backfill JSON → rows (owner-run script) | 4 | unit, integration | New `trade-in-attach.test.ts`; DB assertion no `trade_in_submissions` with NULL VR after backfill | owner-run backfill of `tradeInDetails` JSON | `BuyerOpportunity.tradeInDetails` JSON; `/complete` notes text | TO IMPLEMENT |
 | R21 | MD §6.1 L276; HTML LANES[0].forms[11] | Prequalification attached to buyer | `app/api/buyer/prequal/route.ts:98-140`; `prequal.service.ts:269-278` FCRA consent + IP/UA; location backfill `:300-323` | ALREADY CORRECT | Fill-if-null location; exact FCRA text stored | none; Stage 3 adds admin receipt / expiry via dispatcher | 2 | unit | Existing prequal suite re-run | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | R22 | MD §6.1 L277; HTML LANES[0].forms[12] | Buyer dashboard new request → VR | `app/api/buyer/requests/route.ts:200` unified; ZIP `page.tsx:285`; no attribution/consent/one-open check/entry_type; buyer zip not written back (C1) | PARTIAL | Rate limit `:128` | Pass attribution (`direct`), consent, entry_type; attach to open VR; write buyer zip | 2 | unit, integration, playwright | §7 regression (v); Playwright dashboard shows one request | none | none | TO EXTEND |
-| R23 | MD §6.1 L278; HTML LANES[0].forms[13] | Premium page: plan on buyer + Deal snapshot | `SignUpClient.tsx:309` hidden `plan`; `/api/buyer/plan/upgrade` → `buyers.plan`; Deal snapshot not traced | UNVERIFIED | none | `plan_snapshots` row (Phase 3 §22/§23) | 3 | integration | Payment-area plan suites | none | none | UNVERIFIED — out of intake scope; payment area map owns |
+| R23 | MD §6.1 L278; HTML LANES[0].forms[13] | Premium page: plan on buyer + Deal snapshot | `SignUpClient.tsx:309` hidden `plan`; `/api/buyer/plan/upgrade` → `buyers.plan`; Deal snapshot not traced | UNVERIFIED | none | `plan_snapshots` row: the buyer-level plan election is written in Phase 2/3, but the Deal-level snapshot can only exist once the Deal does, at Phase 6 (§11.6 ruling 8). | 6 | integration | Payment-area plan suites | none | none | UNVERIFIED — out of intake scope; payment area map owns |
 | R24 | MD §6.3 L288-290; HTML LANES[0].forms[14] | Guest submits → claim token emailed → set password/verify → same buyer + VR claimed | Guest created `unified-buyer-intake.service.ts:160-179`; token is resume-only 302 `app/api/public/request/resume/[token]/route.ts:37-53`; email-match upgrade `lib/auth/actions.ts:110-149,193-207` reachable only via OAuth (C11); `signUpAction` refuses guest email `:344-347`; no guest test | BROKEN | Hashed, single-use, race-safe token (`request-resume-token.service.ts:22-25,44-55,86-88`); resume route leaks no reason | `signUpAction` proceeds to `generateLink` for `guest_*` users; claim token as rule-16 step 2 binding on callback; failing-first guest→signup test | 2 | unit, integration, playwright | New `lib/auth/__tests__/guest-claim-signup.test.ts`; Playwright guest capture → claim → dashboard one request | none | `BuyerRequestClaimToken` resume-only usage | TO IMPLEMENT |
 | R25 | MD §6.3 L290; HTML LANES[0].forms[14] | Resend claim link never creates a second buyer/request | Resume token re-minted per touch (ok); `app/api/auth/resend-verification/route.ts:136,142-146` calls `generateLink(type:"signup")` without required `password` (auth-js types `:733-738`), errors swallowed `:172-177` (C12) | BROKEN | Token rows only; no buyer duplication | Resend for a guest issues the claim link via the claim-token path; surface errors; Stage 1 exactly-one-buyer | 2 | unit, integration | New resend test; §7 regression (iv) | none | none | TO IMPLEMENT |
 | R26a | MD §6.4 L303; HTML LANES[0].forms[15] | `abandoned_at` marker (never delete) | No marker on VR/opportunity | MISSING | Nothing deletes leads (correct) | `abandoned_at` column (Phase 1 list) | 1 | integration | Migration test | production migration deploy | none | TO IMPLEMENT |
 | R26b | MD §6.4 L294-303; HTML LANES[0].forms[15] | Four touches at 0 / 1h / 24h / 72h with resume link; abandon at 14 days | `lib/services/crm/lifecycle-touch-drain.service.ts:454,474,494` → touch 4 ≈ +96h (C13a); flag `LIFECYCLE_INTERNAL_FORM_SUBMITTED` default OFF (`admin-platform.service.ts:24-27`) → QStash branch documented removed `lifecycle-scheduler.ts:87-91,185-207`; touches 2–4 contact-only `:730-733`; no 14-day cron | PARTIAL | `preCheckoutResolved` guard (`lib/qstash/state.ts:77-84`); fresh token per send | Move to `comms_outbox` dispatcher with absolute timings; touch-1 lists captured/missing; buyer-keyed recipient; 14-day abandon cron; extend to DRAFT captures | 2 | unit, integration | New `draft-recovery-cadence.test.ts` (absolute offsets); outbox state-recheck test; cron test stamps `abandoned_at` | env flag `LIFECYCLE_INTERNAL_FORM_SUBMITTED` production value (map Q6) until the dispatcher replaces it | QStash `/api/jobs/form-submitted`, `/api/jobs/check-form-completion`; `lifecycle_touch_schedule` | TO CONSOLIDATE |
 | R27a | MD §6.5 L307; HTML LANES[0].forms[7] | Attribution captured at click, stamped on lead, carried onto VR | See R17b | PARTIAL | as R17b | as R17a/R17b | 2 | unit, integration | as R17b | none | none | TO EXTEND |
-| R27b | MD §6.5 L307; HTML LANES[2].rules[2] | Commission settles at Deal completion; reversed on cancel/refund/chargeback | Not traced in the intake area | UNVERIFIED | none | Phase 3 commission settlement/reversal (payment area) | 3 | integration | Payment-area commission suite | refund/money-path activation | none | UNVERIFIED — payment area map owns |
+| R27b | MD §6.5 L307; HTML LANES[2].rules[2] | Commission settles at Deal completion; reversed on cancel/refund/chargeback | Not traced in the intake area | UNVERIFIED | none | Commission settlement at Deal `COMPLETED` (Phase 9) with the reversal hook consumed by Phase 10; Phase 3 provides the ledger shape only. Owned by the payment area (payment/PAY-94) — this row tracks the intake-side attribution (§11.6 ruling 4–5). | 9 | integration | Payment-area commission suite | refund/money-path activation | none | UNVERIFIED — payment area map owns |
 | R28 | MD §7 L313; HTML LANES[1].forms[0] | Refinance form → `refinance_applications` with consent, timestamp, IP hash, state, source | `lib/services/refinance/refinance-lead.service.ts:76-114`; `app/api/public/refinance/route.ts:23` `consentGiven: z.literal(true)` | ALREADY CORRECT | consent literal-true; sha256 IP hash | none | 2 | unit | Existing refinance tests re-run; Playwright refinance stays Lane 2 | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | R29 | MD §7 L313; HTML LANES[1].forms[1] | State eligibility evaluated; `EXCLUDED_STATE` recorded | `route.ts:47-59` returns 422 before `submitRefinanceLead`; client disables `eligibility/page.tsx:89-95,147-148`; service branch `refinance-lead.service.ts:64-66` unreachable; no test (C14) | PARTIAL | API hard block on excluded states | Persist the application with `EXCLUDED_STATE` (spec: written → evaluated) then refuse redirect; add test | 2 | unit, integration | New `refinance-excluded-state.test.ts` | none | none | TO EXTEND |
 | R30 | MD §7 L313; HTML LANES[1].forms[2] | Redirect to OpenRoad with partner attribution; `redirected_at` | `app/api/public/refinance/redirect/route.ts:11-13,66-83`; `markLeadRedirected` QUALIFIED-only `:142-156`; `buildPartnerRedirectUrl` hard-fail `:158-175`; `partner-redirect.test.ts:18-43` (C16) | ALREADY CORRECT | leadId-only input; server-built partner URL | none | 2 | unit | Existing `partner-redirect.test.ts` | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
@@ -1536,7 +1727,7 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 
 | Ref | Document & section | Requirement | Current route / service / model / component / email / cron / queue / admin action | Status | Stronger safeguard to preserve | Exact required change | Phase | Test level | Acceptance evidence | Owner-gated dependency | Legacy path affected | Final disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| R1 | MD Stage 4 Entry L406; HTML S[3].entry | Entry = current, unexpired approval | `lib/services/buyer/journey.ts:101-109` gates `search` on onboardingComplete && prequalValid; `app/buyer/search/page.tsx:142-159` renders for any buyer; `/api/buyer/search` `route.ts:20-23` auth only; `requests/route.ts:122` no prequal gate | PARTIAL | none | Gate the new qualified-results service/surface on `isPrequalValid`; keep custom-request path open; catalogue stays "general" | 4 | unit, playwright | extend `lib/services/buyer/__tests__/journey.test.ts`; new `qualified-results.test.ts` asserts no results/no draw for unapproved buyer; Playwright approved-buyer journey | none | `app/buyer/search` reachable pre-approval as general catalogue | TO IMPLEMENT |
+| R1 | MD Stage 4 Entry L406; HTML S[3].entry | Entry = current, unexpired approval | `lib/services/buyer/journey.ts:101-109` gates `search` on onboardingComplete && prequalValid; `app/buyer/search/page.tsx:40-57` renders for any buyer; `/api/buyer/search` `route.ts:20-23` auth only; `requests/route.ts:122` no prequal gate | PARTIAL | none | Gate the new qualified-results service/surface on `isPrequalValid`; keep custom-request path open; catalogue stays "general" | 4 | unit, playwright | extend `lib/services/buyer/__tests__/journey.test.ts`; new `qualified-results.test.ts` asserts no results/no draw for unapproved buyer; Playwright approved-buyer journey | none | `app/buyer/search` reachable pre-approval as general catalogue | TO IMPLEMENT |
 | R2 | MD §4a L410; HTML S[3].buyer[0], QUAL[0] | System presents qualified results automatically | none; `app/buyer/search` manual filter over `inventory_items` (`search/route.ts:127-137`); `inventory-match.service.ts:23-75` dashboard ranking, no ZIP/radius/provider | MISSING | none | Build qualified-results service (R32) and auto-render after APPROVED in buyer portal | 4 | unit, integration, playwright | new `lib/services/inventory/__tests__/qualified-results.test.ts`; Playwright approved buyer → results shown without manual search | MarketCheck terms §13-D8 (cache only) | `/buyer/search`; `findMatchedVehicles` widget | TO IMPLEMENT |
 | R3 | MD §4a L410; HTML QUAL[1] | Buyer deliberately adds ≤5; system never saves on buyer's behalf | buyer route `app/api/buyer/shortlist/route.ts:99-101` (gated, cap `:91-93`); CORRECTION: admin upsert `app/api/admin/buyers/[buyerId]/shortlist/route.ts:89-93` writes AUCTION_READY on buyer's behalf, audited `:96-106` | PARTIAL | cap counts AVAILABLE only (`shortlist.service.ts:14-28`) | Route admin writer through `shortlistGate` or require explicit override reason + audit; no cron/service writer | 4 | unit, integration | new `app/api/admin/__tests__/admin-shortlist-gate.test.ts`; extend `shortlist-radius-gate.test.ts` | none | admin shortlist upsert route | TO EXTEND |
 | R4a | MD §4a L410; HTML S[3].system[0] | Both entry methods write the SAME Vehicle Request; only `entry_type` differs (schema) | `VehicleRequest` `schema.prisma:1022-1070` has no entry type; rg `entry_type\|entryType` negative | MISSING | none | Phase 1 wave: `entry_type` enum `VehicleRequestEntryType` {INVENTORY_SELECTION, CUSTOM_REQUEST}, `inventory_item_id` FK | 1 | integration | `prisma/__tests__` chain test + CI from-zero replay; `pnpm db:check-drift` | production migration deploy (§13-D1 ledger first) | none | TO IMPLEMENT |
@@ -1572,7 +1763,7 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 | R22 | MD §22a L1071; HTML INV[8] | Out-of-radius card: plain distance, pre-filled request; never labelled qualified/local/confirmed/held/auction-eligible | public correct: `buildSimilarRequestHref` `shortlist-availability.ts:104-121`, `REQUEST_PREFILL_KEYS` `:90-93`, hydrated `requests/new/page.tsx:164-199`; CORRECTION: `components/buyer/VehicleDetailPanel.tsx:82-86` "Eligible for private 48-hour auction" + live Add to Shortlist `:100-108` for every LANE_1 row; `app/buyer/inventory/[vehicleId]/page.tsx:262` never runs `shortlistGate`; `ShortlistClient.tsx:181,205-209` AUCTION READY asserted at write | BROKEN | server refusal still holds | Run `shortlistGate` on buyer detail page; drop auction-eligible chip or derive from gate+revalidation; render gate action on buyer search cards | 4 | unit, playwright, visual | new buyer-detail-gate test; copy-prohibition test; visual buyer detail | none | `readinessState` "AUCTION_READY" default | TO EXTEND |
 | R23a | MD §22a L1072; HTML INV[9] | Sourcing not limited by catalogue/query radius (isolation) | `shortlist-radius.ts:74-77` import isolation; `MAX_RADIUS_MILES` only in `lib/services/inventory` + admin tool | ALREADY CORRECT | import isolation enforced | Keep; add test guarding the import boundary | 4 | unit | import-boundary test in `lib/services/shortlist/__tests__` | none | none | PRESERVED STRONGER SAFEGUARD |
 | R23b | MD §22a L1072, L1102-1108 | Sourcing ladder 100→150→250 then buyer authorisation | `lib/services/auction/coverage.service.ts:38` `RADIUS_TIERS = [25, 50, 100, 150]` | PARTIAL | none | Server-side ladder 100/150/250 + RADIUS_AUTHORIZATION_REQUIRED (Phase 5 scope) | 5 | unit, state-machine | sourcing ladder test in `lib/services/auction/__tests__` | none | `coverage.service.ts` tiers | TO EXTEND |
-| R24a | MD §22a L1073; HTML INV[10] | Rooftop identity columns for ingest | `dealer_rooftops` `schema.prisma:4007-4040` no MC id; `mcRooftopId/mcDealerId` on items (`:986-987`) unusable as join key; migration 20261105 `rooftop_id` NOT APPLIED | PARTIAL | none | Phase 1: `dealer_rooftops.mc_rooftop_id` (unique where not null); `inventory_items` listing_id, provider_last_seen_at, days_on_lot, mc_website_id, mc_location_id, mc_category, external_dealer_website | 1 | integration | migration chain test; apply 20261104/20261105 first | production migration deploy (20261104, 20261105, Phase 1 wave) | env-tier config until applied | TO EXTEND |
+| R24a | MD §22a L1073; HTML INV[10] | Rooftop identity columns for ingest | `dealer_rooftops` `schema.prisma:4007-4040` no MC id; `mcRooftopId/mcDealerId` on items (`:986-987`) unusable as join key; `inventory_items.rooftop_id` + index + FK are PRESENT in production (WORKFLOW 6.1 class (b)); only the ledger row is missing, so the file header's "WRITTEN BUT NOT APPLIED" is stale (D1, D33) | PARTIAL | none | Phase 1: `dealer_rooftops.mc_rooftop_id` (unique where not null); `inventory_items` listing_id, provider_last_seen_at, days_on_lot, mc_website_id, mc_location_id, mc_category, external_dealer_website | 1 | integration | migration chain test; apply 20261104/20261105 first | production migration deploy (20261104, 20261105, Phase 1 wave) | env-tier config until applied | TO EXTEND |
 | R24b | MD §22a L1073; HTML INV[10], FINDINGS[7] | Provider dealer object requested + captured on ingest; listing resolves to real rooftop; pool grows | adapter reads `listing.dealer.*` (`marketcheck.adapter.ts:74-88,394-424`); orchestrator persists (`orchestrator.ts:353-369,384-399,423-438,459`); `resolveListingRooftops` MATCH-never-MINT (`listing-rooftop-resolution.service.ts:14,59,96`); include flags absent (rg `include_dealer\|include_mc_dealership\|mc_category` → none); `inventory_items.dealer_id` NULL by design | PARTIAL | MATCH-never-MINT; ambiguous left unlinked; Null-Island coords rejected (`adapter:114-134`) | Request `dealer`+`mc_dealership`+`build`; read ids from `mc_dealership`; reject `dist > radius`; dedupe on `mc_rooftop_id`; unmatched rooftops minted only via dealer-database-ingestion (match-then-mint) | 4 | unit, integration | `marketcheck-dealer-provenance.test.ts` re-fixtured to real payload; `listing-rooftop-resolution.test.ts` mint-through-ingestion case | live payload shape (default include UNVERIFIED — resolved by sending flags) | `externalDealerName` LANE_2 name-match (`orchestrator.ts:92-105`) | TO EXTEND |
 | R25 | MD §22a L1074; HTML INV[11] | Listing is a specification; availability confirmed only by offer and reaffirmation | copy `[vehicleId]/page.tsx:332`; buyer detail `app/buyer/inventory/[vehicleId]/page.tsx:32-34,252-253` | ALREADY CORRECT | none | Keep copy; reaffirmation confirmation is Phase 7 | 4 | unit, visual | copy-prohibition test; visual detail page | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | R26 | MD §22a L1075; HTML INV[12] | Listed price is the benchmark for cross-vehicle OTD ranking | `priceCents` + `priceHistory` persisted (`orchestrator.ts:332-334`); "% vs market average" from catalogue mean (`[vehicleId]/page.tsx:50-55,149-152`); no ranking | PARTIAL | none | Snapshot listed price/VIN in `auction_vehicles.listing_snapshot` at candidate creation; ranking consumes it (R41, Phase 6) | 4 | unit | candidate creation test asserts `listing_snapshot.priceCents` | none | catalogue-mean statistic on detail page | TO IMPLEMENT |
@@ -1585,8 +1776,8 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 | R33 | MD §22a L1086; HTML QUAL[1] | System never auto-saves to shortlist | as R3 — admin writer exception | PARTIAL | none | see R3/R63 | 4 | unit | shortlist writer inventory test: only buyer route + gated admin override | none | admin shortlist route | TO EXTEND |
 | R34 | MD §22a L1087; HTML QUAL[2] | Thin/absent → pre-filled request confirmed alongside results | as R28 | PARTIAL | none | see R28 | 4 | playwright | as R28 | none | none | TO EXTEND |
 | R35 | MD §22a L1088; HTML QUAL[3] | Sourcing only after $99 settles; ladder independent of catalogue | no sourcing from shortlist writes (rg negative); intake spends off SUBMITTED (R15b); settlement creates auction immediately (`app/api/webhooks/stripe/route.ts:206-214,262`) | PARTIAL | none | Settlement opens sourcing case (Phase 3); ladder Phase 5; DRAFT no-spend Phase 2 | 3 | integration, playwright | Phase 3 Playwright: settlement opens case, no auction row created | none | deposit-settlement immediate auction create + invite (§8.4) | TO IMPLEMENT |
-| R36 | MD §22a L1090 | Before prequal: general catalogue only; nothing presented as qualified | nothing labelled qualified (rg → only "qualified dealers" `LiveAuctionView.tsx:144`); budget banners APPROVED-only (`app/buyer/search/page.tsx:142-159`; `BuyerSearchClient.tsx:320-400`) | ALREADY CORRECT | zero/undetermined ceiling never $0 (`search/route.ts:49-67`) | Keep; R64 gate preserves it once R32 exists | 4 | unit | qualified-results gate test | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
-| R37 | MD §22a L1094-1098; HTML BUDGET[0-2] | Filter generously; near/over-ceiling shown; enforce at offer/selection/contract only | hard cap `/api/buyer/search` `route.ts:64-82` `budgetGuarded`; disabled button `(public)/inventory/[vehicleId]/page.tsx:145,379-386`; `VehicleDetailPanel.tsx:106,112-114` disabled when over; hard exclude `inventory-match.service.ts:19`; `budget-gating.test.ts` pins strict | BROKEN | strict browse-time cap (STRICTER than spec); zero ceiling never $0 | Owner decision Q1; if spec wins: headroom band (e.g. ≤1.10×) + "OTD checked at offer" flag; keep server checks at offer/selection/contract (Phases 6-8); rewrite pinning test deliberately | 4 | unit, playwright | rewrite `app/api/buyer/search/__tests__/budget-gating.test.ts` to headroom; Playwright over-ceiling listing visible + flagged | owner decision (approved-amount headroom) | `budgetGuarded`/`maxBudgetCents` fields; `budget-fit-indicator` | OWNER-GATED |
+| R36 | MD §22a L1090 | Before prequal: general catalogue only; nothing presented as qualified | nothing labelled qualified (rg → only "qualified dealers" `LiveAuctionView.tsx:144`); budget banners APPROVED-only (`app/buyer/search/page.tsx:40-57`; `BuyerSearchClient.tsx:320-400`) | ALREADY CORRECT | zero/undetermined ceiling never $0 (`search/route.ts:49-67`) | Keep; R64 gate preserves it once R32 exists | 4 | unit | qualified-results gate test | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
+| R37 | MD §22a L1094-1098; HTML BUDGET[0-2] | Filter generously; near/over-ceiling shown; enforce at offer/selection/contract only | hard cap `/api/buyer/search` `route.ts:64-82` `budgetGuarded`; disabled button `(public)/inventory/[vehicleId]/page.tsx:145,379-386`; `VehicleDetailPanel.tsx:106,112-114` disabled when over; hard exclude `inventory-match.service.ts:19`; `budget-gating.test.ts` pins strict | BROKEN | strict browse-time cap (STRICTER than spec); zero ceiling never $0 | Owner decision §13-D16; if the spec wins: headroom band (e.g. ≤1.10×) + "OTD checked at offer" flag. **Split by §11.6 ruling 9:** Phase 4 changes only the browse filter; the ceiling is enforced at offer validation and selection in Phase 6 (offers/B2, offers/B12) and at contract request in Phase 8 (contract/C-01). | 4 | unit, playwright | rewrite `app/api/buyer/search/__tests__/budget-gating.test.ts` to headroom; Playwright over-ceiling listing visible + flagged | owner decision (approved-amount headroom) | `budgetGuarded`/`maxBudgetCents` fields; `budget-fit-indicator` | OWNER-GATED |
 | R38 | MD §22a L1102-1108 | Two ceilings: shortlist/qualified 100 (policy); sourcing ladder own records | shortlist 100 correct (R18); ladder stops at 150 (R23b) | ALREADY CORRECT | policy constant isolated | Keep; ladder in R23b | 4 | unit | `shortlist-radius-gate.test.ts` | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | R39 | MD §22a L1110-1112; HTML S[3].rec | Candidate model: ≤5 candidates per request; auction covers all; offers bind; selection collapses to one VIN | manual admin copy `components/admin/LaunchAuctionPanel.tsx:249` → `launch-auction/route.ts:216-228` (unrevalidated, no distance); webhook creates auction with no vehicles (`stripe/route.ts:206-214`) then `inviteDealersToAuction` `:262` synthesises one make-signal row (`dealer-invitation.service.ts:117-147`); `Offer` `schema.prisma:533-565` no candidate column | PARTIAL | admin attach availability check (`auction-vehicles/route.ts:76-97`) | Phase 4: create `auction_vehicles` from shortlist at Stage 4 exit with `vehicle_request_id`, `distance_miles`, `listing_snapshot`, `candidate_status`; offers bind + selection collapse in Phase 6 | 4 | unit, integration, concurrency | new `lib/services/auction/__tests__/candidate-binding.test.ts`; DB trigger cap test; Playwright shortlist 5 → 5 candidates | none | `ensureAuctionVehicleFromRequest` (keep as custom-request fallback); launch-auction manual attach | TO IMPLEMENT |
 | R40 | MD §22a L1116 | Each candidate → holding rooftop + comparable rooftops; union/dedupe recording served candidates | nothing consumes `rooftop_id` in `lib/services/auction` (rg `rooftopId` negative) | MISSING | none | Sourcing case consumes `inventory_items.rooftop_id`; `auction_invitations.candidate_ids[]` | 5 | unit, integration | sourcing-case test: candidate rooftop first, dedupe per rooftop | production migration 20261105 (`rooftop_id`) | none | TO IMPLEMENT |
@@ -1618,7 +1809,7 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 
 ## Owner-gated items
 
-- Production deploy of the Phase 1 additive wave (`§13-D1` ledger reconciliation first, then `prisma migrate deploy`) and of the already-written but NOT APPLIED migrations `20261104` / `20261105` (R4a, R8a, R11a, R12a, R15a, R17a, R24a, R30, R40, R42, R43a, R47, R48, R51, R61); §5.6 open-request precondition cleanup is owner-run (R15a).
+- Production deploy of the Phase 1 additive wave (`§13-D1` ledger reconciliation first, then `prisma migrate deploy`) ; migrations `20261104` / `20261105` are already **applied** in production — every object of both was probed PRESENT (WORKFLOW 6.1 class (b)); only their ledger rows are missing, which `D1` records, so no deploy of them is needed (R4a, R8a, R11a, R12a, R15a, R17a, R24a, R30, R40, R42, R43a, R47, R48, R51, R61); §5.6 open-request precondition cleanup is owner-run (R15a).
 - `§13-D8` MarketCheck terms — whether qualified results may be cached on a criteria hash (`inventory_query_cache` / `SearchCache` reuse) (R2, R16, R17a, R17b, R32, R49).
 - Owner decision Q1 — approved amount at browse time: keep the current strict hard cap or adopt the spec's generous headroom band + over-ceiling flag (R37, R58).
 - Owner decision Q2 — freshness clocks: reconcile 48h `FRESHNESS_WINDOW_MS` (sweep/eligibility) with the 7/30-day shortlist windows; production value of `INVENTORY_STALE_SWEEP_MODE` (R27, R44, R55).
@@ -1655,7 +1846,7 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 
 ### 10.5 Stage 5, §22, §22.1, §23: payment gate, money model, refunds, plans — 108 rows
 
-Status counts: ALREADY CORRECT 18, PARTIAL 35, BROKEN 16, MISSING 34, DUPLICATED 4, UNVERIFIED 1 · Phase counts: P1 7, P3 91, P4 1, P6 4, P7 1, P8 2, P10 2
+Status counts: ALREADY CORRECT 18, PARTIAL 35, BROKEN 16, MISSING 34, DUPLICATED 4, UNVERIFIED 1 · Phase counts: P1 7, P3 87, P4 1, P6 4, P7 2, P8 4, P9 1, P10 2
 
 # Parity table — PAYMENT (Stage 5 · §22 · §22.1 · §23) — FINAL
 
@@ -1728,7 +1919,7 @@ Repo `0cd399f`; paths relative to `frontend/`. `PAY-nn` = row `nn` of `payment.m
 | PAY-56b | MD §23.1 L1135; HTML PLAN_EDGE[3] | Plan elected per VR; buyer carries default; VR and Deal carry binding snapshot | Readers use `buyer.plan` (`app/buyer/deal/page.tsx:44`; `admin-payments.service.ts:55`; `admin-analytics.service.ts:332`; `fee-check`) | BROKEN | — | Election writes a snapshot bound to the VR; Deal creation copies `plan_snapshot_id`; every reader resolves plan via snapshot | 3 | unit, integration | New `lib/services/plan/__tests__/plan-snapshot.test.ts`; reader tests | none | every `buyer.plan` reader | TO EXTEND |
 | PAY-57 | MD §23.1 L1137; HTML PLAN_EDGE[1] | Premium entitlements begin at settlement, not election | Self-serve upgrade flips `plan=PREMIUM` free ("INTENTIONALLY FREE AT THIS STAGE", `app/api/buyer/plan/upgrade/route.ts:12-16,31-37`); features keyed on `buyer.plan` (`deal/page.tsx:44`) | BROKEN | Race-safe `updateMany` flip | Split election (snapshot) from entitlement (settled `ServiceFeePayment.paidAt` / `settled_premium_cents`); upgrade route mints the $400 PI instead of flipping | 3 | unit, integration | `app/api/buyer/plan/__tests__/upgrade.test.ts` rewritten failing-first; `test:buyer-plan` | Owner decision Q6: confirm spec supersedes the 2026-07 "free upgrade" note in code | upgrade route; dashboard card | TO EXTEND |
 | PAY-58 | MD §23.2 L1143; HTML PLAN_UP[0], S[4].system[5] | Window opens when the $99 settles | Upgrade route has no deposit check (`plan/upgrade/route.ts:17-44`); card shown pre-deposit (`PlanUpgradeCard.tsx:107-129`) | MISSING | — | `isUpgradeWindowOpen(vr)` = settled, unrefunded, undisputed $99 for this VR AND no `funding_cleared_at`; route + card consume it | 3 | unit | `lib/services/plan/__tests__/upgrade-window.test.ts` | none | none | TO IMPLEMENT |
-| PAY-59a | MD §23.2 L1144; HTML PLAN_UP[0] | Window-close predicate (funding cleared) | No funding-clear awareness (`plan/upgrade/route.ts`; `deal/payment/page.tsx`) | MISSING | — | Predicate reads Phase 1 `deals.funding_cleared_at`; fee intent refused after it (admin exception PAY-76) | 3 | unit | `upgrade-window.test.ts`: cleared deal → closed | none | none | TO IMPLEMENT |
+| PAY-59a | MD §23.2 L1144; HTML PLAN_UP[0] | Window-close predicate (funding cleared) | No funding-clear awareness (`plan/upgrade/route.ts`; `deal/payment/page.tsx`) | MISSING | — | Predicate reads Phase 1 `deals.funding_cleared_at`, written by the Phase 8 clearance service; fee intent refused after it (admin exception PAY-76). Phase 3 records only the window OPEN ($99 settles) — the CLOSE lands with clearance (§11.6 ruling 2–3). | 8 | unit | `upgrade-window.test.ts`: cleared deal → closed | none | none | TO IMPLEMENT |
 | PAY-59b | MD §23.2 L1144, L1149; HTML EXC[38] | Window closes at the funding-clearance checkpoint | No `FUNDING_PENDING` checkpoint exists today | MISSING | — | Phase 8 clearance transition stamps `funding_cleared_at`, closes window, triggers PAY-64b revert | 8 | state-machine, playwright | Deal state-machine suite; Playwright funding-clearance journey asserts upgrade refused after clearance | none | none | TO IMPLEMENT |
 | PAY-60 | MD §23.2 L1145; HTML PLAN_UP[2] | Cost always $400 shown as $499 less $99; never re-quoted/prorated | Inconsistent: fee page "$499 − $99 = $400" (`deal/payment/page.tsx:98-123`); dashboard "Upgrade to Premium — $499" (`PlanUpgradeCard.tsx:122`); billing no price (`billing/page.tsx:90-92`); signup "$400 after deposit credit" (`SignUpClient.tsx:296-298`); admin `AdminDealTabs.tsx:190-194` | PARTIAL | `netFee` constant math | One shared price-line component fed by constants on every surface | 3 | visual, unit | `test:visual` on all five surfaces; unit for the shared component | none | none | TO EXTEND |
 | PAY-61 | MD §23.2 L1146; HTML PLAN_UP[3] | $99 must be valid, paid, unrefunded, not charged back; else $499 gross | As PAY-52 | MISSING | — | Same change as PAY-52 (window predicate + credit rule share one ledger query) | 3 | unit | `service-fee.test.ts` (PAY-52) | none | none | TO EXTEND |
@@ -1747,7 +1938,7 @@ Repo `0cd399f`; paths relative to `frontend/`. `PAY-nn` = row `nn` of `payment.m
 | PAY-73 | MD §23.2b L1173; HTML PLAN_GUARD[2], EXC[40] | Suppress every prompt while transaction is in an exception state | Card unconditional (`PlanUpgradeCard.tsx:107-129`; `dashboard/page.tsx:165-166`) | MISSING | — | Suppression predicate reads open `queue_items` for the VR/deal; wired into every touchpoint | 10 | unit | `upgrade-suppression.test.ts`: open exception → suppressed | none | none | TO IMPLEMENT |
 | PAY-74 | MD §23.2b L1174; HTML PLAN_GUARD[3] | Suppressed on DNC, dispute, chargeback, cancellation in progress, existing Premium | Only existing Premium (`plan/upgrade/route.ts:21-23`) | PARTIAL | Idempotent route | Predicate reads `do_not_contact`, PAY-38a hold, cancellation state, settled Premium | 3 | unit | `upgrade-suppression.test.ts` | none | none | TO EXTEND |
 | PAY-75 | MD §23.2b L1175; HTML PLAN_GUARD[4] | Invitation never blocks; reaffirmation fires regardless | No interstitial | MISSING | — | Build PAY-67 as non-blocking; reaffirmation request dispatched in the selection tx | 6 | integration, playwright | Playwright PAY-67 journey asserts reaffirmation row created before interstitial dismissed | none | none | TO IMPLEMENT |
-| PAY-76 | MD §23.2b L1176; HTML PLAN_GUARD[5] | Admin may open upgrade after funding clears with audited approval; never automatic | Admin plan route (SUPER/FINANCE_ADMIN, reason ≥10, `AdminAuditLog BUYER_PLAN_CHANGED`) flips entitlement, no charge (`app/api/admin/buyers/[buyerId]/plan/route.ts:15-66`) | PARTIAL | Role allow-list + reason + audit | Route opens the $400 collection (window override flag on snapshot), never flips entitlement | 3 | integration | `test:admin-authz` + new plan-route test: late exception mints PI, entitlement unchanged until paid | none | `AdminBuyerCommandCenter` plan buttons | TO EXTEND |
+| PAY-76 | MD §23.2b L1176; HTML PLAN_GUARD[5] | Admin may open upgrade after funding clears with audited approval; never automatic | Admin plan route (SUPER/FINANCE_ADMIN, reason ≥10, `AdminAuditLog BUYER_PLAN_CHANGED`) flips entitlement, no charge (`app/api/admin/buyers/[buyerId]/plan/route.ts:15-66`) | PARTIAL | Role allow-list + reason + audit | Route opens the $400 collection (window override flag on snapshot), never flips entitlement. Depends on `funding_cleared_at`, so it lands with the Phase 8 clearance service (§11.6 ruling 2–3). | 8 | integration | `test:admin-authz` + new plan-route test: late exception mints PI, entitlement unchanged until paid | none | `AdminBuyerCommandCenter` plan buttons | TO EXTEND |
 | PAY-77 | MD §23.2b L1178; HTML PLAN_UP[7] | Measure impressions, dismissals, conversions per touchpoint; stamp converting touchpoint | Conversion only: `BuyerActivityEvent PLAN_UPGRADED` + audit `source` (`plan/upgrade/route.ts:46-80`) | PARTIAL | Existing activity events | Impression/dismiss events per touchpoint; `touchpoint` written on the settling snapshot (touchpoint 1 in 3; 2–5 in 6/7) | 3 | unit | `plan-snapshot.test.ts`: touchpoint stamped; activity-event tests | none | none | TO EXTEND |
 | PAY-78 | MD §23.2b L1180, §23.5 L1209; HTML PLAN_UP[6] | Standard buyer never disadvantaged; Operations pool owns every Standard transaction with a named owner | `assignedAdminId` nullable, manual (`admin/requests/[requestId]/route.ts:87,113`); no pool | PARTIAL | — | Ownership model: `owner_role=OPERATIONS` pool default on paid VR, named assignee on pickup from queue | 3 | unit | Ownership predicate test; queue-item owner assertions | Owner: Operations-pool semantics (who is "named" for Standard) | none | TO EXTEND |
 | PAY-79 | MD §23.3 L1184; HTML PLAN_DOWN[0] | Before $400 settles: election change only; concierge released; ownership to pool; no refund | Admin plan route sets STANDARD, nulls `planUpgradedAt` (`admin/buyers/[buyerId]/plan/route.ts:42-49`); no release/ownership move; no buyer endpoint | PARTIAL | Reason + audit | Downgrade service: snapshot append, release `assignedAdminId`, pool ownership, notify; buyer endpoint `POST /api/buyer/plan/downgrade` | 3 | unit, integration | `downgrade.test.ts` | none | `AdminBuyerCommandCenter` "Downgrade to Standard" (`:1049-1055`) | TO EXTEND |
@@ -1758,14 +1949,14 @@ Repo `0cd399f`; paths relative to `frontend/`. `PAY-nn` = row `nn` of `payment.m
 | PAY-84 | MD §23.4 L1198; HTML PLAN_EDGE[0], EXC[42] | $99 charged back after Premium settled → Finance exception; entitlement holds; never silent downgrade | Dispute → `AdminAuditLog STRIPE_DISPUTE_CREATED` only (`stripe/route.ts:769-798`); no auto-downgrade (correct by absence) | PARTIAL | Audit row with due_by | `raiseException(PLAN_EXCEPTION, owner FINANCE)` naming deal + plan; no plan change | 3 | integration | `stripe-dispute-hold.test.ts` (PAY-38b) asserts exception + plan unchanged | none | none | TO EXTEND |
 | PAY-85 | MD §23.4 L1199; HTML PLAN_EDGE[1] | Elect Premium at registration, never pay → Standard until settled; revert at clearance | Signup offers Premium; callback/session persist `plan=PREMIUM` free (`app/auth/signup/SignUpClient.tsx:283-303,310`; `app/auth/callback/route.ts:31-33,75-77`; `lib/auth/session.ts:86-90`; `app/api/admin/users/create/route.ts:128`) then gates at `FEE_PENDING` | BROKEN | — | Registration election → snapshot only (Phase 2 Stage 1); entitlement via PAY-57; revert via PAY-64b | 3 | unit, integration | `upgrade.test.ts`; auth callback test: Premium metadata → snapshot, no entitlement | none | `auth/callback`, `session.ts`, admin user-create | TO EXTEND |
 | PAY-86 | MD §23.4 L1200; HTML PLAN_EDGE[2] | $499 in one transaction not offered | Only $99 and $400 intents (`service-fee.service.ts:104,135-142`; `create-intent/route.ts:227`) | ALREADY CORRECT | — | None | 3 | unit | `service-fee.test.ts` pins `netFee` | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
-| PAY-87 | MD §23.4 L1201; HTML PLAN_EDGE[4] | Standard asks at financing/contract → take upgrade, assign concierge that day | Upgrade possible at any time incl. after funding; no assignment (`plan/upgrade/route.ts`) | PARTIAL | — | Window predicate (PAY-58/59a) + settlement orchestration (PAY-62) | 3 | integration | `premium-settlement.test.ts` at `FINANCING_PENDING`/`CONTRACT_PENDING` | none | none | TO EXTEND |
+| PAY-87 | MD §23.4 L1201; HTML PLAN_EDGE[4] | Standard asks at financing/contract → take upgrade, assign concierge that day | Upgrade possible at any time incl. after funding; no assignment (`plan/upgrade/route.ts`) | PARTIAL | — | Window predicate (PAY-58/59a) + settlement orchestration (PAY-62). The financing checkpoint that makes the ask reachable is Phase 7 and the contract request is Phase 8; Phase 3 provides the upgrade primitive only (§11.6 ruling 7). | 7 | integration | `premium-settlement.test.ts` at `FINANCING_PENDING`/`CONTRACT_PENDING` | none | none | TO EXTEND |
 | PAY-88 | MD §23.4 L1202, §23.1 L1135; HTML PLAN_EDGE[3] | Second Vehicle Request → new $99, fresh election | `ALREADY_PAID` buyer-wide (`create-intent/route.ts:88-95`); `isFulfillmentUnlocked` buyer-wide (`fulfillment-gate.ts:34-38`); plan buyer-wide | BROKEN | — | Per-VR deposit (PAY-11b), per-VR gate (PAY-30), per-VR snapshot (PAY-56b); allowed only after prior VR reaches `DEAL_CREATED`/terminal (Phase 1 index) | 3 | integration, concurrency | `create-intent-duplicate-charge.test.ts`: second VR after completed Deal mints a new PI | Owner decision Q2 | `ALREADY_PAID`, `hasPaidDeposit`, journey `depositPaid` fact | TO EXTEND |
-| PAY-89 | MD §23.4 L1203; HTML PLAN_EDGE[5] | Deal cancelled after Premium → cancellation and refund separate; $400 manual review | `DEAL_CANCELLED` auto-refunds the $99, not the $400 (`admin/deals/[dealId]/action/route.ts:172-186`) | BROKEN | `cancelDeal` seam | PAY-51 split; cancel opens a `PLAN_EXCEPTION` review for the settled $400; Phase 10 orchestration consumes | 3 | integration, state-machine | `test:admin-deals`: cancel Premium deal → deposit PAID, review row, no refund | Owner decision Q4 | admin cancel actions | TO EXTEND |
+| PAY-89 | MD §23.4 L1203; HTML PLAN_EDGE[5] | Deal cancelled after Premium → cancellation and refund separate; $400 manual review | `DEAL_CANCELLED` auto-refunds the $99, not the $400 (`admin/deals/[dealId]/action/route.ts:172-186`) | BROKEN | `cancelDeal` seam | PAY-51 split; cancel opens a `PLAN_EXCEPTION` review for the settled $400. **Split by §11.6 ruling 6:** the money treatment lands here in Phase 3; the cancellation orchestration that consumes it is Phase 10 (control/C24-01…C24-12). | 3 | integration, state-machine | `test:admin-deals`: cancel Premium deal → deposit PAID, review row, no refund | Owner decision Q4 | admin cancel actions | TO EXTEND |
 | PAY-90 | MD §23.5 L1207; HTML PLAN_DOWN[4] | Every plan change appends a snapshot; settled history never rewritten | `AuditLog`/`AdminAuditLog` from/to; `Buyer.plan` overwritten; `planUpgradedAt` nulled (`plan/upgrade/route.ts:47-66`; `admin/buyers/[buyerId]/plan/route.ts:46,53-66`) | PARTIAL | Audit rows | All plan writers append to `plan_snapshots`; `Buyer.plan` becomes derived default; stop nulling history | 3 | unit | `plan-snapshot.test.ts`: append-only, no update/delete path | none | none | TO EXTEND |
 | PAY-91 | MD §23.5 L1207; HTML PLAN_DOWN[4] | Fee reconciliation from the ledger, never the plan flag | `ServiceFeePayment` written on fee success (`service-fee.service.ts:19-44`; `stripe/route.ts:517`); readers filter by `buyer.plan`: `lib/services/analytics/admin-analytics.service.ts:330-333` (drops Premium buyers' $99), `lib/services/admin/admin-payments.service.ts:54-56` | BROKEN | Idempotent single writer on `dealId` | Readers compute from `ServiceFeePayment` + `Deposit` ledgers; add `ServiceFeePayment→Deal` relation; resolve `recordFeePayment` callers (dead per comment, `service-fee.service.ts:167-185`) | 3 | unit | `test:analytics` + `test:admin-payments` ledger-derived totals; `lib/services/affiliate/__tests__/commission-ledger-totals.test.ts` pattern | none | `recordFeePayment` | TO EXTEND |
 | PAY-92 | MD §23.5 L1209 | Every paid request has a named owner | `assignedAdminId` optional, manual | PARTIAL | — | PAY-62 + PAY-78 | 3 | unit | Ownership predicate test | Owner: pool semantics (PAY-78) | none | TO EXTEND |
 | PAY-93 | MD §5d L473; HTML S[4].tables | `payment_provider_events`, `idempotency_keys` used | `PaymentProviderEvent` unique `eventId` + `processed` (`prisma/schema.prisma:856-866`); `lib/jobs/idempotency.ts:34-121`; `WebhookEvent` model (`:2777`) unused by Stripe path (UNVERIFIED) | ALREADY CORRECT | Claim inside tx (deposit); claim-at-end (fee/refund) | Phase 1 brings `idempotency_keys` under the Prisma chain at the production definition (§13-D24); no behaviour change | 1 | integration | `pnpm test:migrations`; `stripe-idempotency.test.ts` | Production deploy of Phase 1 wave | none | ALREADY PRESENT (VERIFY IN PHASE) |
-| PAY-94 | MD §6.5 L307, §22.1 L1044 | Commission settles at Deal completion; reverses on cancel / $99 refund / chargeback | Created at fee `payment_intent.succeeded` (`stripe/route.ts:561-591`); auto-APPROVED ≥7d by cron; reversed on fee refund only (`commission.service.ts:18-100,110-161,254-271,290-418`) | PARTIAL | ≤3 levels; idempotent on `qualifyingEventId`; PAID never auto-reversed; approval cron fails closed; DLQ replay | Creation/settlement trigger moves to Deal `COMPLETED`; reversal on deal cancel and deposit refund/dispute | 3 | unit, integration | `lib/services/affiliate/__tests__/settle-commission.test.ts`, `commission-approval-safety.test.ts` extended; webhook case removed | Owner of §6.5 area confirms timing change | fee webhook; `affiliates` cron; DLQ replay `operations.service.ts:98-99` | TO EXTEND |
+| PAY-94 | MD §6.5 L307, §22.1 L1044 | Commission settles at Deal completion; reverses on cancel / $99 refund / chargeback | Created at fee `payment_intent.succeeded` (`stripe/route.ts:561-591`); auto-APPROVED ≥7d by cron; reversed on fee refund only (`commission.service.ts:18-100,110-161,254-271,290-418`) | PARTIAL | ≤3 levels; idempotent on `qualifyingEventId`; PAID never auto-reversed; approval cron fails closed; DLQ replay | Creation/settlement trigger moves to Deal `COMPLETED` (Phase 9); the reversal hook on deal cancel and deposit refund/dispute is read by the Phase 10 cancellation orchestration. Phase 3 provides only the ledger shape (§11.6 ruling 4–5). | 9 | unit, integration | `lib/services/affiliate/__tests__/settle-commission.test.ts`, `commission-approval-safety.test.ts` extended; webhook case removed | Owner of §6.5 area confirms timing change | fee webhook; `affiliates` cron; DLQ replay `operations.service.ts:98-99` | TO EXTEND |
 | PAY-A | MD §23.1 L1131; HTML PLAN_MODEL[1] | Premium entitlements (named concierge, priority coordination, financing/insurance/contract/pickup support) delivered | `buyer.plan === "PREMIUM"` only changes copy/badges and gates the fee stage (`AdminDealTabs.tsx:190`; `billing/page.tsx:82-92`; `PlanUpgradeCard.tsx`; `deal/payment/page.tsx:38`); no service-delivery code path found | UNVERIFIED | — | Entitlement predicates read settled `plan_snapshots`/`ServiceFeePayment.paidAt`; concierge assignment (PAY-62) is the delivery hook; service delivery itself is an Ops process | 3 | unit | `plan-snapshot.test.ts` entitlement predicate; Ops runbook entry | Owner: concierge roster + delivery expectations | none | UNVERIFIED — no code delivers Premium services; only the entitlement predicate is buildable |
 | PAY-B | MD §22.1 L1042; HTML MONEY_PANELS[0][3] | Issuing a refund does not erase the transaction record | No refund path deletes Deal/Deposit/Auction; `REFUND_TRIGGERED` sets `REFUNDED` + audit (`admin/deals/[dealId]/action/route.ts:238`; `deal.service.ts:66-68`) | ALREADY CORRECT | Append-only records | None; keep after PAY-48/51 changes | 3 | integration | `test:admin-deals`: refund leaves rows intact | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | PAY-C | MD §5c L465 | Reminder carries a secure checkout link | CTA is the plain authenticated `/buyer/deposit` (`lifecycle-touch-drain.service.ts:50-53,155-247`); `issueResumeToken` rail used only by `form_submitted` chain | PARTIAL | Existing resume-token rail | Deposit series CTA uses a signed, expiring, VR-scoped resume link from the same rail | 3 | unit | `deposit-series-outbox.test.ts`: link carries token, expires | none | none | TO EXTEND |
@@ -1960,7 +2151,7 @@ Schema note — the §8.2 Phase 1 wave already lists the `offers` expansion (`au
 | A6a | MD §8a L566; HTML S[7].rec | Discounts and incentives with eligibility conditions (schema) | No field on `Offer` or legacy JSON (`lib/services/offer` grep `incentive\|discount\|rebate` → none) | MISSING | none | Add `offers.incentive_items jsonb` `{name, amountCents, conditions}` (Phase 1 wave) | 1 | integration | Migration + column assertion | production migration (§13-D13) | none | TO IMPLEMENT |
 | A6b | MD §8a L566 | Incentives itemised and included in arithmetic | `otd.ts:18-40` sums vehicle+tax+fees+junk only | MISSING | ±1¢ tolerance `otd.ts:9` | Extend `assertOtdComponentsMatch` to subtract incentives; zod schema; render on report | 6 | unit, visual | Extend `otd-truthfulness.test.ts`; report card screenshot | none | none | TO EXTEND |
 | A7a | MD §8a L567; HTML S[7].rec | Documentation fee as its own line (schema) | Aggregate `Offer.feesCents` only `prisma/schema.prisma:541` | PARTIAL | none | Add `offers.doc_fee_cents` (Phase 1 wave) | 1 | integration | Migration + column assertion | production migration (§13-D13) | none | TO IMPLEMENT |
-| A7b | MD §8a L567 | Doc fee captured, in arithmetic, excluded from junk detection | Dead validator flags "doc fee" as junk `lib/services/offer/offer-validation.service.ts:3` | PARTIAL | none | Require `docFeeCents`; include in OTD sum; exclude from `detectJunkFees` keyword set (`lib/services/offer/junk-fee.service.ts:28`) | 6 | unit | Extend `otd-truthfulness.test.ts` + `junk-fee` unit test asserting doc fee not junk | none | `offer-validation.service.ts` (delete, D4) | TO EXTEND |
+| A7b | MD §8a L567 | Doc fee captured, in arithmetic, excluded from junk detection | Dead validator flags "doc fee" as junk `lib/services/offer/offer-validation.service.ts:3` | PARTIAL | none | Require `docFeeCents`; include in OTD sum; exclude from `detectJunkFees` keyword set (`lib/services/offer/junk-fee.service.ts:4-8`) | 6 | unit | Extend `otd-truthfulness.test.ts` + `junk-fee` unit test asserting doc fee not junk | none | `offer-validation.service.ts` (delete, D4) | TO EXTEND |
 | A8 | MD §8a L568, L589; HTML S[7].rec | Dealer-provided taxes recorded, not computed | `Offer.taxCents` `prisma/schema.prisma:540`; no tax calc on any offer path | ALREADY CORRECT | Never computed by AutoLenis | none | 6 | unit | Existing `otd-truthfulness.test.ts`; grep guard in Phase 6 review | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | A9a | MD §8a L569; HTML S[7].rec | Title and registration charges (schema) | Folded into `feesCents` | MISSING | none | Add `offers.title_registration_cents` (Phase 1 wave) | 1 | integration | Migration + column assertion | production migration (§13-D13) | none | TO IMPLEMENT |
 | A9b | MD §8a L569 | Title/registration line required and reconciled | none | MISSING | none | Require in zod; include in `assertOtdComponentsMatch`; render on card | 6 | unit, visual | Extend `otd-truthfulness.test.ts`; card screenshot | none | none | TO EXTEND |
@@ -2041,7 +2232,7 @@ Schema note — the §8.2 Phase 1 wave already lists the `offers` expansion (`au
 | D1 | Map Duplicates #1 | Offer stores: `Offer` vs `DealerOfferSubmission` (+`VehicleOffer`, `BuyerOfferReview[Item]`, `VehicleOfferDealerInvite`) vs `VehicleRequestOffer` | see A19, L1–L4 | DUPLICATED | none | One canonical `offers` writer; legacy kept as intake/history | 6 | integration | Grep guard: `offer.create` only in `offer.service.ts` | none | as L1–L4 | TO CONSOLIDATE |
 | D2 | Map Duplicates #2 | Deal creation: `commitOfferSelection` vs `POST /api/admin/deals` vs `buyer/requests/[requestId]/offer/respond` | `select-offer.service.ts:53`; `app/api/admin/deals/route.ts:50`; `respond/route.ts:81` | DUPLICATED | Locked path | Single locked creation path (S6, L4a, S13) | 6 | integration | Grep guard: one `deal.create` | none | `app/api/admin/deals/route.ts`; `respond/route.ts` | TO CONSOLIDATE |
 | D3 | Map Duplicates #3 | Ranking: engine vs buyer route math vs `dealer-award.ts:111` vs insights `myRank` `insights/route.ts:44-46` | as C9/C10 | DUPLICATED | Engine weights persisted | All orderings consume `rankOffers` output or the close log (C8–C10) | 6 | unit | `best-price-ties.test.ts`; dealer-award position test | none | `app/api/dealer/auctions/[auctionId]/insights/route.ts:44-46` | TO CONSOLIDATE |
-| D4 | Map Duplicates #4 | Junk-fee keyword lists: `junk-fee.service.ts:28` (built-in ∪ DB) vs dead `offer-validation.service.ts:3` | as B7 | DUPLICATED | DB-extensible `JunkFeePattern` | Delete `lib/services/offer/offer-validation.service.ts`; single list | 6 | unit | File absent; `pnpm test:coverage-check` green | none | `offer-validation.service.ts` | TO CONSOLIDATE |
+| D4 | Map Duplicates #4 | Junk-fee keyword lists: `junk-fee.service.ts:4-8` (built-in ∪ DB) vs dead `offer-validation.service.ts:3` | as B7 | DUPLICATED | DB-extensible `JunkFeePattern` | Delete `lib/services/offer/offer-validation.service.ts`; single list | 6 | unit | File absent; `pnpm test:coverage-check` green | none | `offer-validation.service.ts` | TO CONSOLIDATE |
 | D5 | Map Duplicates #5 | APR threshold `29.0` defined twice (`offer.service.ts:20`, `offer-validation.service.ts:2`) | as B8 | DUPLICATED | none | One exported constant in `lib/constants.ts` | 6 | unit | Unit test imports the constant | none | `offer-validation.service.ts` | TO CONSOLIDATE |
 | D6 | Map Duplicates #6 | Four `Offer` insert sites: `offer.service.ts:108,289`; `app/api/admin/offers/route.ts:129,167`; `outside-dealer-offer/[token]/route.ts:99`; `concierge-conversion.service.ts:246` | as E1, L3, L5 | DUPLICATED | Serializable txn in `submitOffer` | Every site calls `submitOffer` (internal variant for conversion keeps the pre-stamp) | 6 | integration | Grep guard test on `prisma.offer.create` | none | `app/api/admin/offers/route.ts`, `outside-dealer-offer/[token]`, `concierge-conversion.service.ts` | TO CONSOLIDATE |
 | D7 | Map Duplicates #7 | Request-status stores: `VehicleRequest.status` enum vs `VehicleOffer.requestStatus` string vs notification metadata (`admin/vehicle-requests/[id]/status/route.ts:36-54`) | as L1 | DUPLICATED | none | `VehicleRequest.status` is the only store; legacy writers counted then removed | 6 | integration | `LEGACY_PATH_WRITE` counter; status route test | none | `send-to-buyer/route.ts:130`; `admin/vehicle-requests/[id]/status/route.ts` | TO CONSOLIDATE |
@@ -2158,8 +2349,8 @@ Schema note — the §8.2 Phase 1 wave already lists `DealStatus + DEALER_CONFIR
 | C10 | MD §11 L735 Fail; L1511 | Disputed figure → dealership correction → new version; repeated failure → Ops, Deal frozen at recap | Only `cancelDeal` exits (`deal.service.ts:377-402`) | MISSING | none | `POST …/recap/dispute` (buyer) storing `dispute_reason`, dealer correction creates v(n+1); after N versions raise `queue_items` `DEAL_EXCEPTION` and remain at `RECAP_PENDING` (`frozen_at`/`frozen_reason`) | 7 | unit, integration | `deal-recap.test.ts`: dispute → new version; Nth dispute → one queue item, status unchanged | owner decision: N (policy value) | none | TO IMPLEMENT |
 | D1 | MD §12 L739; HTML S[11] L628-637 | All financing happens outside AutoLenis — refer, coordinate, follow up, verify only | In-house engine (A2, dormant); buyer path picker (`app/buyer/deal/financing/page.tsx:14-18`); 24h buyer nudge (`nudge.service.ts:71-79`); external evidence review (D8) | BROKEN | 24h buyer nudge; external evidence review | Retire engine (A2/A4b); keep path selection; Ops follow-up via `queue_items` `FINANCING_EXCEPTION` | 7 | integration | Freeze test allowlist zero; queue writer test for the financing follow-up item | none | see A2 | TO IMPLEMENT |
 | D2a | MD §12a L743-747; FIN_CP L854-857 | Checkpoint 1: terms locked before contract request | One stage exited on path selection; `deal.service.ts:15-34` ladder | MISSING | `advanceOnInsuranceSatisfied` narrow-driver pattern (`deal.service.ts:309-338`) | Guard: leaving `FINANCING_PENDING` requires `Financing.status ∈ {TERMS_LOCKED, NOT_REQUIRED_CASH}` (typed `FinancingRequiredError`); `force` audited; **corrected:** `deal-state-machine.test.ts` has zero financing assertions today | 7 | unit, state-machine | `deal-state-machine.test.ts` failing-first: `FINANCING_PENDING → FEE_PENDING` refused at `IN_PROGRESS`, allowed at `TERMS_LOCKED`/`NOT_REQUIRED_CASH` | none | `financing/route.ts:88`, `deal/financing/route.ts:23`, admin `journey/complete*`, `admin/deals/[dealId]/action/route.ts:59-85` | TO IMPLEMENT |
-| D2b | MD §12a L743-747; FIN_CP | Checkpoint 2: financing completed after signing, before release | `COMPLETED` gate = insurance only (`deal.service.ts:134-138`) | MISSING | Insurance hard-gate pattern | Guard on `FUNDING_PENDING → PICKUP_READINESS` (and `→ COMPLETED`) requiring `Financing.status ∈ {COMPLETED, NOT_REQUIRED_CASH}` + `funding_cleared_at`; admin `complete` route records against evidence | 8 | state-machine | `deal-state-machine.test.ts`: release refused at `TERMS_LOCKED`; Phase 9 readiness item re-reads the same fact | none | `app/api/dealer/pickup/scan/route.ts:131`; admin complete action | TO IMPLEMENT |
-| D3 | MD §12a L749 | Owner's rule: never `COMPLETED` unless financing `COMPLETED`/`NOT_REQUIRED_CASH` and funding cleared | `deal.service.ts:29` `PICKUP_SCHEDULED → COMPLETED` direct; `:134-138` insurance only; dealer scan completes (`pickup/scan/route.ts:131`) | MISSING | `InsuranceRequiredError` pattern | `FinancingRequiredError` + `FundingRequiredError` checked inside the seam for every edge into `COMPLETED`, including `force` (audited) | 8 | state-machine, concurrency | `deal-state-machine.test.ts`; Phase 9 atomic-completion concurrency test asserts the guard under a race | none | dealer scan + admin complete routes now surface a typed error | TO IMPLEMENT |
+| D2b | MD §12a L743-747; FIN_CP | Checkpoint 2: financing completed after signing, before release | `COMPLETED` gate = insurance only (`deal.service.ts:134-138`) | MISSING | Insurance hard-gate pattern | Guard on `FUNDING_PENDING → PICKUP_READINESS` (and `→ COMPLETED`) requiring `Financing.status ∈ {COMPLETED, NOT_REQUIRED_CASH}` + `funding_cleared_at`; admin `complete` route records against evidence | 8 | state-machine | `deal-state-machine.test.ts`: release refused at `TERMS_LOCKED`; Phase 9 readiness item re-reads the same fact | none | `app/api/dealer/pickup/scan/route.ts:90`; admin complete action | TO IMPLEMENT |
+| D3 | MD §12a L749 | Owner's rule: never `COMPLETED` unless financing `COMPLETED`/`NOT_REQUIRED_CASH` and funding cleared | `deal.service.ts:29` `PICKUP_SCHEDULED → COMPLETED` direct; `:134-138` insurance only; dealer scan completes (`pickup/scan/route.ts:90`) | MISSING | `InsuranceRequiredError` pattern | `FinancingRequiredError` + `FundingRequiredError` checked inside the seam for every edge into `COMPLETED`, including `force` (audited) | 8 | state-machine, concurrency | `deal-state-machine.test.ts`; Phase 9 atomic-completion concurrency test asserts the guard under a race | none | dealer scan + admin complete routes now surface a typed error | TO IMPLEMENT |
 | D4a | MD §12b L753 (BUILT — EXTEND) | `FinancingStatus` gains `NOT_STARTED, IN_PROGRESS, TERMS_LOCKED, COMPLETED, FAILED, EXPIRED, NOT_REQUIRED_CASH` | Enum `PENDING, SELECTED, APPROVED, DECLINED` (`schema.prisma:1711-1716`; default `:2070`) | MISSING | none | Additive `ALTER TYPE … ADD VALUE` ×7 in the Phase 1 wave; default → `NOT_STARTED`; legacy values kept (cannot drop) | 1 | integration | CI migration job: 11 values present; `pnpm db:check-drift` count does not rise | production migration deploy (§13-D1); legacy values stay (§13-D18) | none | TO IMPLEMENT |
 | D4b | MD §12b L753 | Code writes only the new vocabulary; legacy rows mapped or left | Writers `financing/route.ts:73,81`, `financing-orchestrator.service.ts:112,120`, `scripts/seed-sandbox-deal.ts:234`; readers `FinancingPreApprovalClient.tsx:64-73`, `app/dealer/financing/page.tsx:12-18`, `admin-buyer-command-center.service.ts:528` | MISSING | none | Single writer (`financing-checkpoint.service.ts`) refusing `PENDING/SELECTED/APPROVED/DECLINED`; seed updated; backfill only if owner confirms `SELECTED→IN_PROGRESS`, `APPROVED→TERMS_LOCKED` | 7 | unit | `financing-checkpoint.test.ts`: legacy value write → refused; seed script typechecks | owner decision: backfill semantics (open Q1/Q2, §13-D18) | `scripts/seed-sandbox-deal.ts:222-236` | TO IMPLEMENT |
 | D5 | MD §12b L753 | Path remains `DEALER`, `EXTERNAL`, `CASH` | `FinancingPath` enum (`schema.prisma:1844-1848`); `Deal.financingPath String?` (`:580`); both buyer routes validate the three strings | ALREADY CORRECT | Server-side path validation on both buyer routes | None required; optional typing of `Deal.financingPath` as the enum is O-2 | 7 | unit | `financing-checkpoint.test.ts` rejects a fourth path | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
@@ -2264,7 +2455,7 @@ Schema note — the §8.2 Phase 1 wave already lists `DealStatus + DEALER_CONFIR
 
 ### 10.9 Stages 13–15: contract, Contract Shield, signatures, execution, funding clearance, insurance — 79 rows
 
-Status counts: ALREADY CORRECT 11, PARTIAL 17, BROKEN 10, MISSING 32, DUPLICATED 5, UNVERIFIED 4 · Phase counts: P1 11, P3 1, P8 65, P11 2
+Status counts: ALREADY CORRECT 8, PARTIAL 18, BROKEN 11, MISSING 33, DUPLICATED 5, UNVERIFIED 4 · Phase counts: P1 11, P3 1, P8 65, P11 2
 
 # Parity table — area `contract` (Stages 13–15: contract request, Contract Shield, e-sign, dealer execution, financing completion / funding clearance, insurance)
 
@@ -2349,8 +2540,8 @@ Sources: `parity/contract.md` (rows C-01…C-59, D-1…D-5, incl. "Verification 
 | D-5 | MD §Stage 15 L870 | Single insurance-satisfied definition | `deal.service.ts:41-45` (authoritative); `AdminBuyerCommandCenter.tsx:857`; `app/buyer/insurance/page.tsx:74`; `backfill_insurance_gate.sql:44,51,64,87,93`; `prisma/backfill-insurance-gate.ts` | DUPLICATED | authoritative set in `deal.service` — keep | Export one `INSURANCE_SATISFIED` from `lib/domain`; UI imports it; retire backfill scripts | 8 | unit | `lib/domain/__tests__` set test; grep guard for literal restatement | legacy removal (backfill scripts) | backfill scripts | TO CONSOLIDATE |
 | U-1 | MD §14c L809 | Buckets `contracts` / `legal-documents` exist and are private | `wave1_private_buckets.sql:25,28` lists `dealer-contracts`, `insurance-proofs` only; `contracts` referenced by `20260919000005…:5` comment; no code creates it | UNVERIFIED | none | Owner verifies buckets in Supabase before flag activation; add to Phase 8 preflight | 8 | n/a | `storage.buckets` read (preview + production) recorded in phase report | owner verification (Supabase storage) | none | UNVERIFIED — no storage access in session |
 | U-2 | MD §14c L809 | `ESIGN_EXECUTED_ARTIFACT_ENABLED` state per environment | `.env.example:142` blank; `esign-schema-gate.ts:37-47` strict `"true"` | UNVERIFIED | strict-string gate, default off — keep | Owner sets flag in preview for Phase 8 verification; production activation is an owner decision | 11 | n/a | env inventory line in `ACCEPTANCE-REPORT.md` | `ESIGN_EXECUTED_ARTIFACT_ENABLED` activation (§13-D4) | none | UNVERIFIED — env not readable in session |
-| U-3 | MD §14b L794 | Production `ContractScanRule` rows of unevaluated types | Scanner silently ignores APR_VALIDATION / PAYMENT_PACKING / DISCLOSURE_CHECK / FINANCE_MARKUP rows (`contract-shield.service.ts:145,162`) | UNVERIFIED | none | Read-only query before C-08 lands; existing rows go live once branches exist — review thresholds first | 8 | n/a | `contract_scan_rules` count by `rule_type` recorded in phase report | owner read-only DB query | none | UNVERIFIED — no DB access in session |
-| U-4 | MD §14b L796, §14c L808 | Hourly contract-shield and esign crons actually run | `vercel.json:64-65,144-145` schedules; `CronJobLog` not inspected | UNVERIFIED | `withCronRun` monitoring — keep | Inspect `cron_job_logs` for both crons during acceptance | 11 | n/a | `cron_job_logs` rows in last 24h cited in `ACCEPTANCE-REPORT.md` | owner read-only DB query | none | UNVERIFIED — no DB access in session |
+| U-3 | MD §14b L794 | Production `ContractScanRule` rows of unevaluated types | Scanner silently ignores APR_VALIDATION / PAYMENT_PACKING / DISCLOSURE_CHECK / FINANCE_MARKUP rows (`contract-shield.service.ts:145,162`) | UNVERIFIED | none | Read-only query before C-08 lands; existing rows go live once branches exist — review thresholds first | 8 | n/a | `contract_scan_rules` count by `rule_type` recorded in phase report | owner read-only DB query | none | UNVERIFIED — the evidence is a run-time fact (cron rows in the last 24 h, live rule rows), not a schema read; read-only production SQL WAS available all session (WORKFLOW 4/5), so the reason is timing, not access. Owner-run at Phase 11 |
+| U-4 | MD §14b L796, §14c L808 | Hourly contract-shield and esign crons actually run | `vercel.json:64-65,144-145` schedules; `CronJobLog` not inspected | UNVERIFIED | `withCronRun` monitoring — keep | Inspect `cron_job_logs` for both crons during acceptance | 11 | n/a | `cron_job_logs` rows in last 24h cited in `ACCEPTANCE-REPORT.md` | owner read-only DB query | none | UNVERIFIED — the evidence is a run-time fact (cron rows in the last 24 h, live rule rows), not a schema read; read-only production SQL WAS available all session (WORKFLOW 4/5), so the reason is timing, not access. Owner-run at Phase 11 |
 
 ## Owner-gated items
 
@@ -2559,7 +2750,7 @@ Schema note — the §8.2 Phase 1 wave lists `pickups.{readiness_confirmed_at,to
 
 ### 10.11 Control planes: §24 cancellation, §26 exceptions, §27 communications, §28.3, §29 safeguards — 266 rows
 
-Status counts: ALREADY CORRECT 22, PARTIAL 114, BROKEN 27, MISSING 70, DUPLICATED 25, UNVERIFIED 8 · Phase counts: P1 9, P2 45, P3 33, P4 7, P5 22, P6 33, P7 26, P8 37, P9 26, P10 28
+Status counts: ALREADY CORRECT 22, PARTIAL 114, BROKEN 27, MISSING 70, DUPLICATED 25, UNVERIFIED 8 · Phase counts: P1 9, P2 46, P3 32, P4 7, P5 22, P6 33, P7 26, P8 38, P9 26, P10 27
 
 # Control planes — FINAL parity table (§24 cancellation · §26 exception register · §27 communications · §28.3 transition controls · §29 safeguards)
 
@@ -2878,7 +3069,7 @@ Nineteen requirements the completeness critic found uncovered. Same 13 columns a
 | W30-11 | MD §30 row 14 (L1480); HTML `S[14]` | Stage 15 responsibility split: buyer provides proof; staff verify; system tracks status and expiry | Partly present and mis-attributed. Staff verification exists (`app/api/admin/insurance-requests/respond/route.ts`), and the release gate reads `INSURANCE_SATISFIED` (`app/api/dealer/pickup/scan/route.ts:73-81`), but `Deal.insuranceStatus` has direct writers outside the verification path and `EXTERNAL_UPLOADED` currently counts as satisfied without a staff verification step (rows E26-31, T28-10c). The staff duty is bolded in §30 row 14 precisely because it is the gate, yet a buyer upload can satisfy it unverified. Expiry tracking does not exist (`rg insuranceExpiresAt` → none). The derived `INSURANCE_EXCEPTION` queue fires on a 72h-old `INSURANCE_PENDING` deal with no owner (`admin-queue.service.ts:13-18`) | BROKEN | The insurance hard gate at release, re-checked inside the seam (`scan/route.ts:73-81,95-101`) — keep and strengthen; never widen `INSURANCE_SATISFIED` to reach green | Extend the registry with Stage 15: `owner_role=Buyer` until proof is uploaded, `Ops` from upload to verification, `System` for expiry tracking. `EXTERNAL_UPLOADED` stops satisfying the gate on its own; verification is the single writer of the satisfied state and records the verifying actor; expiry before release raises a Buyer-owned row | 8 | unit, integration, state-machine | `stage-responsibility.test.ts` Stage 15 case; insurance test asserts an unverified external upload does not satisfy release and that verification stores the Ops actor | none | `Deal.insuranceStatus` direct writers; `EXTERNAL_UPLOADED` counted as satisfied | TO IMPLEMENT |
 | W30-12 | MD §30 rows 15–18 (L1481-1484); HTML `S[15..20]` | Stages 16–21 responsibility split: staff schedule after two counters, resolve handover blocks and delivery discrepancies, and escalate overdue post-completion obligations | Only the two-counter rule exists: `lib/services/pickup/pickup-coordination.service.ts:70,88,204,212` tracks `counterCount` and the `DEALER_COUNTERED` state, and `app/dealer/pickups/page.tsx:71,109-115` groups "waiting on the buyer" — the one place in the platform that names a responsible party, and it is a hardcoded page-local filter. Nothing schedules after the second counter, no handover-block object exists, no delivery-discrepancy object exists, and no post-completion obligation record exists (`rg post_completion` → 0), so the last three staff duties have nothing to own. The derived `PICKUP_EXCEPTION` queue fires after 7 days with no owner (`admin-queue.service.ts:26-31`) | PARTIAL | Strict turn-taking, proposal-time compare-and-swap and the two-counter cap in pickup negotiation (§29; `pickup-coordination.service.ts`); round-specific idempotency keys on pickup emails — keep intact | Extend the registry with Stages 16–21: `owner_role` alternates Buyer and Dealership through scheduling per the turn-taking state, becomes `Ops` on the second counter (Ops schedules), on any handover block, on a delivery discrepancy, and on an overdue post-completion obligation. Each raises one `queue_items` row with owner, deadline and recovery; the `dealer/pickups` page-local "waiting on" filter is replaced by the registry so all three portals agree | 9 | unit, integration, state-machine, playwright | `stage-responsibility.test.ts` Stages 16–21 cases; pickup test asserts the second counter transfers ownership to Ops and raises one row; Playwright shows the same owner and deadline in buyer, dealer and Ops surfaces | none | page-local "waiting on the buyer" derivation in `app/dealer/pickups/page.tsx`; derived `PICKUP_EXCEPTION` queue | TO IMPLEMENT |
 | G35-01 | MD §35 L1586 | "This document authorizes no parallel website, no replacement architecture, and no unrelated code changes" — the governing scope constraint needs a row, a gate and an acceptance check | No gate exists. Every CI job is scoped to the app root (`.github/workflows/ci.yml:16,100,214,317` all set `working-directory: frontend`), so a second HTTP surface is invisible to it — and one exists: `backend/server.py:1-97` is a FastAPI proxy that forwards `/api/*` from port 8001 to Next.js, plus unrun root Python suites `tests/test_autolenis.py`, `tests/test_autolenis_v2.py`, `tests/test_autolenis_v3.py` and an `automation/` tree. The verification hook counts changed `frontend/` files only (`.claude/hooks/verification/`, CLAUDE.md L220-226), and `pnpm test:coverage-check` guards unreachable tests, not out-of-scope code. Nothing in IMPLEMENTATION-WORKFLOW §8 or §12 fails a phase for a change outside its scope | MISSING | The `test:coverage-check` reachability guard and the per-phase "no future-phase absorption" close step — reuse their shape rather than inventing a new mechanism | Phase 1 enforcement object: `lib/__tests__/scope-guard.test.ts` plus a CI step run **outside** `working-directory: frontend`, asserting exactly one Next.js app root and one API surface, listing `backend/`, `automation/` and root `tests/` as frozen legacy that may gain no new files, and failing when a phase diff touches a path outside that phase's §8.2 scope list; add the matching gate line to §12 and an `ACCEPTANCE-REPORT.md` check line "no parallel website, no replacement architecture, no unrelated change" | 1 | unit, integration | Guard fails on an added second `next.config.*`, a new `backend/` route or a new root test file; CI step runs at the repository root; the acceptance-report line exists and is checked in Phase 11 | retirement of `backend/server.py` (an Emergent preview-ingress dependency) — freeze now, remove only on an owner decision | `backend/server.py` FastAPI proxy; root `tests/test_autolenis*.py`; `automation/` | TO IMPLEMENT |
-| P23-01 | HTML `S[4].buyer[2]` `AutoLenis-Transaction-Flow.html:539` (cited L644); MD §23.2 L1139-1148; IMPLEMENTATION-WORKFLOW §2 D6 (L87) | The HTML Stage 5 statement "Optionally add the $400 Premium balance now, or any time before accepting an offer" must be reconciled with §23.2 (the window closes at funding clearance) and implemented as a window with a real open and close | The divergence is already adjudicated in the workflow (`IMPLEMENTATION-WORKFLOW.md:87` D6 — Markdown governs, the HTML line is presentational shorthand and the Stage 5 screen must state the Markdown rule), but no window exists in code at all. `app/api/buyer/plan/upgrade/route.ts:11-17,31-38` flips `Buyer.plan` to PREMIUM free of charge, with no $99-settled precondition, no close condition, no per-request scoping (plan lives on `Buyer`, `prisma/schema.prisma:47`) and no $400 charge; `components/buyer/PlanUpgradeCard.tsx:19-42` offers the upgrade unconditionally; the $400 is modelled only at fee collection (`lib/services/deal/service-fee.service.ts:19-43`, `lib/constants.ts:7-8`); no plan-snapshot table exists; funding clearance does not exist (row E26-43b) so the close condition has nothing to fire on | BROKEN | Race-safe `updateMany` plan flip with the `plan != PREMIUM` guard, the rate limit, and the audit plus activity rows (`upgrade/route.ts:31-38,45-79`); the recorded owner decision comment at `:11-17` — keep the CAS, the audit trail and the decision record | Make the window explicit and Markdown-governed: it opens when the $99 settles and closes at funding clearance, never at offer acceptance; the Stage 5 buyer copy states the funding-clearance rule (correcting the HTML shorthand per D6); the election becomes request-scoped with an appended plan snapshot carrying the converting touchpoint; prompts are suppressed during an open exception, a dispute, a chargeback, a do-not-contact flag or a cancellation in progress (§23.2b); an upgrade after clearance requires an audited administrator approval | 3 | unit, integration, state-machine | Extend `app/api/buyer/plan/__tests__/upgrade.test.ts`: upgrade before the $99 settles → refused; after funding clearance → refused except on an audited admin approval; Stage 5 copy assertion reads "before funding clears"; one plan snapshot appended per change | charging the $400 balance — the free upgrade is a recorded owner decision (`upgrade/route.ts:11-17`); money-path activation | free no-charge self-service upgrade; `Buyer.plan` as the single per-buyer plan flag | TO IMPLEMENT |
+| P23-01 | HTML `S[4].buyer[2]` `AutoLenis-Transaction-Flow.html:539` (cited L644); MD §23.2 L1139-1148; IMPLEMENTATION-WORKFLOW §2 D6 (L87) | The HTML Stage 5 statement "Optionally add the $400 Premium balance now, or any time before accepting an offer" must be reconciled with §23.2 (the window closes at funding clearance) and implemented as a window with a real open and close | The divergence is already adjudicated in the workflow (`IMPLEMENTATION-WORKFLOW.md:87` D6 — Markdown governs, the HTML line is presentational shorthand and the Stage 5 screen must state the Markdown rule), but no window exists in code at all. `app/api/buyer/plan/upgrade/route.ts:11-17,31-38` flips `Buyer.plan` to PREMIUM free of charge, with no $99-settled precondition, no close condition, no per-request scoping (plan lives on `Buyer`, `prisma/schema.prisma:47`) and no $400 charge; `components/buyer/PlanUpgradeCard.tsx:19-42` offers the upgrade unconditionally; the $400 is modelled only at fee collection (`lib/services/deal/service-fee.service.ts:19-43`, `lib/constants.ts:7-8`); no plan-snapshot table exists; funding clearance does not exist (row E26-43b) so the close condition has nothing to fire on | BROKEN | Race-safe `updateMany` plan flip with the `plan != PREMIUM` guard, the rate limit, and the audit plus activity rows (`upgrade/route.ts:31-38,45-79`); the recorded owner decision comment at `:11-17` — keep the CAS, the audit trail and the decision record | Make the window explicit and Markdown-governed: it opens when the $99 settles (Phase 3) and CLOSES at funding clearance, which does not exist until Phase 8 — the close predicate lands there, never at offer acceptance; the Stage 5 buyer copy states the funding-clearance rule (§2 D6, §11.6 ruling 11). | 8 | unit, integration, state-machine | Extend `app/api/buyer/plan/__tests__/upgrade.test.ts`: upgrade before the $99 settles → refused; after funding clearance → refused except on an audited admin approval; Stage 5 copy assertion reads "before funding clears"; one plan snapshot appended per change | charging the $400 balance — the free upgrade is a recorded owner decision (`upgrade/route.ts:11-17`); money-path activation | free no-charge self-service upgrade; `Buyer.plan` as the single per-buyer plan flag | TO IMPLEMENT |
 
 ## Gap-fill rows (round 2)
 
@@ -2886,12 +3077,12 @@ Two requirements the round-2 completeness critic found uncovered. Same 13 column
 
 | Ref | Document & section | Requirement | Current route / service / model / component / email / cron / queue / admin action | Status | Stronger safeguard to preserve | Exact required change | Phase | Test level | Acceptance evidence | Owner-gated dependency | Legacy path affected | Final disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| L3-01 | MD §3 L139 ("One lineage, never broken"); no §26 register row covers it (checked L1235-1260) | The orphan rule for the five non-payment record classes: an **auction, offer, deal, contract or pickup** that cannot resolve its parent by stored reference is an orphan — it raises an Operations exception and is **never silently re-parented or duplicated into a parallel transaction**. (The payment half is already covered by E26-09 / jobs C6.) | **No exception half exists at all**: `rg raiseException\|prisma.queueItem\|queueItem.create` over `lib/**` + `app/**` → 0 hits; no `queue_items` model (E26-00a); `QueueItemType` `prisma/schema.prisma:1898-1907` holds 8 values, none for a lineage class, and the additive list at `IMPLEMENTATION-WORKFLOW.md:538-545` adds per-domain codes but no orphan type. **Per class:** *auction* — `Auction.vehicleRequestId` is nullable with `onDelete: SetNull` (`schema.prisma:443,451,456`), so deleting the parent request silently orphans the auction; `deposit-activation.service.ts:207` creates an auction with no `vehicleRequestId` at all; `resolveOwnedVehicleRequestId` (`lib/services/auction/auction.service.ts:34-43`) returns `null` for a mistyped or hostile id and `app/api/admin/buyers/[buyerId]/launch-auction/route.ts:150` then creates the auction anyway, raising nothing. *offer* — `Offer.auctionId` FK `onDelete: Cascade` (`schema.prisma:565`): DB-protected, no runtime check. *deal* — `Deal.offerId` and `Deal.vehicleRequestOfferId` are both nullable (`schema.prisma:577-578,605-606`) with no constraint requiring exactly one, and no `vehicle_request_id`/`auction_id`/`deposit_id` columns exist (WORKFLOW R31 MISSING); a deal that resolves neither is **silently absorbed** at `lib/services/deal/dealer-award-dispatch.service.ts:73-84`, which stamps `dealerAwardDispatchedAt` terminal and counts it `skipped`; read surfaces degrade quietly (`app/buyer/insurance/page.tsx:68`, `app/buyer/pickup/page.tsx:37,60`). *contract* — `ContractScan.dealId` Cascade (`schema.prisma:633,640`), `ContractVersion.dealId` FK with default Restrict (`schema.prisma:2626-2627`): DB-protected, no runtime check. *pickup* — `Pickup.dealId` unique FK Cascade (`schema.prisma:828,850`): DB-protected, no runtime check | PARTIAL | The DB-level parent FKs that already make three of the five classes unorphanable (`Offer.auctionId` Cascade `schema.prisma:565`; `ContractScan.dealId` Cascade `:640`; `Pickup.dealId` unique Cascade `:828,850`); the uniqueness constraints that already forbid a parallel duplicate (`Deal.offerId` and `Deal.vehicleRequestOfferId` `@unique` `schema.prisma:577-578`, `Auction.depositId` `@unique` `:420`, `Offer.originalOfferId` `@unique` `:552`, `Pickup.dealId` `@unique` `:828`); the ownership-scoped resolve in `resolveOwnedVehicleRequestId` (`auction.service.ts:34-43`) which refuses to cross-link another buyer's request; the fail-loud no-deal-after-commit branch at `app/api/buyer/requests/[requestId]/offer/respond/route.ts:112-117` and its idempotent single-deal lookup at `:103-110`; `approveContractVersionByAdmin` hard-refusing a null scan→version link (`schema.prisma:645-652`) | Phase 1 wave (additive): `QueueItemType += LINEAGE_ORPHAN`; the R31 Deal lineage columns (`vehicle_request_id`, `auction_id`, `deposit_id`, `dealer_id`, `rooftop_id`, SetNull) plus a CHECK that a Deal names exactly one of `offer_id` / `vehicle_request_offer_id`. Phase 10 behaviour: extend the Phase-2 `lib/services/operations/queue-item.service.ts` with `assertParentResolves(recordClass, record)` — resolve the parent by stored reference only, and on failure `raiseException({ type: LINEAGE_ORPHAN, exception_code: AUCTION_ORPHAN / OFFER_ORPHAN / DEAL_ORPHAN / CONTRACT_ORPHAN / PICKUP_ORPHAN, owner_role: OPERATIONS, refs, buyer_visible_status, return_point })` and refuse the operation; call it at every create and every status-advance seam for the five classes (auction create + launch, offer submit, deal create, contract-version upload, pickup schedule) and at the read seams that today coalesce a missing parent to `null`; `launch-auction/route.ts:150` refuses instead of creating a parentless auction when a `vehicleRequestId` was supplied but did not resolve; `dealer-award-dispatch.service.ts:73-84` raises `DEAL_ORPHAN` instead of stamping the terminal marker; the negative half is enforced mechanically by a build-failing rule (same shape as the Phase-2 no-direct-send test) that no code path writes a substitute parent id onto an existing record or creates a second record for a lineage that already has one | 10 | unit, integration, state-machine | New `lib/services/operations/__tests__/lineage-orphan.test.ts`: for each of auction, offer, deal, contract, pickup an unresolvable parent yields exactly one `queue_items` row typed `LINEAGE_ORPHAN` owned by Operations, the stored parent reference is unchanged afterwards (never re-parented) and the lineage row count stays 1 (never duplicated); extend `lib/services/deal/__tests__/dealer-award-dispatch.test.ts` (reuse the existing `offer: null` fixture at `:103`) — failing first: the null-lineage deal raises and leaves `dealerAwardDispatchedAt` NULL rather than stamping it; extend `app/api/admin/buyers/[buyerId]/launch-auction/__tests__` — unresolvable `vehicleRequestId` → 4xx + exception, no auction row; CI migration job asserts the `LINEAGE_ORPHAN` enum value and the Deal one-parent CHECK | production migration deploy of the Phase 1 wave (§13-D1) for the enum value, the Deal lineage columns and the one-parent CHECK; **owner decision on historical rows** — the deposit-activation reconciler creates auctions with `vehicle_request_id` NULL by design (`deposit-activation.service.ts:207`, `auction.service.ts:15-19`), so whether a back-sweep raises one exception per pre-existing parentless auction (or they are back-filled/grandfathered) must be approved before the sweep runs | `dealer-award-dispatch.service.ts:73-84` silent terminal stamp; `Auction.vehicleRequestId onDelete: SetNull` (`schema.prisma:451`); the null-coalescing parent reads `app/buyer/insurance/page.tsx:68` and `app/buyer/pickup/page.tsx:37,60`; `SYSTEM_ALERT` Notification as the exception store (shared with E26-09) | TO IMPLEMENT |
+| L3-01 | MD §3 L139 ("One lineage, never broken"); no §26 register row covers it (checked L1235-1260) | The orphan rule for the five non-payment record classes: an **auction, offer, deal, contract or pickup** that cannot resolve its parent by stored reference is an orphan — it raises an Operations exception and is **never silently re-parented or duplicated into a parallel transaction**. (The payment half is already covered by E26-09 / jobs C6.) | **No exception half exists at all**: `rg raiseException\|prisma.queueItem\|queueItem.create` over `lib/**` + `app/**` → 0 hits; no `queue_items` model (E26-00a); `QueueItemType` `prisma/schema.prisma:1898-1907` holds 8 values, none for a lineage class, and the additive list at `IMPLEMENTATION-WORKFLOW.md:538-545` adds per-domain codes but no orphan type. **Per class:** *auction* — `Auction.vehicleRequestId` is nullable with `onDelete: SetNull` (`schema.prisma:443,451,456`), so deleting the parent request silently orphans the auction; `deposit-activation.service.ts:207` creates an auction with no `vehicleRequestId` at all; `resolveOwnedVehicleRequestId` (`lib/services/auction/auction.service.ts:34-43`) returns `null` for a mistyped or hostile id and `app/api/admin/buyers/[buyerId]/launch-auction/route.ts:150` then creates the auction anyway, raising nothing. *offer* — `Offer.auctionId` FK `onDelete: Cascade` (`schema.prisma:565`): DB-protected, no runtime check. *deal* — `Deal.offerId` and `Deal.vehicleRequestOfferId` are both nullable (`schema.prisma:577-578,605-606`) with no constraint requiring exactly one, and no `vehicle_request_id`/`auction_id`/`deposit_id` columns exist (WORKFLOW R31 MISSING); a deal that resolves neither is **silently absorbed** at `lib/services/deal/dealer-award-dispatch.service.ts:73-84`, which stamps `dealerAwardDispatchedAt` terminal and counts it `skipped`; read surfaces degrade quietly (`app/buyer/insurance/page.tsx:68`, `app/buyer/pickup/page.tsx:37,60`). *contract* — `ContractScan.dealId` Cascade (`schema.prisma:633,640`), `ContractVersion.dealId` FK with default Restrict (`schema.prisma:2626-2627`): DB-protected, no runtime check. *pickup* — `Pickup.dealId` unique FK Cascade (`schema.prisma:828,850`): DB-protected, no runtime check | PARTIAL | The DB-level parent FKs that already make three of the five classes unorphanable (`Offer.auctionId` Cascade `schema.prisma:565`; `ContractScan.dealId` Cascade `:640`; `Pickup.dealId` unique Cascade `:828,850`); the uniqueness constraints that already forbid a parallel duplicate (`Deal.offerId` and `Deal.vehicleRequestOfferId` `@unique` `schema.prisma:577-578`, `Auction.depositId` `@unique` `:420`, `Offer.originalOfferId` `@unique` `:552`, `Pickup.dealId` `@unique` `:828`); the ownership-scoped resolve in `resolveOwnedVehicleRequestId` (`auction.service.ts:34-43`) which refuses to cross-link another buyer's request; the fail-loud no-deal-after-commit branch at `app/api/buyer/requests/[requestId]/offer/respond/route.ts:112-117` and its idempotent single-deal lookup at `:103-110`; `approveContractVersionByAdmin` hard-refusing a null scan→version link (`schema.prisma:645-652`) | Phase 2 behaviour, with the writer: `assertParentResolvable()` in `lib/services/operations/queue-item.service.ts` is called by every creation path for the five non-payment classes; a reconciler sweeps existing null-parent rows; a build-failing rule forbids writing a parent id onto an existing row of these classes outside the audited re-parent admin action. §8.1 Phase 2, §8.2 Phase 2 Part A and §11.4 all place it here — an earlier draft of this row said Phase 10, the only dissenting voice. | 2 | unit, integration, state-machine | New `lib/services/operations/__tests__/lineage-orphan.test.ts`: for each of auction, offer, deal, contract, pickup an unresolvable parent yields exactly one `queue_items` row typed `LINEAGE_ORPHAN` owned by Operations, the stored parent reference is unchanged afterwards (never re-parented) and the lineage row count stays 1 (never duplicated); extend `lib/services/deal/__tests__/dealer-award-dispatch.test.ts` (reuse the existing `offer: null` fixture at `:103`) — failing first: the null-lineage deal raises and leaves `dealerAwardDispatchedAt` NULL rather than stamping it; extend `app/api/admin/buyers/[buyerId]/launch-auction/__tests__` — unresolvable `vehicleRequestId` → 4xx + exception, no auction row; CI migration job asserts the `LINEAGE_ORPHAN` enum value and the Deal one-parent CHECK | production migration deploy of the Phase 1 wave (§13-D1) for the enum value, the Deal lineage columns and the one-parent CHECK; **owner decision on historical rows** — the deposit-activation reconciler creates auctions with `vehicle_request_id` NULL by design (`deposit-activation.service.ts:207`, `auction.service.ts:15-19`), so whether a back-sweep raises one exception per pre-existing parentless auction (or they are back-filled/grandfathered) must be approved before the sweep runs | `dealer-award-dispatch.service.ts:73-84` silent terminal stamp; `Auction.vehicleRequestId onDelete: SetNull` (`schema.prisma:451`); the null-coalescing parent reads `app/buyer/insurance/page.tsx:68` and `app/buyer/pickup/page.tsx:37,60`; `SYSTEM_ALERT` Notification as the exception store (shared with E26-09) | TO IMPLEMENT |
 | S11D-01 | MD §11 L703; HTML `S[10].dealer[0]` `AutoLenis-Transaction-Flow.html:616` (cited L117); supporting: MD §12 L792 (Contract Shield compares "trade allowance and payoff figures") | The **dealer-provided preliminary trade allowance, when available**, is supplied by the dealership as an explicit Stage 11 action and carried as a named line on the final deal recap — distinct from the *final* allowance confirmed at handover (pickup R18.10, `final_allowance_cents`, Phase 9) | No dealer-supplied allowance exists anywhere. The dealer-facing offer schemas carry no allowance field: auction path `app/api/dealer/offers/route.ts:9-15` (otd/vehicle/tax/fees/apr/term/junk items only); concierge path `app/api/public/dealer-offer/[token]/route.ts:71-101` has only `tradeInAccepted: z.boolean()` at `:84`. No reaffirmation surface exists at all (`rg reaffirm` over `lib/**` + `app/**` → 0 hits), so the Stage 10→11 dealership seam that would collect it is absent. On the trade record, `TradeInSubmission.valuationCents`/`valuedAt` (`prisma/schema.prisma:2051-2052`) are **never written** by any service — `lib/services/trade-in/trade-in.service.ts:7-25` writes only the buyer-supplied packet — and are read only for display at `app/buyer/trade-in/page.tsx:126-130`; there is no dealer-attributed allowance column, no `deal_id` on the trade row, and no `preliminary_allowance_cents` in the schema. Buyer trade facts flow one way to the dealer as free text (`VehicleOffer.buyerTrade*` `schema.prisma:3767-3775`, rendered at `app/(public)/dealer-offer/[token]/page.tsx:70-77`), with payoff as an unparsed String (`buyerTradePayoff` `:3772`). Recap side: `deal_recaps` does not exist (deal-early C2a MISSING) and the recap payload enumerated in deal-early C2b omits the allowance | MISSING | The trade record has **no dealer-writable surface today** — no dealer route or service mutates `TradeInSubmission` (`rg tradeInSubmission` over `app/api/dealer/**` → 0 hits) — so a dealer can never alter the buyer's own trade packet; keep that boundary by giving the dealer a separate, dealer-attributed allowance field rather than write access to the buyer's row. Also keep the identity-firewall ordering that the trade packet reaches a dealership only at reaffirmation (§8.2 Phase 7 "identity firewall lift + secure handoff (co-buyer + trade packet) at confirmation") | Phase 1 wave already lists `trade_in_submissions.preliminary_allowance_cents` and `verified_payoff_cents` (`IMPLEMENTATION-WORKFLOW.md:549-550`, R63/R12a) — write them here: the Phase 7 reaffirmation/recap flow gains a dealership action "supply the preliminary trade allowance and verified payoff where available" that stamps `preliminary_allowance_cents` (integer minor units) with the supplying dealer id and timestamp, marked optional so a recap can still build with the allowance absent and the line rendered as "not provided by the dealership"; `lib/services/deal/deal-recap.service.ts` (deal-early C2b) adds the allowance as its own named recap line, feeding the net-equity line (MD §11 L705) and the Contract Shield comparison set (§12 L792); the recap version records the allowance value, so a later change at handover (`final_allowance_cents`, R18.10 Phase 9) is detected as an appraisal change (R18.17) against a stored recap figure rather than against nothing; buyer-supplied `buyerTradePayoff` free text stays read-only evidence and is never treated as the verified payoff | 7 | unit, integration | Extend `lib/services/deal/__tests__/deal-recap.test.ts` (new in C2b): recap version 1 carries a named `preliminary_allowance_cents` line when the dealership supplied one and an explicit "not provided" line when it did not; net-equity equals allowance minus verified payoff and the itemised sum still reconciles to `otd_cents_confirmed`; a dealer submitting an allowance leaves the buyer's own trade packet fields byte-identical (dealer-write boundary); new reaffirmation-route test — allowance rejected as non-integer or negative, and rejected from a dealer that is not the reaffirming winner; Phase 9 `handover.test.ts` (R18.10) compares `final_allowance_cents` against the recap's `preliminary_allowance_cents` and routes a difference to the R18.17 appraisal-change path | none for the behaviour — the columns are already inside the Phase 1 wave, whose production migration deploy (§13-D1) is the standing owner-gated dependency | `TradeInSubmission.valuationCents`/`valuedAt` — written by nothing, displayed to buyers at `app/buyer/trade-in/page.tsx:126-130`; `VehicleOffer.buyerTradePayoff` free-text String duplicating payoff (`schema.prisma:3772`); the `tradeInAccepted` boolean as the only trade signal a dealer returns (`app/api/public/dealer-offer/[token]/route.ts:84`) | TO IMPLEMENT |
 
 ### 10.12 Tests, gates, harnesses, CI, hooks (§34) — 91 rows
 
-Status counts: ALREADY CORRECT 17, PARTIAL 27, BROKEN 8, MISSING 36, UNVERIFIED 3 · Phase counts: P1 9, P2 12, P3 16, P4 1, P5 5, P6 11, P7 9, P8 12, P9 8, P10 4, P11 4
+Status counts: ALREADY CORRECT 17, PARTIAL 26, BROKEN 9, MISSING 36, UNVERIFIED 3 · Phase counts: P1 9, P2 12, P3 16, P4 1, P5 5, P6 11, P7 9, P8 12, P9 8, P10 4, P11 4
 
 # Parity table — area: tests (§34 acceptance tests, §29 safeguards, quality gates)
 
@@ -3041,7 +3232,7 @@ Production note carried from IMPLEMENTATION-WORKFLOW §5.2 (probed 2026-09-03): 
 | A4 | MD §27 L1290 "delivery status, retry policy" | Delivery status + bounded retry | `status` pending/sending/sent/failed/suppressed/skipped, `last_result`, `provider_id`; MAX 4, linear backoff (`comms-outbox.service.ts:71-80,386-415`; `comms_outbox.sql:31-36`) | ALREADY CORRECT | Terminal `failed` is columns-only, never `jobs_dead_letter` (`comms-outbox.service.ts:14-16`) | none (add `next_attempt_at`/`max_attempts` columns only if the §8.2 contract needs them) | 2 | integration | Existing `comms-outbox-queue.test.ts` + `app/api/cron/__tests__/comms-outbox-drain-route.test.ts` re-run green | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | A5a | MD §27 L1290 "cancellation rule" | Outbox rows cancellable by key | No cancel API in `comms-outbox.service.ts`; only `cancelDepositReminderTouches`/`cancelPreCheckoutTouches` on the lifecycle table (`lifecycle-touch-drain.service.ts:596-676`) | MISSING | Cancellation is a status write; send-time guard remains the backstop | `cancelByKey(cancel_key, reason)` → `status='cancelled'` on pending/sending rows only; `cancel_key` populated by every `enqueueTransactional()` | 2 | unit, integration | Extend `comms-outbox-queue.test.ts`: cancel → sent rows untouched, pending rows `cancelled`, drain skips them | none | none | TO IMPLEMENT |
 | A5b | MD §24 L1213; §33 #25 L1553 | Cancellation orchestrator cancels unsent comms | No orchestrator; no caller of any outbox cancel | MISSING | — | §24 orchestrator calls `cancelByKey` + `cancelDepositReminderTouches`/`cancelPreCheckoutTouches` by transaction ref | 10 | integration | New `lib/services/deal/__tests__/cancel-transaction.test.ts`: cancel → outbox + touch rows cancelled | none | none | TO IMPLEMENT |
-| A6 | MD §27 L1290 "terminal-failure Operations alert"; HTML EXC[48] | Terminal failure raises an Operations exception | `logger.error` only: `comms-outbox.service.ts:389-397`; `lifecycle-touch-drain.service.ts:846-848`; `dealer-award-dispatch.service.ts:117-121`; no drain calls `notifyOncall` (`lib/observability/alert.ts:23-31`) | MISSING | Alert primitive degrades to logger without Sentry (`alert.ts`) | Terminal `failed` → `raiseException(COMMS_EXCEPTION, owner Operations)` + `notifyOncall`; same in lifecycle/outreach/award drains | 2 | unit, integration | Extend `comms-outbox-queue.test.ts` + `lib/services/deal/__tests__/dealer-award-dispatch.test.ts`: attempt 4 failure → one `queue_items` row + oncall call | none | none | TO IMPLEMENT |
+| A6 | MD §27 L1290 "terminal-failure Operations alert"; HTML EXC[48] | Terminal failure raises an Operations exception | `logger.error` only: `comms-outbox.service.ts:389-397`; `lifecycle-touch-drain.service.ts:846-848`; `dealer-award-dispatch.service.ts:117-121`; no drain calls `notifyOncall` (`lib/observability/alert.ts:23-31`) | MISSING | Alert primitive degrades to logger without Sentry (`alert.ts`) | Terminal `failed` → `raiseException(COMMS_EXCEPTION, owner Operations)` + `notifyOncall`; same in lifecycle/outreach/award drains Cross-referenced with `schema/C12` — one change, two views (§11.5 ruling 5). | 2 | unit, integration | Extend `comms-outbox-queue.test.ts` + `lib/services/deal/__tests__/dealer-award-dispatch.test.ts`: attempt 4 failure → one `queue_items` row + oncall call | none | none | TO IMPLEMENT |
 | A7a | MD §27 L1292 | No page request determines whether a settlement communication survives | Stripe webhook post-commit direct `sendDepositConfirmationEmail` (`app/api/webhooks/stripe/route.ts:283-296`) | PARTIAL | Idempotency key via `sendIdempotent` (`resend.service.ts:136-152`) | Enqueue receipt/notices inside the settlement `$transaction` (needs A1a) | 3 | integration | Extend `app/api/webhooks/__tests__/stripe-idempotency.test.ts`: outbox row committed with the deposit; no Resend call in request context | none | direct send in Stripe webhook | TO EXTEND |
 | A7b | MD §27 L1292 | Offer/selection notices survive request death | `after()` first-offer email `lib/services/offer/offer.service.ts:151-156`; select-offer attribution `app/api/buyer/auctions/[auctionId]/select-offer/route.ts:159-165`; `lib/events/emit.ts:205 after(() => forwardToMake…)` | PARTIAL | Award dispatch already durable via marker + `claimJob` (`dealer-award-dispatch.service.ts:86-102`) | Route each `after()` transactional send through outbox enqueue in the owning transaction; `forwardToMake` stays non-transactional | 6 | integration | Extend `lib/services/deal/__tests__/select-offer-concurrency.test.ts` + new `lib/services/offer/__tests__/first-offer-notice.test.ts`: outbox row present, no `after()` send | none | `after()` sends | TO EXTEND |
 | A8 | MD §27 L1294 | `comms_outbox` "holds zero production records" — routing is the prerequisite | Table PRESENT in production (workflow §5.2, dated probe); producers exist for pickup/lead-nurture/campaign (`pickup-notifications.service.ts:12`, `lead-nurture.service.ts:202`, `campaign-dispatch.service.ts:151,168`) | PARTIAL | — | Covered by A1b; Phase 11 reports the production row count as live-only evidence | 2 | n/a | Phase 11 `ACCEPTANCE-REPORT.md` lists outbox row count (live-only, UNVERIFIED in preview) | none | none | TO EXTEND |
@@ -3194,33 +3385,29 @@ Production note carried from IMPLEMENTATION-WORKFLOW §5.2 (probed 2026-09-03): 
 
 ## §11 Coverage reconciliation — no requirement disappears between the specification and the plan
 
-Total parity rows: **1,568** across 13 areas, covering **1,107 of the 1,109 requirement atoms** the
-completeness critic derived from the two governing files; the two remaining gaps were closed by the
-round-2 gap-fill rows, so coverage at assembly is complete (§11.4). Row counts exceed atom counts
-because one requirement often needs several rows — a schema half, a service half, and a phase-split
-where parts land in different phases.
+Total parity rows: **1568** across 13 areas.
 
 | Status | Rows |
 | --- | --- |
-| ALREADY CORRECT | 218 |
+| ALREADY CORRECT | 215 |
 | PARTIAL | 510 |
-| BROKEN | 148 |
-| MISSING | 550 |
+| BROKEN | 150 |
+| MISSING | 551 |
 | DUPLICATED | 105 |
 | UNVERIFIED | 37 |
 
 | Phase | Rows |
 | --- | --- |
 | 1 | 264 |
-| 2 | 265 |
-| 3 | 180 |
+| 2 | 266 |
+| 3 | 173 |
 | 4 | 89 |
 | 5 | 117 |
-| 6 | 172 |
-| 7 | 128 |
-| 8 | 137 |
-| 9 | 146 |
-| 10 | 61 |
+| 6 | 173 |
+| 7 | 129 |
+| 8 | 140 |
+| 9 | 148 |
+| 10 | 60 |
 | 11 | 9 |
 
 | Area | Rows | ALREADY CORRECT | PARTIAL | BROKEN | MISSING | DUPLICATED | UNVERIFIED |
@@ -3233,10 +3420,10 @@ where parts land in different phases.
 | sourcing | 86 | 5 | 42 | 9 | 30 | 0 | 0 |
 | offers | 113 | 8 | 38 | 7 | 43 | 15 | 2 |
 | deal-early | 109 | 8 | 19 | 23 | 49 | 7 | 3 |
-| contract | 79 | 11 | 17 | 10 | 32 | 5 | 4 |
+| contract | 79 | 8 | 18 | 11 | 33 | 5 | 4 |
 | pickup | 131 | 11 | 17 | 6 | 86 | 10 | 1 |
 | control | 266 | 22 | 114 | 27 | 70 | 25 | 8 |
-| tests | 91 | 17 | 27 | 8 | 36 | 0 | 3 |
+| tests | 91 | 17 | 26 | 9 | 36 | 0 | 3 |
 | jobs | 126 | 23 | 57 | 8 | 25 | 8 | 5 |
 
 ### 11.4 Completeness critic — inventory, gaps, and how each gap was closed
@@ -3292,7 +3479,7 @@ its responsible party from the §30 table; without it the §34 assertion is unim
 | 2 | Prequal expiry warning (`control/D1-13` BROKEN vs `jobs/G1` PARTIAL) | **BROKEN governs.** A reminder exists but is not dispatched durably and is not keyed to the request; Phase 2 moves it onto the dispatcher. Both rows point at one change. |
 | 3 | `plan_snapshots` (`schema/S20` MISSING vs `payment/PAY-56a` BROKEN) | **MISSING governs** — no such table exists in the schema or in production (§5.2). The payment row's "table exists" reading was the Buyer `plan` flag, which is the thing being replaced. Phase 1 creates the table. |
 | 4 | Five-candidate cap (`schema/I2` MISSING vs `schema/S23`/`inventory/R43a` PARTIAL) | **MISSING at the database level, PARTIAL in code.** A service-layer check exists; the DB-level trigger does not. Both are true of different layers; Phase 1's enforcement object 2 is the trigger. |
-| 5 | Terminal comms failure duplicated (`jobs/A6` and `control/C12`) | One change, two rows. **`control/C12` is the owner** (the §27 dispatcher contract); `jobs/A6` is the cron-side view of the same requirement. |
+| 5 | Terminal comms failure duplicated (`jobs/A6` and `schema/C12`) | One change, two rows. **`schema/C12` is the owner** (the §27 dispatcher contract, carried with the `comms_outbox` shape); `jobs/A6` is the cron-side view of the same requirement. Both now name the other. |
 | 6 | Premium upgrade-window close point | **Resolved in round 2.** Already recorded as **§2 difference D6**: the Markdown ("until funding clears") governs; the HTML Stage 5 line is presentational shorthand. `control/P23-01` carries the reconciliation and the buyer-copy correction. |
 | 7 | Cancellation after a Premium upgrade (`control/C24-09b` Phase 10 vs `payment/PAY-89` Phase 3) | **Phase 3 records the money treatment** (the $400 is a settled fee with a manual-review disposition); **Phase 10 owns the cancellation orchestration** that reads it. Not a conflict once split that way; the rows are cross-referenced. |
 | 8 | Lane 3 dealer application (`intake/R35b` Phase 5 vs §8.1 Lane 3 → Phase 2) | **Phase 2 owns the intake surface** (the application form and its records); **Phase 5 owns what approval unlocks** (rooftop, agreement signature, invitation eligibility). The row is split accordingly. |
@@ -3311,30 +3498,63 @@ its responsible party from the §30 table; without it the §34 assertion is unim
 | # | Row | Ruling |
 | --- | --- | --- |
 | 1 | `credit_applications` freeze guard at Phase 1 | **Not a violation as planned.** The Phase 1 allowlist contains exactly the read paths that still exist, so the guard is green on the day it lands; the allowlist shrinks to zero at Phase 7 (§8.2 Phase 1, §13-D6). |
-| 2–3 | Premium window close / admin re-open depend on `funding_cleared_at` (Phase 8) | **Moved:** Phase 3 records the window *open* event and the plan snapshot; the *close* predicate is implemented in Phase 8 with the clearance service. The rows' phase is corrected to 8. |
-| 4–5 | Commission settles at Deal completion; reverses on refund/chargeback | **Moved to Phase 9** (completion) with the reversal hook read by Phase 10's cancellation orchestration. Phase 3 keeps only the ledger shape. |
-| 6 | Deal cancelled after Premium (`PAY-89`) | **Split:** money treatment Phase 3, orchestration Phase 10 (contradiction 7 above). |
-| 7 | Standard buyer asks for Premium at financing or contract | **Moved to Phase 7/8** — the offer surfaces exist only once those checkpoints do. Phase 3 provides the upgrade primitive. |
+| 2–3 | `payment/PAY-59a`, `payment/PAY-76` — Premium window close and admin re-open depend on `funding_cleared_at` (Phase 8) | **Moved:** Phase 3 records the window *open* event and the plan snapshot; the *close* predicate is implemented in Phase 8 with the clearance service. The rows' phase is corrected to 8. |
+| 4–5 | `payment/PAY-94`, `intake/R27b` — commission settles at Deal completion; reverses on refund or chargeback | **Moved to Phase 9** (completion) with the reversal hook read by Phase 10's cancellation orchestration. Phase 3 keeps only the ledger shape. |
+| 6 | `payment/PAY-89` — Deal cancelled after a Premium upgrade | **Split:** money treatment Phase 3, orchestration Phase 10 (contradiction 7 above). |
+| 7 | `payment/PAY-87` — Standard buyer asks for Premium at financing or contract | **Moved to Phase 7/8** — the offer surfaces exist only once those checkpoints do. Phase 3 provides the upgrade primitive. |
 | 8 | Premium page writes the Deal snapshot (`intake/R23`) | **Split:** buyer-level plan election Phase 2/3; the Deal-level snapshot Phase 6, when the Deal first exists. |
 | 9 | "Ceiling enforced at offer validation, selection and contract request" (`inventory/R37`) | **Split:** Phase 4 changes the browse filter (§13-D16); the enforcement points are Phase 6 and Phase 8 rows. |
 | 10 | One-open-request index vs its production precondition | **Sequenced, not moved:** §13-D2 (owner-run cleanup) is an explicit predecessor of §13-D13 (the Phase 1 production deploy). The index is created in the migration; the deploy does not run until the cleanup query returns zero. |
 | 11 | `control/P23-01` — the Premium window "closes at funding clearance" placed at Phase 3 | **Same ruling as 2–3:** the window's *open* is a Phase 3 fact ($99 settles); its *close* is implemented in Phase 8 with the clearance service. The row is split across the two phases. |
 | — | §25 identity firewall: §8.1 says Phase 5, the map says Phase 7 | **Both, by half:** Phase 5 builds the firewall (anonymised invitations, scanning, circumvention records); Phase 7 performs the *lift* at reaffirmation. §8.1 is annotated accordingly. |
 
-### 11.7 Formatting check
+**These rulings are applied, not merely recorded.** Every row named above carries the ruled phase and a
+cross-reference to its ruling in its own §10 row, so an implementer working from the ledger sees the
+correction without reading §11: `payment/PAY-59a` and `payment/PAY-76` now read Phase 8,
+`payment/PAY-94` and `intake/R27b` Phase 9, `payment/PAY-87` Phase 7, `intake/R23` Phase 6 and
+`control/P23-01` Phase 8; `payment/PAY-89` and `inventory/R37` keep their first-half phase and name the
+phase that owns the second half.
+
+### 11.7 Two mechanical invariants, and why they are stated here
+
+The second review found that a set of corrections ruled in §11.6 had been applied to the standalone
+`parity/*.table.md` files but never folded into §10 of this document, so the ledger an engineer reads
+disagreed with the ruling three sections later — and, on one pass, a regeneration silently reverted
+hand-corrections by copying a stale source over them. Both are the same class of defect: two copies of
+the same rows with no check that they agree. Two invariants now close it, and both were run against this
+document as it stands:
+
+1. **§10 is byte-identical to `parity/*.table.md`.** Every one of the 1,568 rows in §10 appears verbatim
+   in its area file — checked with an escape-aware 13-column parse, 0 mismatches. The repository copy is
+   the single source; the generator reads it rather than overwriting it.
+2. **Every row parses to thirteen columns, with a status and a phase.** 1,568 rows, no bad columns, no
+   unrecognised status, no missing required-change or acceptance cell, and no duplicate ref *within* an
+   area. Refs are reused *across* areas (173 of them), which is why every cross-reference in this
+   document is written `area/Ref`.
+
+The §11 status and phase tallies are computed from those rows at assembly, not maintained by hand, so
+they cannot drift from the table again. One caveat worth stating: the status of a row is read from the
+**leading** token of its status cell, because seven rows carry a status that names its own history
+("PARTIAL (corrected from ALREADY CORRECT…)"). An earlier tally took the first status word it saw
+anywhere in the cell and mis-filed five rows.
+
+### 11.8 Formatting check
 
 The critic reported 24 rows whose Status and Phase cells looked unreadable. Re-parsing every table with
 an escape-aware splitter (a `|` preceded by a backslash is content, not a column break) found **one**
 genuinely malformed row — `tests/T53`, whose `secrets.DATABASE_URL || placeholder` shifted the columns —
 which was repaired. The other 23 already carried correct `\|` escapes and parse to exactly thirteen
-cells; the critic's parser split on every pipe. Every row in §10 was re-parsed after the repair:
-**1,568 rows, all thirteen columns, every Status and Phase readable** — the number this document's own
-assembler counted when it built §10 and §11.
+cells; the critic's parser split on every pipe. Every row in §10 was re-parsed after the repair: 1,558
+rows, all thirteen columns, every Status and Phase readable.
 
 Two of the flagged rows carried substantive Phase-1 wave amendments that a reader scanning the Phase
-column could have missed, so they are called out here: the possession facts (`pickup/R19.2`) and
-`post_completion_obligations` gaining `evidence jsonb`, `expected_date` and `temp_tag_expires_at`
-(`pickup/R21.1a`). Both are folded into the Phase 1 wave in §8.2.
+column could have missed. `pickup/R21.1a`'s three columns (`evidence jsonb`, `expected_date`,
+`temp_tag_expires_at`) are folded into §8.2's `post_completion_obligations` bullet. `pickup/R19.2`'s
+possession facts (`odometer_at_possession`, `vin_match`, `possession_discrepancy jsonb`) were **not**
+folded in when this section was first written — that sentence over-claimed — and are now carried in
+§8.2's "Objects the area maps add to this wave" block, together with the other eight objects the pickup
+area asked for. The same block carries the additions raised by the intake, payment, sourcing, offers and
+deal-early areas; §8.2 is the authority, and each item names the area that raised it.
 
 
 ## §12 Test levels, gates, preview isolation, and Playwright scope
@@ -3373,12 +3593,21 @@ phase (`autolenis-code-verification`).
    hook's self-test.
 2. `scripts/check-test-coverage.ts` checks reachability from any `test*` script, never membership in
    the `test:all` chain (`:95-96`); a new `test:foo` script that is not chained passes the guard and
-   never runs in CI. Correction: parse the `test:all` chain and fail on any un-chained `test:*` script.
+   never runs in CI. Correction: parse the `test:all` chain and fail on any un-chained `test:*` script
+   **that is not on a declared exempt list**. The exempt list is required, not a loophole: six scripts
+   are legitimately outside the chain today (VERIFIED by parsing `package.json` on 2026-09-03) —
+   `test:coverage-check` (it *is* the guard), `test:integration` (needs a real database),
+   `test:e2e`, `test:e2e-autopilot`, `test:visual` and `test:visual:update` (all need a running app or a
+   browser, and CI runs them in their own jobs). Without that list this correction fails the build on
+   day one, and it would also contradict correction 3, which deliberately moves `test:concurrency` out
+   of the chain. The exempt list lives in the script, each entry carries the reason, and adding to it is
+   a reviewable diff — which is the property the guard is protecting.
 3. `lib/services/deal/__tests__/select-offer-concurrency.test.ts` runs inside `test:all` whenever a
    real `DATABASE_URL` is present, has no `autolenis_e2e` DSN guard and creates users/buyers/deposits/
    auctions/dealers/offers with no cleanup (`:20-61`) — a production-safety hazard if CI's secret is a
    production DSN. Correction: add the `/autolenis_e2e/` refusal used by `scripts/e2e-admin-storage-state.ts`,
-   clean up in `finally`, and move `test:concurrency` out of `test:all` into the postgres-service CI job.
+   clean up in `finally`, and move `test:concurrency` out of `test:all` into the postgres-service CI job,
+   adding it to correction 2's exempt list in the same commit so the two corrections agree.
 4. Two Playwright roots (`frontend/e2e`, `frontend/tests/e2e`) are consolidated before the §34 form-walk
    suite is written; CI runs only `dealer-outreach.spec.ts` today (`ci.yml:300`).
 Until (1)–(3) land, every "PASS" reported by the hook is re-checked by reading the suite-by-suite output.
@@ -3469,6 +3698,13 @@ marked **ACTION** are owner-run production steps this session will not perform.
 | D42 | Dealer termination criteria | DECISION | Phase 5 | §25.2 requires consequences for repeat circumvention. Proposed: first attempt warns and records; a second within 90 days suspends invitations pending review; termination is always a human decision. |
 | D43 | RLS coverage for the invitation and messaging tables | DECISION | Phase 1 | No migration enables RLS on `auction_invitations`, `outside_auction_invites`, `messages`, `circumvention_attempts`, `identity_firewall_entries` (production probe: the core Prisma tables are reached only through the service role). Proposed: enable RLS with zero policies (deny-all except service role) on the new tables this wave creates, and leave existing tables unchanged in this phase. Adding a policy OPENS access, so none is added. |
 | D44 | Untargeted dealer broadcast | DECISION | Phase 5 | `notifyActiveDealersOfOpportunity` emails the first 20 ACTIVE dealers with no radius and no invitation, from the public request route. Proposed: retire it — §7 invitations are the only dealer fan-out. |
+| D45 | OFAC screening control on the external pre-approval approve route | DECISION | Phase 2 | The approve route today requires a human OFAC attestation (`z.literal(true)`) rather than an automated screen. Proposed: keep the attestation as the control and record it as a deliberate choice; alternative: add automated screening and demote the attestation to a second check. Verify after: the approve route cannot write `APPROVED` without whichever control is chosen. Raised by §10 *stages1-3*; §13 had no OFAC row before this review. |
+| D46 | SMS and email consent capture on every Lane 1 surface | DECISION | Phase 2 | Consent is captured inconsistently today: the onboarding wizard gates a button on an SMS checkbox it never transmits, the SEO form hard-codes `consent_sms = true`, and Google-OAuth signups store a NULL terms version. Proposed: one consent record per surface (version, text hash, IP, surface, timestamp), no pre-checked boxes, and no send without a matching record. Verify after: a send attempt for a buyer with no consent record is refused by the dispatcher and raises an exception. |
+| D47 | PII already stored in `notifications.metadata` | ACTION (privacy) | Phase 2 | The public wizard spreads the whole form into `notifications.metadata`, so income, employer and credit-band answers sit in a notification row. Proposed: stop writing it in Phase 2, then an owner-run purge or redaction of the existing rows under the retention policy. Verify after: the metadata column holds no field outside an allowlist, and the purge query returns zero. |
+| D48 | Refund-policy copy shown to the buyer | DECISION (legal) | Phase 3 | §22.1 requires the buyer to see the refund rules before paying; the current deposit-confirmation email says the $99 "is credited toward your concierge fee when your deal closes", which contradicts both "Standard plan paid in full" and the $400-until-funding-clears rule. Proposed: legal-approved copy for the checkout disclosure and the receipt, written once and reused. Verify after: both surfaces render the approved text and a test pins it. |
+| D49 | Contract state representation | DECISION | Phase 1 | `WARNING` and `REVISION_REQUESTED` are free-text `ContractScan.status` values today; the buyer UI colour map handles only PASS/WARNING/FAIL and paints anything else red. Proposed: model them as `ContractVersionStatus` enum values in the wave so the state machine is typed. Alternative: keep a scan-classification column. Verify after: no free-text status reaches a buyer surface. |
+| D50 | Which surfaces the freeze test's repository-wide scan may exempt | DECISION | Phase 1 | The `credit_applications` guard scans `app/**`, `lib/**`, `components/**` and `scripts/**` with an explicit twelve-file allowlist (§8.2 Phase 1). Confirm no other surface needs an exemption, and that the allowlist shrinking to zero at Phase 7 is the intended end state. Verify after: the test fails when any allowlisted file stops referencing the model, and when a new reference appears anywhere else. |
+| D51 | CI `DATABASE_URL` secret — what it points at | ACTION (safety) | before the next CI run | `select-offer-concurrency.test.ts` runs inside `test:all` whenever a real `DATABASE_URL` is present, has no `autolenis_e2e` guard and creates users, buyers, deposits, auctions, dealers and offers with no cleanup; `ci.yml:70` uses `secrets.DATABASE_URL || <placeholder>`. If that secret points at anything but a throw-away database, every CI run writes rows into it. Proposed: confirm what the secret is, and land the §12.2 item-3 guard before the answer can matter. Verify after: the test refuses to run against a DSN whose name is not `autolenis_e2e`. Raised by §10 *tests*; §13 had no row for it before this review. |
 
 
 ## §14 Out-of-scope findings (reported, not implemented)
@@ -3613,6 +3849,46 @@ Findings surfaced by the area inspections that fall outside the transaction impl
 - `docs/plans/MIGRATION-LEDGER-RECONCILIATION.md` (2026-08-31) and `scripts/production-runbook/01-baseline-chain.sh` describe a production state (e-sign objects absent; 32 unrecorded migrations) that no longer holds; both should be refreshed after §13-D1.
 
 
+### 14.100 What the second review changed in this document
+
+After the first assembly, this deliverable was put through the review→fix→re-review loop the repository's
+own rules require (`CLAUDE.md`, `autolenis-code-verification`, step 6: read the work as though another
+engineer wrote it). Six independent lenses — internal consistency, repository-fact citations, evidence
+labels, governing-constraint compliance, phase soundness and owner decisions — produced 66 findings, each
+then handed to a separate agent instructed to refute it. **21 survived refutation and were fixed; 45 were
+refuted** and are recorded in the run rather than acted on. Every fix is in the sections above; the
+material ones, so a reader can see what the first draft got wrong:
+
+- **A blocking migration defect.** The Phase 1 wave added enum labels and then used them in the same
+  migration file. PostgreSQL refuses that, and Prisma runs each migration in one transaction, so the wave
+  would have failed on deploy. Reproduced against PostgreSQL 16.13 in this session and fixed by splitting
+  the wave into two ordered directories (§8.2).
+- **The wave was incomplete.** Eight area tables each ended with a "not in the Phase 1 list — add" note
+  that was never folded in. With C1 allowing only one schema wave, that left Phases 2, 5, 6, 7 and 9
+  unbuildable. All the objects are now in §8.2, each naming the area that raised it.
+- **Rulings not applied to the ledger.** §11.6 moved seven rows to later phases; the rows still said
+  Phase 3. §10 and the parity files are now byte-identical and the tallies are computed, not typed
+  (§11.7).
+- **A false VERIFIED.** §1 reported 26 data-model entries in the specification's §32. There are 25. The
+  file hash matches, so the marker was wrong, not the file (§1).
+- **Over-claims about what was run.** "Sandbox" described live MarketCheck calls; two places reported a
+  command outcome while §15 said none was executed; the disclaimer never covered unprobed production
+  configuration. All three corrected (§4, §14, §15).
+- **Phases could not be executed or undone.** Only Phase 1 had a rollback and only Phase 1 named its
+  owner-gated decisions; 27 of the decisions were unreachable from any phase. Every phase now carries
+  both, and no decision is orphaned.
+- **Seven decisions were missing entirely** — OFAC control, consent capture, PII already stored in
+  notification metadata, refund-policy copy, contract state representation, the freeze test's exemptions,
+  and what the CI database secret points at. They are D45–D51, and the last is asked first in §15.
+- **Four code citations pointed at lines that do not exist** (a file 10 lines shorter than the citation,
+  a page rewritten out from under a line range, a relation cited 31 lines late, an email template cited
+  as a completion write). Corrected against the tree.
+
+The full run — findings, verdicts and reasoning on both sides — is in the session record. Two lessons
+worth carrying: a generated document needs a mechanical invariant binding it to its sources, or
+hand-corrections get reverted silently; and the highest-value finding of the whole review came from
+executing one SQL statement against a throw-away database rather than from reading anything.
+
 ## §15 STOP — approval gate
 
 This is the first deliverable required by the master prompt (§9): the complete workflow plan, the
@@ -3625,13 +3901,19 @@ probes only.
 
 **What the owner is asked to do now:**
 
-1. Read §8 (phases) and §13 (decisions D1–D44) and answer the **DECISION** items. The ones that block
-   Phase 1 are **D5** (which statuses count as an open Vehicle Request), **D6** (the `credit_applications`
-   freeze mechanics, including the proposed 410 on the SSN intake route), **D7** (`InsuranceStatus`
-   additions), **D11** (`QueueItemType` and the `queue_items` shape), **D24** (bringing the raw-SQL
-   background tables under the migration chain) and **D43** (RLS on the new tables). **D8** (MarketCheck
+0. **Before anything else, answer §13-D51.** It asks what the CI `DATABASE_URL` secret points at. A
+   concurrency test with no database guard and no cleanup runs inside `test:all` on every CI run today;
+   if that secret is not a throw-away database, every run is writing rows into whatever it is. This costs
+   one look and is the only item whose answer matters before the next CI run rather than before a phase.
+1. Read §8 (phases) and §13 (decisions D1–D51) and answer the **DECISION** items. The ones that block
+   Phase 1 are **D5** (which statuses count as an open Vehicle Request — §8.2 already hard-codes an
+   answer), **D6** (the `credit_applications` freeze, including the 410 on the SSN intake route that is
+   callable in production today — §7.3), **D7** (`InsuranceStatus` additions), **D11** (`QueueItemType`
+   and the `queue_items` shape), **D24** (bringing the raw-SQL background tables under the migration
+   chain), **D43** (RLS — both the new tables and the five existing tables that have none), **D49**
+   (how contract state is represented) and **D50** (the freeze test's exemptions). **D8** (MarketCheck
    terms) blocks only the cache table inside Phase 1 and the whole of Phase 4's cached path. Everything
-   else can be answered before its own phase.
+   else can be answered before its own phase, and every phase in §8 now names the decisions it waits on.
 2. Run the two **ACTION** items that Phase 1 depends on: **D1** (six `prisma migrate resolve --applied`
    commands, listed verbatim in §6.2) and **D2** (audited cleanup of the three buyers holding multiple
    open Vehicle Requests, §5.6).
@@ -3648,5 +3930,9 @@ owner authorisation (§13-D15). Two MarketCheck items are UNVERIFIED for contrac
 
 **Confirmations for this deliverable:** no parallel website or workflow was created; no direct
 transactional send and no non-canonical exception path was introduced (no code was written); no later
-phase was started; skills used are listed in §3 with their effect.
+phase was started; skills used are listed in §3 with their effect. This document has been through the
+repository's review→fix→re-review loop once as a deliverable in its own right: 66 findings raised by six
+independent lenses, each adversarially refuted, 21 confirmed and fixed (§14.100). One executable check
+was run — a two-statement enum test against a throw-away local PostgreSQL — and it found the one defect
+that would have failed the Phase 1 deploy.
 

@@ -25,7 +25,7 @@ Status legend: ALREADY CORRECT | PARTIAL | BROKEN | MISSING | DUPLICATED | UNVER
 
 **R1** · spec_ref: Stage 4 Entry (L406) · requirement: Entry = current approval.
 - status: ALREADY CORRECT (journey) / PARTIAL (surfaces)
-- current: `lib/services/buyer/journey.ts:101-109` moves to `search` only when `onboardingComplete && prequalValid`; `app/buyer/search/page.tsx:142-159` renders for any buyer with a prequal-state banner; `/api/buyer/search` does not require a valid prequal (only auth, `search/route.ts:20-23`); `/api/buyer/requests` explicitly does not gate on prequal (`requests/route.ts:122`).
+- current: `lib/services/buyer/journey.ts:101-109` moves to `search` only when `onboardingComplete && prequalValid`; `app/buyer/search/page.tsx:40-57` renders for any buyer with a prequal-state banner; `/api/buyer/search` does not require a valid prequal (only auth, `search/route.ts:20-23`); `/api/buyer/requests` explicitly does not gate on prequal (`requests/route.ts:122`).
 - evidence: journey.ts:106-109 `const prereqForSearch = facts.onboardingComplete && facts.prequalValid;`; search/route.ts:58-67 budget only applied when `isPrequalValid`.
 - stronger safeguard: none.
 - required change: keep the request path open (spec Stage 5 allows custom request pre-approval elsewhere), but gate the *qualified results* surface (when built) on `isPrequalValid`.
@@ -241,7 +241,7 @@ Status legend: ALREADY CORRECT | PARTIAL | BROKEN | MISSING | DUPLICATED | UNVER
 
 **R36** · spec_ref: L1090 "Qualified results are a post-approval view; before prequal, general catalogue only; nothing presented as qualified."
 - status: ALREADY CORRECT (by absence) / PARTIAL
-- current: Nothing is labelled "qualified" anywhere (rg negative). Buyer search shows "pre-qualified budget" banners only for APPROVED (`app/buyer/search/page.tsx:142-159`; `BuyerSearchClient.tsx:320-400`).
+- current: Nothing is labelled "qualified" anywhere (rg negative). Buyer search shows "pre-qualified budget" banners only for APPROVED (`app/buyer/search/page.tsx:40-57`; `BuyerSearchClient.tsx:320-400`).
 - required change: keep when R32 lands.
 
 **R37** · spec_ref: "How the approved amount is applied" (L1094-1098) · requirement: filter generously, never tightly; a listing near or a little over the ceiling is shown; enforce server-side at offer validation/selection/contract, not browsing.
@@ -347,7 +347,7 @@ Status legend: ALREADY CORRECT | PARTIAL | BROKEN | MISSING | DUPLICATED | UNVER
 - `classifyYield` only downgrades, never upgrades; provider `num_found` is the only denominator (`sync-yield.ts:317-323`).
 - Null-Island / out-of-range coordinates rejected as a pair (`adapter:114-134`).
 - Approved-amount hard cap at browse time (`search/route.ts:64-82`) — STRICTER than spec; owner decision required before relaxing (R37).
-- Zero/undetermined prequal ceiling never treated as $0 (`search/route.ts:49-67`; `app/buyer/search/page.tsx:142-159`).
+- Zero/undetermined prequal ceiling never treated as $0 (`search/route.ts:49-67`; `app/buyer/search/page.tsx:40-57`).
 - Admin attach refuses unavailable linked vehicles (`auction-vehicles/route.ts:76-97`).
 - Buyer identity from JWT on every buyer route (`getRequestBuyer`).
 

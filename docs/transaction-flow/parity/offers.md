@@ -118,7 +118,7 @@ Format per row: **spec_ref** · requirement · **status** · current implementat
 1. Offer stores: `Offer` vs `DealerOfferSubmission` (+`VehicleOffer`, `BuyerOfferReview[Item]`, `VehicleOfferDealerInvite`) vs `VehicleRequestOffer`.
 2. Deal creation: `commitOfferSelection` (locked) vs `POST /api/admin/deals` (unlocked, admin-selects) vs `buyer/requests/[requestId]/offer/respond` (unlocked, no prequal).
 3. Ranking: `rankOffers` engine vs route-level Best Cash/Best Monthly math in `app/api/buyer/auctions/[auctionId]/best-price/route.ts:40-129`; dealer-award position ranking (`dealer-award.ts:111`) and insights `myRank` (`insights/route.ts:44-46`) are further independent orderings.
-4. Junk-fee keyword lists: `lib/services/offer/junk-fee.service.ts:28` (built-in ∪ DB) vs dead `offer-validation.service.ts:3`.
+4. Junk-fee keyword lists: `lib/services/offer/junk-fee.service.ts:4-8` (built-in ∪ DB) vs dead `offer-validation.service.ts:3`.
 5. APR threshold `29.0` defined twice (`offer.service.ts:20`, `offer-validation.service.ts:2`).
 6. Offer creation without `submitOffer`: `POST /api/admin/offers` (registered + outside), `outside-dealer-offer/[token]`, `concierge-conversion` — four insert sites for `Offer`.
 7. Request-status stores: `VehicleRequest.status` enum, `VehicleOffer.requestStatus` string, notification-metadata `requestStatus` (`admin/vehicle-requests/[id]/status`).
