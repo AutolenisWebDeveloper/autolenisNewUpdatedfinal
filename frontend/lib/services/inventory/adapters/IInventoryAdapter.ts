@@ -18,7 +18,25 @@ export interface NormalizedVehicle {
   externalDealerPhone?: string;
   externalDealerCity?: string;
   externalDealerState?: string;
+  externalDealerStreet?: string;
+  externalDealerZip?: string;
+  externalDealerEmail?: string;
+  externalDealerType?: string;
   externalListingUrl?: string;
+
+  // The provider's own dealership identifiers. Strongest available join key when the
+  // name/address text is noisy, and the route from a swept listing to a rooftop we own.
+  mcRooftopId?: string;
+  mcDealerId?: string;
+
+  // The listing's own location — the dealership physically holding the car. Written to
+  // InventoryItem.city/state/zip/latitude/longitude, which were declared but never populated:
+  // distance was NULL on every row, so the public ZIP+radius filter matched nothing.
+  city?: string;
+  state?: string;
+  zip?: string;
+  latitude?: number;
+  longitude?: number;
 
   // Deduplication key: VIN (primary) or composite (fallback)
   sourceKey: string; // VIN or "make:model:year:mileage:price"

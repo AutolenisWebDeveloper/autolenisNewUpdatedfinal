@@ -46,7 +46,7 @@ export const revalidate = 3600;
 
 const HOW_IT_WORKS = [
   { step: "01", title: "Get Prequalified", body: "Free soft-pull prequalification in 3 minutes. See your exact pre-qualified budget — zero credit score impact." },
-  { step: "02", title: "Choose Smart Inventory", body: "Browse curated vehicles selected for value and demand. Shortlist up to 5 vehicles with confirmed prices and real mileage." },
+  { step: "02", title: "Choose Smart Inventory", body: "Browse sourced listings selected for value and demand. Shortlist up to 5 vehicles — dealers then confirm price and availability by bidding on them." },
   { step: "03", title: "Activate Dealer Competition", body: "A small Auction Access Deposit launches your auction. Up to 8 pre-vetted dealers compete privately within 48 hours." },
   { step: "04", title: "Buy With Confidence", body: "Compare offers ranked by total cost, monthly payment, and overall value. Choose the best deal — or decline and request a refund." },
 ];

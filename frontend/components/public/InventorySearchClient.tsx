@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useState, useEffect, useTransition, useMemo, useCallback } from "react";
 import { Search, MapPin, X, SlidersHorizontal, Loader2, Crosshair } from "lucide-react";
+import { SHORTLIST_RADIUS_MILES } from "@/lib/services/shortlist/shortlist-radius";
 
 export const ALL_MAKES = [
   "Toyota", "Honda", "Ford", "Chevrolet", "BMW", "Tesla", "Mercedes-Benz", "Audi",
@@ -26,7 +27,6 @@ const MILEAGE_OPTIONS = [
   { value: "25000", label: "Under 25k" }, { value: "50000", label: "Under 50k" },
   { value: "75000", label: "Under 75k" }, { value: "100000", label: "Under 100k" },
 ];
-const RADIUS_OPTIONS = [10, 25, 50, 100, 200];
 const FEATURE_OPTIONS = [
   "Sunroof", "Navigation", "Backup Camera", "Heated Seats",
   "Apple CarPlay", "Android Auto", "Blind Spot Monitor",
@@ -73,7 +73,6 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
   const [fuelType, setFuelType] = useState(sp.get("fuelType") ?? "");
   const [color, setColor] = useState(sp.get("color") ?? "");
   const [zip, setZip] = useState(sp.get("zip") ?? "");
-  const [radiusMiles, setRadiusMiles] = useState(sp.get("radiusMiles") ?? "");
   const [features, setFeatures] = useState<string[]>(() => {
     const f = sp.get("features");
     return f ? f.split(",").filter(Boolean) : [];
@@ -89,7 +88,7 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
     const next = new URLSearchParams();
     const fields: Record<string, string> = {
       q, make, model, yearMin, yearMax, priceMin, priceMax, mileageMax, condition,
-      bodyType, transmission, drivetrain, fuelType, color, zip, radiusMiles, sort,
+      bodyType, transmission, drivetrain, fuelType, color, zip, sort,
       features: features.join(","),
       ...overrides,
     };
@@ -97,7 +96,7 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
       if (v && v !== "relevance") next.set(k, v);
     }
     startTransition(() => router.push(`${pathname}?${next.toString()}`));
-  }, [q, make, model, yearMin, yearMax, priceMin, priceMax, mileageMax, condition, bodyType, transmission, drivetrain, fuelType, color, zip, radiusMiles, features, sort, pathname, router]);
+  }, [q, make, model, yearMin, yearMax, priceMin, priceMax, mileageMax, condition, bodyType, transmission, drivetrain, fuelType, color, zip, features, sort, pathname, router]);
 
   // Sync sort changes immediately
   useEffect(() => {
@@ -109,7 +108,7 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
     setQ(""); setMake(""); setModel(""); setYearMin(""); setYearMax("");
     setPriceMin(""); setPriceMax(""); setMileageMax(""); setCondition("");
     setBodyType(""); setTransmission(""); setDrivetrain(""); setFuelType("");
-    setColor(""); setZip(""); setRadiusMiles(""); setFeatures([]); setSort("relevance");
+    setColor(""); setZip(""); setFeatures([]); setSort("relevance");
     startTransition(() => router.push(pathname));
   }
 
@@ -151,7 +150,7 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
   if (drivetrain) chips.push({ key: "drivetrain", label: drivetrain, clear: () => { setDrivetrain(""); apply({ drivetrain: "" }); } });
   if (fuelType) chips.push({ key: "fuelType", label: fuelType, clear: () => { setFuelType(""); apply({ fuelType: "" }); } });
   if (color) chips.push({ key: "color", label: color, clear: () => { setColor(""); apply({ color: "" }); } });
-  if (zip) chips.push({ key: "zip", label: `${zip}${radiusMiles ? ` · ${radiusMiles}mi` : ""}`, clear: () => { setZip(""); setRadiusMiles(""); apply({ zip: "", radiusMiles: "" }); } });
+  if (zip) chips.push({ key: "zip", label: zip, clear: () => { setZip(""); apply({ zip: "" }); } });
   if (features.length > 0) chips.push({ key: "features", label: `${features.length} feature${features.length === 1 ? "" : "s"}`, clear: () => { setFeatures([]); apply({ features: "" }); } });
 
   const activeCount = chips.length;
@@ -234,7 +233,7 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
             transmission={transmission} setTransmission={setTransmission} drivetrain={drivetrain} setDrivetrain={setDrivetrain}
             fuelType={fuelType} setFuelType={setFuelType} color={color} setColor={setColor}
             features={features} toggleFeature={toggleFeature}
-            zip={zip} setZip={setZip} radiusMiles={radiusMiles} setRadiusMiles={setRadiusMiles}
+            zip={zip} setZip={setZip}
             locating={locating} useMyLocation={useMyLocation}
             onApply={() => apply()} onClear={clearAll} isPending={isPending}
             inputCls={inputCls} labelCls={labelCls}
@@ -285,7 +284,7 @@ export default function InventorySearchClient({ availableMakes, availableModelsB
                 transmission={transmission} setTransmission={setTransmission} drivetrain={drivetrain} setDrivetrain={setDrivetrain}
                 fuelType={fuelType} setFuelType={setFuelType} color={color} setColor={setColor}
                 features={features} toggleFeature={toggleFeature}
-                zip={zip} setZip={setZip} radiusMiles={radiusMiles} setRadiusMiles={setRadiusMiles}
+                zip={zip} setZip={setZip}
                 locating={locating} useMyLocation={useMyLocation}
                 inputCls={inputCls} labelCls={labelCls}
                 sort={sort} setSort={setSort} mobileSort
@@ -337,7 +336,6 @@ interface FilterFieldsProps {
   color: string; setColor: (v: string) => void;
   features: string[]; toggleFeature: (f: string) => void;
   zip: string; setZip: (v: string) => void;
-  radiusMiles: string; setRadiusMiles: (v: string) => void;
   locating: boolean; useMyLocation: () => void;
   inputCls: string; labelCls: string;
   sort: string; setSort: (v: string) => void;
@@ -467,13 +465,16 @@ function FilterFields(p: FilterFieldsProps) {
               {p.locating ? <Loader2 size={13} className="animate-spin" /> : <Crosshair size={13} />}
             </button>
           </div>
+          {/* The radius selector is gone deliberately. Distance no longer narrows the catalogue
+              — every listing stays visible and searchable — so a control offering "25 miles"
+              would change nothing on screen while appearing to filter. The ZIP above is what
+              matters now: it puts a distance on every card and decides which vehicles can be
+              taken to auction. */}
           {p.zip.length === 5 && (
-            <select data-testid="filter-radius"
-              className="w-full mt-2 px-3 py-2 border border-[#E5E7EB] rounded-lg text-xs"
-              value={p.radiusMiles} onChange={e => p.setRadiusMiles(e.target.value)}>
-              <option value="">Any Distance</option>
-              {RADIUS_OPTIONS.map(r => <option key={r} value={r}>{r} miles</option>)}
-            </select>
+            <p className="mt-2 text-[11px] text-[#6B7280] leading-snug" data-testid="radius-note">
+              Every vehicle stays browsable. We show how far each one is, and bring those within{" "}
+              {SHORTLIST_RADIUS_MILES} miles to auction.
+            </p>
           )}
         </div>
       </div>

@@ -78,6 +78,8 @@ export interface SimilarVehicleSeed {
   trim?: string | null;
   mileage?: number | null;
   priceCents: number;
+  /** What the buyer liked about this specific car. Carried over so the request is not generic. */
+  features?: string[] | null;
 }
 
 /**
@@ -87,7 +89,11 @@ export interface SimilarVehicleSeed {
  */
 export const REQUEST_PREFILL_KEYS = [
   "makePreference", "modelPreference", "trim", "yearMin", "yearMax", "maxMileage", "maxBudgetCents",
+  "features",
 ] as const;
+
+/** How many features to carry over. A request seeded with twenty must-haves matches nothing. */
+export const MAX_PREFILL_FEATURES = 6;
 
 /**
  * A pre-filled Vehicle Request for a vehicle that is no longer available.
@@ -105,5 +111,12 @@ export function buildSimilarRequestHref(v: SimilarVehicleSeed): string {
   params.set("maxMileage", mileageBandFor(v.mileage));
   const band = priceBandCentsFor(v.priceCents);
   if (band !== null) params.set("maxBudgetCents", String(band));
+  // Features are what made THIS car the one they picked, so they carry over — but capped and
+  // de-duplicated. Every feature is an AND in the search, and a request seeded with a full
+  // options list describes exactly one car, which is the car that just went away.
+  const features = Array.from(
+    new Set((v.features ?? []).map((f) => f.trim()).filter((f) => f.length > 0)),
+  ).slice(0, MAX_PREFILL_FEATURES);
+  if (features.length > 0) params.set("features", features.join(","));
   return `/buyer/requests/new?${params.toString()}`;
 }

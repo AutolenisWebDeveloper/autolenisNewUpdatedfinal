@@ -29,9 +29,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 const LANE_INFO: Record<string, { label: string; variant: "green" | "blue" | "gray"; trustLabel: string }> = {
-  LANE_1: { label: "Verified", variant: "green",  trustLabel: "Directly from a verified AutoLenis dealer partner" },
-  LANE_2: { label: "Partner",  variant: "blue",   trustLabel: "Partner-adjacent inventory — availability confirmation pending" },
-  LANE_3: { label: "Market",   variant: "gray",   trustLabel: "Open-market listing — subject to availability" },
+  LANE_1: { label: "Dealer listed", variant: "green", trustLabel: "Listed by a dealer we source from — price and availability confirmed when they bid" },
+  LANE_2: { label: "Partner",       variant: "blue",  trustLabel: "Partner-adjacent listing — price and availability confirmed when a dealer bids" },
+  LANE_3: { label: "Market listed", variant: "gray",  trustLabel: "Third-party listing — price and availability confirmed when a dealer bids" },
 };
 
 export default async function VehicleDetailPage({ params }: Props) {
@@ -246,10 +246,12 @@ export default async function VehicleDetailPage({ params }: Props) {
 
             {/* Dealer identity — NEVER expose Lane 2/3 external dealer info to buyer */}
             {vehicle.lane === "LANE_1" && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-5" data-testid="dealer-verified-notice">
-                <p className="text-sm font-semibold text-green-800">Verified Dealer Vehicle</p>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-5" data-testid="dealer-listed-notice">
+                <p className="text-sm font-semibold text-green-800">Listed by a dealer we source from</p>
                 <p className="text-xs text-green-600 mt-0.5">
-                  This vehicle is listed directly by an AutoLenis-verified dealer partner. Dealer details are revealed after you select a deal.
+                  AutoLenis has not inspected this vehicle or confirmed it is still available. What
+                  gets verified is the dealer&apos;s offer, at the point they make it. Dealer details are
+                  revealed after you select a deal.
                 </p>
               </div>
             )}

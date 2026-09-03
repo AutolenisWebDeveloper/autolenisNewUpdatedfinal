@@ -83,7 +83,7 @@
     "test:campaign": "tsx --test --experimental-test-module-mocks lib/services/campaign/__tests__/*.test.ts",
     "test:operations": "tsx --test --experimental-test-module-mocks lib/services/__tests__/*.test.ts",
     "test:inventory": "tsx --test --experimental-test-module-mocks lib/services/inventory/__tests__/*.test.ts",
-    "test:shortlist": "tsx --test --experimental-test-module-mocks lib/services/shortlist/__tests__/*.test.ts",
+    "test:shortlist": "tsx --test --experimental-test-module-mocks lib/services/shortlist/__tests__/*.test.ts app/api/buyer/shortlist/__tests__/*.test.ts",
     "test:vehicle-request": "tsx --test --experimental-test-module-mocks lib/services/vehicle-request/__tests__/*.test.ts",
     "test:dealer-onboarding": "tsx --test --experimental-test-module-mocks lib/services/dealer/__tests__/batch2/*.test.ts lib/services/agreement/__tests__/*.test.ts",
     "test:esign": "tsx --test --experimental-test-module-mocks lib/services/esign/__tests__/*.test.ts app/api/buyer/esign/__tests__/*.test.ts app/api/dealer/deals/__tests__/*.test.ts",

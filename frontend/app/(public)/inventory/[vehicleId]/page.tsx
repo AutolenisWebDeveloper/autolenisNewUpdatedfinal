@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { ArrowLeft, CheckCircle2, Shield, MapPin } from "lucide-react";
 import VehicleGalleryClient from "./VehicleGalleryClient";
 import AddToShortlistButton from "./AddToShortlistButton";
+import { shortlistGate, distanceMilesBetween, SHORTLIST_RADIUS_MILES } from "@/lib/services/shortlist/shortlist-radius";
+import { buildSimilarRequestHref } from "@/lib/services/shortlist/shortlist-availability";
+import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
 import { JsonLd, vehicleSchema, breadcrumbSchema } from "@/lib/seo/jsonld";
 import { bucketFeatures } from "@/lib/utils/feature-categories";
 
@@ -12,10 +15,17 @@ const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").tri
 
 export const dynamic = "force-dynamic";
 
+// Lane describes PROVENANCE — where the listing came from — never a guarantee about it. A swept
+// listing is third-party sourced and unconfirmed: AutoLenis has not seen the car, spoken to the
+// seller, or held it. What gets verified is a dealer's OFFER, at the moment it is made.
+//
+// LANE_1 used to render "Verified" with an "Identity-verified dealer" caption and a shield chip.
+// Every LANE_1 row in production carries a null dealer_id, so all three were asserting a dealer
+// relationship that did not exist on a single row.
 const LANE_CONFIG = {
-  LANE_1: { label: "Verified", bg: "bg-[#50D14E]/15", text: "text-[#1A6B18]", border: "border-[#50D14E]/40", desc: "Identity-verified dealer", verified: true },
-  LANE_2: { label: "Partner",  bg: "bg-[#2667BF]/10", text: "text-[#1A3C7A]", border: "border-[#2667BF]/30", desc: "Vetted partner dealer",     verified: false },
-  LANE_3: { label: "Market",   bg: "bg-[#F8F9FB]",      text: "text-[#4B5563]",  border: "border-[#E5E7EB]",  desc: "Licensed market listing",   verified: false },
+  LANE_1: { label: "Dealer listed", bg: "bg-[#50D14E]/15", text: "text-[#1A6B18]", border: "border-[#50D14E]/40", desc: "Listed by a dealer we source from" },
+  LANE_2: { label: "Partner",       bg: "bg-[#2667BF]/10", text: "text-[#1A3C7A]", border: "border-[#2667BF]/30", desc: "Listed by a partner dealer" },
+  LANE_3: { label: "Market listed", bg: "bg-[#F8F9FB]",    text: "text-[#4B5563]", border: "border-[#E5E7EB]",  desc: "Third-party listing, not yet confirmed" },
 };
 
 async function getVehicle(id: string) {
@@ -32,6 +42,8 @@ async function getVehicle(id: string) {
       zip: true,
       latitude: true, longitude: true,
       externalDealerCity: true, externalDealerState: true,
+      // Gate inputs — they decide the ACTION, never whether this page renders.
+      isActive: true, lastSeenAt: true, dealerId: true, addedByAdminId: true,
     },
   });
   if (!item) return null;
@@ -43,18 +55,23 @@ async function getVehicle(id: string) {
   return { ...item, avgPriceCents: avg._avg.priceCents ?? null, avgSampleSize: avg._count };
 }
 
-async function getBuyerBudget(): Promise<number | null> {
+/** Budget AND location from the one buyer read the page already performed. */
+async function getBuyerContext(): Promise<{ budgetCents: number | null; zip: string | null }> {
+  const none = { budgetCents: null, zip: null };
   try {
     const { createServerSupabaseClient } = await import("@/lib/supabase");
     const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user) return none;
     const buyer = await prisma.buyer.findFirst({
       where: { user: { supabaseId: user.id } },
       include: { preQualification: true },
     });
-    return buyer?.preQualification?.maxOtdAmountCents ?? null;
-  } catch { return null; }
+    return {
+      budgetCents: buyer?.preQualification?.maxOtdAmountCents ?? null,
+      zip: buyer?.zip ?? null,
+    };
+  } catch { return none; }
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ vehicleId: string }> }): Promise<Metadata> {
@@ -65,7 +82,7 @@ export async function generateMetadata({ params }: { params: Promise<{ vehicleId
   const title = `${v.year} ${v.make} ${v.model}${trim} — AutoLenis`;
   const price = `$${(v.priceCents / 100).toLocaleString()}`;
   const mi = v.mileage ? `${v.mileage.toLocaleString()} mi · ` : "";
-  const description = `${v.year} ${v.make} ${v.model}${trim} for ${price}. ${mi}Verified inventory on AutoLenis. Let dealers compete for your business.`;
+  const description = `${v.year} ${v.make} ${v.model}${trim} for ${price}. ${mi}Sourced listing on AutoLenis. Let dealers compete for your business.`;
   const url = `${APP_URL}/inventory/${vehicleId}`;
   const ogImage = `${APP_URL}/og/vehicle/${vehicleId}`;
   return {
@@ -81,8 +98,31 @@ export async function generateMetadata({ params }: { params: Promise<{ vehicleId
 export default async function VehicleDetailPage({ params, searchParams }: { params: Promise<{ vehicleId: string }>, searchParams: Promise<Record<string, string>> }) {
   const { vehicleId } = await params;
   const sp = await searchParams;
-  const [vehicle, buyerBudget] = await Promise.all([getVehicle(vehicleId), getBuyerBudget()]);
+  const [vehicle, buyerCtx] = await Promise.all([getVehicle(vehicleId), getBuyerContext()]);
   if (!vehicle) notFound();
+  const buyerBudget = buyerCtx.budgetCents;
+
+  // Distance and the resulting action. A vehicle outside the provider's radius is fully
+  // browsable — only the button changes, and it changes into a route forward rather than a
+  // disabled control.
+  const buyerCoords = buyerCtx.zip ? await geocodeZip(buyerCtx.zip) : null;
+  const distanceMiles = distanceMilesBetween(buyerCoords, vehicle.latitude, vehicle.longitude);
+  const gate = shortlistGate(
+    {
+      distanceMiles,
+      isActive: vehicle.isActive,
+      priceCents: vehicle.priceCents,
+      lastSeenAt: vehicle.lastSeenAt,
+      lane: vehicle.lane,
+      dealerId: vehicle.dealerId,
+      addedByAdminId: vehicle.addedByAdminId,
+    },
+    { hasZip: !!buyerCoords },
+  );
+  const similarHref = buildSimilarRequestHref({
+    year: vehicle.year, make: vehicle.make, model: vehicle.model, trim: vehicle.trim,
+    mileage: vehicle.mileage, priceCents: vehicle.priceCents, features: vehicle.features,
+  });
 
   // Related vehicles for internal SEO linking
   const relatedVehicles = await prisma.inventoryItem.findMany({
@@ -286,9 +326,26 @@ export default async function VehicleDetailPage({ params, searchParams }: { para
               )}
 
               <div className="border-t border-[#E5E7EB] pt-4 mb-5 space-y-2" data-testid="trust-signals">
-                {lc.verified && (
-                  <div className="flex items-center gap-2 text-xs text-[#1A6B18]" data-testid="verified-dealer-chip">
-                    <Shield size={12} /> Verified Dealer
+                {/* Sourcing, stated plainly. This used to read "Verified Dealer" behind a shield
+                    on every LANE_1 row — none of which has a dealer_id. */}
+                <div className="flex items-center gap-2 text-xs text-[#4B5563]" data-testid="listing-provenance">
+                  <Shield size={12} /> {lc.desc} · price and availability confirmed when a dealer bids
+                </div>
+                {/* Distance on the detail page as well as the card. Shown whenever we can place
+                    both ends — including when it is too far to shortlist, because that is
+                    precisely when the buyer most needs to know. */}
+                {distanceMiles !== null && (
+                  <div className="flex items-center gap-2 text-xs text-[#4B5563]" data-testid="vehicle-distance">
+                    <MapPin size={12} /> {distanceMiles} mi from {buyerCtx.zip}
+                    {distanceMiles > SHORTLIST_RADIUS_MILES && " · outside our auction radius"}
+                  </div>
+                )}
+                {gate.freshness !== "FRESH" && (
+                  <div className="flex items-center gap-2 text-xs text-[#92400E]" data-testid="stale-flag">
+                    <Shield size={12} />
+                    {gate.freshness === "STALE"
+                      ? "Not seen on the market this week — may already be sold"
+                      : "Not seen for over 30 days — likely sold"}
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-xs text-[#4B5563]">
@@ -304,6 +361,20 @@ export default async function VehicleDetailPage({ params, searchParams }: { para
                   <Link href="/auth/signup" data-testid="vehicle-cta-primary" className="block w-full text-center px-5 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors shadow-md shadow-[#0B5FD1]/15">
                     Check Your Buying Power
                     <span className="block text-[10px] font-normal opacity-80 mt-0.5">Free · No Credit Impact</span>
+                  </Link>
+                ) : gate.action === "REQUEST_SIMILAR" ? (
+                  <Link href={similarHref} data-testid="find-similar-cta"
+                    className="block w-full text-center px-5 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors shadow-md shadow-[#0B5FD1]/15">
+                    Find one like this near me
+                    <span className="block text-[10px] font-normal opacity-80 mt-0.5">
+                      {gate.reason === "OUT_OF_RADIUS"
+                        ? `This one is ${distanceMiles} mi away — beyond our ${SHORTLIST_RADIUS_MILES} mi auction radius`
+                        : gate.reason === "STALE_LISTING"
+                          ? "This listing has not been seen for over 30 days"
+                          : gate.reason === "UNAVAILABLE"
+                            ? "This vehicle is no longer available"
+                            : "We cannot confirm where this vehicle is located"}
+                    </span>
                   </Link>
                 ) : withinBudget ? (
                   <AddToShortlistButton vehicleId={vehicle.id} />

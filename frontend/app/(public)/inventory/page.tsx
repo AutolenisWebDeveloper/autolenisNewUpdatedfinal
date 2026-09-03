@@ -6,7 +6,9 @@ import { Suspense } from "react";
 import InventorySearchClient from "@/components/public/InventorySearchClient";
 import PublicFooter from "@/components/public/PublicFooter";
 import { ChevronLeft, ChevronRight, Car, MapPin } from "lucide-react";
-import { lookupZip, haversineMiles, boundingBox } from "@/lib/utils/zip-coords";
+import { lookupZip } from "@/lib/utils/zip-coords";
+import { gateCatalogue, SHORTLIST_RADIUS_MILES } from "@/lib/services/shortlist/shortlist-radius";
+import { PROVIDER_PAGINATION_LIMIT } from "@/lib/services/inventory/inventory-source-config.service";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, breadcrumbSchema } from "@/lib/seo/jsonld";
 
@@ -34,10 +36,16 @@ export const dynamic = "force-dynamic";
 const PAGE_SIZE = 12;
 const RECOGNIZED_BODY = ["SUV", "Sedan", "Truck", "Van", "Coupe", "Convertible", "Wagon", "Hatchback"];
 
+// A swept listing is third-party sourced and UNCONFIRMED. These labels describe where a listing
+// came from, never that anyone has stood behind it. "Verified" is reserved for a dealer's OFFER,
+// at the point it is made — that is the only moment AutoLenis has a commitment from anyone.
+//
+// LANE_1 previously read "Verified" on the card. In production every LANE_1 row carries a null
+// dealer_id: the badge was asserting a dealer relationship that did not exist on a single row.
 const LANE_CONFIG = {
-  LANE_1: { label: "Verified", bg: "bg-[#ECFDF5]", text: "text-[#065F46]", border: "border-[#A7F3D0]" },
-  LANE_2: { label: "Partner",  bg: "bg-[#EFF6FF]", text: "text-[#1D4ED8]", border: "border-[#BFDBFE]" },
-  LANE_3: { label: "Market",   bg: "bg-[#0B5FD1]/10", text: "text-[#0B5FD1]", border: "border-[#0B5FD1]/25" },
+  LANE_1: { label: "Dealer listed", bg: "bg-[#ECFDF5]", text: "text-[#065F46]", border: "border-[#A7F3D0]" },
+  LANE_2: { label: "Partner",       bg: "bg-[#EFF6FF]", text: "text-[#1D4ED8]", border: "border-[#BFDBFE]" },
+  LANE_3: { label: "Market listed", bg: "bg-[#0B5FD1]/10", text: "text-[#0B5FD1]", border: "border-[#0B5FD1]/25" },
 };
 
 type SearchParams = {
@@ -48,7 +56,7 @@ type SearchParams = {
   mileageMax?: string; condition?: string; bodyType?: string;
   transmission?: string; drivetrain?: string; fuelType?: string; color?: string;
   features?: string;
-  zip?: string; radiusMiles?: string; sort?: string;
+  zip?: string; sort?: string;
 };
 
 async function getMakeAndModelOptions() {
@@ -111,16 +119,15 @@ async function getInventory(p: SearchParams) {
     ];
   }
 
-  let center: { lat: number; lng: number } | null = null;
-  const radiusMiles = p.radiusMiles ? parseFloat(p.radiusMiles) : null;
-  if (p.zip && p.zip.length === 5 && radiusMiles && radiusMiles > 0) {
-    center = lookupZip(p.zip);
-    if (center) {
-      const box = boundingBox(center, radiusMiles);
-      where.latitude  = { gte: box.minLat, lte: box.maxLat };
-      where.longitude = { gte: box.minLng, lte: box.maxLng };
-    }
-  }
+  // A ZIP tells us where the buyer is. It does NOT narrow the catalogue.
+  //
+  // This used to push a bounding box into the WHERE and then filter again in memory, which
+  // dropped every out-of-radius row and — because the box is a coordinate comparison — every
+  // row with a null coordinate too. The adapter had never written a coordinate, so entering a
+  // ZIP emptied a catalogue of 148 cars. Distance is now a label and a sort order; the action
+  // on each card is what changes past the radius (see gateCatalogue).
+  const center: { lat: number; lng: number } | null =
+    p.zip && p.zip.length === 5 ? lookupZip(p.zip) : null;
 
   const sort = p.sort ?? "relevance";
   let orderBy: Prisma.InventoryItemOrderByWithRelationInput | Prisma.InventoryItemOrderByWithRelationInput[];
@@ -132,8 +139,12 @@ async function getInventory(p: SearchParams) {
     default:           orderBy = [{ lane: "asc" }, { createdAt: "desc" }];
   }
 
-  // Pull 2x for dedupe; if geo, pull more for distance refinement
-  const fetchTake = center ? 200 : PAGE_SIZE * 4;
+  // Pull 2x for dedupe; with a ZIP, distance ranking happens in memory so the window has to
+  // cover the whole market. 500 is the provider's own deep-paging ceiling, which is therefore
+  // the largest catalogue one market's sweep can produce — the previous 200 was set when every
+  // row was NULL-coordinate and unrankable, and would silently truncate the DFW catalogue the
+  // moment it fills.
+  const fetchTake = center ? PROVIDER_PAGINATION_LIMIT : PAGE_SIZE * 4;
   const fetchSkip = center ? 0 : (page - 1) * PAGE_SIZE;
 
   const [totalRaw, itemsRaw] = await Promise.all([
@@ -145,6 +156,9 @@ async function getInventory(p: SearchParams) {
         mileage: true, priceCents: true, images: true, bodyType: true,
         latitude: true, longitude: true,
         city: true, state: true, externalDealerCity: true, externalDealerState: true,
+        // Gate inputs. Freshness and availability decide the ACTION on the card, never whether
+        // the card is rendered.
+        isActive: true, lastSeenAt: true, dealerId: true, addedByAdminId: true,
       },
     }),
   ]);
@@ -158,33 +172,34 @@ async function getInventory(p: SearchParams) {
     return true;
   });
 
-  // Compute distance + filter
-  type WithDistance = typeof deduped[number] & { distanceMiles: number | null };
-  let computed: WithDistance[] = deduped.map(it => {
-    let d: number | null = null;
-    if (center && it.latitude !== null && it.longitude !== null) {
-      d = haversineMiles(center, { lat: Number(it.latitude), lng: Number(it.longitude) });
-    }
-    return { ...it, distanceMiles: d !== null ? Math.round(d * 10) / 10 : null };
-  });
+  // Distance + per-card action. No filter: the row count out equals the row count in.
+  const { gated, inRadiusCount, hasZip } = gateCatalogue(deduped, center);
 
-  if (center && radiusMiles) {
-    computed = computed.filter(it => it.distanceMiles !== null && it.distanceMiles <= radiusMiles);
-    if (sort === "distance" || sort === "relevance") {
-      computed.sort((a, b) => (a.distanceMiles ?? 1e9) - (b.distanceMiles ?? 1e9));
-    }
+  // An explicit sort other than relevance/distance is the buyer's choice and outranks proximity;
+  // gateCatalogue has already ordered nearest-first, so only a re-sort is needed here.
+  if (center && sort !== "distance" && sort !== "relevance") {
+    // Preserve the DB order the query asked for.
+    const rank = new Map(deduped.map((it, i) => [it.id, i]));
+    gated.sort((a, b) => (rank.get(a.row.id) ?? 0) - (rank.get(b.row.id) ?? 0));
   }
 
-  const total = center ? computed.length : totalRaw;
-  const start = center ? (page - 1) * PAGE_SIZE : 0;
-  const items = computed.slice(start, start + PAGE_SIZE);
+  const items = gated
+    .slice(center ? (page - 1) * PAGE_SIZE : 0, (center ? (page - 1) * PAGE_SIZE : 0) + PAGE_SIZE)
+    .map(g => ({ ...g.row, distanceMiles: g.distanceMiles, gate: g.gate }));
 
-  return { items, total, page, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) };
+  // With a ZIP the ranking is done over the fetched window rather than the whole table, so the
+  // count reported is the size of that ranked set. Without one, the DB count is exact.
+  const total = center ? gated.length : totalRaw;
+
+  return {
+    items, total, page, inRadiusCount, hasZip,
+    totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+  };
 }
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
-  const [{ items, total, page, totalPages }, { makes, modelsByMake }] = await Promise.all([
+  const [{ items, total, page, totalPages, inRadiusCount, hasZip }, { makes, modelsByMake }] = await Promise.all([
     getInventory(params),
     getMakeAndModelOptions(),
   ]);
@@ -225,11 +240,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
           </Link>
         </div>
         <p className="text-xs text-[#94A3B8] font-medium">
-          Curated opportunities · Verified sellers · Financing clarity · Dealer competition
+          Sourced listings · Financing clarity · Dealer competition
         </p>
         <p className="text-sm text-[#94A3B8] mt-4" data-testid="results-count">
           Showing {items.length} of {total} vehicle{total !== 1 ? "s" : ""}
-          {params.zip ? ` near ${params.zip}` : " from verified dealers"}
+          {params.zip ? ` near ${params.zip}` : ""}
         </p>
       </div>
 
@@ -240,6 +255,46 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
             <InventorySearchClient availableMakes={makes} availableModelsByMake={modelsByMake} />
           </Suspense>
         </div>
+      </div>
+
+      {/* LOCATION + REACHABILITY. Never a filter — the grid below always renders. */}
+      <div className="px-6 md:px-12 max-w-7xl mx-auto pt-6">
+        {!hasZip ? (
+          <div
+            data-testid="zip-prompt"
+            className="rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-5 py-4 mb-6"
+          >
+            <p className="text-sm font-semibold text-[#1D4ED8] mb-1">
+              Add your ZIP code to see distances
+            </p>
+            <p className="text-sm text-[#1E40AF]/80">
+              We bring vehicles within {SHORTLIST_RADIUS_MILES} miles of you to auction. Enter a ZIP
+              above and we will show how far each vehicle is and which ones dealers can compete on.
+              Everything below stays browsable either way.
+            </p>
+          </div>
+        ) : inRadiusCount === 0 ? (
+          <div
+            data-testid="no-vehicles-in-radius"
+            className="rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-5 py-5 mb-6"
+          >
+            <p className="text-base font-bold text-[#92400E] mb-1">
+              Nothing within {SHORTLIST_RADIUS_MILES} miles of {params.zip} yet
+            </p>
+            <p className="text-sm text-[#92400E]/85 mb-4">
+              Tell us what you are looking for and dealers near you compete to find it — that is
+              the faster route anyway. The vehicles below are outside your radius, shown as
+              examples of what we source.
+            </p>
+            <Link
+              href="/buyer/requests/new"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0B5FD1] text-white
+                text-sm font-semibold rounded-md hover:bg-[#0A4DB8] transition-colors"
+            >
+              Tell us what you want →
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       {/* GRID */}
@@ -335,8 +390,22 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-[#0B5FD1] font-semibold group-hover:underline">
-                      View Opportunity →
+                    {/* Stale flag: display only. Not seen for a week, still perfectly browsable. */}
+                    {vehicle.gate.freshness !== "FRESH" && (
+                      <p className="text-[11px] text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A]
+                        rounded px-2 py-1 mb-3 inline-block" data-testid="stale-flag">
+                        {vehicle.gate.freshness === "STALE"
+                          ? "Not seen on the market this week — may already be sold"
+                          : "Not seen for over 30 days — likely sold"}
+                      </p>
+                    )}
+                    {/* The ACTION is what the radius gates. The card itself is never withheld. */}
+                    <div className="text-xs font-semibold group-hover:underline text-[#0B5FD1]">
+                      {vehicle.gate.action === "ADD"
+                        ? "View Opportunity →"
+                        : vehicle.gate.action === "NEED_ZIP"
+                          ? "View details →"
+                          : "Find one like this near me →"}
                     </div>
                   </div>
                 </Link>

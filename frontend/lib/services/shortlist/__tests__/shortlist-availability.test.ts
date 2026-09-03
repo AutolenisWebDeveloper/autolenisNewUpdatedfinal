@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   isShortlistItemAvailable, countAvailable, mileageBandFor, priceBandCentsFor,
-  buildSimilarRequestHref, REQUEST_PREFILL_KEYS, MILEAGE_STOPS,
+  buildSimilarRequestHref, REQUEST_PREFILL_KEYS, MILEAGE_STOPS, MAX_PREFILL_FEATURES,
 } from "@/lib/services/shortlist/shortlist-availability";
 
 // ── Availability ─────────────────────────────────────────────────────────────
@@ -140,4 +140,36 @@ test("EVERY emitted key is one the request form actually reads", () => {
       `${key} is emitted but /buyer/requests/new never reads it — the form would open empty`,
     );
   }
+});
+
+// ── features carry over into the seeded request ─────────────────────────────
+
+test("features the buyer liked are carried into the request", () => {
+  const href = buildSimilarRequestHref({
+    year: 2022, make: "Ford", model: "F-150", priceCents: 3_000_000,
+    features: ["Tow Package", "Heated Seats"],
+  });
+  assert.match(href, /features=Tow\+Package%2CHeated\+Seats/);
+});
+
+test("features are capped — a request seeded with every option matches nothing", () => {
+  const href = buildSimilarRequestHref({
+    year: 2022, make: "Ford", model: "F-150", priceCents: 3_000_000,
+    features: ["a", "b", "c", "d", "e", "f", "g", "h"],
+  });
+  const got = new URL(href, "http://x").searchParams.get("features")!.split(",");
+  assert.equal(got.length, MAX_PREFILL_FEATURES);
+});
+
+test("blank and duplicate features are dropped rather than emitted", () => {
+  const href = buildSimilarRequestHref({
+    year: 2022, make: "Ford", model: "F-150", priceCents: 3_000_000,
+    features: ["Sunroof", " Sunroof ", "  ", "AWD"],
+  });
+  assert.deepEqual(new URL(href, "http://x").searchParams.get("features")!.split(","), ["Sunroof", "AWD"]);
+});
+
+test("no features means no features key at all", () => {
+  const href = buildSimilarRequestHref({ year: 2022, make: "Ford", model: "F-150", priceCents: 3_000_000 });
+  assert.equal(new URL(href, "http://x").searchParams.has("features"), false);
 });

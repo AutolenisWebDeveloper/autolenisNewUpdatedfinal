@@ -19,6 +19,7 @@ const calls = {
   syncRun: [] as Call[],
   sourceUpsert: [] as Call[],
   sourceUpdate: [] as Call[],
+  sourceFindUnique: [] as Call[],
   itemUpdateMany: [] as Call[],
   itemFindMany: [] as Call[],
   itemFindFirst: [] as Call[],
@@ -26,6 +27,10 @@ const calls = {
 };
 let existingAlert: unknown = null;
 let ledgerRefuses = false;
+/** Month-to-date calls the ledger reports when draws are still being granted. */
+let ledgerUsed = 0;
+/** Simulates the ledger read failing (e.g. P2022 pre-migration). */
+let readFailure = false;
 let existingItem: unknown = null;
 
 mock.module("@/lib/prisma", {
@@ -51,6 +56,14 @@ mock.module("@/lib/prisma", {
           monthlyCallBudget: 400, callsUsedThisCycle: 0, budgetCycleKey: "2026-09" }),
         upsert: async ({ where }: Call) => { calls.sourceUpsert.push({ where }); return { id: "src_1" }; },
         update: async (args: Call) => { calls.sourceUpdate.push(args); return { id: "src_1" }; },
+        // The post-run ledger read backing the 80% warning. Kept CONSISTENT with ledgerRefuses:
+        // draws are only refused once the counter has reached the cap, so a double that refuses
+        // draws while reporting 0 used would be modelling a state production cannot be in.
+        findUnique: async (args: Call) => {
+          calls.sourceFindUnique.push(args);
+          if (readFailure) throw new Error("P2022: column does not exist");
+          return { callsUsedThisCycle: ledgerRefuses ? 400 : ledgerUsed };
+        },
         // The ledger draw: count 0 means "refused".
         updateMany: async (args: Call) => {
           const w = args.where as { OR?: unknown[] };
@@ -80,6 +93,7 @@ beforeEach(() => {
   calls.itemUpsert = []; calls.itemCreate = []; calls.syncRun = []; calls.sourceUpsert = []; calls.sourceUpdate = [];
   calls.itemUpdateMany = []; calls.itemFindMany = []; calls.itemFindFirst = [];
   calls.notifications = []; existingAlert = null; ledgerRefuses = false;
+  calls.sourceFindUnique = []; ledgerUsed = 0; readFailure = false;
   existingItem = null;
 });
 afterEach(() => {
@@ -285,6 +299,58 @@ test("a fully budget-exhausted sweep alerts — it is excluded from health, so n
   assert.equal(result.attemptedSources, 0, "zero calls is not an attempt");
   assert.equal(calls.syncRun[0]!.status, "BUDGET_EXHAUSTED");
   assert.equal(calls.notifications.length, 1, "exactly one alert");
+  assert.match(String(calls.notifications[0]!.title), /budget exhausted/i);
+});
+
+test("a sweep that crosses 80% of the budget warns while there is still room to act", async () => {
+  // The exhausted alert fires when the month is already lost. This is the one that arrives in
+  // time to raise the cap, narrow the market, or accept the freeze knowingly.
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  mockFetchListings([]);
+  ledgerUsed = 340; // of the mocked 400 budget = 85%
+  const { runInventorySync } = await load();
+  await runInventorySync({}, "full");
+
+  assert.equal(calls.notifications.length, 1, "exactly one warning");
+  assert.match(String(calls.notifications[0]!.title), /80%/);
+  assert.match(String(calls.notifications[0]!.body), /340 of 400/);
+  assert.doesNotMatch(String(calls.notifications[0]!.title), /exhausted/i);
+});
+
+test("a healthy budget stays silent and costs no alert query", async () => {
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  mockFetchListings([]);
+  ledgerUsed = 12;
+  const { runInventorySync } = await load();
+  await runInventorySync({}, "full");
+  assert.equal(calls.notifications.length, 0, "a healthy sweep must not page anyone");
+});
+
+test("the month-to-date read happens AFTER the run, so this sweep's calls are counted", async () => {
+  // Reading before the run always reports the previous sweep's position and warns a day late.
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  mockFetchListings([]);
+  ledgerUsed = 340;
+  const { runInventorySync } = await load();
+  await runInventorySync({}, "full");
+  assert.equal(calls.sourceFindUnique.length, 1, "one ledger read per run");
+  assert.deepEqual(
+    (calls.sourceFindUnique[0]! as { select?: unknown }).select,
+    { callsUsedThisCycle: true },
+    "narrowed — an unnarrowed read raises P2022 while the market-config migration is unapplied",
+  );
+});
+
+test("a ledger read failure cannot silence the EXHAUSTED alert", async () => {
+  // The adapter outcome is authoritative and free; the alert must not hinge on a second query.
+  process.env.MARKETCHECK_API_KEY = "test-key";
+  mockFetchListings([]);
+  ledgerRefuses = true;
+  readFailure = true;
+  const { runInventorySync } = await load();
+  const result = await runInventorySync({}, "full");
+  assert.equal(result.outcome, "BUDGET_EXHAUSTED");
+  assert.equal(calls.notifications.length, 1, "still alerted despite the failed read");
   assert.match(String(calls.notifications[0]!.title), /budget exhausted/i);
 });
 

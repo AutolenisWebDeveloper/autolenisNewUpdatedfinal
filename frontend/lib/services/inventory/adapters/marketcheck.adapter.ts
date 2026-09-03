@@ -66,12 +66,25 @@ interface MarketCheckListing {
   interior_color?: string;
   media?: { photo_links?: string[] };
   vdp_url?: string;
+  /**
+   * The provider's dealership object. Everything here is optional and untrusted: field
+   * presence varies by rooftop, `mc_dealer_id` is sometimes only the numeric `id`, and
+   * coordinates are occasionally 0,0 or out of range. Read defensively, never assumed.
+   */
   dealer?: {
+    id?: number | string;
     name?: string;
     phone?: string;
+    street?: string;
     city?: string;
     state?: string;
     zip?: string;
+    latitude?: number | string;
+    longitude?: number | string;
+    seller_email?: string;
+    dealer_type?: string;
+    mc_rooftop_id?: number | string;
+    mc_dealer_id?: number | string;
   };
 }
 
@@ -89,6 +102,36 @@ interface PageResult {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** A non-blank trimmed string, or undefined. Never writes "" into a nullable column. */
+function text(v: unknown): string | undefined {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t.length > 0 ? t : undefined;
+}
+
+/**
+ * A usable coordinate pair, or undefined for BOTH.
+ *
+ * Rejected: non-numeric values (a NaN in a Decimal column is a write error, not a location),
+ * out-of-range values, and exactly 0,0 — Null Island is the provider's missing-coordinate
+ * sentinel, and storing it would place a Texas dealership in the Gulf of Guinea and make every
+ * distance calculation silently wrong rather than absent. Returned as a pair because half a
+ * coordinate is not a location.
+ */
+function coordinates(lat: unknown, lng: unknown): { lat: number; lng: number } | undefined {
+  const n = (v: unknown): number | null => {
+    const x = typeof v === "string" ? Number(v) : v;
+    return typeof x === "number" && Number.isFinite(x) ? x : null;
+  };
+  const la = n(lat);
+  const lo = n(lng);
+  if (la === null || lo === null) return undefined;
+  if (Math.abs(la) > 90 || Math.abs(lo) > 180) return undefined;
+  if (la === 0 && lo === 0) return undefined;
+  return { lat: la, lng: lo };
+}
 
 export class MarketCheckAdapter implements IInventoryAdapter {
   readonly name = "marketcheck";
@@ -348,6 +391,8 @@ export class MarketCheckAdapter implements IInventoryAdapter {
       const price = listing.price;
       if (!year || !make || !model || !price || price <= 0) return null;
 
+      const coords = coordinates(listing.dealer?.latitude, listing.dealer?.longitude);
+
       const vehicle: NormalizedVehicle = {
         vin: listing.vin,
         year,
@@ -357,10 +402,26 @@ export class MarketCheckAdapter implements IInventoryAdapter {
         mileage: listing.miles,
         priceCents: Math.round(price * 100),
         images: listing.media?.photo_links?.slice(0, 6) ?? [],
-        externalDealerName: listing.dealer?.name,
-        externalDealerPhone: listing.dealer?.phone,
-        externalDealerCity: listing.dealer?.city,
-        externalDealerState: listing.dealer?.state,
+        externalDealerName: text(listing.dealer?.name),
+        externalDealerPhone: text(listing.dealer?.phone),
+        externalDealerCity: text(listing.dealer?.city),
+        externalDealerState: text(listing.dealer?.state),
+        externalDealerStreet: text(listing.dealer?.street),
+        externalDealerZip: text(listing.dealer?.zip),
+        externalDealerEmail: text(listing.dealer?.seller_email),
+        externalDealerType: text(listing.dealer?.dealer_type),
+        // `mc_dealer_id` is the documented field, but plenty of rooftops carry only the
+        // numeric `id`. Falling back keeps the strongest join key we have rather than none.
+        mcRooftopId: text(listing.dealer?.mc_rooftop_id),
+        mcDealerId: text(listing.dealer?.mc_dealer_id) ?? text(listing.dealer?.id),
+        // The listing's own location IS the holding dealership's location. Writing it here
+        // fills InventoryItem.city/state/zip/latitude/longitude, which the adapter has never
+        // populated — the reason distance was NULL on every row.
+        city: text(listing.dealer?.city),
+        state: text(listing.dealer?.state),
+        zip: text(listing.dealer?.zip),
+        latitude: coords?.lat,
+        longitude: coords?.lng,
         externalListingUrl: listing.vdp_url,
         sourceAdapter: this.name,
         sourceUrl: "https://www.marketcheck.com",
