@@ -173,6 +173,38 @@ export function isDrift(v: Verdict): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Ledger interpretation — pure, unit-tested without a database.
+// ---------------------------------------------------------------------------
+
+export interface LedgerRow {
+  migration_name: string;
+  finished_at: Date | null;
+  rolled_back_at: Date | null;
+}
+
+export interface LedgerState {
+  /** Names with at least one successful row. These count as applied. */
+  recorded: Set<string>;
+  /**
+   * Rows that claim nothing AND have no successful counterpart. A migration that
+   * was rolled back and then re-applied leaves BOTH rows behind — that is a
+   * healthy history, so flagging its rolled-back row would fail a correct
+   * database. Only a name with no successful row at all is a real problem.
+   */
+  unusable: LedgerRow[];
+}
+
+export function readLedger(rows: LedgerRow[]): LedgerState {
+  const recorded = new Set(
+    rows.filter((r) => r.finished_at && !r.rolled_back_at).map((r) => r.migration_name),
+  );
+  const unusable = rows.filter(
+    (r) => (!r.finished_at || r.rolled_back_at) && !recorded.has(r.migration_name),
+  );
+  return { recorded, unusable };
+}
+
+// ---------------------------------------------------------------------------
 // Live-database inventory.
 // ---------------------------------------------------------------------------
 
@@ -233,12 +265,21 @@ async function main(): Promise<number> {
 
     const [ledgerRows, tables, columns, indexes, constraints, types, enumValues] = await Promise.all(
       [
-        q<{ migration_name: string; finished_at: Date | null; rolled_back_at: Date | null }>(
+        q<LedgerRow>(
           `SELECT migration_name, finished_at, rolled_back_at FROM "_prisma_migrations"`,
         ),
         q<{ tablename: string }>(`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`),
+        // pg_attribute, not information_schema.columns: the information_schema
+        // views filter to objects the CURRENT ROLE has privileges on, while every
+        // other query here reads pg_catalog, which does not. Mixing the two lets a
+        // permission gap masquerade as a missing column — a spurious PARTIAL.
+        // attnum > 0 excludes system columns; attisdropped excludes dropped ones.
         q<{ table_name: string; column_name: string }>(
-          `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'`,
+          `SELECT c.relname AS table_name, a.attname AS column_name
+             FROM pg_attribute a
+             JOIN pg_class c ON c.oid = a.attrelid
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND a.attnum > 0 AND NOT a.attisdropped`,
         ),
         q<{ indexname: string }>(`SELECT indexname FROM pg_indexes WHERE schemaname = 'public'`),
         // Constraint and type names are schema-scoped, so these are filtered to
@@ -269,12 +310,7 @@ async function main(): Promise<number> {
       enumValues: new Set(enumValues.map((r) => `${r.typname}.${r.enumlabel}`)),
     };
 
-    // A row that never finished, or that was rolled back, is not a claim of
-    // applied-ness — treat it as absent so a half-written row cannot mask drift.
-    const recorded = new Set(
-      ledgerRows.filter((r) => r.finished_at && !r.rolled_back_at).map((r) => r.migration_name),
-    );
-    const unusableRows = ledgerRows.filter((r) => !r.finished_at || r.rolled_back_at);
+    const { recorded, unusable: unusableRows } = readLedger(ledgerRows);
 
     const onDisk = migrationDirsOnDisk();
 

@@ -22,6 +22,7 @@ import {
   isDrift,
   migrationDirsOnDisk,
   objectExists,
+  readLedger,
   stripComments,
   type DbObject,
   type SchemaInventory,
@@ -189,6 +190,56 @@ describe("objectExists", () => {
     const inv = inventoryOf([{ kind: "enumValue", parent: "SyncRunStatus", name: "BUDGET_EXHAUSTED" }]);
     assert.ok(objectExists(inv, { kind: "enumValue", parent: "SyncRunStatus", name: "BUDGET_EXHAUSTED" }));
     assert.ok(!objectExists(inv, { kind: "enumValue", parent: "DealStatus", name: "BUDGET_EXHAUSTED" }));
+  });
+});
+
+describe("readLedger — which rows count as a claim of applied-ness", () => {
+  const row = (name: string, finished: Date | null, rolledBack: Date | null = null) => ({
+    migration_name: name,
+    finished_at: finished,
+    rolled_back_at: rolledBack,
+  });
+  const T = new Date("2026-09-03T00:00:00Z");
+
+  test("a finished, never-rolled-back row counts as applied", () => {
+    const { recorded, unusable } = readLedger([row("m1", T)]);
+    assert.ok(recorded.has("m1"));
+    assert.equal(unusable.length, 0);
+  });
+
+  test("an unfinished row does NOT count as applied, and is flagged", () => {
+    // finished_at IS NULL means the migration died mid-apply. Counting it as
+    // applied would let a half-applied schema pass as clean.
+    const { recorded, unusable } = readLedger([row("m1", null)]);
+    assert.ok(!recorded.has("m1"));
+    assert.deepEqual(unusable.map((r) => r.migration_name), ["m1"]);
+  });
+
+  test("a rolled-back row with no successful counterpart is flagged", () => {
+    const { recorded, unusable } = readLedger([row("m1", T, T)]);
+    assert.ok(!recorded.has("m1"));
+    assert.deepEqual(unusable.map((r) => r.migration_name), ["m1"]);
+  });
+
+  test("rolled back THEN re-applied is a healthy history — not flagged", () => {
+    // Prisma leaves BOTH rows behind. Flagging the rolled-back one would fail a
+    // database that is actually correct. This was a real second-review defect.
+    const { recorded, unusable } = readLedger([row("m1", T, T), row("m1", T)]);
+    assert.ok(recorded.has("m1"), "the successful row must still count as applied");
+    assert.equal(unusable.length, 0, "the superseded rolled-back row must not be flagged");
+  });
+
+  test("a rolled-back row does not launder a DIFFERENT migration", () => {
+    const { recorded, unusable } = readLedger([row("m1", T), row("m2", T, T)]);
+    assert.ok(recorded.has("m1"));
+    assert.ok(!recorded.has("m2"));
+    assert.deepEqual(unusable.map((r) => r.migration_name), ["m2"]);
+  });
+
+  test("an empty ledger yields no recorded names and nothing flagged", () => {
+    const { recorded, unusable } = readLedger([]);
+    assert.equal(recorded.size, 0);
+    assert.equal(unusable.length, 0);
   });
 });
 
