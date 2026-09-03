@@ -21,6 +21,11 @@ import {
   countRunTag,
   withTaggedRun,
   CleanupFailedError,
+  resolveDestructiveTarget,
+  isCiEnvironment,
+  type GuardEnv,
+  classifyDatabaseTarget,
+  PRODUCTION_DATABASE_NAMES,
   CLEANUP_ORDER,
   type CleanupClient,
 } from "../isolated-database";
@@ -350,5 +355,94 @@ describe("run tagging and cleanup", () => {
   test("countRunTag sums every model", async () => {
     const { client } = spyClient(2);
     assert.equal(await countRunTag(client, "tag"), 2 * CLEANUP_ORDER.length);
+  });
+});
+
+describe("CI fail-closed: a refusal must not be silently survivable in CI", () => {
+  const GOOD = "postgresql://u:p@127.0.0.1:55432/autolenis_e2e";
+  const CI: GuardEnv = { CI: "true" };
+  const LOCAL: GuardEnv = {};
+  const REFUSED = [
+    undefined,
+    "",
+    "   ",
+    "not a url",
+    "postgresql://placeholder:placeholder@localhost:5432/placeholder",
+    `postgresql://u:p@db.${PRODUCTION_PROJECT_REF}.supabase.co:5432/postgres`,
+    "postgresql://u:p@10.0.0.7:5432/autolenis_e2e",
+    "postgresql://u:p@127.0.0.1:5432/postgres",
+  ];
+
+  test("in CI, every refused target FAILS — missing, unparseable, unapproved alike", () => {
+    for (const dsn of REFUSED) {
+      const d = resolveDestructiveTarget(dsn, CI);
+      assert.equal(d.mode, "fail", `CI must fail on ${JSON.stringify(dsn)}, got ${d.mode}`);
+      assert.equal(d.target, null, "a failed decision exposes no target");
+      assert.match(d.reason, /CI DATABASE TARGET REFUSED/);
+    }
+  });
+
+  test("locally, the same targets SKIP — but say NOT VERIFIED and satisfy no gate", () => {
+    for (const dsn of REFUSED) {
+      const d = resolveDestructiveTarget(dsn, LOCAL);
+      assert.equal(d.mode, "skip", `local must skip on ${JSON.stringify(dsn)}, got ${d.mode}`);
+      assert.match(d.reason, /NOT VERIFIED/);
+      assert.match(d.reason, /does NOT satisfy any acceptance gate/);
+    }
+  });
+
+  test("an approved target runs in both environments — the guard gates the target, not the runner", () => {
+    for (const env of [CI, LOCAL]) {
+      const d = resolveDestructiveTarget(GOOD, env);
+      assert.equal(d.mode, "run");
+      assert.equal(d.target?.database, "autolenis_e2e");
+    }
+  });
+
+  test("deciding opens nothing — fail and skip are reached from the string alone", () => {
+    const { client, calls } = spyClient();
+    for (const dsn of REFUSED) {
+      for (const env of [CI, LOCAL]) {
+        const d = resolveDestructiveTarget(dsn, env);
+        if (d.mode === "run") await_unreachable(client);
+      }
+    }
+    assert.deepEqual(calls, [], "no client method may be touched while deciding");
+    function await_unreachable(_c: typeof client) {
+      throw new Error("unreachable: a refused target must never reach the client");
+    }
+  });
+
+  test("CI is detected from the flag the runners actually set", () => {
+    for (const v of ["true", "1", "TRUE", "yes"]) assert.equal(isCiEnvironment({ CI: v }), true, v);
+    for (const v of [undefined, "", "0", "false", "False"]) {
+      assert.equal(isCiEnvironment({ CI: v }), false, String(v));
+    }
+  });
+});
+
+describe("sanitized classification: answer what a secret points at without revealing it", () => {
+  test("classifies production by project reference and by database name", () => {
+    const byRef = classifyDatabaseTarget(`postgresql://u:p@db.${PRODUCTION_PROJECT_REF}.supabase.co:5432/x`);
+    assert.equal(byRef.classification, "PRODUCTION");
+    assert.equal(byRef.projectRef, PRODUCTION_PROJECT_REF);
+    for (const name of PRODUCTION_DATABASE_NAMES) {
+      assert.equal(classifyDatabaseTarget(`postgresql://u:p@127.0.0.1:5432/${name}`).classification, "PRODUCTION", name);
+    }
+  });
+
+  test("classifies a disposable local target and an unusable one", () => {
+    assert.equal(classifyDatabaseTarget("postgresql://u:p@127.0.0.1:55432/autolenis_e2e").classification, "DISPOSABLE-LOCAL");
+    assert.equal(classifyDatabaseTarget("postgresql://u:p@10.0.0.7:5432/whatever").classification, "UNUSABLE");
+    assert.equal(classifyDatabaseTarget(undefined).classification, "UNUSABLE");
+  });
+
+  test("the classification carries no credentials and no DSN", () => {
+    const c = classifyDatabaseTarget("postgresql://secretuser:secretpass@127.0.0.1:55432/autolenis_e2e");
+    const serialized = JSON.stringify(c);
+    assert.ok(!serialized.includes("secretuser"), "must not leak the user");
+    assert.ok(!serialized.includes("secretpass"), "must not leak the password");
+    assert.ok(!serialized.includes("postgresql://"), "must not leak the DSN");
+    assert.deepEqual(Object.keys(c).sort(), ["classification", "database", "detail", "host", "projectRef"]);
   });
 });

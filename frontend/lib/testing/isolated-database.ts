@@ -134,6 +134,112 @@ export function isolatedDatabaseOrNull(dsn: string | undefined | null): Sanitize
   }
 }
 
+/**
+ * CI must FAIL on an unusable target, not skip past it.
+ *
+ * WHY THIS EXISTS. Turning every refusal into a skipped test is not enforcement: the suite exits 0,
+ * the pipeline goes green, and "the destructive test is safe" and "the destructive test never ran"
+ * become indistinguishable. A guard that can only ever produce success is decoration. So the same
+ * refusal produces two different outcomes depending on where it happens:
+ *
+ *   - **In CI** a missing, unparseable, unapproved or unverified target is a FAILURE, raised before
+ *     any connection is opened. CI is where the suite is supposed to be an acceptance gate, so a CI
+ *     run that cannot execute it must not report success.
+ *   - **On a developer machine** the same refusal is a skip — but one that says NOT VERIFIED out
+ *     loud, because a laptop without a disposable database is a normal state and not evidence.
+ *
+ * A skip therefore never satisfies an acceptance gate, and a green CI run means the suite genuinely
+ * executed against a positively identified disposable database.
+ */
+export type DestructiveTargetDecision =
+  | { mode: "run"; target: SanitizedTarget; reason: string }
+  | { mode: "skip"; target: null; reason: string }
+  | { mode: "fail"; target: null; reason: string };
+
+/**
+ * The environment as this guard reads it: a plain string map, not the app's typed `ProcessEnv`.
+ * Deliberate — the guard must be callable with a two-key literal in a test, and coupling it to the
+ * application's env schema would make that impossible without casting around the type system.
+ */
+export type GuardEnv = Readonly<Record<string, string | undefined>>;
+
+/** GitHub Actions and every other common runner set CI=true. */
+export function isCiEnvironment(env: GuardEnv = process.env): boolean {
+  const flag = env.CI;
+  if (flag === undefined) return false;
+  return flag !== "" && flag !== "0" && flag.toLowerCase() !== "false";
+}
+
+/**
+ * Decide whether a destructive suite runs, skips, or fails — without opening a connection.
+ * Pure: the caller supplies both the DSN and the environment, so both branches are testable.
+ */
+export function resolveDestructiveTarget(
+  dsn: string | undefined | null,
+  env: GuardEnv = process.env,
+): DestructiveTargetDecision {
+  let target: SanitizedTarget;
+  try {
+    target = assertIsolatedDatabase(dsn);
+  } catch (err) {
+    const why = err instanceof ProductionDatabaseRefusedError ? err.reason : String(err);
+    if (isCiEnvironment(env)) {
+      return {
+        mode: "fail",
+        target: null,
+        reason:
+          `CI DATABASE TARGET REFUSED — ${why}. CI must run this suite against a positively ` +
+          `identified disposable database (loopback host, database name matching ` +
+          `${ISOLATED_DATABASE_PATTERN}). Refusing to report success for a suite that did not run.`,
+      };
+    }
+    return {
+      mode: "skip",
+      target: null,
+      reason:
+        `NOT VERIFIED — ${why}. Skipped on a developer machine; this does NOT satisfy any ` +
+        `acceptance gate. Run it with DATABASE_URL pointing at a disposable autolenis_e2e database.`,
+    };
+  }
+  return { mode: "run", target, reason: `isolated target confirmed: ${describeTarget(target)}` };
+}
+
+/**
+ * Sanitized, credential-free classification of a connection string, for reporting what a CI secret
+ * resolves to WITHOUT revealing it. A stored GitHub secret's value cannot be read back, so the only
+ * honest way to answer "what does it point at" is to have the job itself classify it and print the
+ * four non-secret facts. Never returns, logs or formats the user, password or full DSN.
+ */
+export function classifyDatabaseTarget(dsn: string | undefined | null): {
+  host: string | null;
+  database: string | null;
+  projectRef: string | null;
+  classification: "PRODUCTION" | "REMOTE-NON-PRODUCTION" | "DISPOSABLE-LOCAL" | "UNUSABLE";
+  detail: string;
+} {
+  let target: SanitizedTarget;
+  try {
+    target = parseDatabaseTarget(dsn);
+  } catch (err) {
+    const why = err instanceof ProductionDatabaseRefusedError ? err.reason : String(err);
+    return { host: null, database: null, projectRef: null, classification: "UNUSABLE", detail: why };
+  }
+  const base = { host: target.host, database: target.database, projectRef: target.projectRef };
+  if (target.projectRef === PRODUCTION_PROJECT_REF) {
+    return { ...base, classification: "PRODUCTION", detail: `project reference ${PRODUCTION_PROJECT_REF}` };
+  }
+  if (PRODUCTION_DATABASE_NAMES.has(target.database.toLowerCase())) {
+    return { ...base, classification: "PRODUCTION", detail: `production database name "${target.database}"` };
+  }
+  if (/\.supabase\.(co|com|net)$/i.test(target.host)) {
+    return { ...base, classification: "REMOTE-NON-PRODUCTION", detail: "Supabase endpoint, not the production project" };
+  }
+  if (isolatedDatabaseOrNull(dsn)) {
+    return { ...base, classification: "DISPOSABLE-LOCAL", detail: "loopback host and reserved disposable name" };
+  }
+  return { ...base, classification: "UNUSABLE", detail: "not a positively identified disposable target" };
+}
+
 /** Human-readable, credential-free description for logs and reports. */
 export function describeTarget(target: SanitizedTarget): string {
   return `host=${target.host} port=${target.port} database=${target.database} projectRef=${target.projectRef ?? "none"}`;

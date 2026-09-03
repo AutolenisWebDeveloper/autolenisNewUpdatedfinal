@@ -291,14 +291,113 @@ export function readDisplayedTablePairs(docText) {
 }
 
 // ---------------------------------------------------------------------------
+// Decision triage (§13). Same principle as the ledger: the categories and their totals are
+// CALCULATED from the table, never typed beside it. Every decision carries exactly one category,
+// and the three categories must partition the complete set — a decision that is silently in none,
+// or in two, is the failure this exists to catch.
+
+export const TRIAGE_CATEGORIES = [
+  'BLOCKING PHASE 1',
+  'BLOCKING A NAMED LATER PHASE',
+  'DEFAULT AND PROCEED UNLESS OVERRIDDEN',
+];
+
+export const TRIAGE_BEGIN = '<!-- BEGIN GENERATED: decision-triage (scripts/parity-ledger.mjs) -->';
+export const TRIAGE_END = '<!-- END GENERATED: decision-triage -->';
+
+/** Parse the §13 decision table: every `| D<n> | … | <triage> |` row inside that section. */
+export function parseDecisions(docText) {
+  const start = docText.indexOf('## §13 ');
+  if (start === -1) throw new Error('document has no §13 section');
+  let stop = docText.indexOf('\n## ', start + 1);
+  if (stop === -1) stop = docText.length;
+  const decisions = [];
+  for (const line of docText.slice(start, stop).split('\n')) {
+    if (!/^\| D\d+ \|/.test(line)) continue;
+    const cells = splitCells(line);
+    if (cells.length !== 6) {
+      throw new Error(`decision row ${cells[0]} has ${cells.length} cells, expected 6 (the triage column is missing)`);
+    }
+    const raw = cells[5];
+    const category = TRIAGE_CATEGORIES.find((c) => raw.startsWith(c)) ?? 'UNCLASSIFIED';
+    decisions.push({ id: cells[0], item: cells[1], kind: cells[2], needed_before: cells[3], triage_raw: raw, category });
+  }
+  return decisions;
+}
+
+export function calculateDecisionTriage(docText) {
+  const decisions = parseDecisions(docText);
+  const by_category = {};
+  for (const c of TRIAGE_CATEGORIES) by_category[c] = 0;
+  for (const d of decisions) by_category[d.category] = (by_category[d.category] ?? 0) + 1;
+  const numeric = (id) => Number(id.slice(1));
+  return {
+    decision_count: decisions.length,
+    by_category,
+    categories_sum: Object.values(by_category).reduce((a, b) => a + b, 0),
+    unclassified: decisions.filter((d) => d.category === 'UNCLASSIFIED').map((d) => d.id),
+    blocking_phase_1: decisions.filter((d) => d.category === 'BLOCKING PHASE 1').map((d) => d.id).sort((a, b) => numeric(a) - numeric(b)),
+    blocking_phase_1_items: decisions
+      .filter((d) => d.category === 'BLOCKING PHASE 1')
+      .sort((a, b) => numeric(a.id) - numeric(b.id))
+      .map((d) => ({ id: d.id, item: d.item })),
+  };
+}
+
+export function renderTriageSection(triage) {
+  const rows = TRIAGE_CATEGORIES.map((c) => `| ${c} | **${triage.by_category[c]}** |`).join('\n');
+  const blockers = triage.blocking_phase_1_items
+    .map((d) => `- **${d.id}** — ${d.item}`)
+    .join('\n');
+  return [
+    TRIAGE_BEGIN,
+    '',
+    'Every decision below carries exactly one category, and the categories are calculated from the',
+    'table rather than tallied by hand. The three counts must sum to the decision count; a decision in',
+    'no category, or in two, fails `pnpm test:parity-ledger`.',
+    '',
+    '| Category | Decisions |',
+    '| --- | --- |',
+    rows,
+    `| **Total** | **${triage.categories_sum}** |`,
+    '',
+    `Decisions in the table: **${triage.decision_count}**. Categories sum to **${triage.categories_sum}**. Unclassified: **${triage.unclassified.length}**.`,
+    '',
+    '**BLOCKING PHASE 1 — these, and only these, must be answered before the Phase 1 wave is authored and deployed:**',
+    '',
+    blockers,
+    '',
+    'Everything else is either gated on a later phase it names, or has an evidence-supported default',
+    'that proceeds unless the owner overrides it. A later-phase decision never blocks Phase 1.',
+    '',
+    TRIAGE_END,
+  ].join('\n');
+}
+
+export function applyTriageToDocument(docText, triage) {
+  const block = renderTriageSection(triage);
+  const start = docText.indexOf(TRIAGE_BEGIN);
+  const stop = docText.indexOf(TRIAGE_END);
+  if (start === -1 || stop === -1) {
+    throw new Error(`document is missing the markers ${TRIAGE_BEGIN} / ${TRIAGE_END}`);
+  }
+  return docText.slice(0, start) + block + docText.slice(stop + TRIAGE_END.length);
+}
+
+// ---------------------------------------------------------------------------
 
 function main() {
   const argv = process.argv.slice(2);
   const ledger = calculateLedger();
 
   if (argv.includes('--write')) {
-    writeFileSync(DOC_PATH, applyToDocument(readFileSync(DOC_PATH, 'utf8'), ledger));
-    process.stdout.write(`wrote generated ledger block: ${ledger.source_ledger_rows} rows\n`);
+    let doc = applyToDocument(readFileSync(DOC_PATH, 'utf8'), ledger);
+    doc = applyTriageToDocument(doc, calculateDecisionTriage(doc));
+    writeFileSync(DOC_PATH, doc);
+    const triage = calculateDecisionTriage(doc);
+    process.stdout.write(
+      `wrote generated blocks: ${ledger.source_ledger_rows} ledger rows, ${triage.decision_count} decisions\n`,
+    );
     return;
   }
 

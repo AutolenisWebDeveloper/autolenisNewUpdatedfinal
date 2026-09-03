@@ -22,6 +22,7 @@
     "test:concurrency": "tsx --test lib/services/deal/__tests__/select-offer-concurrency.test.ts",
     "test:parity-ledger": "tsx --test scripts/__tests__/parity-ledger.test.ts",
     "test:isolated-db": "tsx --test lib/testing/__tests__/isolated-database.test.ts",
+    "db:report-target": "tsx scripts/report-database-target.ts",
     "test:webhooks": "tsx --test --experimental-test-module-mocks app/api/webhooks/__tests__/*.test.ts",
     "test:concierge": "tsx --test --experimental-test-module-mocks lib/services/concierge/__tests__/*.test.ts",
     "test:action-intent": "tsx --test --experimental-test-module-mocks lib/services/ai/action-intent/__tests__/*.test.ts",

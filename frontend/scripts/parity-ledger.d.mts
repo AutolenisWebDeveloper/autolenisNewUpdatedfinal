@@ -97,3 +97,30 @@ export declare function readDisplayedLedger(docText: string): {
   by_phase: Record<string, number>;
 };
 export declare function readDisplayedTablePairs(docText: string): Array<[string, number]>;
+
+export declare const TRIAGE_CATEGORIES: readonly string[];
+export declare const TRIAGE_BEGIN: string;
+export declare const TRIAGE_END: string;
+
+export interface Decision {
+  id: string;
+  item: string;
+  kind: string;
+  needed_before: string;
+  triage_raw: string;
+  category: string;
+}
+
+export interface DecisionTriage {
+  decision_count: number;
+  by_category: Record<string, number>;
+  categories_sum: number;
+  unclassified: string[];
+  blocking_phase_1: string[];
+  blocking_phase_1_items: Array<{ id: string; item: string }>;
+}
+
+export declare function parseDecisions(docText: string): Decision[];
+export declare function calculateDecisionTriage(docText: string): DecisionTriage;
+export declare function renderTriageSection(triage: DecisionTriage): string;
+export declare function applyTriageToDocument(docText: string, triage: DecisionTriage): string;

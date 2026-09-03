@@ -137,7 +137,7 @@ ALTER TABLE "vehicle_requests"
   ADD COLUMN IF NOT EXISTS "entry_type"                        "VehicleRequestEntryType",
   ADD COLUMN IF NOT EXISTS "inventory_item_id"                 TEXT,
   ADD COLUMN IF NOT EXISTS "pre_qualification_id"              TEXT,
-  ADD COLUMN IF NOT EXISTS "plan_snapshot_id"                  TEXT,
+  ADD COLUMN IF NOT EXISTS "current_plan_snapshot_id"          TEXT,
   ADD COLUMN IF NOT EXISTS "city"                              TEXT,
   ADD COLUMN IF NOT EXISTS "state"                             TEXT,
   ADD COLUMN IF NOT EXISTS "zip"                               TEXT,
@@ -167,7 +167,9 @@ ALTER TABLE "vehicle_requests"
   ADD COLUMN IF NOT EXISTS "consent_surface"                   TEXT,
   ADD COLUMN IF NOT EXISTS "stated_budget_cents"               INTEGER,
   ADD COLUMN IF NOT EXISTS "expected_down_payment_cents"       INTEGER,
-  ADD COLUMN IF NOT EXISTS "co_buyer_elected"                  BOOLEAN;
+  ADD COLUMN IF NOT EXISTS "co_buyer_elected"                  BOOLEAN
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 -- ── deposits (§3 rule 10, §23, §26 dispute) ─────────────────────────────────────────────────────
 ALTER TABLE "deposits"
@@ -191,7 +193,7 @@ ALTER TABLE "deals"
   ADD COLUMN IF NOT EXISTS "co_buyer_id"                           TEXT,
   ADD COLUMN IF NOT EXISTS "otd_cents_confirmed"                   INTEGER,
   ADD COLUMN IF NOT EXISTS "down_payment_cents"                    INTEGER,
-  ADD COLUMN IF NOT EXISTS "plan_snapshot_id"                      TEXT,
+  ADD COLUMN IF NOT EXISTS "current_plan_snapshot_id"              TEXT,
   ADD COLUMN IF NOT EXISTS "recap_confirmed_by_buyer_at"           TIMESTAMP(3),
   ADD COLUMN IF NOT EXISTS "recap_confirmed_by_dealer_at"          TIMESTAMP(3),
   ADD COLUMN IF NOT EXISTS "vehicle_hold_until"                    TIMESTAMP(3),
@@ -376,7 +378,9 @@ ALTER TABLE "buyer_opportunities"
   ADD COLUMN IF NOT EXISTS "consent_version"     TEXT,
   ADD COLUMN IF NOT EXISTS "consent_text_hash"   TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip"          TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT;
+  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 -- Lane 2–4 attribution & consent (N1): the two submission records that carry neither today.
 ALTER TABLE "dealer_applications"
@@ -391,7 +395,9 @@ ALTER TABLE "dealer_applications"
   ADD COLUMN IF NOT EXISTS "consent_version"     TEXT,
   ADD COLUMN IF NOT EXISTS "consent_text_hash"   TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip"          TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT;
+  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 ALTER TABLE "affiliates"
   ADD COLUMN IF NOT EXISTS "acquisition_channel" TEXT NOT NULL DEFAULT 'direct',
@@ -405,7 +411,9 @@ ALTER TABLE "affiliates"
   ADD COLUMN IF NOT EXISTS "consent_version"     TEXT,
   ADD COLUMN IF NOT EXISTS "consent_text_hash"   TEXT,
   ADD COLUMN IF NOT EXISTS "consent_ip"          TEXT,
-  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT;
+  ADD COLUMN IF NOT EXISTS "consent_surface"     TEXT
+  ADD COLUMN IF NOT EXISTS "ip_unavailable_reason"         TEXT,
+  ADD COLUMN IF NOT EXISTS "consent_ip_unavailable_reason" TEXT;
 
 ALTER TABLE "refinance_applications"
   ADD COLUMN IF NOT EXISTS "interested_in_buying" BOOLEAN,
@@ -436,6 +444,43 @@ ALTER TABLE "dealer_scorecard_snapshots"
 
 -- §25.2 — a dealer-initiated circumvention attempt is recorded against the dealer, not only the buyer.
 ALTER TABLE "circumvention_attempts" ADD COLUMN IF NOT EXISTS "dealer_id" TEXT;
+
+-- ── Address columns hold an address or NULL, never a sentinel ───────────────────────────────────
+-- An earlier draft wrote the literal `unavailable:<reason>` into `ip_address`. That makes the column
+-- untypeable, defeats every `IS NULL` check silently, and hides a reason inside a value. The reason
+-- gets its own controlled column, and a second constraint makes the pair mutually exclusive so a row
+-- can never carry both an address and an excuse for not having one.
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('vehicle_requests',   'ip_address', 'ip_unavailable_reason'),
+      ('vehicle_requests',   'consent_ip', 'consent_ip_unavailable_reason'),
+      ('buyer_opportunities','ip_address', 'ip_unavailable_reason'),
+      ('buyer_opportunities','consent_ip', 'consent_ip_unavailable_reason'),
+      ('dealer_applications','ip_address', 'ip_unavailable_reason'),
+      ('dealer_applications','consent_ip', 'consent_ip_unavailable_reason'),
+      ('affiliates',         'ip_address', 'ip_unavailable_reason'),
+      ('affiliates',         'consent_ip', 'consent_ip_unavailable_reason')
+    ) AS t(tbl, addr_col, reason_col)
+  LOOP
+    -- The reason is drawn from a fixed vocabulary, not free text.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = r.tbl || '_' || r.reason_col || '_check') THEN
+      EXECUTE format(
+        'ALTER TABLE %I ADD CONSTRAINT %I CHECK (%I IS NULL OR %I IN (%L,%L,%L,%L,%L))',
+        r.tbl, r.tbl || '_' || r.reason_col || '_check', r.reason_col, r.reason_col,
+        'PROXY_HEADER_ABSENT', 'SERVER_SIDE_JOB', 'ANONYMIZED_BY_POLICY', 'CLIENT_WITHHELD', 'UNKNOWN');
+    END IF;
+    -- Never both: an address present means there is nothing to explain.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = r.tbl || '_' || r.reason_col || '_exclusive') THEN
+      EXECUTE format(
+        'ALTER TABLE %I ADD CONSTRAINT %I CHECK (%I IS NULL OR %I IS NULL)',
+        r.tbl, r.tbl || '_' || r.reason_col || '_exclusive', r.addr_col, r.reason_col);
+    END IF;
+  END LOOP;
+END $$;
 
 -- ── inventory & rooftops (§22a, §6b validation) ─────────────────────────────────────────────────
 ALTER TABLE "inventory_items"
@@ -699,7 +744,6 @@ BEGIN
       -- vehicle_requests
       ('vehicle_requests_inventory_item_id_fkey',    'vehicle_requests',      'inventory_item_id',    'inventory_items',   'SET NULL'),
       ('vehicle_requests_pre_qualification_id_fkey', 'vehicle_requests',      'pre_qualification_id', 'pre_qualifications','SET NULL'),
-      ('vehicle_requests_plan_snapshot_id_fkey',     'vehicle_requests',      'plan_snapshot_id',     'plan_snapshots',    'SET NULL'),
       ('vehicle_requests_affiliate_id_fkey',         'vehicle_requests',      'affiliate_id',         'affiliates',        'SET NULL'),
       -- assigned_admin_id already exists as a bare text column with no key at all (R2).
       ('vehicle_requests_assigned_admin_id_fkey',    'vehicle_requests',      'assigned_admin_id',    'users',             'SET NULL'),
@@ -720,7 +764,6 @@ BEGIN
       ('deals_dealer_id_fkey',                       'deals',                 'dealer_id',            'dealers',           'SET NULL'),
       ('deals_rooftop_id_fkey',                      'deals',                 'rooftop_id',           'dealer_rooftops',   'SET NULL'),
       ('deals_co_buyer_id_fkey',                     'deals',                 'co_buyer_id',          'co_buyers',         'SET NULL'),
-      ('deals_plan_snapshot_id_fkey',                'deals',                 'plan_snapshot_id',     'plan_snapshots',    'SET NULL'),
       ('deals_dealer_executed_contract_id_fkey',     'deals',                 'dealer_executed_contract_id', 'contract_versions', 'SET NULL'),
       -- offers / candidates / invitations
       ('offers_auction_vehicle_id_fkey',             'offers',                'auction_vehicle_id',   'auction_vehicles',  'SET NULL'),
@@ -770,14 +813,14 @@ END $$;
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 CREATE INDEX IF NOT EXISTS "vehicle_requests_inventory_item_id_idx"    ON "vehicle_requests" ("inventory_item_id");
 CREATE INDEX IF NOT EXISTS "vehicle_requests_pre_qualification_id_idx" ON "vehicle_requests" ("pre_qualification_id");
-CREATE INDEX IF NOT EXISTS "vehicle_requests_plan_snapshot_id_idx"     ON "vehicle_requests" ("plan_snapshot_id");
+CREATE INDEX IF NOT EXISTS "vehicle_requests_current_plan_snapshot_idx" ON "vehicle_requests" ("current_plan_snapshot_id");
 CREATE INDEX IF NOT EXISTS "vehicle_requests_affiliate_id_idx"         ON "vehicle_requests" ("affiliate_id");
 CREATE INDEX IF NOT EXISTS "vehicle_requests_assigned_admin_id_idx"    ON "vehicle_requests" ("assigned_admin_id");
 CREATE INDEX IF NOT EXISTS "deposits_vehicle_request_id_idx"           ON "deposits" ("vehicle_request_id");
 CREATE INDEX IF NOT EXISTS "deals_vehicle_request_id_idx"              ON "deals" ("vehicle_request_id");
 CREATE INDEX IF NOT EXISTS "deals_auction_id_idx"                      ON "deals" ("auction_id");
 CREATE INDEX IF NOT EXISTS "deals_dealer_id_idx"                       ON "deals" ("dealer_id");
-CREATE INDEX IF NOT EXISTS "deals_plan_snapshot_id_idx"                ON "deals" ("plan_snapshot_id");
+CREATE INDEX IF NOT EXISTS "deals_current_plan_snapshot_idx"           ON "deals" ("current_plan_snapshot_id");
 CREATE INDEX IF NOT EXISTS "offers_auction_vehicle_id_idx"             ON "offers" ("auction_vehicle_id");
 CREATE INDEX IF NOT EXISTS "auction_vehicles_vehicle_request_id_idx"   ON "auction_vehicles" ("vehicle_request_id");
 CREATE INDEX IF NOT EXISTS "co_buyers_buyer_id_idx"                    ON "co_buyers" ("buyer_id");
@@ -811,18 +854,79 @@ CREATE UNIQUE INDEX IF NOT EXISTS "inventory_query_cache_criteria_hash_key"
 CREATE UNIQUE INDEX IF NOT EXISTS "offers_one_live_per_rooftop_candidate_key"
   ON "offers" ("auction_id", "rooftop_id", "auction_vehicle_id") WHERE "status" = 'SUBMITTED';
 
--- The e-sign constraint SWAP (§13-D30): the co-buyer needs a second envelope per deal, so the unique
--- deal_id becomes unique per (deal_id, signer_kind). This is the one non-additive statement in the
--- wave; rollback.sql carries its explicit restore, because a guarded "drop what we created" cannot
--- recreate a constraint the wave replaced.
-ALTER TABLE "e_sign_envelopes" DROP CONSTRAINT IF EXISTS "e_sign_envelopes_deal_id_key";
-DROP INDEX IF EXISTS "e_sign_envelopes_deal_id_key";
+-- The co-buyer signer needs a second envelope per deal, which the live unique on `deal_id` forbids.
+-- REPLACING that constraint is an expand / backfill / verify / cutover / contract operation on a live
+-- table, and this wave is required to be additive — so the destructive half does NOT happen here. It
+-- belongs to the signatures phase (§8.2 Phase 8), which drops the old constraint once the new one is
+-- proven and every writer sets `signer_kind`.
+--
+-- What Phase 1 lands is the EXPAND half: the columns above, and the composite unique index the cutover
+-- will rely on. Creating it alongside the existing `e_sign_envelopes_deal_id_key` is non-conflicting —
+-- every existing row has a unique `deal_id` and the defaulted `signer_kind = 'BUYER'`, so the new index
+-- builds without contention and simply enforces a stricter rule than the old one until the old one is
+-- removed. Nothing is dropped and nothing is replaced, so `rollback.sql` needs no restore statement.
 CREATE UNIQUE INDEX IF NOT EXISTS "e_sign_envelopes_deal_id_signer_kind_key"
   ON "e_sign_envelopes" ("deal_id", "signer_kind");
 
 -- Legacy-path counter (master rule 7). Names the label directory 1 committed to AdminActionType.
 CREATE INDEX IF NOT EXISTS "audit_logs_legacy_path_write_idx"
   ON "audit_logs" ("action", "created_at") WHERE "action" = 'LEGACY_PATH_WRITE';
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════
+-- 7b. THE GOVERNING PLAN SNAPSHOT — a pointer that cannot point somewhere else's snapshot
+--
+-- `plan_snapshots` owns the lineage: its buyer_id / vehicle_request_id / deal_id say which subject a
+-- version belongs to, and a subject accumulates versions. The parents carry a SEPARATE, mutable
+-- pointer named for what it is — `current_plan_snapshot_id`, "the version governing this row right
+-- now". These are two different facts, not two spellings of one, and the pointer is never described
+-- as a reverse relation.
+--
+-- The obvious failure of a bare FK is that it would happily let a Vehicle Request point at a snapshot
+-- belonging to a different buyer's request. A COMPOSITE foreign key closes that: the pointer must
+-- match a snapshot row whose own lineage column names this very row. Default MATCH SIMPLE means a
+-- NULL pointer is unconstrained, which is what "no snapshot yet" needs.
+--
+-- WRITE ORDERING: insert the snapshot first, with its lineage set, then point the parent at it. The
+-- pointer is nullable precisely so that order is possible without a deferred constraint.
+-- AUTHORIZATION: only the plan service writes either side; no route sets these columns directly.
+-- IMMUTABILITY: a superseded snapshot is never edited — a change appends a new version and re-points
+-- the parent. The trigger below enforces that; deletion remains possible only through the buyer
+-- cascade, so retention deletion still works.
+-- ════════════════════════════════════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS "plan_snapshots_vehicle_request_id_id_key"
+  ON "plan_snapshots" ("vehicle_request_id", "id");
+CREATE UNIQUE INDEX IF NOT EXISTS "plan_snapshots_deal_id_id_key"
+  ON "plan_snapshots" ("deal_id", "id");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vehicle_requests_current_plan_snapshot_fkey') THEN
+    ALTER TABLE "vehicle_requests"
+      ADD CONSTRAINT "vehicle_requests_current_plan_snapshot_fkey"
+      FOREIGN KEY ("id", "current_plan_snapshot_id")
+      REFERENCES "plan_snapshots" ("vehicle_request_id", "id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'deals_current_plan_snapshot_fkey') THEN
+    ALTER TABLE "deals"
+      ADD CONSTRAINT "deals_current_plan_snapshot_fkey"
+      FOREIGN KEY ("id", "current_plan_snapshot_id")
+      REFERENCES "plan_snapshots" ("deal_id", "id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION "plan_snapshots_append_only"() RETURNS trigger AS $fn$
+BEGIN
+  RAISE EXCEPTION 'plan_snapshots is append-only: supersede % with a new version instead of editing it', OLD."id"
+    USING ERRCODE = 'P0001';
+END;
+$fn$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS "plan_snapshots_append_only_trg" ON "plan_snapshots";
+CREATE TRIGGER "plan_snapshots_append_only_trg"
+  BEFORE UPDATE ON "plan_snapshots"
+  FOR EACH ROW EXECUTE FUNCTION "plan_snapshots_append_only"();
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 -- 8. ENFORCEMENT OBJECT 1 — one open Vehicle Request per buyer

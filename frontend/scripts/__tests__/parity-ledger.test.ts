@@ -26,6 +26,10 @@ import {
   PHASES,
   DOC_PATH,
   REPO_ROOT,
+  calculateDecisionTriage,
+  parseDecisions,
+  applyTriageToDocument,
+  TRIAGE_CATEGORIES,
 } from "../parity-ledger.mjs";
 
 const doc = () => readFileSync(DOC_PATH, "utf8");
@@ -171,5 +175,59 @@ describe("parity ledger — the guard actually fails on drift", () => {
       fs.rmSync(backup);
     }
     assert.equal(doc(), original, "the drift test must leave the document exactly as it found it");
+  });
+});
+
+describe("decision triage — every decision in exactly one category, counted by machine", () => {
+  test("the three categories partition the decisions and sum to the total", () => {
+    const t = calculateDecisionTriage(doc());
+    assert.equal(t.categories_sum, t.decision_count, "categories must sum to the decision count");
+    assert.deepEqual(t.unclassified, [], `decisions with no category: ${t.unclassified.join(", ")}`);
+    assert.equal(Object.keys(t.by_category).length, TRIAGE_CATEGORIES.length, "no category invented");
+    assert.ok(t.decision_count > 0, "the §13 table must have decisions");
+  });
+
+  test("every decision row carries exactly one category from the declared vocabulary", () => {
+    for (const d of parseDecisions(doc())) {
+      const matches = TRIAGE_CATEGORIES.filter((c: string) => d.triage_raw.startsWith(c));
+      assert.equal(matches.length, 1, `${d.id} matched ${matches.length} categories: ${d.triage_raw}`);
+      assert.equal(d.category, matches[0]);
+    }
+  });
+
+  test("no later-phase decision is allowed to block Phase 1", () => {
+    for (const d of parseDecisions(doc())) {
+      if (d.category !== "BLOCKING PHASE 1") continue;
+      const laterPhase = d.needed_before.match(/Phase (\d+)/);
+      if (laterPhase && Number(laterPhase[1]) > 1) {
+        assert.fail(`${d.id} is tagged BLOCKING PHASE 1 but is needed before ${d.needed_before}`);
+      }
+    }
+  });
+
+  test("the displayed totals equal the calculated totals", () => {
+    const t = calculateDecisionTriage(doc());
+    const text = doc();
+    for (const c of TRIAGE_CATEGORIES) {
+      const m = text.match(new RegExp(`\\| ${c} \\| \\*\\*(\\d+)\\*\\* \\|`));
+      assert.ok(m, `category ${c} is not displayed`);
+      assert.equal(Number(m![1]), t.by_category[c], `displayed total for ${c}`);
+    }
+    const total = text.match(/\| \*\*Total\*\* \| \*\*(\d+)\*\* \|/);
+    assert.ok(total, "the total row is not displayed");
+    assert.equal(Number(total![1]), t.decision_count);
+  });
+
+  test("every BLOCKING PHASE 1 decision is listed by name, and nothing else is", () => {
+    const t = calculateDecisionTriage(doc());
+    const text = doc();
+    const start = text.indexOf("**BLOCKING PHASE 1 —");
+    const listed = [...text.slice(start, start + 2000).matchAll(/^- \*\*(D\d+)\*\*/gm)].map((m) => m[1]);
+    assert.deepEqual(listed, t.blocking_phase_1, "the listed blockers must be exactly the calculated ones");
+  });
+
+  test("regenerating the triage block reproduces the committed document exactly", () => {
+    const before = doc();
+    assert.equal(applyTriageToDocument(before, calculateDecisionTriage(before)), before);
   });
 });

@@ -16,32 +16,51 @@
 // production, since CI supplies `secrets.DATABASE_URL || <placeholder>`. The guard is now an
 // allowlist (lib/testing/isolated-database): loopback host plus the reserved `autolenis_e2e`
 // database name, with the production project reference, the Supabase host family and production
-// database names refused explicitly. Anything else — including missing or unparseable
-// configuration — skips before a connection is opened, so a refusal writes nothing. Every row is
-// tagged with a unique run id and removed on success AND on failure, and the run asserts that no
-// tagged row survives.
+// database names refused explicitly. A refusal is decided from the connection string alone, before
+// any connection is opened, so it writes nothing.
+//
+// FAIL-CLOSED IN CI. A refusal is NOT uniformly a skip. In CI this suite is an acceptance gate, so
+// a missing, unparseable or unapproved target FAILS the run — a green pipeline must never mean
+// "the destructive test quietly did not execute". On a developer machine the same refusal skips,
+// but reports NOT VERIFIED and satisfies no gate. CI points this at the job's own ephemeral
+// postgres service, never at a stored secret.
+//
+// Every row is tagged with a unique run id and removed on success AND on failure, and both paths
+// assert that no tagged row survives.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  isolatedDatabaseOrNull,
+  resolveDestructiveTarget,
   describeTarget,
   withTaggedRun,
   type CleanupClient,
 } from "@/lib/testing/isolated-database";
 
-const target = isolatedDatabaseOrNull(process.env.DATABASE_URL);
-const hasRealDb = target !== null;
+const decision = resolveDestructiveTarget(process.env.DATABASE_URL);
+
+// The gate itself. In CI a refused target fails HERE, having opened nothing.
+test("the destructive suite has an approved, positively identified database target", () => {
+  assert.notEqual(decision.mode, "fail", decision.reason);
+  if (decision.mode === "skip") {
+    // eslint-disable-next-line no-console
+    console.log(`# ${decision.reason}`);
+  }
+});
 
 test(
   "commitOfferSelection: N concurrent selections of different offers → exactly one Deal per auction",
   {
-    skip: hasRealDb
-      ? false
-      : "DATABASE_URL is not a positively identified disposable database — REQUIRES LIVE INFRASTRUCTURE",
+    skip:
+      decision.mode === "run"
+        ? false
+        : decision.mode === "skip"
+          ? decision.reason
+          : "target refused — the enforcement test above has failed this run",
   },
   async () => {
+    const target = decision.mode === "run" ? decision.target : null;
     const { prisma } = await import("@/lib/prisma");
     // eslint-disable-next-line no-console
     console.log(`[concurrency] isolated target confirmed: ${describeTarget(target!)}`);

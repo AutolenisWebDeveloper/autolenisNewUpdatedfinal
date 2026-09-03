@@ -63,6 +63,30 @@ jobs:
       # The FULL matrix, not just `pnpm test`. Before 2026-08 this step ran one
       # of 15 suites, so payments, webhooks, security, CRM and SEO coverage
       # existed but was never enforced on a PR.
+      # SAFETY GUARDS RUN FIRST, ON PURPOSE.
+      #
+      # `test:all` is a single `&&` chain, so every suite after the first failure never executes.
+      # A pre-existing failure early in that chain therefore silently disables the suites that
+      # protect the database and the parity ledger — exactly the two things that must never depend
+      # on the health of an unrelated test. Running them in their own step, ahead of the matrix,
+      # makes them execute on every pull request regardless of what else is red. They also stay in
+      # `test:all` (the reachability guard requires it) — this step is an additional, independent
+      # execution, not a relocation.
+      - name: Safety guards (isolated-database + parity ledger)
+        run: |
+          pnpm test:isolated-db
+          pnpm test:parity-ledger
+
+      # What does the DATABASE_URL secret actually point at? GitHub never discloses a stored
+      # secret's value, so the only party that can answer is a job it is injected into. This prints
+      # four non-secret facts — host, database, Supabase project reference, and a production /
+      # non-production classification — and never the user, password or DSN. It opens no
+      # connection. Reporting only; the enforcement lives in the destructive suite's own guard.
+      - name: Database target report (sanitized — never prints the DSN)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm db:report-target
+
       - name: Unit & integration tests (full matrix)
         run: pnpm test:all
         env:
@@ -295,6 +319,19 @@ jobs:
       # unless DATABASE_URL targets autolenis_e2e.
       - name: Mint an admin session
         run: pnpm exec tsx scripts/e2e-admin-storage-state.ts
+
+      # The destructive concurrency suite, run against a positively identified ephemeral service.
+      #
+      # This job already provisions postgres with POSTGRES_DB=autolenis_e2e on the runner's
+      # localhost, destroyed with the runner — precisely the shape the suite's allowlist requires,
+      # and reused here rather than standing up a second one. It is NEVER pointed at
+      # secrets.DATABASE_URL: an unknown secret cannot be shown to be disposable, and the guard
+      # would refuse it anyway. CI=true is what makes a refusal FAIL this step instead of skipping
+      # it, so "the suite did not run" can never be reported as success.
+      - name: Concurrency (destructive — ephemeral autolenis_e2e only)
+        env:
+          CI: "true"
+        run: pnpm test:concurrency
 
       - name: E2E — dealer outreach
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/dealer-outreach.spec.ts

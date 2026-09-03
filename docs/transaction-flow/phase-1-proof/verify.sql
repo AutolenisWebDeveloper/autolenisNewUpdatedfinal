@@ -25,7 +25,7 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('comms_outbox'),('lifecycle_touch_schedule'),('idempotency_keys'),('jobs_dead_letter')
 ), expected_columns(tbl, col) AS (VALUES
   ('vehicle_requests','entry_type'),('vehicle_requests','inventory_item_id'),('vehicle_requests','pre_qualification_id'),
-  ('vehicle_requests','plan_snapshot_id'),('vehicle_requests','latitude'),('vehicle_requests','authorized_max_radius_miles'),
+  ('vehicle_requests','current_plan_snapshot_id'),('vehicle_requests','latitude'),('vehicle_requests','authorized_max_radius_miles'),
   ('vehicle_requests','delivery_preference'),('vehicle_requests','exterior_colors'),('vehicle_requests','required_features'),
   ('vehicle_requests','radius_authorization_requested_at'),('vehicle_requests','abandoned_at'),
   ('vehicle_requests','acquisition_channel'),('vehicle_requests','utm_content'),('vehicle_requests','affiliate_id'),
@@ -33,7 +33,7 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('deposits','vehicle_request_id'),('deposits','disputed_at'),('deposits','refund_reason'),
   ('deals','vehicle_request_id'),('deals','auction_id'),('deals','deposit_id'),('deals','dealer_id'),('deals','rooftop_id'),
   ('deals','vin'),('deals','odometer_at_offer'),('deals','co_buyer_id'),('deals','otd_cents_confirmed'),
-  ('deals','plan_snapshot_id'),('deals','recap_confirmed_by_buyer_at'),('deals','vehicle_hold_until'),
+  ('deals','current_plan_snapshot_id'),('deals','recap_confirmed_by_buyer_at'),('deals','vehicle_hold_until'),
   ('deals','financing_terms_locked_at'),('deals','funding_cleared_at'),('deals','dealer_executed_contract_id'),
   ('deals','pickup_ready_at'),('deals','possession_confirmed_at'),('deals','completed_at'),('deals','frozen_at'),
   ('deals','frozen_reason'),('deals','hold_reason'),
@@ -57,6 +57,10 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('e_sign_envelopes','signer_kind'),('e_sign_envelopes','co_buyer_id'),
   ('buyers','latitude'),('buyers','geocode_source'),
   ('buyer_opportunities','acquisition_channel'),('buyer_opportunities','affiliate_id'),('buyer_opportunities','consent_version'),
+  ('vehicle_requests','ip_unavailable_reason'),('vehicle_requests','consent_ip_unavailable_reason'),
+  ('buyer_opportunities','ip_unavailable_reason'),('buyer_opportunities','consent_ip_unavailable_reason'),
+  ('dealer_applications','ip_unavailable_reason'),('dealer_applications','consent_ip_unavailable_reason'),
+  ('affiliates','ip_unavailable_reason'),('affiliates','consent_ip_unavailable_reason'),
   ('dealer_applications','acquisition_channel'),('dealer_applications','consent_version'),
   ('affiliates','acquisition_channel'),('affiliates','consent_version'),
   ('refinance_applications','interested_in_buying'),('refinance_applications','partner_reference'),
@@ -78,16 +82,18 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('uq_comms_outbox_dedup_key'),('idx_comms_outbox_drain'),
   ('uq_lifecycle_touch_key_sequence'),('idx_lifecycle_touch_due'),
   ('idx_idempotency_created'),('idx_dlq_event'),('idx_dlq_failed_at'),
-  ('deposits_vehicle_request_id_idx'),('deals_plan_snapshot_id_idx')
+  ('deposits_vehicle_request_id_idx'),('deals_current_plan_snapshot_idx'),
+  ('vehicle_requests_current_plan_snapshot_idx'),
+  ('plan_snapshots_vehicle_request_id_id_key'),('plan_snapshots_deal_id_id_key')
 ), expected_fks(name) AS (VALUES
   ('vehicle_requests_inventory_item_id_fkey'),('vehicle_requests_pre_qualification_id_fkey'),
-  ('vehicle_requests_plan_snapshot_id_fkey'),('vehicle_requests_affiliate_id_fkey'),
+  ('vehicle_requests_current_plan_snapshot_fkey'),('vehicle_requests_affiliate_id_fkey'),
   ('vehicle_requests_assigned_admin_id_fkey'),
   ('deposits_vehicle_request_id_fkey'),('auctions_sourcing_case_id_fkey'),
   ('co_buyers_buyer_id_fkey'),('co_buyers_vehicle_request_id_fkey'),
   ('plan_snapshots_buyer_id_fkey'),('plan_snapshots_vehicle_request_id_fkey'),('plan_snapshots_deal_id_fkey'),
   ('deals_vehicle_request_id_fkey'),('deals_auction_id_fkey'),('deals_deposit_id_fkey'),('deals_dealer_id_fkey'),
-  ('deals_rooftop_id_fkey'),('deals_co_buyer_id_fkey'),('deals_plan_snapshot_id_fkey'),('deals_dealer_executed_contract_id_fkey'),
+  ('deals_rooftop_id_fkey'),('deals_co_buyer_id_fkey'),('deals_current_plan_snapshot_fkey'),('deals_dealer_executed_contract_id_fkey'),
   ('offers_auction_vehicle_id_fkey'),('offers_rooftop_id_fkey'),('auction_vehicles_vehicle_request_id_fkey'),
   ('auction_invitations_rooftop_id_fkey'),('sourcing_cases_vehicle_request_id_fkey'),
   ('sourcing_candidates_sourcing_case_id_fkey'),('sourcing_candidates_rooftop_id_fkey'),
@@ -98,8 +104,17 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('queue_items_assigned_admin_id_fkey'),('queue_items_vehicle_request_id_fkey'),('queue_items_deal_id_fkey'),
   ('queue_items_auction_id_fkey'),('queue_items_deposit_id_fkey'),('queue_items_buyer_id_fkey'),('queue_items_dealer_id_fkey'),
   ('circumvention_attempts_dealer_id_fkey'),('buyer_opportunities_affiliate_id_fkey'),('inventory_query_cache_buyer_id_fkey')
+), expected_checks(name) AS (VALUES
+  ('vehicle_requests_ip_unavailable_reason_check'),('vehicle_requests_ip_unavailable_reason_exclusive'),
+  ('vehicle_requests_consent_ip_unavailable_reason_check'),('vehicle_requests_consent_ip_unavailable_reason_exclusive'),
+  ('buyer_opportunities_ip_unavailable_reason_check'),('buyer_opportunities_ip_unavailable_reason_exclusive'),
+  ('buyer_opportunities_consent_ip_unavailable_reason_check'),('buyer_opportunities_consent_ip_unavailable_reason_exclusive'),
+  ('dealer_applications_ip_unavailable_reason_check'),('dealer_applications_ip_unavailable_reason_exclusive'),
+  ('dealer_applications_consent_ip_unavailable_reason_check'),('dealer_applications_consent_ip_unavailable_reason_exclusive'),
+  ('affiliates_ip_unavailable_reason_check'),('affiliates_ip_unavailable_reason_exclusive'),
+  ('affiliates_consent_ip_unavailable_reason_check'),('affiliates_consent_ip_unavailable_reason_exclusive')
 ), expected_triggers(name) AS (VALUES
-  ('shortlist_items_enforce_cap_trg'),('auction_vehicles_enforce_cap_trg')
+  ('shortlist_items_enforce_cap_trg'),('auction_vehicles_enforce_cap_trg'),('plan_snapshots_append_only_trg')
 ), expected_rls(name) AS (VALUES
   ('co_buyers'),('plan_snapshots'),('sourcing_cases'),('sourcing_candidates'),('dealer_reaffirmations'),('deal_recaps'),
   ('queue_items'),('post_completion_obligations'),('deal_corrections'),('inventory_query_cache'),
@@ -117,6 +132,8 @@ UNION ALL SELECT 'index', name FROM expected_indexes i
   WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname=i.name)
 UNION ALL SELECT 'foreign_key', name FROM expected_fks f
   WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=f.name AND contype='f')
+UNION ALL SELECT 'check_constraint', name FROM expected_checks k
+  WHERE NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=k.name AND contype='c')
 UNION ALL SELECT 'trigger', name FROM expected_triggers g
   WHERE NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname=g.name AND NOT tgisinternal)
 UNION ALL SELECT 'rls_enabled', name FROM expected_rls r
@@ -124,6 +141,8 @@ UNION ALL SELECT 'rls_enabled', name FROM expected_rls r
                     WHERE n.nspname='public' AND c.relname=r.name AND c.relrowsecurity)
 UNION ALL SELECT 'rls_policy_present_unexpectedly', r.name FROM expected_rls r
   WHERE EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename=r.name)
-UNION ALL SELECT 'stale_unique_should_be_gone', 'e_sign_envelopes_deal_id_key'
-  WHERE EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_key')
+-- Phase 1 is additive: the LIVE unique on deal_id must still be here afterwards. Its removal is the
+-- signatures-phase cutover, not this wave. Flag it if this wave dropped it.
+UNION ALL SELECT 'live_constraint_wrongly_dropped', 'e_sign_envelopes_deal_id_key'
+  WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_key')
 ORDER BY 1,2;
