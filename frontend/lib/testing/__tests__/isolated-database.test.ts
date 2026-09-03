@@ -479,6 +479,24 @@ describe("wiring: a destructive suite must never sit in a job that has no dispos
     }
   });
 
+  test("the guard suites run in their own CI step, ahead of the full matrix", () => {
+    // They are also tail-appended to `test:all`, but `test:all` is one `&&` chain: a failure early
+    // in it would silently stop the suites that protect the database from running at all. That is
+    // exactly the condition this work was rejected for. The independent step is the guarantee, so
+    // removing it must fail the build rather than quietly restore the old behaviour.
+    const wf = readFileSync(new URL("../../../../.github/workflows/ci.yml", import.meta.url), "utf8");
+    const guardStep = wf.indexOf("pnpm test:isolated-db");
+    const matrixStep = wf.indexOf("run: pnpm test:all");
+    assert.notEqual(guardStep, -1, "ci.yml must run test:isolated-db in its own step");
+    assert.notEqual(wf.indexOf("pnpm test:parity-ledger"), -1, "ci.yml must run test:parity-ledger too");
+    assert.notEqual(matrixStep, -1, "ci.yml must still run the full matrix");
+    assert.ok(
+      guardStep < matrixStep,
+      "the guard step must come BEFORE the full matrix, so a failure inside test:all can never " +
+        "prevent the database-safety suites from executing",
+    );
+  });
+
   test("the e2e job is the only workflow step that runs test:concurrency, and it forces CI=true", () => {
     const wf = readFileSync(new URL("../../../../.github/workflows/ci.yml", import.meta.url), "utf8");
     const runs = wf.split("\n").filter((l) => /run:\s*pnpm test:concurrency/.test(l));
