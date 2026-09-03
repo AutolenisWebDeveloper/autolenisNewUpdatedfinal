@@ -8,23 +8,43 @@
 // OfferSelectionRaceLostError. It is repeated across several rounds so the guard
 // — not a single timing coincidence — is what produces the result.
 //
-// Requires a REAL Postgres. Not part of `pnpm test:all` (which runs against a
-// placeholder DSN). Run:
-//   DATABASE_URL=postgresql://.../db DIRECT_URL=... pnpm test:concurrency
-// When DATABASE_URL is unset or a placeholder, the suite skips (documented
-// NOT VERIFIED — REQUIRES LIVE INFRASTRUCTURE in any environment without a DB).
+// Requires a REAL Postgres, and specifically a DISPOSABLE one. Run:
+//   DATABASE_URL=postgresql://.../autolenis_e2e pnpm test:concurrency
+//
+// SAFETY. This suite seeds users, buyers, deposits, auctions, dealers and offers. Its earlier
+// guard was `!dsn.includes("placeholder")`, which any reachable database satisfied — including
+// production, since CI supplies `secrets.DATABASE_URL || <placeholder>`. The guard is now an
+// allowlist (lib/testing/isolated-database): loopback host plus the reserved `autolenis_e2e`
+// database name, with the production project reference, the Supabase host family and production
+// database names refused explicitly. Anything else — including missing or unparseable
+// configuration — skips before a connection is opened, so a refusal writes nothing. Every row is
+// tagged with a unique run id and removed on success AND on failure, and the run asserts that no
+// tagged row survives.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const dsn = process.env.DATABASE_URL ?? "";
-const hasRealDb = dsn.length > 0 && !dsn.includes("placeholder");
+import {
+  isolatedDatabaseOrNull,
+  describeTarget,
+  withTaggedRun,
+  type CleanupClient,
+} from "@/lib/testing/isolated-database";
+
+const target = isolatedDatabaseOrNull(process.env.DATABASE_URL);
+const hasRealDb = target !== null;
 
 test(
   "commitOfferSelection: N concurrent selections of different offers → exactly one Deal per auction",
-  { skip: hasRealDb ? false : "no real DATABASE_URL — REQUIRES LIVE INFRASTRUCTURE" },
+  {
+    skip: hasRealDb
+      ? false
+      : "DATABASE_URL is not a positively identified disposable database — REQUIRES LIVE INFRASTRUCTURE",
+  },
   async () => {
     const { prisma } = await import("@/lib/prisma");
+    // eslint-disable-next-line no-console
+    console.log(`[concurrency] isolated target confirmed: ${describeTarget(target!)}`);
     const { commitOfferSelection, OfferSelectionRaceLostError } = await import(
       "@/lib/services/deal/select-offer.service"
     );
@@ -32,8 +52,11 @@ test(
     const ROUNDS = 5;
     const OFFERS_PER_AUCTION = 8;
 
+    await withTaggedRun(prisma as unknown as CleanupClient, async (runTag) => {
     for (let round = 0; round < ROUNDS; round++) {
-      const uniq = `race-${round}-${crypto.randomUUID()}`;
+      // Every natural key carries the run tag, so cleanup finds this run's rows and only this
+      // run's rows even when several runs share the disposable database.
+      const uniq = `${runTag}-race-${round}`;
 
       // ── Seed: buyer, deposit, CLOSED auction, N dealers + SUBMITTED offers ──
       const buyerUser = await prisma.user.create({
@@ -106,5 +129,6 @@ test(
       const finalAuction = await prisma.auction.findUnique({ where: { id: auction.id } });
       assert.equal(finalAuction?.status, "CLOSED", `round ${round}: auction must be CLOSED`);
     }
+    });
   },
 );
