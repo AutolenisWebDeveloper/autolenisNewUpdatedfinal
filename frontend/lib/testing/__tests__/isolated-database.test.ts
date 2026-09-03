@@ -330,6 +330,23 @@ describe("run tagging and cleanup", () => {
     );
   });
 
+  test("a FAILING run also asserts it left nothing behind", async () => {
+    // The success path always checked. The failure path did not — and a failing run is the one most
+    // likely to leak, so it must carry the same assertion.
+    const { client } = spyClient(2, ["deal-y"]);
+    await assert.rejects(
+      withTaggedRun(client, async () => {
+        throw new Error("body blew up");
+      }),
+      (err: unknown) => {
+        const message = (err as Error).message;
+        assert.match(message, /body blew up/, "the body's error must survive");
+        assert.match(message, /cleanup left \d+ tagged row\(s\) behind/, "and the leak must be reported");
+        return true;
+      },
+    );
+  });
+
   test("countRunTag sums every model", async () => {
     const { client } = spyClient(2);
     assert.equal(await countRunTag(client, "tag"), 2 * CLEANUP_ORDER.length);

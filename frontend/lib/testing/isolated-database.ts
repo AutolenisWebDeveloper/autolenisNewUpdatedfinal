@@ -291,9 +291,12 @@ export async function countRunTag(
 }
 
 /**
- * Run `body` with a fresh tag and clean up afterwards WHETHER OR NOT it throws, then assert the
- * run left nothing behind. A failing body must not leave rows: that is how one red test turns a
- * shared database into a landfill.
+ * Run `body` with a fresh tag, reclaim every row it created WHETHER OR NOT it threw, and assert the
+ * run left nothing behind — on both paths. A failing body must not leave rows: that is how one red
+ * test turns a shared database into a landfill.
+ *
+ * Both paths run the identical reclaim, because an earlier revision only asserted emptiness on the
+ * success path — so a failing run could leak silently, which is exactly the run most likely to.
  */
 export async function withTaggedRun<T>(
   client: CleanupClient,
@@ -301,26 +304,31 @@ export async function withTaggedRun<T>(
   options: { prefix?: string } = {},
 ): Promise<T> {
   const runTag = newRunTag(options.prefix);
-  let result: T;
+  let result!: T;
+  let bodyError: Error | undefined;
   try {
     result = await body(runTag);
-  } catch (bodyError) {
-    // The body already failed. Clean up anyway, but never let a cleanup problem hide the real cause:
-    // a `finally` that throws replaces the original error, which is how a red test becomes a mystery.
-    try {
-      await cleanupRunTag(client, runTag);
-    } catch (cleanupError) {
-      const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-      if (bodyError instanceof Error) bodyError.message += `\n[cleanup also failed] ${detail}`;
-    }
+  } catch (err) {
+    bodyError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  // The deal ids are captured BEFORE the deletes and counted against afterwards: deleting a deal
+  // cannot cascade to deal_status_history, which has no foreign key to it.
+  let reclaimProblem: string | undefined;
+  try {
+    const context = await taggedRunContext(client, runTag);
+    await cleanupRunTag(client, runTag, context);
+    const remaining = await countRunTag(client, runTag, context);
+    if (remaining !== 0) reclaimProblem = `cleanup left ${remaining} tagged row(s) behind for run ${runTag}`;
+  } catch (err) {
+    reclaimProblem = err instanceof Error ? err.message : String(err);
+  }
+
+  if (bodyError) {
+    // Never let a reclaim problem replace the reason the test failed — report both.
+    if (reclaimProblem) bodyError.message += `\n[cleanup also failed] ${reclaimProblem}`;
     throw bodyError;
   }
-  // Capture the deal ids BEFORE the deletes, and count against that same list afterwards.
-  const context = await taggedRunContext(client, runTag);
-  await cleanupRunTag(client, runTag, context);
-  const remaining = await countRunTag(client, runTag, context);
-  if (remaining !== 0) {
-    throw new Error(`cleanup left ${remaining} tagged row(s) behind for run ${runTag}`);
-  }
+  if (reclaimProblem) throw new Error(reclaimProblem);
   return result;
 }
