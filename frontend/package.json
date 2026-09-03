@@ -19,7 +19,7 @@
     "test:buyer-contracts": "tsx --test --experimental-test-module-mocks app/buyer/contracts/__tests__/*.test.ts",
     "test:security": "tsx --test --experimental-test-module-mocks lib/security/__tests__/*.test.ts app/api/admin/__tests__/*.test.ts",
     "test:auth": "tsx --test --experimental-test-module-mocks lib/auth/__tests__/*.test.ts",
-    "test:concurrency": "tsx --test lib/services/deal/__tests__/select-offer-concurrency.test.ts",
+    "test:concurrency": "tsx --test lib/services/deal/__tests__/destructive/select-offer-concurrency.test.ts",
     "test:parity-ledger": "tsx --test scripts/__tests__/parity-ledger.test.ts",
     "test:isolated-db": "tsx --test lib/testing/__tests__/isolated-database.test.ts",
     "db:report-target": "tsx scripts/report-database-target.ts",

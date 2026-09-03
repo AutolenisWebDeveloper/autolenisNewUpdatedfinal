@@ -6,7 +6,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, globSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   assertIsolatedDatabase,
@@ -455,22 +456,56 @@ describe("wiring: a destructive suite must never sit in a job that has no dispos
   // into a build failure, which is the correct signal and the wrong place to be running it at all.
   // The suite now runs only in the e2e job, against that job's own ephemeral autolenis_e2e
   // service. These tests make the arrangement structural instead of remembered.
+  const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
   const pkg = JSON.parse(
     readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
   ) as { scripts: Record<string, string> };
 
   test("test:concurrency exists as its own script, so it stays reachable for coverage-check", () => {
     assert.ok(pkg.scripts["test:concurrency"], "test:concurrency script must exist");
-    assert.match(pkg.scripts["test:concurrency"], /select-offer-concurrency\.test\.ts/);
+    assert.match(pkg.scripts["test:concurrency"], /destructive\/select-offer-concurrency\.test\.ts/);
   });
 
-  test("test:all does NOT run the destructive concurrency suite", () => {
-    assert.ok(
-      !pkg.scripts["test:all"].includes("test:concurrency"),
-      "test:all runs in a job with no disposable database. Putting test:concurrency back into it " +
-        "points a row-writing suite at secrets.DATABASE_URL || <placeholder>. Run it in the e2e " +
-        "job, which provisions POSTGRES_DB=autolenis_e2e on localhost.",
+  // Resolve what `test:all` ACTUALLY runs, globs included. Checking for the literal string
+  // "test:concurrency" is not enough and was already proven not enough: the first link in the
+  // chain, `pnpm test`, globs lib/services/deal/__tests__/*.test.ts, so removing the named script
+  // from test:all left the destructive suite running anyway. The file therefore lives in a
+  // `destructive/` subdirectory that a non-recursive `*` cannot reach, and this test expands the
+  // globs rather than trusting a name.
+  const filesReachableFromTestAll = (): string[] => {
+    const seen = new Set<string>();
+    const visit = (script: string, depth: number): void => {
+      if (depth > 4) return;
+      for (const token of script.split(/\s+/)) {
+        if (token.startsWith("test:") || token === "test") {
+          const body = pkg.scripts[token];
+          if (body) visit(body, depth + 1);
+        } else if (token.endsWith(".test.ts")) {
+          for (const f of globSync(token, { cwd: repoRoot })) seen.add(f.replaceAll("\\", "/"));
+        }
+      }
+    };
+    visit(pkg.scripts["test:all"], 0);
+    return [...seen];
+  };
+
+  test("nothing reachable from test:all runs the destructive suite — globs expanded, not guessed", () => {
+    const hits = filesReachableFromTestAll().filter((f) => f.includes("select-offer-concurrency"));
+    assert.deepEqual(
+      hits,
+      [],
+      "test:all runs in a job with no disposable database; its DSN is " +
+        "`secrets.DATABASE_URL || <placeholder>`. A row-writing suite reachable from it points at " +
+        "an unidentified target. Keep the destructive suite under " +
+        "lib/services/deal/__tests__/destructive/, which no `*` glob in test:all reaches, and run " +
+        "it in the e2e job against POSTGRES_DB=autolenis_e2e.",
     );
+  });
+
+  test("the destructive suite is still reachable from its own script, so coverage-check passes", () => {
+    const own = globSync(pkg.scripts["test:concurrency"].split(/\s+/).at(-1) as string, { cwd: repoRoot });
+    assert.equal(own.length, 1, "test:concurrency must resolve to exactly the destructive test file");
+    assert.match(own[0].replaceAll("\\", "/"), /destructive\/select-offer-concurrency\.test\.ts$/);
   });
 
   test("test:all DOES run both non-destructive guard suites", () => {
