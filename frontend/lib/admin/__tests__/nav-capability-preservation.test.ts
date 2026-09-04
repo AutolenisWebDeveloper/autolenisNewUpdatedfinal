@@ -199,11 +199,24 @@ describe("admin IA — page inventory", () => {
     //     rail item rather than a hub page because it is a daily working
     //     surface, not a readout: the pipeline page answers "what do we have",
     //     this one answers "who do I contact right now".
+    //   /admin/settings/rbac-shadow       — the RBAC shadow-denial report
+    //     (HUB under /admin/settings, already linked from its SETTINGS_LINKS).
+    //     It is a live operational surface, not scaffolding: permissions.ts runs
+    //     in shadow mode with RBAC_ENFORCE unset, writes the RBAC_SHADOW_DENY
+    //     rows this page reads, and the documented precondition for the enforce
+    //     flip is the owner's review of exactly this report. A HUB rather than a
+    //     rail entry because it is read before one configuration decision, not a
+    //     daily working surface.
     const baseline = new Set(BASELINE_ADMIN_ROUTES);
     const added = ROUTES.filter((r) => !baseline.has(r));
     assert.deepEqual(
       added,
-      ["/admin", "/admin/dealer-outreach/coverage", "/admin/dealer-outreach/queue"],
+      [
+        "/admin",
+        "/admin/dealer-outreach/coverage",
+        "/admin/dealer-outreach/queue",
+        "/admin/settings/rbac-shadow",
+      ],
       "an unlisted admin page appeared — add it here deliberately, with its IA placement",
     );
   });
