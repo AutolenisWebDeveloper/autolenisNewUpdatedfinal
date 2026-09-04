@@ -25,9 +25,11 @@
 //     financing-orchestrator.service.ts still read existing applications exactly
 //     as before.
 //   • The buyer's ability to move a deal through financing, which never ran
-//     through this route. POST /api/buyer/financing (financingPath
-//     DEALER | EXTERNAL | CASH) is what calls advanceDealStatus, and it collects no
-//     SSN. app/buyer/financing/page.tsx already routes buyers there.
+//     through this route. The live rail is PATCH /api/buyer/deal/financing
+//     (financingPath DEALER | EXTERNAL | CASH), called from
+//     app/buyer/deal/financing/page.tsx:45; it advances FINANCING_PENDING →
+//     FEE_PENDING via advanceDealStatus (route.ts:23) and collects no SSN.
+//     app/buyer/financing/page.tsx already links buyers to that page.
 //
 // ROLLBACK: this is code, not SQL. Reverting the commit restores the previous
 // handler verbatim. Nothing was migrated, dropped, or rewritten, so there is no
