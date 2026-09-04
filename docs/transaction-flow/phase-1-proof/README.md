@@ -98,6 +98,47 @@ schema — not counts, but the sorted definitions themselves. All eight match:
 Reproduce with `production-baseline/digests.sql`, which is written to run unchanged against either
 side.
 
+## Baseline freshness — a MANUAL pre-deploy step, not an automated gate
+
+Those eight digests were true when the baseline was captured. They are not self-maintaining. If
+production changes and the committed baseline does not, `run-proof.sh` keeps proving the Phase 1
+migrations against a schema production no longer has — and it stays green while doing it. **A green
+proof over a stale baseline is the failure mode this section exists to prevent.**
+
+`check-baseline-freshness.sh` re-derives the census and all eight digests from production
+**read-only**, restores the committed baseline into a scratch database, and compares the two. It
+fails on any digest divergence and names which of the eight diverged and by how many objects —
+including the case people misread, where a digest changes while the object count does not, which
+means a *definition* changed rather than anything being added or removed.
+
+```bash
+PROD_READONLY_URL='postgresql://…' docs/transaction-flow/phase-1-proof/check-baseline-freshness.sh
+#   exit 0  baseline fresh — all 8 digests match
+#   exit 1  DRIFT — the report names which digests and the object deltas
+#   exit 2  refused / misconfigured — nothing was compared
+```
+
+**This is deliberately NOT wired into CI, and that is not an oversight.** Automating it would
+require a production credential in the CI environment. No usable `DATABASE_URL` secret is configured
+for this repository — `pnpm db:report-target` reports `configured: no … classification: UNUSABLE` —
+and adding one to make this check automatic is a worse trade than running it by hand. **Baseline
+freshness is therefore a manual step, to be run before relying on the proof for a deploy decision.**
+Treat a green `run-proof.sh` as conditional on a freshness check that someone actually ran.
+
+Safety properties, since this is the one script here that touches production:
+
+- Production is opened with `default_transaction_read_only=on`, and is only ever queried through
+  `production-baseline/digests.sql` and `production-baseline/census.sql` — the same two committed
+  files `run-proof.sh` uses, invoked rather than reimplemented, so the two can never drift apart.
+  Both are pure `SELECT`s over `pg_catalog` / `information_schema`.
+- No DSN, user, or password is ever printed; all output is scrubbed first.
+- It reads `PROD_READONLY_URL`, deliberately a different variable from `DATABASE_URL`, so the
+  application's read-write DSN is never used here by accident.
+- The scratch restore is destructive and so refuses any host but loopback and any database name it
+  did not create itself — the same guards `run-proof.sh` uses.
+- Digests are major-version sensitive, so it refuses to compare unless both sides are PostgreSQL
+  17.x; comparing across majors would report drift that is not drift.
+
 ## Baseline census
 
 ```
