@@ -69,6 +69,12 @@ export const ADMIN_UI_CAPABILITIES = {
       "app/api/admin/payments/concierge-fee/[dealId]/refund/route.ts",
       // The "Waive Deposit" control posts here.
       "app/api/admin/buyers/[buyerId]/deposit/override/route.ts",
+      // "Send payment link" — same MONEY role set, enforced as
+      // finance.payment_link.send. These were reachable from the payments UI
+      // but absent from the mirror, so the mirror described less of the
+      // surface than it gates.
+      "app/api/admin/payments/deposit/send-link/route.ts",
+      "app/api/admin/payments/concierge-fee/send-link/route.ts",
     ],
   },
   /** Record a payout or claw a commission back. */

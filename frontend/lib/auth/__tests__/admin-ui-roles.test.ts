@@ -26,6 +26,7 @@ import {
   CONTENT_CAPABILITY_ROLES,
   type ContentCapability,
 } from "../content-permissions";
+import { rolesFor, type Permission } from "../permissions";
 
 const ALL_ROLES = [
   "SUPER_ADMIN",
@@ -75,6 +76,26 @@ function enforcedRolesIn(source: string): Set<string> {
   )) {
     const mapped = CONTENT_CAPABILITY_ROLES[m[1] as ContentCapability];
     assert.ok(mapped, `route names an unknown content capability: ${m[1]}`);
+    for (const r of mapped) roles.add(r);
+  }
+
+  // `requirePermissionStrict(request, "finance.deposit.override")` — the HARD
+  // variant, and the one this suite was blind to. It is not shadow-mode: it has
+  // no `enforcing()` branch at all (lib/auth/permissions.ts:235-273). A role
+  // outside the matrix gets an RBAC_DENY audit row and a 403 FORBIDDEN, and
+  // every caller returns on `!adminCheck.ok`. Treating it as enforcement is
+  // therefore correct, and NOT treating it as enforcement is what made this
+  // suite report eight live controls as unprotected.
+  //
+  // As with requireContentCapability, the role names are not literal in the
+  // route file, so they are resolved through rolesFor() — the same map the
+  // SERVER enforces from — never through a list restated here, which would let
+  // the mirror agree with itself instead of with the route.
+  for (const m of source.matchAll(
+    /requirePermissionStrict\(\s*request\s*,\s*"([a-z_.]+)"\s*\)/g,
+  )) {
+    const mapped = rolesFor(m[1] as Permission);
+    assert.ok(mapped, `route names an unknown permission: ${m[1]}`);
     for (const r of mapped) roles.add(r);
   }
 
