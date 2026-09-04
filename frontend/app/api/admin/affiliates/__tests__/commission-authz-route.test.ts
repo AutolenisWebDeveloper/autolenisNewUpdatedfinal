@@ -8,16 +8,18 @@
 // segment cannot be passed to the runner. Routes are imported via the @/ alias,
 // which tsx resolves from tsconfig paths without shell globbing.
 //
-// Regression target (admin authz audit, batch 1): these three routes gated only
-// on requirePermission("finance.commissions.settle"), which is SHADOW-ONLY —
+// Regression target (admin authz audit, batch 1): these three routes ONCE gated
+// only on requirePermission("finance.commissions.settle"), which is SHADOW-ONLY —
 // under the default runtime (RBAC_ENFORCE unset) a role outside the permission's
 // allow-list is recorded as RBAC_SHADOW_DENY and then ALLOWED. A SUPPORT_ADMIN
 // (read-only per policy 1) could therefore approve, reject, and settle real
 // affiliate money. Their correctly-scoped siblings — reverse/ and clawback/,
 // [affiliateId]/commissions/, and referral-milestones/[id]/pay — all hard-enforce
-// SUPER_ADMIN or FINANCE_ADMIN. These tests pin that same hard gate here: an
-// under-privileged admin gets 403 and the mutation is NEVER reached, while
-// FINANCE_ADMIN and SUPER_ADMIN keep working.
+// SUPER_ADMIN or FINANCE_ADMIN. All three now call requirePermissionStrict(),
+// which has no enforcing() branch at all: an out-of-matrix role is audited
+// RBAC_DENY and answered 403 FORBIDDEN whatever RBAC_ENFORCE says. These tests
+// pin that hard gate: an under-privileged admin gets 403 and the mutation is
+// NEVER reached, while FINANCE_ADMIN and SUPER_ADMIN keep working.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
@@ -26,6 +28,9 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
+// Hoisted, so it binds the REAL module: mock.module() below replaces the same
+// specifier only for the routes' own (later, dynamic) import.
+import { roleAllows, rolesFor, type Permission } from "@/lib/auth/permissions";
 
 // ── Controllable caller role + mutation spies ────────────────────────────────
 let callerRole = "FINANCE_ADMIN";
@@ -77,17 +82,32 @@ mock.module("@/lib/services/affiliate/affiliate-payout.service", {
   },
 });
 
-// requirePermission is SHADOW-ONLY by design: it returns the authenticated admin
-// even when the role is outside the permission's allow-list. Mocking that real
-// behaviour is the point — it proves the route's own hard check is what blocks.
+// requirePermissionStrict is the gate the routes actually call, and it is NOT
+// shadow-mode: an out-of-allow-list role is denied 403 FORBIDDEN before the
+// handler reaches any side effect. The mock reproduces that contract and resolves
+// the allow-list through the REAL matrix (roleAllows/rolesFor, imported above and
+// unaffected by this mock) rather than a role list restated here — a restated list
+// would let the mock agree with itself instead of with the policy the server
+// enforces, and a blanket allow would delete the control these tests exist to pin.
 mock.module("@/lib/auth/permissions", {
   namedExports: {
-    requirePermission: async () => ({
-      adminId: "admin_1",
-      email: "caller@autolenis.com",
-      role: callerRole,
-      mfaVerified: true,
-    }),
+    requirePermissionStrict: async (_request: NextRequest, permission: Permission) =>
+      roleAllows(permission, callerRole)
+        ? {
+            ok: true,
+            admin: {
+              adminId: "admin_1",
+              email: "caller@autolenis.com",
+              role: callerRole,
+              mfaVerified: true,
+            },
+          }
+        : {
+            ok: false,
+            status: 403,
+            code: "FORBIDDEN",
+            message: `This action requires ${rolesFor(permission).join(" or ")}.`,
+          },
   },
 });
 

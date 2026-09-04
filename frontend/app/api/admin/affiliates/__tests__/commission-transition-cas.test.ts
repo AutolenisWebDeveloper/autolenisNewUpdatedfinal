@@ -21,6 +21,17 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
+// Hoisted, so it binds the REAL module: mock.module() below replaces the same
+// specifier only for the routes' own (later, dynamic) import.
+import { roleAllows, rolesFor, type Permission } from "@/lib/auth/permissions";
+
+// FINANCE_ADMIN is inside both PERMISSION_ROLES["finance.commissions.settle"] and
+// ["finance.commissions.reverse"], so the gate below admits it and these CAS
+// assertions get to run. Resolving that through roleAllows() rather than asserting
+// it keeps this suite honest: if the matrix ever stopped admitting FINANCE_ADMIN,
+// these tests would 403 rather than silently keep exercising a path the server no
+// longer allows.
+const CALLER_ROLE = "FINANCE_ADMIN";
 
 let commissionStatus = "PENDING";
 // what the CAS updateMany reports — 0 simulates a concurrent transition winning
@@ -68,14 +79,32 @@ mock.module("@/lib/prisma", {
   },
 });
 
+// requirePermissionStrict is the gate the routes actually call, and it is NOT
+// shadow-mode: an out-of-allow-list role is denied 403 FORBIDDEN before the
+// handler reaches any side effect. The mock reproduces that contract and resolves
+// the allow-list through the REAL matrix (roleAllows/rolesFor, imported above and
+// unaffected by this mock) rather than a role list restated here — a restated list
+// would let the mock agree with itself instead of with the policy the server
+// enforces, and a blanket allow would delete the control these tests exist to pin.
 mock.module("@/lib/auth/permissions", {
   namedExports: {
-    requirePermission: async () => ({
-      adminId: "admin_1",
-      email: "caller@autolenis.com",
-      role: "FINANCE_ADMIN",
-      mfaVerified: true,
-    }),
+    requirePermissionStrict: async (_request: NextRequest, permission: Permission) =>
+      roleAllows(permission, CALLER_ROLE)
+        ? {
+            ok: true,
+            admin: {
+              adminId: "admin_1",
+              email: "caller@autolenis.com",
+              role: CALLER_ROLE,
+              mfaVerified: true,
+            },
+          }
+        : {
+            ok: false,
+            status: 403,
+            code: "FORBIDDEN",
+            message: `This action requires ${rolesFor(permission).join(" or ")}.`,
+          },
   },
 });
 
