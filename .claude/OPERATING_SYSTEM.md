@@ -116,6 +116,21 @@ Say this out loud rather than discovering it later:
   needs are listed in `.github/workflows/ci.yml`; if reading the example file turns out to matter,
   relaxing the rule is an owner decision.
 
+## Where this came from
+
+`docs/claude/install.sh` is the bundle installer that produces this configuration,
+kept in the repository for provenance and so the install is reproducible. It is
+**AutoLenis only.** The upstream script was written to serve two unrelated
+repositories and carried a `--profile` switch to pick between them; that switch is
+removed here, so there is nothing to choose and nothing to get wrong.
+`--profile autolenis` is still accepted so the documented command keeps working, and
+any other profile is refused with a clear error rather than silently installing the
+wrong payload.
+
+The script needs the bundle payload (`autolenis/`, and `global/` for the user-memory
+mode) sitting beside it, which is not committed — so running it from the repository
+stops at its own payload check without writing anything.
+
 ## Verify the install
 
 ```bash
