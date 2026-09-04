@@ -606,7 +606,7 @@ rather than record.** That is the honest framing of the question.
 - **Blast radius:** the `_prisma_migrations` table only. No schema change, no DDL, no
   application behaviour. Reversible by deleting 29 rows and restoring 6 checksum values —
   both single statements, and the pre-change snapshot exists.
-- **CI empty-DB chain job:** **unaffected.** The job provisions a fresh `postgres:16.4`,
+- **CI empty-DB chain job:** **unaffected.** The job provisions a fresh `postgres:17.6`,
   asserts zero `public` tables, then runs `prisma migrate deploy` from empty
   (`ci.yml:145-160`). It builds its own ledger, so it computes checksums fresh and can
   never observe the production ledger's staleness. It is green today and stays green.

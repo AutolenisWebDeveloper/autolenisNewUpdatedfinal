@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoLenis — Complete Transaction Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --stock:#E9E6DF;
+  --form:#FCFBF8;
+  --form-alt:#F4F1EA;
+  --rule:#CBC6BA;
+  --rule-hard:#9C9689;
+  --ink:#191B1F;
+  --ink2:#5C5F65;
+  --ink3:#83868C;
+  --pen:#17307C;
+  --pen-wash:#E6EAF5;
+  --stamp:#AE272E;
+  --stamp-wash:#F7E7E7;
+  --seal:#1C6244;
+  --seal-wash:#E4EFE9;
+  --gold:#9C6E0C;
+  --gold-wash:#F6EEDA;
+  --shadow:0 1px 0 var(--rule), 0 2px 10px rgba(30,26,18,.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{animation:none!important;transition:none!important}}
+body{
+  margin:0;background:var(--stock);color:var(--ink);
+  font-family:'Barlow',system-ui,sans-serif;font-size:15.5px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+h1,h2,h3,h4{font-family:'Barlow Condensed',sans-serif;font-weight:600;margin:0;letter-spacing:.005em}
+code,.mono{font-family:'IBM Plex Mono',monospace;font-size:.86em}
+a{color:var(--pen)}
+
+/* ---------- masthead ---------- */
+.mast{border-bottom:2px solid var(--ink);background:var(--form);}
+.mast-in{padding:34px 0 26px}
+.mast-top{display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;justify-content:space-between;
+  border-bottom:1px solid var(--rule);padding-bottom:12px;margin-bottom:26px}
+.brand{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;letter-spacing:.06em}
+.brand span{color:var(--stamp)}
+.mast-meta{font-size:13px;color:var(--ink2);font-family:'IBM Plex Mono',monospace}
+.mast h1{font-size:clamp(38px,6vw,68px);line-height:.98;max-width:15ch;font-weight:700}
+.mast .sub{margin-top:16px;max-width:62ch;color:var(--ink2);font-size:17px}
+
+/* lineage chain hero */
+.chain{margin-top:30px;padding:18px 0 4px;border-top:1px solid var(--rule);
+  display:flex;flex-wrap:wrap;gap:6px 0;align-items:center}
+.chain b{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:15px;
+  background:var(--form-alt);border:1px solid var(--rule-hard);padding:4px 10px;white-space:nowrap}
+.chain b.pay{background:var(--gold-wash);border-color:var(--gold);color:var(--gold)}
+.chain b.deal{background:var(--pen-wash);border-color:var(--pen);color:var(--pen)}
+.chain b.done{background:var(--seal-wash);border-color:var(--seal);color:var(--seal)}
+.chain i{width:16px;height:1px;background:var(--rule-hard);flex:0 0 16px}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0;margin-top:28px;
+  border:1px solid var(--rule-hard);background:var(--form-alt)}
+.stat{padding:12px 14px;border-right:1px solid var(--rule)}
+.stat:last-child{border-right:0}
+.stat .n{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:700;line-height:1}
+.stat .l{font-size:12.5px;color:var(--ink2);margin-top:2px}
+
+/* ---------- sticky nav ---------- */
+nav.rail{position:sticky;top:0;z-index:40;background:var(--ink);color:var(--form);
+  border-bottom:1px solid #000}
+.rail-in{display:flex;flex-wrap:wrap;gap:2px;align-items:center;padding:0}
+.rail a{font-family:'Barlow Condensed',sans-serif;font-size:14.5px;font-weight:500;letter-spacing:.02em;
+  color:#CFCCC6;text-decoration:none;padding:11px 14px;border-right:1px solid #2E3137}
+.rail a:hover,.rail a:focus-visible{background:#2A2D33;color:#fff}
+.rail .spacer{margin-left:auto}
+.rail button{font-family:'Barlow Condensed',sans-serif;font-size:14px;background:transparent;color:#CFCCC6;
+  border:0;border-left:1px solid #2E3137;padding:11px 14px;cursor:pointer}
+.rail button:hover{background:#2A2D33;color:#fff}
+
+/* ---------- sections ---------- */
+section{padding:56px 0 8px}
+.sec-head{display:flex;align-items:baseline;gap:16px;border-bottom:2px solid var(--ink);padding-bottom:8px;margin-bottom:8px}
+.sec-head .part{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--stamp);letter-spacing:.08em;padding-top:6px}
+.sec-head h2{font-size:clamp(26px,3.4vw,38px);font-weight:700}
+.sec-note{color:var(--ink2);max-width:74ch;margin:14px 0 26px;font-size:16px}
+
+/* ---------- legend ---------- */
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 26px}
+.chip{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:600;letter-spacing:.03em;
+  padding:2px 8px;border:1px solid;white-space:nowrap}
+.c-built{color:var(--seal);border-color:var(--seal);background:var(--seal-wash)}
+.c-extend{color:var(--pen);border-color:var(--pen);background:var(--pen-wash)}
+.c-new{color:var(--stamp);border-color:var(--stamp);background:var(--stamp-wash)}
+.c-retire{color:var(--ink2);border-color:var(--ink3);background:var(--form-alt);text-decoration:line-through}
+.c-gate{color:var(--gold);border-color:var(--gold);background:var(--gold-wash)}
+
+/* ---------- intake lanes ---------- */
+.lanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-bottom:12px}
+.lane{background:var(--form);border:1px solid var(--rule-hard);box-shadow:var(--shadow);display:flex;flex-direction:column}
+.lane.primary{grid-column:1/-1;border:2px solid var(--pen)}
+.lane-h{padding:12px 16px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;
+  align-items:baseline;gap:10px;background:var(--form-alt)}
+.lane.primary .lane-h{background:var(--pen-wash)}
+.lane-h h3{font-size:20px}
+.lane-h .dest{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink2)}
+.lane-b{padding:14px 16px 16px}
+.forms{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:0;
+  border-top:1px solid var(--rule);border-left:1px solid var(--rule)}
+.form-cell{border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:9px 11px}
+.form-cell .fn{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:16px;line-height:1.2}
+.form-cell .fd{font-size:12.5px;color:var(--ink2);margin-top:3px}
+.form-cell .ft{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--pen);margin-top:5px;display:block}
+.lane-rules{margin:16px 0 0;padding:0;list-style:none;border-top:1px dashed var(--rule-hard);padding-top:12px}
+.lane-rules li{position:relative;padding-left:26px;margin-bottom:7px;font-size:14.5px}
+.lane-rules li b.rn{font-family:'IBM Plex Mono',monospace;position:absolute;left:0;top:1px;font-size:12px;color:var(--stamp);font-weight:500}
+.lane-rules li b:not(.rn){position:static;font-family:inherit;font-size:inherit;color:inherit;font-weight:600}
+
+/* ---------- swimlane spine ---------- */
+.spine{border-top:2px solid var(--ink)}
+.stage{background:var(--form);border:1px solid var(--rule-hard);border-top:0;position:relative}
+.stage:first-child{border-top:1px solid var(--rule-hard)}
+.stage.is-gate{border-left:5px solid var(--gold)}
+.st-head{display:grid;grid-template-columns:56px 1fr auto;gap:14px;align-items:center;
+  padding:13px 16px 13px 0;cursor:pointer;width:100%;background:none;border:0;text-align:left;font:inherit;color:inherit}
+.st-head:hover{background:var(--form-alt)}
+.st-head:focus-visible{outline:2px solid var(--pen);outline-offset:-2px}
+.st-num{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:26px;color:var(--ink3);
+  text-align:center;border-right:1px solid var(--rule);padding:2px 0;align-self:stretch;
+  display:flex;align-items:center;justify-content:center}
+.stage.is-gate .st-num{color:var(--gold)}
+.st-title{min-width:0}
+.st-title h3{font-size:22px;line-height:1.15}
+.st-title .owner{font-size:13px;color:var(--ink2);margin-top:2px}
+.st-tags{display:flex;gap:6px;align-items:center;padding-right:4px}
+.st-toggle{font-family:'IBM Plex Mono',monospace;font-size:16px;color:var(--ink3);width:20px;text-align:center}
+
+.st-body{display:none;border-top:1px solid var(--rule);padding:0}
+.stage.open .st-body{display:block}
+.stage.open .st-toggle{color:var(--pen)}
+
+.cond{padding:11px 16px;font-size:14.5px;display:flex;gap:12px;align-items:flex-start}
+.cond .k{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:14px;color:var(--ink2);
+  flex:0 0 88px;padding-top:1px}
+.cond.entry{background:var(--form-alt);border-bottom:1px solid var(--rule)}
+.cond.exit{background:var(--seal-wash);border-top:1px solid var(--rule);color:#123B29}
+.cond.exit .k{color:var(--seal)}
+
+.swim{display:grid;grid-template-columns:repeat(4,1fr);border-top:0}
+.swim .col{border-right:1px solid var(--rule);padding:12px 14px 14px}
+.swim .col:last-child{border-right:0}
+.swim .ch{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:14px;letter-spacing:.03em;
+  padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid var(--rule-hard)}
+.swim .col.buyer .ch{color:var(--ink)}
+.swim .col.dealer .ch{color:var(--gold)}
+.swim .col.staff .ch{color:var(--stamp)}
+.swim .col.system .ch{color:var(--pen)}
+.swim ul{margin:0;padding-left:16px;font-size:14px}
+.swim li{margin-bottom:6px}
+.swim .none{color:var(--ink3);font-size:14px;font-style:italic}
+
+.rec{padding:12px 16px;border-top:1px solid var(--rule);background:#FAF8F3;font-size:14px}
+.rec .k{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:14px;color:var(--ink2);margin-bottom:5px}
+.rec .tables{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.rec .tables code{background:var(--pen-wash);border:1px solid #C4CEE6;color:var(--pen);padding:1px 6px}
+
+.sees{padding:11px 16px;border-top:1px solid var(--rule);font-size:14.5px;display:flex;gap:12px}
+.sees .k{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:14px;color:var(--ink2);flex:0 0 88px}
+.sees .v{font-style:italic;color:var(--ink)}
+
+.fail{padding:12px 16px;border-top:1px solid var(--stamp);background:var(--stamp-wash)}
+.fail .k{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:14px;color:var(--stamp);margin-bottom:5px}
+.fail p{margin:0;font-size:14.5px;color:#5E1A1E}
+
+.note{margin:0;padding:12px 16px;border-top:1px solid var(--rule);border-left:4px solid var(--ink);
+  background:var(--form-alt);font-size:14.5px}
+.note b{font-family:'Barlow Condensed',sans-serif;font-weight:600}
+
+.gatebar{display:flex;align-items:center;gap:14px;padding:9px 16px;background:var(--gold-wash);
+  border-bottom:1px solid var(--gold);font-family:'Barlow Condensed',sans-serif;font-weight:600;
+  font-size:15px;color:var(--gold);letter-spacing:.03em}
+.gatebar span{flex:1;border-top:1px dashed var(--gold)}
+
+/* ---------- generic table ---------- */
+.tbl{width:100%;border-collapse:collapse;background:var(--form);border:1px solid var(--rule-hard);font-size:14.5px}
+.tbl th{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:14.5px;text-align:left;
+  background:var(--form-alt);border-bottom:1px solid var(--rule-hard);padding:9px 12px;letter-spacing:.02em}
+.tbl td{border-bottom:1px solid var(--rule);padding:9px 12px;vertical-align:top}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:#F8F6F1}
+.tbl tr.hot td{background:var(--gold-wash)}
+.tbl tr.hot:hover td{background:#F1E6C9}
+.tbl .own{font-family:'Barlow Condensed',sans-serif;font-weight:600;white-space:nowrap}
+.own-ops{color:var(--stamp)}.own-fin{color:var(--gold)}.own-buy{color:var(--ink)}
+.own-sys{color:var(--pen)}.own-comp{color:#6B2D8C}.own-deal{color:#8A5A00}
+
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:20px}
+.panel{background:var(--form);border:1px solid var(--rule-hard);box-shadow:var(--shadow)}
+.panel h3{font-size:20px;padding:11px 15px;border-bottom:1px solid var(--rule);background:var(--form-alt)}
+.panel .pb{padding:14px 15px}
+.panel ul{margin:0;padding-left:17px;font-size:14.5px}
+.panel li{margin-bottom:6px}
+
+/* money */
+.money{border:1px solid var(--rule-hard);background:var(--form)}
+.money-row{display:grid;grid-template-columns:1.4fr 1fr 1.1fr .8fr;gap:0;border-bottom:1px solid var(--rule)}
+.money-row:last-child{border-bottom:0}
+.money-row>div{padding:11px 14px;border-right:1px solid var(--rule);font-size:14.5px}
+.money-row>div:last-child{border-right:0}
+.money-row.h>div{font-family:'Barlow Condensed',sans-serif;font-weight:600;background:var(--form-alt);font-size:14.5px}
+.money-row .amt{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:18px;color:var(--gold)}
+.money-row.ext .amt{color:var(--ink)}
+
+/* state pills */
+.states{display:flex;flex-wrap:wrap;gap:6px}
+.state{font-family:'IBM Plex Mono',monospace;font-size:12px;padding:4px 9px;border:1px solid var(--rule-hard);background:var(--form-alt)}
+.state.n{border-color:var(--stamp);color:var(--stamp);background:var(--stamp-wash)}
+.state.b{border-color:var(--seal);color:var(--seal);background:var(--seal-wash)}
+.state.t{border-color:var(--ink);background:var(--ink);color:var(--form)}
+
+
+.amt-cell{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px;color:var(--gold)}
+.panel.path-up h3{border-left:5px solid var(--seal);padding-left:11px}
+.panel.path-down h3{border-left:5px solid var(--stamp);padding-left:11px}
+.path-list{padding:0}
+.path-step{display:grid;grid-template-columns:46px 1fr;border-bottom:1px solid var(--rule)}
+.path-step:last-child{border-bottom:0}
+.ps-n{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink3);
+  border-right:1px solid var(--rule);display:flex;align-items:flex-start;justify-content:center;padding:13px 0}
+.path-up .ps-n{color:var(--seal)}
+.path-down .ps-n{color:var(--stamp)}
+.ps-b{padding:12px 14px}
+.ps-t{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:17px;line-height:1.2}
+.ps-d{font-size:14px;color:var(--ink2);margin-top:4px}
+footer{margin-top:64px;border-top:2px solid var(--ink);background:var(--form);padding:30px 0 46px}
+footer p{max-width:78ch;color:var(--ink2);font-size:14.5px}
+footer .gov{color:var(--ink);font-size:17px;font-family:'Barlow Condensed',sans-serif;font-weight:600;max-width:70ch}
+
+@media (max-width:860px){
+  .swim{grid-template-columns:1fr 1fr}
+  .swim .col:nth-child(2n){border-right:0}
+  .swim .col:nth-child(-n+2){border-bottom:1px solid var(--rule)}
+  .money-row{grid-template-columns:1fr 1fr}
+  .money-row>div:nth-child(2n){border-right:0}
+}
+@media (max-width:560px){
+  .swim{grid-template-columns:1fr}
+  .swim .col{border-right:0;border-bottom:1px solid var(--rule)}
+  .st-head{grid-template-columns:44px 1fr auto}
+  .cond,.sees{flex-direction:column;gap:3px}
+  .cond .k,.sees .k{flex:none}
+}
+@media print{
+  nav.rail{display:none}
+  body{background:#fff;font-size:10.5pt}
+  .stage .st-body{display:block!important}
+  .stage{break-inside:avoid;box-shadow:none}
+  .st-toggle{display:none}
+  .panel,.lane{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="wrap mast-in">
+    <div class="mast-top">
+      <div class="brand">AUTO<span>LENIS</span></div>
+      <div class="mast-meta">Definitive implementation specification &nbsp;|&nbsp; supersedes the transaction spec and operating manual</div>
+    </div>
+    <h1>The complete car transaction, end to end.</h1>
+    <p class="sub">One connected transaction from a visitor's first form submission through confirmed possession of a vehicle. Every marketing surface feeds it. Every stage has an owner, an exit condition, and a way back.</p>
+
+    <div class="chain" id="chain"></div>
+    <div class="stats" id="stats"></div>
+  </div>
+</header>
+
+<nav class="rail">
+  <div class="wrap rail-in">
+    <a href="#intake">A · Entry points</a>
+    <a href="#spine">B · The 21 stages</a>
+    <a href="#money">C · Money</a>
+    <a href="#inventory">Inventory</a>
+    <a href="#findings">Findings</a>
+    <a href="#plans">Plans</a>
+    <a href="#financing">Financing</a>
+    <a href="#exceptions">Exceptions</a>
+    <a href="#states">States</a>
+    <a href="#safeguards">Safeguards</a>
+    <a href="#build">D · Build order</a>
+    <a href="#findings">Findings</a>
+    <span class="spacer"></span>
+    <button id="expandAll" type="button">Expand all stages</button>
+    <button id="printBtn" type="button">Print</button>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <section id="intake">
+    <div class="sec-head"><div class="part">PART A</div><h2>Where every form goes</h2></div>
+    <p class="sec-note">The transaction does not begin at account creation. It begins on a marketing page, a search result, a social post, or an affiliate link. Every form on the website, without exception, resolves to exactly one of four lanes — and every buy-lane form lands on the same fulfillment record.</p>
+    <div class="legend">
+      <span class="chip c-built">BUILT — exists today</span>
+      <span class="chip c-extend">BUILT, EXTEND — exists, needs additions</span>
+      <span class="chip c-new">NEW — must be built</span>
+      <span class="chip c-retire">RETIRE — remove from the transaction</span>
+      <span class="chip c-gate">GATE — a hard stop</span>
+    </div>
+    <div class="lanes" id="lanes"></div>
+  </section>
+
+  <section id="spine">
+    <div class="sec-head"><div class="part">PART B</div><h2>The transaction spine</h2></div>
+    <p class="sec-note">Twenty-one stages. Each one names its entry condition, who does what across the four responsible parties, what gets recorded, what the buyer sees, its exit condition, and what happens when it fails. Select any stage to open it.</p>
+    <div class="spine" id="spine-list"></div>
+  </section>
+
+  <section id="money">
+    <div class="sec-head"><div class="part">PART C</div><h2>The money model</h2></div>
+    <p class="sec-note">Exactly three money movements exist in an AutoLenis transaction, and only the first two touch AutoLenis. Stripe is the authority on money; local state is never treated as authoritative over the provider.</p>
+    <div class="money" id="money-tbl"></div>
+    <div class="two" style="margin-top:20px" id="money-panels"></div>
+  </section>
+
+
+
+  <section id="inventory">
+    <div class="sec-head"><div class="part">PART C</div><h2>Inventory and the shortlist</h2></div>
+    <p class="sec-note">The catalogue is a purchased third-party feed swept into the platform on a schedule, not dealer stock committed to AutoLenis and not searched live per buyer. That makes a listing a specification rather than a supply promise. After prequalification the system automatically presents qualifying vehicles within 100 miles of the buyer&rsquo;s ZIP and inside their approved ceiling &mdash; but it never chooses for them. <b>The 100-mile ceiling is AutoLenis policy, not a vendor limit</b>: a provider must support it, and no change to a provider plan may move it. Sourcing is unaffected and still reaches 250 miles through the rooftop pool.</p>
+    <h3 style="font-size:22px;margin:0 0 6px">Four experiences, and who acts in each</h3>
+    <p class="sec-note" style="margin:0 0 14px">The system finds vehicles. The buyer chooses them. Auto-saving a recommendation into a shortlist would imply intent the buyer never expressed, and could carry an unwanted vehicle into a paid auction.</p>
+    <div id="states4"></div>
+    <h3 style="font-size:22px;margin:34px 0 12px">The rules</h3>
+    <h3 style="font-size:22px;margin:0 0 6px">Qualified results, then the buyer chooses</h3>
+    <p class="sec-note" style="margin:0 0 14px">The system does the finding. The buyer does the choosing. These are two different surfaces and conflating them would put a car the buyer never picked into an auction they paid for.</p>
+    <div id="qual-tbl"></div>
+    <h3 style="font-size:22px;margin:34px 0 12px">How the approved amount is applied</h3>
+    <div id="budget-tbl"></div>
+    <h3 style="font-size:22px;margin:34px 0 12px">The catalogue rules</h3>
+    <div id="inv-tbl"></div>
+    <p class="sec-note" style="margin-top:16px">A shortlisted vehicle is a candidate. One request carries up to five, the auction covers all of them, offers bind to the candidate they answer, and selection collapses the shortlist to a single VIN. Nothing after selection knows the request was ever multi-vehicle.</p>
+  </section>
+
+  <section id="findings">
+    <div class="sec-head"><div class="part">APPENDIX</div><h2>Verified implementation findings</h2></div>
+    <p class="sec-note"><b>Verified 2 September 2026</b> against the production database and the provider&rsquo;s published plan limits, at repository commit <code>12be724</code>. These are <b>operational evidence, not business rules.</b> They record the conditions that justified specific remediation and they will stop being true once that work lands. Nothing in this appendix governs the transaction.</p>
+    <div id="find-tbl"></div>
+    <p class="sec-note" style="margin-top:16px">The permanent rules these findings justify are stated in the inventory section: sweep the served markets, monitor provider usage, alert before the quota ceiling, detect abnormally small runs, and never show a provider failure to a buyer as an empty market.</p>
+  </section>
+
+  <section id="plans">
+    <div class="sec-head"><div class="part">PART C</div><h2>Plans, upgrades and downgrades</h2></div>
+    <p class="sec-note">There are two plans and one gate. Standard is not a free tier &mdash; the $99 paid at the gate is the Standard plan in full. Premium is $499 in total, collected as that same $99 plus a $400 balance. The upgrade window opens when the $99 settles and closes when funding clears. It is pitched hardest immediately after the buyer accepts an offer &mdash; they have just chosen their car, and everything Premium does still lies ahead of them. Moving between plans never changes a single transaction term.</p>
+    <div id="plan-model"></div>
+    <h3 style="font-size:22px;margin:34px 0 6px">The upgrade sequence</h3>
+    <p class="sec-note" style="margin:0 0 14px">Premium is the second revenue line, so the ask is deliberate and sequenced rather than left to a link in a menu. Five touchpoints, one of which does most of the work. Then it stops.</p>
+    <div id="plan-seq"></div>
+    <h3 style="font-size:22px;margin:34px 0 12px">How the ask stays honest</h3>
+    <div id="plan-guard"></div>
+    <div class="two" style="margin-top:20px" id="plan-paths"></div>
+    <h3 style="font-size:22px;margin:34px 0 12px">Edge cases, resolved</h3>
+    <div id="plan-edge"></div>
+  </section>
+
+  <section id="financing">
+    <div class="sec-head"><div class="part">PART C</div><h2>Financing happens outside AutoLenis</h2></div>
+    <p class="sec-note">Whether the dealership arranges it, the buyer brings it, or AutoLenis assists in finding it, the loan is obtained and completed with an external lender. AutoLenis refers, coordinates, follows up, and verifies — and does nothing else. It never collects an SSN, accepts a lender application, pulls lender credit, underwrites, issues lender disclosures, or disburses funds.</p>
+    <div id="fin-checkpoints"></div>
+    <div class="two" style="margin-top:20px" id="fin-panels"></div>
+  </section>
+
+
+  <section id="exceptions">
+    <div class="sec-head"><div class="part">PART C</div><h2>Exception register</h2></div>
+    <p class="sec-note">Every exception names an owner, a buyer-visible status, a required action, a deadline, and the return point in the same transaction. All of them write to one Operations queue.</p>
+    <table class="tbl"><thead><tr><th style="width:30%">Exception</th><th style="width:16%">Owner</th><th>Required result</th></tr></thead><tbody id="exc-body"></tbody></table>
+  </section>
+
+  <section id="states">
+    <div class="sec-head"><div class="part">PART C</div><h2>State model</h2></div>
+    <p class="sec-note">The existing deal lifecycle is kept as the base and completed with the checkpoints this flow requires. Detailed outcomes live on supporting records rather than multiplying primary states.</p>
+    <div id="state-blocks"></div>
+  </section>
+
+  <section id="safeguards">
+    <div class="sec-head"><div class="part">PART C</div><h2>Safeguards that must not be weakened</h2></div>
+    <p class="sec-note">These exist today and are load-bearing. Any implementation that replaces them with something simpler is a regression.</p>
+    <div class="two" id="safe-panels"></div>
+  </section>
+
+  <section id="build">
+    <div class="sec-head"><div class="part">PART D</div><h2>Build order</h2></div>
+    <p class="sec-note">This sequence exists so that each step is testable when it lands, and so that nothing is built on a foundation that has not yet been connected.</p>
+    <table class="tbl"><thead><tr><th style="width:44px">#</th><th style="width:44%">Work</th><th>Why here</th></tr></thead><tbody id="build-body"></tbody></table>
+    <div class="two" style="margin-top:24px" id="accept"></div>
+  </section>
+
+
+  <section id="findings">
+    <div class="sec-head"><div class="part">APPENDIX</div><h2>Verified implementation findings</h2></div>
+    <p class="sec-note">Operational evidence gathered against the live system, recorded here so the remediation sequence can be justified without embedding dated observations in the permanent rules. <b>These are findings, not business rules,</b> and they expire once the remediation lands.</p>
+    <div id="findings-tbl"></div>
+    <p class="sec-note" style="margin-top:16px">The permanent rules these findings justify are simply: synchronise inventory to served markets; monitor provider usage; alert on quota thresholds; detect incomplete or abnormally small synchronisation results; and never show a buyer a false no-inventory result caused by a provider failure.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="gov">AutoLenis coordinates; the dealership sells. Nothing advances on assumption — every stage advances only on recorded evidence, and every stall has a named owner and a way back.</p>
+    <p style="margin-top:16px">This document authorizes no parallel website, no replacement architecture, and no unrelated code changes. Evidence basis: the written transaction flow and operating manual, plus direct inspection of the live production database — tables, columns, enumerations, and record volumes.</p>
+  </div>
+</footer>
+
+<script>
+const CHAIN=[["Buyer",""],["Prequalification",""],["Vehicle Request",""],["$99 payment","pay"],["Sourcing case",""],["Auction",""],["Offers",""],["Deal","deal"],["Contract",""],["Funding","pay"],["Possession",""],["Completed","done"]];
+const STATS=[["21","stages, first form to final possession"],["4","intake lanes, every form resolves to one"],["17","surfaces feeding the buy lane"],["47","exceptions with a named owner"],["27","steps in the build order"],["3","money movements, two touch AutoLenis"]];
+
+const LANES=[
+{id:1,name:"Lane 1 — Buy",primary:true,dest:"buyer_opportunities → vehicle_requests",
+ blurb:"The visitor wants a vehicle. Every surface below produces the same result: a lead record and a Vehicle Request, drafted or complete, carrying attribution and location.",
+ forms:[
+ ["Homepage hero","Find my car / start request — vehicle interest, ZIP, contact","CUSTOM_REQUEST"],
+ ["Inventory search results","Get best price on this vehicle — inventory item, ZIP, contact","INVENTORY_SELECTION"],
+ ["Vehicle detail page","Start my request, with the specific vehicle bound","INVENTORY_SELECTION"],
+ ["Shortlist","Get offers on my shortlist — one request per vehicle intent","INVENTORY_SELECTION"],
+ ["AMIPS / programmatic SEO pages","Page CTA — vehicle context from the page, ZIP, contact","CUSTOM_REQUEST"],
+ ["Blog and content articles","In-article CTA — contact, interest","CUSTOM_REQUEST"],
+ ["Social posts and campaigns","Landing form — platform, campaign, hook, contact","social_leads → CUSTOM_REQUEST"],
+ ["Affiliate referral link","Any buy-lane form, attribution captured at click","either entry type"],
+ ["Conversational intake / concierge chat","Guided questions — full criteria, budget, trade, timeline","CUSTOM_REQUEST"],
+ ["Call-back / talk to a human","Callback request — contact, reason, staff task","CUSTOM_REQUEST"],
+ ["Trade-in valuation","Trade details, attached to a Vehicle Request — never floating","either entry type"],
+ ["Prequalification","Non-SSN application attached to the buyer","pre_qualifications"],
+ ["Buyer dashboard","New request with full criteria","either entry type"],
+ ["Premium upgrade page","Plan election, snapshotted onto the Deal","plan on buyer"],
+ ["Guest capture","No account required — claim token issued, same buyer and request claimed later","buyer_request_claim_tokens"],
+ ["Draft resume link","Any incomplete capture, recovered over four touches","DRAFT"],
+ ["Find one like this","Out-of-radius listing used as a specification template, pre-filling a request","CUSTOM_REQUEST"]],
+ rules:[
+ ["1","<b>One endpoint.</b> All buy-lane forms post to a single intake handler. No page implements its own capture logic."],
+ ["2","<b>Attribution is mandatory.</b> Source, medium, campaign, content, source URL, referrer, landing source, affiliate and IP are written on every submission. A submission with no attribution is recorded as direct, never as null."],
+ ["3","<b>Location is captured at first opportunity.</b> ZIP is requested on every buy-lane form and written to both the lead and the Vehicle Request. This closes the live defect where a buyer with null city, state and ZIP produced an auction that received zero dealer invitations and closed early."],
+ ["4","<b>Consent is captured and timestamped.</b> Email consent, SMS consent and terms acceptance stored with version and time. No SMS without a stored consent record."],
+ ["5","<b>One open request per buyer.</b> A new submission attaches to the open request and updates it. It never creates a second open request and never creates a second buyer. This closes the live duplicate-buyer defect."],
+ ["6","<b>Incomplete is a draft, never a dead end.</b> Partial submissions persist with whatever was captured and enter the four-touch recovery sequence."],
+ ["7","<b>No spend before payment.</b> Draft storage, lead scoring and internal notification are free. Paid enrichment, external discovery, contact reveal and dealer outreach never occur before the $99 settles."]]},
+
+{id:2,name:"Lane 2 — Refinance",dest:"refinance_applications → OpenRoad",
+ blurb:"The visitor wants a better rate on a car they already own. This is a live surface with real production volume and its own compliance posture. It is not a purchase transaction and must never be merged into one.",
+ forms:[
+ ["Refinance form","Consent, timestamp, IP hash, state and source recorded","refinance_applications"],
+ ["State eligibility check","Excluded where AutoLenis does not operate","EXCLUDED_STATE"],
+ ["Partner redirect","Qualified applicants redirected with partner attribution","redirected_at"]],
+ rules:[
+ ["A","<b>AutoLenis is a lead generator here.</b> It does not quote a rate, take an application, underwrite, or service a loan. Every buyer-facing screen says so."],
+ ["B","<b>Crossover rule.</b> A refinance applicant who indicates interest in buying, or later submits a buy-lane form with the same verified email or phone, generates a buy-lane lead and Vehicle Request. The records link for attribution and support context."],
+ ["C","<b>Neither status ever drives the other.</b> A redirected refinance application does not advance a purchase, and a completed purchase does not close a refinance lead."],
+ ["D","<b>Reconciliation.</b> The partner reconciliation key must be confirmed and stored on the application. Until it is, redirected leads are unmatchable and the channel cannot be measured."]]},
+
+{id:3,name:"Lane 3 — Supply",dest:"dealer_applications / affiliates",
+ blurb:"A dealership or affiliate wants to join. Separate from any buyer's transaction, but it feeds the registered pool that sourcing draws from.",
+ forms:[
+ ["Dealer application","Public signup, review, approval creates dealer, rooftops and agreement signature","dealer_applications"],
+ ["Outside winner onboarding","Rooftop claim, verification and agreement mid-transaction, before the Deal advances","dealer_verifications"],
+ ["Affiliate application","Onboarding review, compliance acknowledgment, tax and payout profile","affiliates"],
+ ["Dealer prospecting","Proactive recruitment feeding the registered pool","dealer_prospects"]],
+ rules:[
+ ["A","<b>Outside winners enter mid-transaction.</b> Rooftop claim, account verification, dealer agreement and business verification all complete before the Deal advances past reaffirmation."],
+ ["B","<b>Outreach channel must match the contact data held.</b> Phone coverage across prospects is near-complete while email coverage is not, so the outreach log must support SMS and calls, not email alone."],
+ ["C","<b>Affiliate commission settles at Deal completion</b> — not at payment, not at offer selection. It reverses if the Deal is cancelled or the $99 is refunded or charged back."]]},
+
+{id:4,name:"Lane 4 — Support",dest:"conversations / testimonials",
+ blurb:"Contact, help, testimonial, preference changes. These create support records and, where a buyer is identified, a timeline entry.",
+ forms:[
+ ["Contact form","Support record, linked to an open request for context","conversations"],
+ ["Help request","Same, routed to the assigned owner","conversations"],
+ ["Testimonial","Content record only","testimonials"],
+ ["Preference / unsubscribe","Consent and suppression records updated","preference records"]],
+ rules:[["A","<b>Support forms never create or advance a transaction.</b> A form submitted by a buyer with an open Vehicle Request links to it for context only."]]}
+];
+
+const S=[
+{n:1,t:"Account and verification",st:"built",owner:"System · Buyer",
+entry:"A buy-lane capture exists, or a visitor registers directly.",
+buyer:["Provide legal name, email, phone and password","Elect Standard ($99) or Premium ($499), knowing the election can change later","Accept terms and privacy","Give email and SMS consent","Click the verification link"],
+dealer:null,staff:null,
+system:["Capture registration and consent","Carry referral or affiliate attribution from the lead","Send the verification link","Create or confirm exactly one buyer — resending never creates a second","Attach any draft Vehicle Request to the verified buyer"],
+rec:"One buyer record. Terms acceptance with version and timestamp. Consent records. Attribution carried from the lead.",
+tables:["buyers","accepted_terms","buyer_opportunities"],
+sees:"Verify your email to continue.",
+exit:"Email verified and one buyer record confirmed. Any draft Vehicle Request is attached to it.",
+fail:"Owner: system. Reminders at 1 hour, 24 hours and 72 hours. Abandon the draft after 14 days, preserving history. The verification link may be reissued at any time."},
+
+{n:2,t:"Onboarding and usable location",st:"extend",owner:"Buyer · Operations on failure",
+entry:"Verified buyer.",
+buyer:["Provide complete address, city, state and ZIP","Set communication preferences","Give initial vehicle preferences","Correct anything unusable"],
+dealer:null,
+staff:["Open a correction task if geocoding repeatedly fails"],
+system:["Geocode the address and store latitude and longitude","Mirror the location onto the Vehicle Request when it is created","Name the exact missing field rather than showing a generic error"],
+rec:"Buyer address fields populated and geocoded. Location snapshot mirrored onto the Vehicle Request.",
+tables:["buyers","vehicle_requests"],
+sees:"Progress toward ready to request offers, with the exact missing field named.",
+exit:"A usable, geocoded location exists.",
+fail:"An unusable address blocks every location-dependent stage — sourcing, distance disclosure and offer distance ranking. The buyer is returned to the specific field with a specific message.",
+note:"<b>Why this is a hard gate.</b> A live auction received zero dealer invitations and closed after roughly two hours of a forty-eight-hour window because the buyer record carried null city, state and ZIP. Location is not profile data. It is transaction data, and the transaction cannot be sourced without it."},
+
+{n:3,t:"MicroBilt prequalification",st:"extend",owner:"System · Compliance",
+entry:"Verified buyer with a usable location.",
+buyer:["Complete the non-SSN application: name, date of birth, address, income, employment, housing status and cost, monthly debt, budget, expected down payment","Elect a co-buyer","Give FCRA consent"],
+dealer:null,
+staff:["Work manual review and OFAC review with an owner and a deadline","Issue the decline decision and adverse-action notice"],
+system:["Persist FCRA consent before the MicroBilt request","Claim the pull to prevent concurrent duplicates","Run the pull and OFAC screening","Return exactly one truthful outcome: approved, declined, manual review, OFAC review, or provider delay","Refuse approval without an affirmative OFAC clear","Queue an administrative receipt for every submitted application"],
+rec:"Prequalification with a server-controlled approved amount, tier and expiry. Consent record. Compliance events. An admin receipt excluding SSN, raw bureau data, raw OFAC data and raw provider responses.",
+tables:["pre_qualifications","prequal_consents","compliance_events"],
+sees:"The applicable decision: approval with amount and expiration; manual review with honest status; OFAC or compliance review without exposing restricted information; provider delay; correction required; or decline with adverse-action information.",
+exit:"Approved and unexpired. The approved ceiling now governs qualified inventory results.",
+fail:"Manual and OFAC review route to the responsible reviewer. Decline sends the decision and adverse-action notice, and delivery is recorded as sent, duplicate or failed. Provider delay retries and notifies. Approaching expiry warns the buyer.",
+note:"<b>Approval is rechecked</b> at the payment gate, at offer selection, and again at contract request. An approval that expires mid-transaction pauses the Deal and asks the buyer to renew rather than silently proceeding on a stale ceiling."},
+
+{n:4,t:"Vehicle definition, co-buyer and trade",st:"new",owner:"Buyer",
+entry:"A current, unexpired approval.",
+buyer:["Review the qualified results the system presents automatically","Deliberately add up to five of them to the shortlist, or submit a custom request","Use any out-of-radius listing as a starting point for a request instead of shortlisting it","Record every criterion: new or used, year range, make, model, trim, body type, drivetrain, colors, required and preferred features, mileage, condition, timeframe, budget, down payment, financing preference, pickup or delivery","Elect a co-buyer and consent to share their information with the winning dealership","Submit the trade packet"],
+dealer:null,staff:null,
+system:["Write both entry methods to the same Vehicle Request — only the entry type differs","Read the buyer\u2019s verified ZIP, approved ceiling and criteria, and present qualifying vehicles within 100 miles automatically, required criteria ranked before preferred","Never write a vehicle into the shortlist on the buyer\u2019s behalf \u2014 the system recommends, the buyer selects","Filter on listing price with headroom for tax, title, documentation and registration, and flag any result whose realistic out-the-door would breach the ceiling","Present the Vehicle Request path alongside thin results, not only when the count is zero","Show every listing in the general catalogue, kept clearly separate from qualified results","Query the provider live with the buyer's ZIP, approved amount and criteria, returning matches from the whole market rather than from the browsing catalogue","Cache each query against a criteria hash so repeated and similar searches cost nothing","Capture the holding rooftop returned with every listing \u2014 name, address, coordinates, type, phone and email \u2014 so the sourcing pool grows with every search","Offer an out-of-radius listing as a specification template, pre-filling a custom request from its year, make, model, trim, mileage band, price band and features","Attach each shortlisted vehicle to the one Vehicle Request as a candidate, capped at five, each with its distance from the buyer","Revalidate each candidate for price, availability, VIN, location and listing freshness","Flag a vehicle missing a required criterion as a mismatch, never rank it as equivalent","Carry criteria into invitations, offer validation and buyer comparison"],
+rec:"One Vehicle Request with complete criteria and up to five in-radius candidate vehicles, each carrying its distance. Co-buyer record with name, contact, address, role, consent and required-signer flag. Trade packet with lienholder, payoff and good-through date, title status and state, second key, photos, and whether the trade comes to pickup.",
+tables:["vehicle_requests","auction_vehicles","inventory_items","shortlists","co_buyers","trade_in_submissions"],
+sees:"Qualified results within 100 miles and inside the approved ceiling, each showing distance, listing freshness, vehicle detail and listing status, with Add to shortlist on each. The general catalogue remains browsable and clearly separate. An out-of-radius or stale listing offers Find one like this near me instead, and is never labelled qualified, locally available, confirmed, held or auction eligible.",
+exit:"Complete criteria, co-buyer election recorded, trade election recorded.",
+fail:"The request remains a draft. Drafts do not enroll payment reminders, do not spend on enrichment, do not contact dealerships and do not create auctions.",
+note:"<b>AutoLenis does not collect the co-buyer's SSN</b>, pull their credit, submit a lender application, or represent that a co-buyer is approved for financing. Their information reaches the winning dealership through the secure handoff at dealer reaffirmation. <b>AutoLenis does not appraise the trade</b>, guarantee value, verify payoff, transfer title or take possession — every trade screen says the dealership performs the appraisal."},
+
+{n:5,t:"Eligibility recheck and the $99 gate",st:"new",gate:"Nothing costly happens before this point",owner:"Buyer · Finance on exceptions",
+entry:"Eligibility passes: active verified account, completed onboarding, usable geocoded location, approved and unexpired prequalification, complete criteria, co-buyer and trade elections recorded, no conflicting open request, and disclosures accepted.",
+buyer:["Accept the payment and distance disclosures","Pay the $99 Standard plan","Optionally add the $400 Premium balance now, or any time before accepting an offer"],
+dealer:null,
+staff:["Work reconciliation gaps and unroutable payments as Finance exceptions"],
+system:["Move the request to payment required","Create or reuse ONE payment intent tied to that Vehicle Request, not merely to the buyer","Query the provider for an existing succeeded or in-flight obligation before creating another intent","On settlement, atomically record the payment, attach it to the request, unlock fulfillment, cancel reminders, queue the receipt and open the sourcing case","Run the six-touch reminder series and recheck live status before every send","Open the Premium upgrade window the moment the $99 settles, and name it once on the receipt without pushing it"],
+rec:"Deposit attached to the Vehicle Request. Provider object reference. Reminder enrollment and cancellation.",
+tables:["deposits","vehicle_requests","payment_provider_events","idempotency_keys"],
+sees:"Checkout showing the $99, what it activates, that sourcing may extend from 100 to 150 and then 250 miles, that dealerships may be in another state, that expansion beyond 250 miles requires authorization, that payment does not obligate a purchase, and the refund policy including that refunds are reviewed manually.",
+exit:"Payment settled and attached to the Vehicle Request.",
+fail:"Payment failure preserves the request and permits safe retry. Dispute or refund places fulfillment on hold and stops all unsent outreach. A confirmed payment matching no known obligation raises an immediate Finance exception rather than being absorbed.",
+note:"<b>Market enrichment, external discovery, contact enrichment, script drafting, dealer outreach, invitations and auctions all sit behind this gate.</b> Draft storage, lead scoring and internal notification are the only free actions permitted before it. The six touches run immediately, 1 hour, 6 hours, 24 hours, 72 hours and day seven, and cancel on payment, cancellation, closure, refund, dispute hold, suspension or do-not-contact."},
+
+{n:6,t:"Dealer sourcing",st:"new",owner:"System · Operations",
+entry:"Settled, undisputed payment attached to the request.",
+buyer:["Authorize a maximum additional distance if coverage runs out at 250 miles"],
+dealer:null,
+staff:["Approve a limited auction of three or four rooftops, with audit","Source manually where automated sourcing falls short","Review zero-coverage cases before closing"],
+system:["Open a sourcing case — settlement no longer launches an auction directly","Search the rooftop pool rather than the catalogue, so sourcing is not bound by the catalogue radius","Resolve each shortlisted candidate to two rooftop sets: the rooftop holding that listing where it is mapped to a real rooftop and sits in radius, and rooftops in radius holding the comparable unit","Union the sets across all candidates and dedupe by rooftop, recording which candidates each rooftop can serve","Search the ladder in order: registered within 100 miles, outside within 100, then the 100–150 band, then 150–250, then beyond 250 only on explicit buyer authorization","Search only the new band on each expansion and reuse valid candidates already found","Enforce radius server-side, never as a client parameter","Validate each rooftop: real physical location, calculated distance, make or inventory fit, active status, no duplicate or suppression, deliverable contact, relevant sales role","Use stored contacts first; run paid enrichment only after payment and only when stored and public paths fail"],
+rec:"Sourcing case with band, candidates, validation outcomes, enrichment spend and readiness state. Named, ordered readiness checkpoints with completion owner and timestamp.",
+tables:["vehicle_request_due_diligence_checkpoints","auction_vehicles","dealer_rooftops","dealer_contact_profiles","apollo_reveals"],
+sees:"Finding dealerships, with band progress and honest expectations.",
+exit:"An invitation-ready field of five to eight rooftops, or an Operations-approved limited auction.",
+fail:"At 250 miles without coverage the request pauses for radius authorization, reminding at 24 and 72 hours and closing as abandoned after 14 days with history preserved. Zero coverage creates an Operations case and a buyer notice; closure and refund are separate decisions.",
+note:"<b>Field size decides the action.</b> Five to eight launches automatically. More than eight ranks and invites the best eight. Three or four is a limited auction requiring a completely searched radius, documented scarcity, disclosure of the field size to the buyer and an audited approval. One or two continues expansion, sources manually, or closes after review. Zero closes as no coverage after review."},
+
+{n:7,t:"Auction launch and invitations",st:"extend",owner:"System · Operations",
+entry:"Launch readiness confirmed: payment settled and undisputed, prequalification and ceiling attached, criteria complete, required dealer count or approved exception, every contact send-safe against suppression, every rooftop within the permitted distance, and auction and per-dealer invitation references existing.",
+buyer:[],
+dealer:["Receive a unique, expiring, auction-and-rooftop-bound invitation","Open, decline or respond"],
+staff:["Replace an undeliverable contact or rooftop early in the window"],
+system:["Launch a 48-hour sealed auction","Issue every rooftop the same class of secure invitation — registered dealers no longer receive a generic dashboard link","Issue one invitation per rooftop carrying every candidate that rooftop can serve, never one invitation per vehicle","Send criteria, the required-versus-preferred distinction, general location and distance, trade indication, delivery preference, deadline and submission link","Withhold buyer identity entirely","Track queued, sent, delivered, opened, bounced, declined, responded and offer submitted","Remind nonresponders at 50% and 90% of the window"],
+rec:"Auction linked to the Vehicle Request and the deposit. One invitation per rooftop with token hash, expiry and delivery state.",
+tables:["auctions","auction_invitations","auction_vehicles","identity_firewall_entries"],
+sees:"Your 48-hour auction is live, the number of dealerships invited, the close time, and the offer count as it grows — never competing prices.",
+exit:"The auction closes at its deadline, or every invited dealer has responded.",
+fail:"A bounced invitation creates an Operations contact-replacement exception. A launch that cannot reach readiness holds and surfaces the exact missing prerequisite with an owner. The auction never launches half-ready."},
+
+{n:8,t:"Offers",st:"extend",owner:"Dealership · System",
+entry:"An active auction.",
+buyer:[],
+dealer:["Submit a complete offer","Confirm the vehicle is currently available","Confirm it can complete this sale for this buyer","State whether it can process registration for the buyer's home state","Attach the condition report, history report and photographs","Revise before the deadline if desired"],
+staff:["Review flagged offers"],
+system:["Validate component arithmetic against the stated total","Enforce the buyer's approved budget","Match VIN and vehicle against the request criteria","Bind every offer to the candidate it answers, or to the criteria set on a custom request","Allow one live offer per rooftop per candidate, capped at three offers per rooftop, retaining every version","Evaluate junk-fee patterns and APR flags","Extend the auction five minutes on a bid inside the final five, capped at six extensions","Process close exactly once under an atomic claim and reprocess any closed auction with unfinished side effects","Rank within a candidate on out-the-door, and across candidates on discount to the listed market price and monthly payment, persisting inputs and weights","Break ties deterministically: lowest out-the-door, then best required-feature match, then shortest distance, then earliest submission","Offer Premium alongside the Best Price Report, where its value first becomes legible"],
+rec:"Canonical offers carrying VIN, stock number, vehicle detail, condition and odometer, availability, price, itemized incentives and add-ons, documentation fee, dealer-provided taxes, title and registration, out-the-door total, financing terms, delivery terms and fee, out-of-state registration capability, expiration, feature matches and mismatches, and disclosure documents.",
+tables:["offers","best_price_calculation_logs","junk_fee_patterns"],
+sees:"Offer count as it grows, then the Best Price Report at close: each candidate ranked on its own, plus one cross-vehicle view.",
+exit:"Auction closed with at least one valid offer.",
+fail:"Offers on some candidates and none on others is a successful auction, not a failure \u2014 only zero valid offers across every candidate triggers the zero-offer case. Zero offers creates a buyer notice and an owned Operations case. Operations may source manually, relaunch once without a second $99, or close the request. No refund is automatic. Offers exceeding the approved budget are never presented as qualified. An auction trending toward zero alerts Operations before close, not after.",
+note:"<b>Out-of-state registration is not an optional field.</b> Sourcing reaches 250 miles and crosses state lines by design. A dealership that cannot title and register in the buyer's home state creates a stranded buyer, and that must be visible before selection. <b>The condition report, history report and photographs are required</b> because this is frequently a remote purchase — a buyer choosing a vehicle 250 miles away needs disclosed condition before committing, not at handover."},
+
+{n:9,t:"Buyer selection",st:"built",owner:"Buyer",
+entry:"Offers ready.",
+buyer:["Compare out-the-door amount, vehicle and feature match, VIN and mileage, distance, fees and optional products, financing terms, delivery terms, out-of-state registration capability, condition and history disclosure, and expiration","Explicitly select one valid offer, which resolves the shortlist to a single vehicle","Accept or decline the Premium invitation \u2014 declining costs the buyer nothing"],
+dealer:null,staff:null,
+system:["Serialize the selection under a database lock guaranteeing exactly one winner","Close every non-selected candidate and send non-award notices to the rooftops that bid on them","Present the full Premium invitation once, on the confirmation screen, before the dealer-confirmation view","Send the reaffirmation request to the dealership regardless of whether the buyer engages with the invitation","Queue the follow-up email one hour later only if the invitation was declined or dismissed","Write the plan snapshot onto the Deal at creation, appending a new version on any later change","Create one Deal carrying the full lineage","Notify the winning dealership and send non-award notices to the rest"],
+rec:"One Deal at dealer-confirmation pending, carrying the Vehicle Request, auction, selected offer, deposit, buyer, co-buyer, trade, dealership, rooftop, VIN, vehicle snapshot, out-the-door amount and the current plan snapshot. Invitation impression, dismissal or conversion recorded against the touchpoint.",
+tables:["deals","offers","plan_snapshots","deal_status_history"],
+sees:"Selection confirmed. The winning dealership is confirming availability, with an expected response time.",
+exit:"Deal created at dealer-confirmation pending.",
+fail:"Offers carry an expiration and the buyer is reminded before they lapse. Non-selection triggers revalidation with the dealerships or closure of the request, with the buyer informed either way. A closed request with no selection does not automatically refund.",
+note:"<b>No system, algorithm or administrator selects on the buyer's behalf.</b><br><br><b>This is the primary Premium conversion moment.</b> The buyer has just chosen their car. They are committed, and everything Premium does \u2014 chasing the dealership, holding the recap honest, the financing handoff, contract coordination, insurance, funding and pickup \u2014 still lies ahead of them. A full-screen invitation is shown once here, framed against this buyer's actual remaining path, showing $499 less the $99 already paid and introducing the concierge by role. It is declinable in one action, it never blocks the transaction, and it never delays the reaffirmation request to the dealership. Suppressed where the buyer is already Premium, has a do-not-contact flag, or has a dispute or cancellation in progress. The full sequence is in the plans section."},
+
+{n:10,t:"Dealer reaffirmation, vehicle hold and disclosure",st:"new",owner:"Dealership · Operations",
+entry:"Deal at dealer-confirmation pending.",
+buyer:["Acknowledge the condition disclosure","Accept or reject any material change, side by side"],
+dealer:["Within 24 hours confirm: vehicle still available, VIN and current mileage, out-the-door amount, every fee, incentive and add-on, delivery terms, out-of-state registration handling, ability and willingness to proceed, and that the trade remains subject to its own inspection","Set a vehicle hold-until date and time","Supply the condition report, history report and current photographs","Complete rooftop claim, verification and agreement if an outside winner"],
+staff:["Chase the reaffirmation timeout","Verify outside winners before advancement"],
+system:["Remind the dealership at 12 hours","Lift the identity firewall at this moment and not before — release buyer and co-buyer contact, the trade packet and the secure handoff","Track the hold-until timestamp","Route material changes to the buyer for a single accept or reject","Send the second and final Premium email here, where the coordination work becomes visible \u2014 and stop asking after it","Apply a lower out-the-door automatically in the buyer's favour","Refuse any change above the approved ceiling"],
+rec:"Reaffirmation with all confirmed values, hold-until, disclosure artifacts and buyer acknowledgment. Every material change and its buyer decision.",
+tables:["dealer_reaffirmations","deals","identity_firewall_entries","dealer_verifications"],
+sees:"Dealership confirmed — review your vehicle and condition report, or the specific change awaiting a decision.",
+exit:"Dealership reaffirms, buyer acknowledges the disclosure, and no material change is unresolved.",
+fail:"Rejection, timeout, failed verification, unavailable inventory or an unaccepted material change returns the buyer to the remaining valid offers with the reason stated. The failure records on the dealership scorecard and affects future invitation ranking. Repeated failures trigger an SLA violation and review. If the hold expires before the contract is requested, the dealership extends or releases; a released hold returns the buyer to remaining offers.",
+note:"<b>Buyer approval is required for</b> any out-the-door increase, a different VIN, any new fee or add-on, any APR, term or payment change, odometer more than 500 miles above the confirmed offer, delivery more than seven days later than confirmed, or the loss of a required year, trim, condition, drivetrain or feature."},
+
+{n:11,t:"Final deal recap",st:"new",owner:"Buyer · Dealership",
+entry:"Dealership reaffirmed.",
+buyer:["Review one consolidated recap","Accept or decline each optional product separately","Confirm"],
+dealer:["Supply the preliminary trade allowance and verified payoff where available","Confirm"],
+staff:["Resolve disputed figures and reissue a corrected recap version"],
+system:["Present buyer and co-buyer, dealership and rooftop, vehicle, VIN, mileage and condition","Itemize the out-the-door: vehicle price, discounts and incentives, documentation fee, taxes, title and registration, add-ons, delivery fee","State net trade equity or negative equity plainly, and whether negative equity is rolled into the amount financed","Show down payment amount and method, cash or external financing path, expected amount financed","Show the estimated monthly payment alongside the out-the-door total so the two reconcile","Version every recap and audit every change"],
+rec:"Recap version with both confirmations and timestamps. Any later change produces a revised recap, disclosed and audited — settled figures are never silently rewritten.",
+tables:["deal_recaps","deals"],
+sees:"The complete recap with a single confirm action, and a plain-language summary of what happens next.",
+exit:"Both parties confirmed.",
+fail:"A disputed figure returns to the dealership for correction and produces a new recap version. Repeated failure escalates to Operations with the Deal frozen at recap.",
+note:"<b>Every optional product is named, priced and accepted or declined here.</b> A warranty, service contract, GAP product, maintenance plan or protection package may never first appear in the contract — if one does, Contract Shield holds the contract. <b>No funds pass from the buyer to the dealership before the contract is executed.</b> No holding deposits, no hold-it-for-me payments, no card on file."},
+
+{n:12,t:"Financing terms locked, or cash confirmed",st:"extend",owner:"Buyer · Operations",
+entry:"Recap confirmed by both parties.",
+buyer:["Pursue financing with an external lender, or confirm a cash purchase","Supply pre-approval evidence"],
+dealer:["Arrange financing where the path is dealer-arranged","Submit to its lenders outside AutoLenis"],
+staff:["Coordinate and follow up","Assist with the external handoff on Premium"],
+system:["Track path, status and expiry","Record the locked terms onto the recap","Recheck that the buyer's approval is current and sufficient"],
+rec:"Financing at terms-locked or not-required-cash, with path, approved amount, down payment, APR, term, payment and expiry. External lender evidence attached to the Deal.",
+tables:["financing","external_pre_approvals","vehicle_request_financing"],
+sees:"Your financing terms are confirmed — the dealership is preparing your contract.",
+exit:"Terms locked, or cash confirmed, with the recap reflecting the locked terms.",
+fail:"A failed or expired approval returns the buyer to another external path — a different lender, a different structure, a larger down payment, or cash. It does not automatically cancel the Deal. The vehicle hold is re-evaluated and extended or released. Operations owns the follow-up and tells the buyer plainly what is being tried and by when.",
+note:"<b>Why financing is two checkpoints, not one.</b> A real deal cannot record financing as completed before the contract exists, because in dealer-arranged and most bank-arranged financing the signed contract is the instrument the lender funds against. Terms are locked here so a contract can be written. Completion and funding are verified at funding clearance, before the vehicle moves."},
+
+{n:13,t:"Contract package, Contract Shield and signatures",st:"extend",owner:"Dealership · Operations",
+entry:"Financing terms locked or cash confirmed. Plan level never blocks this stage.",
+buyer:["Review the approved contract","Give affirmative electronic-records consent and adopt a name","Sign"],
+dealer:["Prepare and upload the complete package within 24 hours","Determine which forms the transaction requires and confirm the package is complete","Execute the contract and return the fully executed copy"],
+staff:["Review held contracts","Escalate an overdue upload","Name the specific discrepancies to both parties"],
+system:["Dispatch the contract request durably from the central transition, not from an administrator's manual action, with deadline, reminder and escalation attached","Request insurance at the same moment so the buyer has time to bind","Compare the uploaded contract against the winning offer, the reaffirmation and the confirmed recap","Hold on any unexplained increase, addition, inconsistent total, changed VIN, changed financing term or changed trade figure","Apply junk-fee patterns, fee caps, APR validation, payment packing and disclosure checks","Treat extraction failure as retryable and never as approval","Keep uploads private, dealer-owned and versioned create-before-supersede","Bind approval to the exact reviewed version and reject an upload arriving during review","Bind the signing envelope to the approved document bytes by hash","Record identity, IP, device and timestamps server-side","Void the envelope and require fresh consent and signatures if the document changes","Expire the signing period after 14 days, reissuable against the still-approved version"],
+rec:"Contract versions with hashes, scan results and decisions, envelopes with consent snapshot and certificate, and the executed artifact with its hash.",
+tables:["document_requests","contract_versions","contract_scans","e_sign_envelopes"],
+sees:"Contract under review, then ready to sign, then signed and waiting on the dealership's countersignature.",
+exit:"Buyer and any required co-buyer have signed the exact approved version, and the dealership's fully executed copy is stored.",
+fail:"A mismatch requires correction and a rescan with the discrepancies named. An overdue upload reminds the dealership and escalates. A buyer or co-buyer who does not sign is reminded, the envelope expires, and it may be reissued. A dealership that does not execute is escalated, and release stays blocked.",
+note:"<b>AutoLenis does not determine which legal forms a dealership must use.</b> The dealership identifies the complete package and confirms it is complete. <b>The transaction is not contract-executed merely because the buyer signed</b> — release stays blocked until the fully executed copy is stored. A page view is not a signature."},
+
+{n:14,t:"Financing completed and funding cleared",st:"new",gate:"No conditional or spot delivery",owner:"Finance · Operations",
+entry:"Contract fully executed by both sides.",
+buyer:[],
+dealer:["Confirm funding or funding authorization","Collect the down payment and record its method"],
+staff:["Record financing completion against external dealership or lender evidence","Separately confirm funding clearance","Verify the trade payoff quote is within its good-through date"],
+system:["Refuse completion recorded by anyone other than an authorized Finance or Operations administrator","Write source, external reference, approved amount, down payment, APR, term, payment, expiration, VIN, verifier identity and verification time into the financing audit trail","Block release until funding is cleared","Close the Premium upgrade window at clearance and revert any unpaid election to Standard","Send the transaction back through recap, contract, Contract Shield and signatures if a financing change affects the contract"],
+rec:"Financing completed or not-required-cash, financing completion time, funding clearance time, verifier identity and the evidence reference on the Deal.",
+tables:["financing","external_pre_approvals","financing_audit_events","deals"],
+sees:"Financing complete — preparing your vehicle for delivery, or the specific outstanding condition and who owns it.",
+exit:"Financing completed and funding cleared.",
+fail:"A stale trade payoff requires a refreshed quote before clearance. Unresolved clearance holds the Deal and creates an Operations exception with an owner and a deadline. It never proceeds on a stale contract.",
+note:"<b>Funding clearance requires all of:</b> financing approval current and unexpired; every lender condition and stipulation satisfied; the down-payment arrangement complete with its method recorded; the dealership confirming funding or authorization; the trade payoff within its good-through date where a lien exists; and no funding hold, payment dispute or chargeback on the $99 or the Premium fee. <b>A vehicle is never released on the expectation that financing will complete later.</b> This protects the buyer from unwinding after delivery, and it is enforced structurally: release requires funding cleared, and funding clearance requires completed financing. <b>The buyer can never mark financing completed.</b>"},
+
+{n:15,t:"Insurance",st:"new",owner:"Buyer · Operations",
+entry:"Contract requested — insurance is requested at the same moment so the buyer has time to bind.",
+buyer:["Upload proof of coverage, or bind a policy externally","Correct a rejected document"],
+dealer:null,
+staff:["Review the uploaded proof and decide","Confirm the policy is active, names the buyer and any co-buyer, and matches the VIN"],
+system:["Treat an upload as under review, never as approval","Permit release only on verified or policy-bound","Track expiry and block release if coverage lapses before pickup"],
+rec:"Insurance policy with provider, policy number, effective and expiry dates, proof document, verifier and verification time.",
+tables:["insurance_policies","queue_items"],
+sees:"Insurance requirements and a secure submission link, then under review, then cleared.",
+exit:"Verified or policy bound.",
+fail:"Rejection names the specific defect and requests a corrected document. Expiry before pickup blocks release until corrected.",
+note:"<b>An upload is not approval.</b> Insurance never blocks contract preparation — it blocks the vehicle leaving the lot. AutoLenis may assist with quotes but does not sell, bind or broker insurance."},
+
+{n:16,t:"Pickup readiness",st:"new",gate:"Nothing is scheduled while any item is unmet",owner:"System · all parties",
+entry:"Contract executed, financing completed, funding cleared, insurance verified.",
+buyer:[],
+dealer:["Confirm vehicle preparation is complete","Confirm promised equipment, keys and accessories are present","Document promised repairs and due-bill items","Ready the delivery documents"],
+staff:["Own each unmet item to resolution"],
+system:["Evaluate every prerequisite and display the exact unresolved item and the party responsible","Refuse scheduling while any item is unmet"],
+rec:"Readiness confirmation timestamp on the pickup record.",
+tables:["pickups","deals"],
+sees:"The readiness checklist with the exact unresolved item and who owns it.",
+exit:"Every item true; the Deal moves to scheduling.",
+fail:"Each unmet item has a named owner, a buyer-visible status, a required action and a deadline.",
+note:"<b>The checklist:</b> correct vehicle and VIN confirmed; vehicle still available; final contract fully executed and stored; financing completed or cash confirmed; funding cleared; down-payment arrangement confirmed; insurance verified or policy bound; trade packet ready for inspection with title and payoff current; no payment dispute, cancellation or other hold; dealership confirms vehicle preparation; promised equipment, keys and accessories present; promised repairs and due-bill items documented; dealership delivery documents ready."},
+
+{n:17,t:"Scheduling",st:"extend",owner:"Buyer · Dealership · Operations",
+entry:"Pickup readiness complete.",
+buyer:["Propose a time and location within the dealership's availability","Accept or counter"],
+dealer:["Confirm or counter","Publish availability"],
+staff:["Schedule directly after two unsuccessful counter rounds"],
+system:["Enforce strict turn-taking, each action conditional on the current turn","Refuse a stale or duplicate action without side effects","Generate a cryptographically secure, expiring, single-use release token on confirmation","Revoke the prior token and issue a new one on any schedule change","Send 24-hour and 2-hour reminders"],
+rec:"Confirmed appointment with a live token, revocation history and reminder dispatch.",
+tables:["pickups","dealer_availability","comms_outbox"],
+sees:"Time and location, required government identification for buyer and co-buyer, insurance reminder, down-payment or funding instructions and accepted methods, trade instructions including title, keys and payoff documents, release-token instructions and the rescheduling contact.",
+exit:"Confirmed appointment with a live token.",
+fail:"A missed pickup returns to scheduling with a new proposal round and a revoked token. Repeated no-shows escalate to Operations and register on the dealership scorecard where the dealership is at fault."},
+
+{n:18,t:"Handover",st:"new",owner:"Dealership · Buyer",
+entry:"Scheduled appointment with a live token.",
+buyer:["Present government identification","Inspect the vehicle before signing the final delivery acknowledgment","Pay amounts owed directly to the dealership","Surrender the trade with keys, title and payoff documents"],
+dealer:["Authenticate and scan the release token","Confirm Deal ownership and token validity","Verify buyer and co-buyer identity against its contract","Confirm VIN, mileage and condition","Complete its own inspection and delivery process","Collect amounts payable and record the method","Receive and inspect the trade, confirm final allowance and payoff handling","Provide keys, accessories and all dealership documents","Record unresolved due-bill commitments and dealer release evidence"],
+staff:["Resolve blocks in real time"],
+system:["Validate the token exactly once","Record token consumption, identity verification, VIN and odometer at release, condition, funds collected and method, trade received, due-bill items and release evidence"],
+rec:"Full release evidence on the pickup and Deal records.",
+tables:["pickups","deals","documents"],
+sees:"A short confirmation flow on mobile at the dealership.",
+exit:"Dealer release recorded.",
+fail:"An identity mismatch, unavailable vehicle, unfunded transaction, failed insurance, changed contract or any unmet release condition blocks handover and creates an urgent exception with an owner and immediate buyer and dealership notification.",
+note:"<b>Delivery variant.</b> Where the agreed terms are delivery rather than pickup, the same requirements apply: the dealership or its transporter delivers to the agreed address, identity verification occurs at the delivery point, the release token is presented and scanned at delivery, odometer at delivery is recorded, and the trade is surrendered at the same appointment with its keys and title. Delivery does not lower any release condition. <b>A changed trade appraisal</b> must be disclosed to and accepted by the buyer — if it changes the contract, the transaction returns to contract revision and execution, not a handshake at the curb."},
+
+{n:19,t:"Buyer possession confirmation",st:"new",owner:"Buyer",
+entry:"Dealer release recorded.",
+buyer:["Record vehicle received, VIN match, odometer, condition as delivered","Confirm keys and promised accessories received","Confirm the trade was surrendered where applicable","Note any outstanding due-bill items","Give an affirmative possession confirmation"],
+dealer:null,
+staff:["Open a case on any material discrepancy and notify the dealership"],
+system:["Store possession evidence on the Deal","Remind the buyer where the dealer released but the buyer has not confirmed"],
+rec:"Possession evidence on the Deal.",
+tables:["deals","pickups"],
+sees:"A short confirmation form, available on mobile at the dealership.",
+exit:"Possession affirmatively confirmed with no material discrepancy.",
+fail:"A material discrepancy blocks completion and creates an Operations case with the dealership notified.",
+note:"<b>The Deal never completes automatically on the dealer's word alone.</b>"},
+
+{n:20,t:"Completion",st:"new",gate:"Completed is terminal",owner:"System",
+entry:"Dealer release evidence and buyer possession confirmation both present.",
+buyer:[],dealer:null,
+staff:["Resolve any discrepancy blocking completion"],
+system:["Verify every completion requirement is true before committing","Atomically mark pickup complete, mark the Deal completed, record completion time, emit the canonical completion event exactly once, queue buyer and dealership communications durably, and preserve the executed contract, receipt, recap and full history","Show the exact missing checkpoint and responsible party if any requirement is false","Keep corrections append-only"],
+rec:"Terminal Deal with completion time and the preserved transaction record.",
+tables:["deals","pickups","comms_outbox","deal_timeline"],
+sees:"Deal completed, with the executed contract, receipt and support information.",
+exit:"Deal completed.",
+fail:"If any requirement is false the Deal is not complete and the website shows the exact missing checkpoint and the responsible party.",
+note:"<b>Completion requires all of:</b> one verified buyer and any required co-buyer identified; an unbroken reference chain from the Deal to its Vehicle Request, payment, sourcing case, auction, selected offer, buyer, vehicle and dealership; one confirmed vehicle and VIN bound to the Deal; the dealership reaffirmed; the recap confirmed by both parties; financing completed or cash confirmed; funding cleared; fees resolved; insurance verified or policy bound; the exact approved contract version signed by every required signer; the fully executed contract stored; the vehicle released by the correct dealership; buyer possession, VIN, mileage and condition confirmed; and no blocking hold or unresolved delivery discrepancy."},
+
+{n:21,t:"Post-completion dealership obligations",st:"new",owner:"Dealership · Operations",
+entry:"Deal completed.",
+buyer:["Report anything outstanding"],
+dealer:["Deliver title and registration before the temporary tag expires","Complete the trade payoff and confirm the lienholder was paid","Honour due-bill repairs and promised equipment","Supply missing accessories or second keys","Correct transaction documents where needed"],
+staff:["Escalate overdue obligations"],
+system:["Track each obligation as pending, overdue or resolved with an owner and a due date","Notify both parties and register overdue obligations on the dealership scorecard"],
+rec:"Child obligation records on the terminal Deal, without reopening or altering it.",
+tables:["post_completion_obligations","dealer_scorecard_snapshots"],
+sees:"Outstanding obligation status with expected dates.",
+exit:"All obligations resolved.",
+fail:"Overdue obligations notify the buyer and the dealership, escalate to Operations and register on the dealership scorecard.",
+note:"The dealership remains responsible for performance. AutoLenis tracks status and communication for buyer support and dealer-quality history."}
+];
+
+
+const INV=[
+["The market is far larger than any catalogue","A single metropolitan area holds around 200,000 active listings. A metered plan capped at 500 rows per query can mirror a fraction of one percent of that, chosen essentially at random. No sweep can ever be the buyer\u2019s search \u2014 the market is too big to copy and too big to browse."],
+["So the catalogue is a shop window, not an index","A small scheduled sweep keeps a few hundred current local vehicles on the public site so a visitor sees real cars at real prices. It exists to be looked at. It is not where a qualified buyer\u2019s vehicle is found."],
+["Qualified results are a live targeted query","When an approved buyer reaches vehicle selection, the system queries the provider directly with their verified ZIP, approved amount and criteria, and returns matches from the whole market rather than from the sample. One or two calls, cached against a criteria hash so repeated and similar searches cost nothing."],
+["Why this does not breach the no-spend rule","The rule exists to stop per-buyer fulfilment spend on people who never pay. This is a fraction of a cent, spent once, for a buyer who has already completed prequalification. It is not enrichment, contact reveal, or outreach \u2014 all of which stay behind the $99 as before."],
+["The 100-mile ceiling is AutoLenis policy","AutoLenis enforces a maximum 100-mile radius for qualified results and shortlist eligibility. The provider must support that policy, but a change of provider, plan or technical limit never moves the AutoLenis radius on its own. Policy is decided here, not on an invoice."],
+["Used and budget filtering are not optional","Roughly half of a metro\u2019s listings are effectively new, which pulls the median price far above what most approved buyers can carry. Qualified results filter to the buyer\u2019s vehicle condition preference and around their approved amount, or the buyer is shown cars they cannot buy."],
+["Distance on every listing","Each result and catalogue card states its distance from the buyer. A buyer with no stored location is asked for a ZIP before distances and shortlist actions appear."],
+["In radius, the action is Add to shortlist","A vehicle within 100 miles can join the shortlist, up to five. Every shortlisted vehicle is a candidate the auction will genuinely cover."],
+["Out of radius, the action is Find one like this","The card states the distance plainly and opens a custom request pre-filled from that vehicle\u2019s year, make, model, trim, mileage band, price band and features. An out-of-radius listing is never labelled qualified, locally available, confirmed, held or auction-eligible. It serves only as a specification template."],
+["Sourcing is not limited by either surface","The auction searches the rooftop pool, not the catalogue and not the query. That pool carries no provider radius cap, so sourcing still runs the full 100, 150 and 250-mile ladder."],
+["Every listing carries its dealer","The provider returns the holding rooftop with each listing \u2014 name, address, coordinates, type, phone and email. That record is captured on ingest, so a listing resolves to a real rooftop and the sourcing pool grows with every search rather than being built separately."],
+["A listing is a specification, not a supply commitment","Inventory is purchased third-party data. No listing promises the vehicle is available, held, or sellable to AutoLenis. Price and availability are confirmed only by a dealer offer, and again at reaffirmation."],
+["The listed price is the benchmark","Provider pricing is what cross-vehicle ranking measures a dealer\u2019s out-the-door against, and it is the honest use of purchased listing data."],
+["Freshness gates the shortlist, not the display","A listing not seen in seven days carries a freshness note. One not seen in thirty days can still be viewed but cannot be shortlisted, and offers only the specification path."],
+["No qualifying results is not a dead end","Where a query returns nothing or very little, the buyer is offered the custom request, pre-filled from the criteria already gathered. Sourcing does not depend on the catalogue or the query \u2014 it searches the rooftop pool around the buyer."],
+["Say what is actually verified","A listing is third-party sourced and unconfirmed. Buyer-facing copy must not call it verified, confirmed, or held. What is verified is the dealer\u2019s offer, at the point it is made."],
+["Both paths run to a call budget","Sweep and query consumption are recorded together against one monthly allowance, with an Operations alert before the ceiling. A provider failure is never shown to a buyer as an empty market \u2014 they are told the search is unavailable and offered the request path."]];
+
+
+const FINDINGS=[
+["Catalogue geography","148 active listings: New York 137, Texas 1, blank 10. Zero carried a dealer record. Sweep geography was an inline literal defaulting to a New York ZIP, so every run pulled the wrong market."],
+["Market size","A single metropolitan area returned roughly 200,000 active listings within 100 miles, and about 24,000 in a typical used, mid-budget, moderate-mileage slice. The provider plan caps pagination at 500 rows, so no sweep can mirror the market."],
+["Provider quota exceeded","Two crons ran 28 sweeps a day, one API call each, against a 500-call monthly allowance \u2014 roughly 170% of the cap."],
+["A week of silent failure","191 consecutive runs between 24 and 31 August returned HTTP 429 and were recorded as a non-alerting deferred status. Ingestion stopped for seven days and nothing raised an alarm."],
+["Stale rows structurally protected","95 active listings had not been seen in over 30 days. The sweep predicate excluded them by lane label alone, matching zero rows every run. One row with a null last-seen timestamp was unreachable by any predicate."],
+["Run size is a range","Completed runs returned between 20 and 44 vehicles, averaging 24 \u2014 so any fixed expected-count threshold would misfire."],
+["A second unmetered consumer","An admin search tool called the provider on the same key outside any accounting, so recorded consumption was never the true total."],
+["Dealer data arrives free","Every listing returns its holding rooftop with name, address, coordinates, type, phone and email \u2014 data the platform was not capturing, while all 148 rows had a null dealer reference."]];
+
+const QUAL=[
+["System finds","Qualified results","After approval, the system reads the buyer\u2019s verified ZIP, approved amount and criteria and queries the provider live, returning matches from the whole market rather than from the browsing catalogue. Required criteria rank ahead of preferred. Each result shows distance, freshness, vehicle detail and listing status."],
+["Buyer chooses","Shortlist","The buyer deliberately adds up to five vehicles. <b>The system never saves a vehicle into the shortlist on the buyer\u2019s behalf</b> \u2014 an auto-saved vehicle implies an intent the buyer never expressed, and it could carry a car they never chose into a paid auction."],
+["Buyer confirms","Vehicle Request","Where inventory is thin or absent, the request is pre-filled from the criteria already gathered and the buyer confirms it. Thin results offer the request alongside them, not only when the count is zero."],
+["Buyer pays","Auction","Dealer sourcing begins only after the $99 settles, and runs the 100, 150 and 250-mile ladder independently of the catalogue."]];
+
+const BUDGET=[
+["Filter generously, never tightly","Qualified results are filtered around the approved amount with room to spare. A listing near or a little over the ceiling is shown, not withheld."],
+["Because the real number does not exist yet","A listing price is not an out-the-door. Tax, title, documentation and registration land on top, and the actual figure only exists once a dealership makes an offer. Filtering to the dollar against a number nobody has quoted yet would hide good cars for no reason."],
+["The ceiling is enforced where it matters","The approved amount is checked server-side at offer validation, at selection and at contract request. That is where a real number meets a real limit. Browsing is not the place to enforce it."]];
+
+const MONEY=[
+["Standard plan","AutoLenis via Stripe","Stage 5, before any sourcing","$99","the platform payment, attached to the Vehicle Request \u2014 this IS the Standard plan, paid in full"],
+["Premium balance","AutoLenis via Stripe","Any time before funding clears \u2014 pitched hardest right after offer acceptance","$400","$499 total less the $99 already paid \u2014 never a second $99"],
+["Everything else","The dealership, directly","At or after contract execution","\u2014","down payment, taxes, fees, balance"]];
+
+const MONEY_PANELS=[
+["Refunds",["Refunds are reviewed manually. There is no automatic refund.","Refund reasons: no offers, buyer request, fraud, administrative decision.","Refund execution is idempotency-keyed and never labels a no-charge record as money refunded.","<b>Cancellation and refund are separate decisions.</b> Cancelling does not entitle a refund, and issuing a refund does not erase the transaction record.","A refunded or charged-back $99 cannot be used as the Premium credit \u2014 Premium then costs $499 gross \u2014 and it reverses any affiliate commission attributed to that transaction.","A downgrade after the Premium balance settled is a refund request against the $400 only. The $99 Standard plan is not refunded on a downgrade."]],
+["What AutoLenis never collects",["A down payment.","Buyer funds held for a vehicle.","A dealer holding deposit.","Any amount payable to the dealership.","<b>No funds pass from the buyer to the dealership before the contract is executed</b> — no holding deposits, no hold-it-for-me payments, no card on file."]],
+["Cancellation",["<b>Before contract execution:</b> an authorized actor, a required reason, the current stage recorded, unsent sourcing and outreach stopped, auction activity closed, affected dealerships notified, unsigned envelopes voided, pickup cancelled and release tokens revoked, payment treatment determined, the buyer notified, and full history preserved — all in one orchestration.","<b>After the contract is fully executed</b>, AutoLenis cannot unilaterally void it. The Deal moves to a frozen coordination state while AutoLenis coordinates the documented release or other resolution. This is a coordination state, not a cancellation."]],
+["Identity and circumvention",["Invited dealerships receive vehicle criteria, general location, distance and trade indication — and no buyer identity. Name, email, phone and exact address are released only at Stage 10, when that dealership has won and reaffirmed.","Losing dealerships never receive buyer contact information at all.","Messages between buyer and dealership are monitored for contact attempts, external deals, identity mismatches and payment bypass.","A confirmed attempt to move the transaction off-platform after a paid auction is a dealer agreement violation: it registers on the scorecard, may suspend the dealership from future invitations, and is grounds for termination.","Buyers are protected, not penalized, when the dealership initiates."]]];
+
+
+const PLAN_MODEL=[
+["Standard","$99","Paid once at the Stage 5 gate. Activates sourcing, the auction, offers, Contract Shield, signing and every release checkpoint. Owned by the Operations pool.","Every buyer pays this, Premium included."],
+["Premium","$499 total","The same $99 plus a $400 balance. Adds a named concierge, priority coordination, external-financing handoff assistance, insurance coordination, contract issue coordination and pickup support.","The $400 is a balance, never a second $99."]];
+
+const PLAN_UP=[
+["The window","Opens the moment the $99 settles and closes when funding clears. After funding only scheduling and handover remain, and pickup support alone does not justify $400 \u2014 so the ask stops there."],
+["The conversion moment is offer acceptance","The buyer has just chosen their car. They are committed, and every single thing Premium does \u2014 chasing the dealership, holding the recap honest, the financing handoff, contract coordination, insurance, funding, pickup \u2014 still lies ahead of them. This is where the upgrade is presented in full."],
+["What it costs","Always the $400 balance, shown as $499 total less the $99 already paid. Never re-quoted, never prorated, never discounted by stage."],
+["What must be true","The $99 is valid, paid, unrefunded and not charged back. Where it was refunded or charged back there is no credit, and Premium is $499 gross."],
+["On settlement","Assign the named concierge and introduce them by name the same day. Move ownership from the Operations pool to that concierge. Append a plan snapshot with its effective time, the acting party and the touchpoint that converted. Notify the buyer and the concierge."],
+["What does not change","The auction, the offers, the selected offer, the out-the-door amount, the contract, the financing path, every release checkpoint and every completion requirement. An upgrade buys attention, not different transaction terms."],
+["A Standard buyer is never disadvantaged","Operations owns every Standard transaction and works every exception with a named owner and a deadline. Premium buys a named person and faster coordination, never a better deal or a faster gate."],
+["Measure it","Track impressions, dismissals and conversions at every touchpoint, and stamp the converting touchpoint onto the plan snapshot. Premium is the second revenue line and it is managed like one."]];
+
+const PLAN_SEQ=[
+["1","Payment confirmation","In-app + receipt","A single line on the receipt and the sourcing-started screen. Named, not pushed \u2014 the buyer is still waiting to see whether the auction produces anything."],
+["2","Best Price Report","In-app","Offered alongside the offers, where the value first becomes legible: a concierge who will walk them through these numbers and everything after."],
+["3","Immediately after offer acceptance","Full-screen invitation","<b>The primary conversion moment.</b> Shown once, on the confirmation screen, before the dealer-confirmation view. Frames Premium against this buyer's actual remaining path by name, shows $499 less the $99 already paid, introduces the concierge role, and offers a clean decline. It never blocks the transaction and never delays the reaffirmation request to the dealership."],
+["4","One hour after acceptance","Email","Sent only if the invitation was declined or dismissed. Specific, not generic: what a concierge does across reaffirmation, recap, financing handoff, contract, insurance, funding and pickup \u2014 the exact stages this buyer is about to walk."],
+["5","At dealer reaffirmation or recap","Email","The second and final ask, timed to when the coordination work becomes visible and real. After this, AutoLenis stops asking. The option stays quietly available in the dashboard until funding clears."]];
+
+const PLAN_GUARD=[
+["Two emails, then silence","Never a third. The in-app option remains available without further prompting. A buyer who declines twice is not asked again."],
+["Never sold on fear","No message implies the deal will go worse on Standard, that Standard offers are weaker, or that any gate is slower. All of that would be untrue."],
+["Never sold into a stall AutoLenis caused","Suppress every prompt while the transaction sits in an exception state. Upselling a buyer whose deal is broken is the fastest way to lose them and deserve it."],
+["Suppressed on holds","No prompt where there is a do-not-contact flag, a payment dispute, a chargeback, a cancellation in progress, or an existing Premium plan."],
+["The invitation never blocks","It is an interstitial the buyer can decline in one action. The dealer reaffirmation request fires regardless of whether the buyer ever looks at it."],
+["The one late exception","An administrator may open an upgrade after funding clears with an audited approval, where the buyer genuinely needs the coordination. Never automatic."]];
+
+const PLAN_DOWN=[
+["Before the $400 settles","This is only a change of election. No money has moved. The plan reverts to Standard, which is already paid in full, the concierge assignment is released, ownership returns to the Operations pool, and the transaction continues without a gap. No refund is involved."],
+["After the $400 settles","This is a refund request against the $400 and follows the manual refund review \u2014 there is no automatic refund. Finance decides on the record of Premium service actually delivered: a full $400 refund where no concierge contact or coordination work was logged, otherwise a documented partial or declined decision. Once the concierge has worked the deal, that record weighs against a full refund."],
+["The $99 is never refunded on a downgrade","Standard is retained, the buyer keeps every platform capability, and the transaction continues. A downgrade never cancels the transaction and never releases the vehicle hold."],
+["What the buyer is told","Exactly which services stop \u2014 the named concierge, priority coordination and handoff assistance \u2014 and exactly which do not, which is everything that moves the transaction."],
+["Recorded","An appended plan snapshot with the new plan, effective time and actor. Settled financial history is never rewritten. Fee reconciliation always computes from the ledger of settled payments, not from the current plan flag."],
+["Re-upgrading","Permitted at the $400 balance while the window is open, which is to say before funding clears. A refunded $400 must be paid again in full."]];
+
+const PLAN_EDGE=[
+["The $99 is charged back after a Premium upgrade settled","The credit basis is broken. This raises a Finance exception. The Premium entitlement holds while under review and Operations never silently downgrades a buyer."],
+["A buyer elects Premium at registration but never pays the balance","They are Standard until the balance settles. The election reverts to Standard when funding clears with the balance unpaid. Entitlements begin at settlement, not at election, so concierge service is never delivered unpaid."],
+["A buyer wants to pay $499 in one transaction","Not offered. The $99 gate always settles first and Premium is always the balance after it. One gate, one credit rule, no special-case checkout."],
+["A buyer starts a second Vehicle Request","A new request means a new $99 and a fresh plan election. Plan is per transaction. The buyer record carries the current default; the request and the Deal carry the binding snapshot."],
+["A Standard buyer asks for Premium at financing or contract","The window is still open \u2014 take the upgrade, assign the concierge that day, and pick up the coordination from wherever the transaction stands."],
+["The Deal is cancelled after a Premium upgrade","Cancellation and refund remain separate decisions. The $400 follows the same manual review as any refund, on the record of service delivered."]];
+
+const FIN_CP=[
+["Terms locked","Before the contract package is requested","The path is chosen and the terms are known well enough to write a contract: lender or cash, approved amount, down payment, APR, term, payment, expiry","Blocks the contract request","Stage 12"],
+["Financing completed","After signing, before vehicle release","The external lender has approved the final contract and committed to fund, or cash is confirmed received by the dealership","Blocks vehicle release and Deal completion","Stage 15"]];
+
+const FIN_PANELS=[
+["Status model",["<code>NOT_STARTED</code> → <code>IN_PROGRESS</code> → <code>TERMS_LOCKED</code> → <code>COMPLETED</code> | <code>FAILED</code> | <code>EXPIRED</code> | <code>NOT_REQUIRED_CASH</code>","Path remains dealer-arranged, external, or cash.","Added fields: down payment, external reference, evidence document, terms-locked time, completed time, verifier, verification time, expiry, failure reason.","A cash purchase sets not-required-cash at Stage 12 and is confirmed as received at funding clearance. Cash does not skip a checkpoint; it satisfies it differently."]],
+["Who may record completion",["<b>The buyer can never mark financing completed.</b>","Only an authorized Finance or Operations administrator records completion, and only against external dealership or lender evidence.","Every recording writes source, external reference, approved amount, down payment, APR, term, payment, expiration, VIN, verifier identity and verification time into the financing audit trail.","External pre-approval records hold the lender evidence and attach to the Deal. The buyer's pre-deal financing preference feeds this checkpoint rather than duplicating it."]],
+["What must be retired",["An internal credit-application model stores encrypted SSN, income, employment and date of birth alongside lender decision fields. It holds no production records.","<b>No route in the buy transaction may read or write it.</b> It is frozen, excluded from all transaction code paths, and scheduled for removal after legal sign-off on retention obligations.","Its presence is the single largest contradiction between what AutoLenis says it does and what the platform is capable of doing."]],
+["The rule that governs completion",["A Deal can never be marked complete unless financing status is completed or not-required-cash, <b>and</b> funding is cleared.","Release requires funding cleared. Funding clearance requires completed financing. Together these make conditional and spot delivery structurally impossible.","A financing change that affects the contract sends the transaction back through recap confirmation, contract generation, Contract Shield and signatures. It never proceeds on a stale contract."]]];
+
+
+const EXC=[
+["Buyer does not verify account","sys","Remind at 1h, 24h and 72h, then abandon the draft"],
+["Onboarding location unusable","buy","Block location-dependent stages; open a specific correction task"],
+["Prequalification manual or OFAC review","comp","Hold and route to the responsible reviewer"],
+["Prequalification provider delay","sys","Retry and notify with an honest processing notice"],
+["Prequalification decline","comp","Send the decision and applicable adverse-action communication"],
+["Approval expires mid-transaction","buy","Pause; require renewal before advancing"],
+["Payment failure","buy","Preserve the request; allow safe retry"],
+["Payment succeeded, webhook missed","fin","Reconcile from the provider; alert with the reference"],
+["Payment unroutable to an obligation","fin","Immediate exception; never absorbed"],
+["Payment disputed or refunded","fin","Hold fulfillment; stop unsent outreach"],
+["No dealer coverage at 250 miles","ops","Request radius authorization; remind at 24h and 72h; close at 14 days"],
+["Zero dealer coverage","ops","Review, then close or expand"],
+["Invitation bounced","ops","Replace the contact or rooftop inside the window"],
+["Zero offers at close","ops","Owned case; one relaunch without a second $99, or closure"],
+["All offers exceed budget","ops","Never presented as qualified; route to recovery"],
+["Buyer does not select","buy","Remind before expiry; revalidate or close"],
+["Winning dealer rejects or times out","ops","Return the buyer to remaining valid offers; scorecard entry"],
+["Dealer changes material terms","buy","Side-by-side accept or reject; above-ceiling changes refused"],
+["Vehicle hold expires","ops","Extend or release; a released hold returns to offers"],
+["Vehicle sold before contract or pickup","ops","Return to offers or source a replacement"],
+["Outside winner fails verification","ops","Block advancement; return to remaining offers"],
+["Recap disputed","ops","Correct and reissue a new recap version"],
+["Financing fails or expires","fin","Return the buyer to another external path; do not auto-cancel"],
+["Funding not cleared","fin","Block release"],
+["Trade payoff quote stale","ops","Refresh before clearance"],
+["Insurance rejected or expired","buy","Name the defect; block release until corrected"],
+["Contract overdue from dealer","ops","Remind at the deadline; escalate"],
+["Contract mismatch","ops","Require correction and rescan; name discrepancies to both parties"],
+["Contract extraction failure","ops","Retry; never treat as approval"],
+["Buyer or co-buyer does not sign","buy","Remind, expire at 14 days, permit reissue"],
+["Dealer does not execute","ops","Escalate; release stays blocked"],
+["Pickup missed","deal","Return to scheduling; revoke and reissue the token"],
+["Identity mismatch at handover","ops","Block release; urgent exception"],
+["Trade appraisal changed at handover","buy","Buyer accepts; return to contract revision if the contract changes"],
+["Buyer reports delivery discrepancy","ops","Hold completion; open a case"],
+["Dealer released, buyer has not confirmed","ops","Remind the buyer; never complete automatically"],
+["Circumvention detected","ops","Review; scorecard, suspension or termination"],
+["Post-completion obligation overdue","ops","Notify both parties; escalate; scorecard"],
+["Premium balance unpaid when funding clears","buy","Revert to Standard, which is already paid; continue without interruption"],
+["Premium balance payment fails","buy","Retry and notify; the transaction never stalls and the buyer stays on Standard"],
+["Upgrade prompt fires during an open exception","ops","Suppress; never upsell a buyer whose deal is stalled"],
+["Downgrade requested after the Premium balance settled","fin","Manual refund review against the record of service delivered; the $99 is never refunded"],
+["The $99 is charged back after a Premium upgrade","fin","Finance exception; entitlement holds under review; never a silent downgrade"],
+["Shortlisted candidate goes stale or sells mid-auction","ops","Drop the candidate, tell the buyer, and let the auction run on the rest"],
+["Buyer has no in-radius inventory","sys","Lead with the custom request; never present an empty grid"],
+["Inventory provider call budget near or at its ceiling","ops","Alert before the ceiling, not after; the catalogue goes stale silently otherwise"],
+["Sweep returns fewer listings than expected","ops","Treat as a failed run, not a successful one; investigate before the catalogue decays"],
+["Buyer has no stored location on the inventory page","sys","Ask for a ZIP before distances and shortlist actions; still render the catalogue"],
+["Communication terminal failure","sys","Alert Operations; the transaction never depends on a page request"]];
+const OWN={sys:["System","own-sys"],buy:["Buyer","own-buy"],ops:["Operations","own-ops"],fin:["Finance","own-fin"],comp:["Compliance","own-comp"],deal:["Dealership","own-deal"]};
+
+const DEALSTATES=[["DEALER_CONFIRMATION","n"],["RECAP_PENDING","n"],["FINANCING_PENDING","b"],["FEE_PENDING","b"],["CONTRACT_PENDING","b"],["CONTRACT_REVIEW","b"],["CONTRACT_APPROVED","b"],["SIGNING_PENDING","b"],["SIGNED","b"],["DEALER_EXECUTED","n"],["FUNDING_PENDING","n"],["INSURANCE_PENDING","b"],["PICKUP_READINESS","n"],["PICKUP_SCHEDULED","b"],["HANDOVER_PENDING","n"],["COMPLETED","t"],["CANCELLED","t"],["FROZEN_PENDING_RELEASE","n"]];
+const SUPSTATES=[
+["Payment","pending · processing · paid · failed · disputed · refunded · reconciliation pending"],
+["Sourcing","band 100 · band 150 · band 250 · authorization required · limited-auction review · no coverage"],
+["Auction","pending · active · closed · zero-offer review"],
+["Offer","draft · submitted · revised · expired · selected · declined · revalidation pending"],
+["Dealer confirmation","pending · confirmed · rejected · timed out · material change pending"],
+["Financing","not started · in progress · terms locked · completed · failed · expired · not required, cash"],
+["Funding","pending · cleared · blocked"],
+["Fee","standard resolved · Premium pending · paid · failed · refunded"],
+["Insurance","uploaded · under review · verified · policy bound · rejected · expired"],
+["Contract","uploaded · scanning · review · warning · revision required · approved · signing · executed"],
+["Pickup","not scheduled · proposed · dealer countered · scheduled · checked in · dealer released · buyer confirmed · missed · rescheduling · exception"],
+["Communications","queued · sent · delivered · suppressed · failed"],
+["Post-completion obligation","pending · overdue · resolved"]];
+const TRANSITION=["<b>Authorization</b> — the actor holds the permission.","<b>Validation</b> — required transaction facts are current, not cached.","<b>Conditional write</b> — the update applies only to the state the actor observed.","<b>Atomicity</b> — state and critical domain or financial records commit together.","<b>Idempotency</b> — replay cannot duplicate money, auctions, offers, deals, signatures, completion events or communications.","<b>Audit</b> — actor, prior state, next state, reason and time recorded.","<b>Communication</b> — required notices scheduled durably.","<b>Recovery</b> — every failure and timeout has an owner and a return path."];
+
+const SAFE=[
+["Compliance and credit",["FCRA consent persisted before the credit pull; duplicate paid pulls claimed safely.","Prequalification requires no SSN; OFAC fails closed on positive or indeterminate screening.","Adverse-action delivery distinguishes sent, duplicate and failed outcomes."]],
+["Money",["The payment provider is treated as the authority on money; local state never overrides it.","Provider-side duplicate-charge checks on both the deposit and the Premium fee.","Deposit transitions guarded by a state matrix; unroutable successful payments raise an Operations exception.","Refund execution is idempotency-keyed and never labels a no-charge record as refunded."]],
+["Auction and offers",["Auction close uses an atomic claim and reprocesses any closed auction with unfinished side effects.","Anti-snipe extension with a hard cap and full audit.","Offer selection serializes the single-winner decision under a database lock.","Offer arithmetic and the approved budget checked server-side.","Best Price rankings persisted with weights and results for reproducibility."]],
+["Contract and signature",["Contract uploads private, dealer-owned, versioned create-before-supersede, failing closed on extraction or scan failure.","Approval binds to the exact reviewed version and rejects upload-during-review races.","E-sign binds the envelope to document bytes by hash and refuses to sign when evidence storage is unavailable.","Junk-fee patterns, fee caps, APR validation, payment packing and disclosure checks applied to every contract."]],
+["Pickup and completion",["Pickup negotiation uses strict turn-taking, proposal-time compare-and-swap, a two-counter cap and compensating recovery.","Pickup emails dispatch durably with round-specific idempotency keys.","Deal transitions use a legal-transition table, compare-and-swap, history and an exactly-once completion event."]],
+["Marketplace integrity",["Identity firewall between the buyer and every non-winning dealership.","Anti-circumvention monitoring with pattern capture and Operations routing.","Dealer scorecard consequences connected to reaffirmation failures, no-shows, contract delays and overdue obligations."]]];
+
+const BUILD=[
+["Extend the Vehicle Request into the fulfillment record; attach the deposit to it","Everything downstream needs one parent"],
+["Route every buy-lane form through one intake handler with attribution, ZIP, consent and the one-open-request rule","Fixes duplicate buyers and null-location auctions at the source"],
+["Connect both entry paths to the same eligibility recheck and payment-required transition","The dashboard Vehicle Request currently never reaches payment"],
+["Start and cancel the six-touch payment sequence from fulfillment state","Reminders must follow the request, not the buyer"],
+["Move every paid sourcing activity behind confirmed payment","Stops pre-payment spend"],
+["Change settlement to open a sourcing case rather than launch an auction","The single most important reordering"],
+["Enforce the 100/150/250 plus buyer-authorization radius policy server-side","Removes client control of a cost driver"],
+["Merge registered and outside candidates into one deduplicated invitation field with secure tokens","Equal treatment and real delivery tracking"],
+["Add invitation-readiness and the limited-auction decision before launch","No half-ready auctions"],
+["Expand the canonical offer record and its validation","Selection, Shield and release all depend on these fields"],
+["Enable and monitor payment reconciliation","Currently disabled by default"],
+["Add dealer reaffirmation, vehicle hold, condition disclosure, material-change handling and outside-winner verification","The missing link between selection and a real deal"],
+["Add the deal recap with both confirmations and optional-product acceptance","Nothing may first appear in the contract"],
+["Replace internal financing with external terms-locked and completion checkpoints; freeze the credit-application model","Satisfies the external-financing rule"],
+["Build the upgrade sequence \u2014 the post-acceptance invitation, two emails, suppression rules and per-touchpoint conversion tracking \u2014 and close the window at funding clearance","Standard stops being described as free, plan changes stop being undefined, and the second revenue line gets built deliberately"],
+["Build insurance review with an Operations queue and correct every release gate","Upload is not approval"],
+["Dispatch the contract request from the central transition with deadline, reminder and escalation","Removes dependence on an administrator clicking"],
+["Add co-buyer records and co-buyer signing; add the contract hash and dealer-executed artifact","Completes the signature chain"],
+["Apply and verify the e-sign evidence schema in production, then activate","Signing fails closed until this is done"],
+["Add funding clearance as a distinct checkpoint","The no-spot-delivery guarantee"],
+["Add pickup readiness, cryptographic single-use tokens, 24-hour and 2-hour reminders and buyer possession confirmation","Release becomes conditional and evidenced"],
+["Make completion atomic — possession, pickup, Deal and the outbox event commit together","Removes best-effort completion"],
+["Create the Operations queue and route every exception to it","The operational floor"],
+["Route every transaction communication through the durable outbox","It exists and is unused"],
+["Orchestrate cancellation cleanup in one place","Stops orphaned outreach, envelopes and tokens"],
+["Link post-completion obligations to the terminal Deal","Title, payoff and due-bill tracking"],
+["Connect dealer scorecard consequences to reaffirmation failures, no-shows, contract delays and overdue obligations","Makes dealer quality self-correcting"],
+["Radius-filter the shortlist action, add the specification path for out-of-radius listings, and carry up to five candidates on the request","Stops a buyer shortlisting a car the auction can never source, without hiding any inventory"],
+["Resolve candidates to holding and comparable rooftops, dedupe to one invitation per rooftop, and keep the field at five to eight","One deposit buys one invitation budget however long the shortlist is"],
+["Repoint the inventory sweep at the served market, size it to the provider call budget, and cut the run rate","Verified findings of 2 September 2026 record a mis-targeted catalogue and a run rate above the plan quota"],
+["Build the qualified-results view: ZIP, ceiling and criteria applied automatically after prequalification, with selection left to the buyer","Recommendations are generated; the shortlist stays deliberate"]];
+
+const ACCEPT=[
+["Four scenarios must complete through the same spine",["<b>A</b> — selected inventory, Standard, external lender. The $99 settles against the request, sourcing opens, the $0 fee resolves, financing is completed and verified before release, possession is confirmed, and completion commits once.","<b>B</b> — selected inventory, Premium, dealer-arranged. A valid $99 credit applies, $400 settles, every release checkpoint passes, and the co-buyer signs.","<b>C</b> — custom Vehicle Request, Standard, cash. The request reaches payment immediately with no pre-payment sourcing spend, not-required-cash is set and cash is confirmed at funding clearance, following the same auction, deal and pickup path as A.","<b>D</b> — custom Vehicle Request, Premium, external financing with a trade carrying a lien. Same lineage as C, the payoff good-through date is enforced, the trade is surrendered at handover, and obligations are tracked after completion."]],
+["Every branch must be exercised",["Replay and concurrency on every money and completion path.","A missing payment webhook recovered by reconciliation.","Each sourcing band, buyer authorization beyond 250 miles, and a limited auction with an Operations approval.","Zero offers, and an offer above budget.","A dealer timeout at reaffirmation, a material change accepted and rejected, and a vehicle hold expiry.","A financing failure followed by a successful alternate path.","An insurance rejection, a Contract Shield mismatch, a signature expiry and reissue, and a dealer that never executes.","A blocked handover on identity mismatch and a delivery-discrepancy hold.","Cancellation before and after contract execution, a refund request, and concurrent completion attempts."]],
+["Every form must be walked",["Homepage, inventory, vehicle detail, shortlist, AMIPS pages, blog CTAs, social landing pages, affiliate links, conversational intake, callback, trade-in, prequalification, refinance, dealer application, affiliate application and support.","Each must land in its correct lane with attribution, ZIP and consent recorded, without creating a duplicate buyer or a second open request."]],
+["The passing condition",["The buyer portal, the dealership portal and the Operations queue all display <b>the same current checkpoint, the same responsible party, the same deadline and the same recovery action</b>, against one unbroken transaction lineage."]]];
+
+const el=(h)=>{const d=document.createElement('div');d.innerHTML=h.trim();return d.firstChild};
+const esc=(s)=>s;
+const CH={built:['BUILT','c-built'],extend:['BUILT, EXTEND','c-extend'],new:['NEW','c-new'],retire:['RETIRE','c-retire']};
+
+/* hero chain */
+document.getElementById('chain').innerHTML=CHAIN.map((c,i)=>
+  (i?'<i></i>':'')+`<b class="${c[1]}">${c[0]}</b>`).join('');
+document.getElementById('stats').innerHTML=STATS.map(s=>
+  `<div class="stat"><div class="n">${s[0]}</div><div class="l">${s[1]}</div></div>`).join('');
+
+/* lanes */
+document.getElementById('lanes').innerHTML=LANES.map(L=>`
+<div class="lane${L.primary?' primary':''}">
+  <div class="lane-h"><h3>${L.name}</h3><div class="dest">${L.dest}</div></div>
+  <div class="lane-b">
+    <p style="margin:0 0 14px;font-size:14.5px;color:var(--ink2)">${L.blurb}</p>
+    <div class="forms">${L.forms.map(f=>`
+      <div class="form-cell"><div class="fn">${f[0]}</div><div class="fd">${f[1]}</div><span class="ft">${f[2]}</span></div>`).join('')}
+    </div>
+    <ul class="lane-rules">${L.rules.map(r=>`<li><b class="rn">${r[0]}</b>${r[1]}</li>`).join('')}</ul>
+  </div>
+</div>`).join('');
+
+/* stages */
+function col(cls,label,items){
+  if(items===null) return `<div class="col ${cls}"><div class="ch">${label}</div><div class="none">Not involved at this stage</div></div>`;
+  if(!items||!items.length) return `<div class="col ${cls}"><div class="ch">${label}</div><div class="none">Waiting</div></div>`;
+  return `<div class="col ${cls}"><div class="ch">${label}</div><ul>${items.map(i=>`<li>${i}</li>`).join('')}</ul></div>`;
+}
+document.getElementById('spine-list').innerHTML=S.map(s=>{
+  const c=CH[s.st];
+  return `<article class="stage${s.gate?' is-gate':''}" data-st="${s.st}">
+  <button class="st-head" type="button" aria-expanded="false">
+    <div class="st-num">${String(s.n).padStart(2,'0')}</div>
+    <div class="st-title"><h3>${s.t}</h3><div class="owner">${s.owner}</div></div>
+    <div class="st-tags"><span class="chip ${c[1]}">${c[0]}</span>${s.gate?'<span class="chip c-gate">GATE</span>':''}<span class="st-toggle">+</span></div>
+  </button>
+  <div class="st-body">
+    ${s.gate?`<div class="gatebar">${s.gate}<span></span></div>`:''}
+    <div class="cond entry"><div class="k">Entry</div><div>${s.entry}</div></div>
+    <div class="swim">
+      ${col('buyer','Buyer',s.buyer)}
+      ${col('dealer','Dealership',s.dealer)}
+      ${col('staff','AutoLenis staff',s.staff)}
+      ${col('system','System',s.system)}
+    </div>
+    <div class="rec"><div class="k">Recorded</div>${s.rec}
+      <div class="tables">${s.tables.map(t=>`<code>${t}</code>`).join('')}</div></div>
+    <div class="sees"><div class="k">Buyer sees</div><div class="v">${s.sees}</div></div>
+    ${s.note?`<p class="note">${s.note}</p>`:''}
+    <div class="cond exit"><div class="k">Exit</div><div>${s.exit}</div></div>
+    <div class="fail"><div class="k">If it fails</div><p>${s.fail}</p></div>
+  </div></article>`}).join('');
+
+document.querySelectorAll('.st-head').forEach(b=>b.addEventListener('click',()=>{
+  const a=b.closest('.stage'),o=a.classList.toggle('open');
+  b.setAttribute('aria-expanded',o);b.querySelector('.st-toggle').textContent=o?'\u2212':'+';
+}));
+const ea=document.getElementById('expandAll');let allOpen=false;
+ea.addEventListener('click',()=>{allOpen=!allOpen;
+  document.querySelectorAll('.stage').forEach(a=>{a.classList.toggle('open',allOpen);
+    const b=a.querySelector('.st-head');b.setAttribute('aria-expanded',allOpen);
+    b.querySelector('.st-toggle').textContent=allOpen?'\u2212':'+';});
+  ea.textContent=allOpen?'Collapse all stages':'Expand all stages';});
+document.getElementById('printBtn').addEventListener('click',()=>window.print());
+
+/* money */
+document.getElementById('money-tbl').innerHTML=
+`<div class="money-row h"><div>Movement</div><div>Who collects</div><div>When</div><div>Amount</div></div>`+
+MONEY.map((m,i)=>`<div class="money-row${i===2?' ext':''}"><div><b>${m[0]}</b><br><span style="color:var(--ink2);font-size:13.5px">${m[4]}</span></div><div>${m[1]}</div><div>${m[2]}</div><div class="amt">${m[3]}</div></div>`).join('');
+const panel=(p)=>`<div class="panel"><h3>${p[0]}</h3><div class="pb"><ul>${p[1].map(x=>`<li>${x}</li>`).join('')}</ul></div></div>`;
+document.getElementById('money-panels').innerHTML=MONEY_PANELS.map(panel).join('');
+
+
+/* plan model + changes */
+document.getElementById('plan-model').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:14%">Plan</th><th style="width:12%">Total</th><th>What it is</th><th style="width:26%">The rule</th></tr></thead><tbody>`+
+PLAN_MODEL.map(p=>`<tr><td class="own own-fin">${p[0]}</td><td class="amt-cell">${p[1]}</td><td>${p[2]}</td><td style="color:var(--ink2)">${p[3]}</td></tr>`).join('')+`</tbody></table>`;
+
+const planPath=(title,dir,rows)=>`
+<div class="panel path-${dir}">
+  <h3>${title}</h3>
+  <div class="pb path-list">${rows.map((x,i)=>`
+    <div class="path-step"><div class="ps-n">${String(i+1).padStart(2,'0')}</div>
+      <div class="ps-b"><div class="ps-t">${x[0]}</div><div class="ps-d">${x[1]}</div></div></div>`).join('')}
+  </div></div>`;
+document.getElementById('plan-paths').innerHTML=
+  planPath('Upgrading from Standard to Premium','up',PLAN_UP)+
+  planPath('Downgrading from Premium to Standard','down',PLAN_DOWN);
+
+document.getElementById('plan-seq').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:44px">#</th><th style="width:22%">When</th><th style="width:16%">Channel</th><th>What it says</th></tr></thead><tbody>`+
+PLAN_SEQ.map((p,i)=>`<tr${i===2?' class="hot"':''}><td class="mono" style="color:var(--gold)">${p[0]}</td><td><b>${p[1]}</b></td><td class="own own-fin">${p[2]}</td><td>${p[3]}</td></tr>`).join('')+`</tbody></table>`;
+document.getElementById('plan-guard').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:32%">Guardrail</th><th>Rule</th></tr></thead><tbody>`+
+PLAN_GUARD.map(p=>`<tr><td><b>${p[0]}</b></td><td>${p[1]}</td></tr>`).join('')+`</tbody></table>`;
+document.getElementById('plan-edge').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:38%">Situation</th><th>Resolution</th></tr></thead><tbody>`+
+PLAN_EDGE.map(p=>`<tr><td><b>${p[0]}</b></td><td>${p[1]}</td></tr>`).join('')+`</tbody></table>`;
+
+/* inventory and the shortlist */
+document.getElementById('inv-tbl').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:28%">Rule</th><th>How it works</th></tr></thead><tbody>`+
+INV.map(i=>`<tr><td><b>${i[0]}</b></td><td>${i[1]}</td></tr>`).join('')+`</tbody></table>`;
+
+/* dated findings */
+document.getElementById('find-tbl').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:26%">Finding</th><th>What was observed</th></tr></thead><tbody>`+
+FINDINGS.map(f=>`<tr><td><b>${f[0]}</b></td><td>${f[1]}</td></tr>`).join('')+`</tbody></table>`;
+
+/* qualified results + budget */
+document.getElementById('qual-tbl').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:16%">Who acts</th><th style="width:18%">Surface</th><th>What happens</th></tr></thead><tbody>`+
+QUAL.map(q=>`<tr><td class="own own-sys">${q[0]}</td><td><b>${q[1]}</b></td><td>${q[2]}</td></tr>`).join('')+`</tbody></table>`;
+document.getElementById('budget-tbl').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:30%">Rule</th><th>Why</th></tr></thead><tbody>`+
+BUDGET.map(b=>`<tr><td><b>${b[0]}</b></td><td>${b[1]}</td></tr>`).join('')+`</tbody></table>`;
+
+/* financing */
+document.getElementById('fin-checkpoints').innerHTML=
+`<table class="tbl"><thead><tr><th style="width:16%">Checkpoint</th><th style="width:20%">When</th><th>What it means</th><th style="width:20%">Blocks</th><th style="width:8%">Stage</th></tr></thead><tbody>`+
+FIN_CP.map(f=>`<tr><td class="own own-fin">${f[0]}</td><td>${f[1]}</td><td>${f[2]}</td><td>${f[3]}</td><td class="mono">${f[4]}</td></tr>`).join('')+`</tbody></table>`;
+document.getElementById('fin-panels').innerHTML=FIN_PANELS.map(panel).join('');
+
+/* exceptions */
+document.getElementById('exc-body').innerHTML=EXC.map(e=>{const o=OWN[e[1]];
+  return `<tr><td>${e[0]}</td><td class="own ${o[1]}">${o[0]}</td><td>${e[2]}</td></tr>`}).join('');
+
+/* states */
+document.getElementById('state-blocks').innerHTML=`
+<div class="panel" style="margin-bottom:20px"><h3>Primary Deal states</h3><div class="pb">
+  <div class="states">${DEALSTATES.map(d=>`<span class="state ${d[1]}">${d[0]}</span>`).join('')}</div>
+  <p style="font-size:14px;color:var(--ink2);margin:14px 0 0">Green states exist today. Red states must be added. Black states are terminal. The historical values <code>PENDING</code>, <code>ACTIVE</code>, <code>FEE_PAID</code>, <code>PICKUP_COMPLETE</code> and <code>REFUNDED</code> are retained for existing records and mapped forward — fee-paid and pickup-complete become supporting-record facts rather than primary states, and refunded becomes a payment fact on a cancelled or completed Deal.</p>
+</div></div>
+<div class="two">
+  <div class="panel"><h3>Supporting record states</h3><div class="pb">
+    <table class="tbl" style="border:0">${SUPSTATES.map(s=>`<tr><td class="own" style="width:38%">${s[0]}</td><td class="mono" style="font-size:12.5px">${s[1]}</td></tr>`).join('')}</table>
+  </div></div>
+  <div class="panel"><h3>Universal transition controls</h3><div class="pb">
+    <p style="margin:0 0 10px;font-size:14.5px;color:var(--ink2)">Every material transition requires all eight. The platform already implements a legal-transition table with compare-and-swap, history, idempotent communications and an exactly-once completion seam — every new checkpoint routes through that same seam rather than around it.</p>
+    <ol style="margin:0;padding-left:18px;font-size:14.5px">${TRANSITION.map(t=>`<li style="margin-bottom:6px">${t}</li>`).join('')}</ol>
+  </div></div>
+</div>`;
+
+/* safeguards + build */
+document.getElementById('safe-panels').innerHTML=SAFE.map(panel).join('');
+document.getElementById('build-body').innerHTML=BUILD.map((b,i)=>
+  `<tr><td class="mono" style="color:var(--stamp)">${String(i+1).padStart(2,'0')}</td><td><b>${b[0]}</b></td><td style="color:var(--ink2)">${b[1]}</td></tr>`).join('');
+document.getElementById('accept').innerHTML=ACCEPT.map(panel).join('');
+
+</script>
+</body>
+</html>
