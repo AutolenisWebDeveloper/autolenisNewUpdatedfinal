@@ -17,6 +17,89 @@ e-signature, payment, and pickup. Roles: **buyer, dealer, affiliate, admin**.
 Vercel · Stripe · Twilio/ElevenLabs · Resend · DocuSign · MicroBilt · Groq/Anthropic/Gemini ·
 Inngest/QStash · Sentry. **App root: `frontend/`.**
 
+## CRITICAL ENVIRONMENT BOUNDARY — read before anything else
+
+**There is NO legitimate non-production authenticated environment.** Branch previews share the
+**PRODUCTION** Supabase project and have no isolated branch database.
+
+Therefore you MUST NOT:
+
+- create accounts or seed test users;
+- mutate production-backed records;
+- run authenticated end-to-end tests that write;
+- process payments or send real communications;
+- use production credentials to manufacture a test environment.
+
+The absence of an E2E environment is **not** permission to provision infrastructure, create a
+database, or alter or weaken authentication. When authenticated browser verification cannot be done
+legitimately, report the behavior as **NOT VERIFIED**. Fabricating a verification result is the
+worst possible outcome here — worse than an unfinished batch, and worse than saying "I could not
+check this."
+
+## Working method — phased batches with a hard owner gate
+
+Work arrives as batches:
+
+**Phase 1** repository-first audit (`/investigate`) → **Phase 2** workflow/UX design (`/plan`) →
+**HARD STOP for explicit owner approval** → **Phase 3** implement, review, verify (`/verify`,
+`/review`).
+
+**A request to improve a surface is NOT advance authorization to implement.** Owner approval of the
+Phase 2 proposal is the implementation gate. Do not begin Phase 3 without it, and do not treat
+silence, enthusiasm, or a follow-up question as approval. `/investigate`, `/plan` and `/review`
+have `disallowed-tools: Edit, Write, NotebookEdit` in their frontmatter, so the gate is mechanical
+for the turn that invokes them, not merely remembered.
+
+This gate is in addition to, not instead of, the `autolenis-code-verification` loop below.
+
+## Capability-preservation invariant
+
+**Simplification is not feature removal.** A capability may be moved, regrouped, or made
+progressive — it may never silently disappear.
+
+Any batch that touches routes, controls, actions, or workflows must produce a **before → after
+capability map** accounting for every one of them, each with a disposition: **KEPT · MOVED ·
+REGROUPED · PROGRESSIVE · RENAMED · REMOVED**. `REMOVED` requires explicit owner sign-off. The
+counts must reconcile; if they do not, the map is wrong.
+
+## Information architecture (preserve it)
+
+Established Content IA: Growth → `/admin/content` (primary rail destination),
+`/admin/content/bulk` and `/admin/content/attribution` (related hubs), `/admin/content/[id]`
+(detail drill-down). No competing navigation system, no second sidebar, no independent page chrome.
+
+## Protected paths & forbidden actions
+
+**Also enforced mechanically** — see `.claude/OPERATING_SYSTEM.md` for what each layer does and
+what it cannot do.
+
+- **Branch only.** No merging, deploying, production changes, migrations, or server-authorization
+  changes without separate explicit authorization.
+- **Never edit an existing file** in `frontend/prisma/migrations/**` or `frontend/migrations/**`
+  (and `supabase/migrations/**` if one is ever added) — it may already be applied to production,
+  and CI replays the whole chain against an empty database. Adding a **new** migration is normal
+  work and is not blocked; applying one is not yours to do.
+- **Never read or edit `.env*`.** Environment values are owner-managed in Vercel. The variable
+  *names* the build needs are listed in `.github/workflows/ci.yml`.
+- **Never run:** `rm -rf`, `drop database`, `git push --force`, `git reset --hard`, `git merge`,
+  `supabase db push` / `db reset`, `prisma migrate deploy` / `reset` / `db push`, `vercel deploy`
+  or anything `--prod`.
+- Anything that looks obsolete, duplicated, unfinished, misleading, or dead gets **REPORTED for an
+  owner decision — never deleted.**
+
+## Known security finding — report, do not remediate here
+
+`GET /api/admin/content/attribution/export`
+(`frontend/app/api/admin/content/attribution/export/route.ts`) exports CSV containing **buyer
+email** and is gated only by `requireAdmin()` — any authenticated admin role, with no dedicated
+role gate on this route specifically. The UI discloses the exposure rather than preventing it
+(`frontend/app/admin/content/attribution/page.tsx`).
+
+Authorization changes there require a **separately authorized security batch**. Do not change its
+server authorization, and do not silently hide or remove the capability. The PreToolUse path guard
+blocks edits to that route file so it cannot be "fixed in passing"; a separately authorized batch
+runs with `AUTOLENIS_GUARD=off` or removes that rule as part of the batch.
+
 ## Golden rules
 
 1. **Extend the existing architecture — never build a parallel or duplicate system.** Read before write.
@@ -225,24 +308,93 @@ degrades to *allow* on any internal error; `AUTOLENIS_VERIFICATION_HOOK=off` dis
 is a floor — it cannot see whether you truly re-reviewed or tested the workflow, so satisfying the
 hook is not satisfying the loop.
 
+## Investigation-before-implementation contract
+
+Before writing code:
+
+1. Restate the objective in one sentence.
+2. Trace the request end-to-end and name the exact files and functions involved.
+3. Produce an **evidence table** for the material claims.
+4. State what you will reuse vs create, and what must be preserved.
+
+Evidence, proportional to consequence. Cite `file:line` for: architecture conclusions, security and
+authorization boundaries, database and RLS behavior, API contracts, business-workflow behavior, and
+existing functionality being changed. Routine narration needs no citation. **No material
+implementation decision may rest on an unverified assumption about this repository.**
+
+## Resolving ambiguity — do not over-ask
+
+Resolve low-risk ambiguity from repository evidence and existing conventions; state the assumption
+and proceed. Stop and ask when it materially changes business behavior, security, data integrity,
+architecture, or scope. The Phase 2 owner gate is a separate, always-required stop — it is not an
+ambiguity question, and answering an ambiguity question is not passing the gate.
+
+## Control plane — you are not the final authority
+
+You can inspect, test, review, and produce evidence. You do not decide whether you succeeded, and
+you never decide that a batch is approved. Owner approval, CI, branch protection, and RLS are the
+real controls.
+
+## Definition of done — three-bucket verification
+
+- The stated requirement is satisfied, the owner gate was respected, and no capability was silently
+  removed.
+- Typecheck / lint / tests / build clean, **with output shown**.
+- Verification reported in three buckets:
+  - **CODE-VERIFIED** — proven by tests, typecheck, lint, or build; output shown.
+  - **BROWSER-VERIFIED** — proven in a browser; **read-only, unauthenticated/public paths only** on
+    this repository.
+  - **NOT VERIFIED** — stated plainly, with the reason and exactly what would be needed.
+
+For authenticated write paths, **NOT VERIFIED is the correct and expected answer**, not a failure.
+
 ## Commands (run from `frontend/`)
 
+The package manager is **pnpm 10.33.0**, pinned by `frontend/package.json` `packageManager` and
+`frontend/pnpm-lock.yaml`. Do not substitute npm or yarn — a stale yarn-based
+`frontend/.github/workflows/ci.yml` exists but is dead config (GitHub only reads the workflows at
+the repository root).
+
 ```
-pnpm dev                  # local dev on :3000
+pnpm dev                  # next dev --port 3000
 pnpm typecheck            # tsc --noEmit
-pnpm lint                 # eslint
-pnpm test                 # core service unit tests (subset)
-pnpm test:all             # FULL matrix — all 26 test:* suites; this is the gate
+pnpm lint                 # eslint . --ext .ts,.tsx
+pnpm test                 # core service unit tests — a SUBSET, not the gate
+pnpm test:all             # FULL matrix — 65 test:* invocations; THIS is the gate
 pnpm test:coverage-check  # fails if any *.test.ts is unreachable from a test:* script
-pnpm test:payments        # payments suite (see package.json for the full test:* matrix)
+pnpm test:payments        # payments suite (see package.json for all 72 test:* scripts)
 pnpm test:security        # security suite
 pnpm test:webhooks        # webhook suite
-pnpm test:visual          # Playwright visual/E2E
+pnpm test:visual          # Playwright visual regression
+pnpm test:e2e             # Playwright E2E
 pnpm build                # prisma generate && next build
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck → lint → `test:coverage-check` → `test:all` →
-build, plus a dependency-audit job that blocks on **critical** advisories and reports **high** ones.
+The unit harness is **`node:test` run through `tsx`** (`tsx --test`), with Playwright for
+visual/E2E. There is no Jest and no Vitest in this repository — confirm the harness before writing
+any test, and never invent one.
+
+CI (`.github/workflows/ci.yml`) runs four jobs: **ci** (typecheck → lint → `test:coverage-check` →
+`test:all` → build), **migrations** (the full Prisma chain plus the 15 numbered SQL files against
+an empty Postgres, applied twice to prove idempotency, then a drift check), **E2E (dealer
+outreach)** (Playwright against a real server and migrated database), and **dependency-audit**
+(blocks on **critical** advisories, reports **high**).
+
+## Slash commands — the working loop
+
+| Command | Phase | Writes code? |
+| --- | --- | --- |
+| `/investigate <surface>` | 1 — read-only audit: evidence table + capability inventory | No — Edit/Write removed |
+| `/plan <objective>` | 2 — proposal with the before → after capability map | No — stops at the owner gate |
+| *(owner approves explicitly)* | the gate | — |
+| `/verify` | 3 — run the gates, report in three buckets | Yes |
+| `/review` | 3 — adversarial diff review from a fresh context | No — findings only |
+| `/autolenis-verify` | the same executable gate, with the readiness verdict | Yes |
+| `/prompt-for-claude-code` | turns a rough request into a complete implementation prompt | No |
+
+`/review` dispatches the `adversarial-diff-reviewer` subagent so the diff is read by a clean
+context rather than by the author's memory. The prompt template it fills lives at
+`docs/claude/implementation-prompt-template.md`.
 
 ## MCP & tooling
 
@@ -276,5 +428,10 @@ When two artifacts disagree, the higher rank wins:
   session.
 - Weaken a test, widen a `catch`, or disable a security control to reach green
   (`autolenis-debugging`).
+- Treat the absence of a test environment as licence to provision one, seed users, or weaken
+  authentication — report **NOT VERIFIED** instead.
+- Begin implementation because a surface was criticised. Phase 2 approval is the gate.
+- Edit an existing migration, read or edit `.env*`, or "fix in passing" the
+  `content/attribution/export` authorization.
 - Declare work complete, working, or production ready after a single review pass — the second,
   independent review is not optional (`autolenis-code-verification`).

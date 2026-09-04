@@ -88,8 +88,24 @@ const skillNames = new Set(skills.map((s) => s.name));
 const claudeMd = readFileSync(join(REPO, "CLAUDE.md"), "utf8");
 const routed = new Set(claudeMd.match(/autolenis-[a-z0-9-]+/g) || []);
 
+// A CLAUDE.md mention of `autolenis-*` may legitimately name a slash command
+// (.claude/commands/<name>.md) or a sub-agent (.claude/agents/<name>.md) rather
+// than a skill. Those resolve to a real file, so they are references, not typos —
+// but they do not satisfy the "every skill is routed" check below either.
+const commandNames = new Set(
+  readdirSync(join(REPO, ".claude", "commands"), { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => e.name.slice(0, -3)),
+);
+const agentNames = new Set(
+  readdirSync(join(REPO, ".claude", "agents"), { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => e.name.slice(0, -3)),
+);
+
 for (const r of routed) {
-  if (!skillNames.has(r)) fail(`[routing] CLAUDE.md references "${r}" — no such skill directory`);
+  if (skillNames.has(r) || commandNames.has(r) || agentNames.has(r)) continue;
+  fail(`[routing] CLAUDE.md references "${r}" — no such skill, command, or agent`);
 }
 for (const s of skillNames) {
   if (s.startsWith("autolenis-") && !routed.has(s)) {
