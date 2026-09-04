@@ -12,10 +12,12 @@ Prior: [`SKILLS_DEPENDENCY_AUDIT_2026-07.md`](../SKILLS_DEPENDENCY_AUDIT_2026-07
 
 | Path | Purpose |
 | --- | --- |
-| `settings.json` | Enables the project MCP servers from `../.mcp.json`, the Impeccable `PostToolUse` hook, and declares the Superpowers plugin (see caveat below). |
-| `skills/` | **42 project skills**: 41 authoritative `autolenis-*` skills + the vendored `impeccable/` plugin. |
-| `commands/` | Slash commands (`/autolenis-verify` — the full quality gate + verdict). |
-| `agents/` | Sub-agents (`impeccable-manual-edit-applier`). |
+| `settings.json` | Permission rules (`deny` / `ask` / `allow`), the four registered hook events, the project MCP servers from `../.mcp.json`, and the Superpowers plugin declaration (see caveat below). |
+| `skills/` | **51 skill directories**: 42 authoritative `autolenis-*` skills (all routed from `CLAUDE.md`) + the vendored `impeccable/` plugin + `task-observer` + 7 mirrored `superpowers-*` skills. |
+| `commands/` | Slash commands. The phased loop — `/investigate` → `/plan` → *(owner approval)* → `/verify` · `/review` — plus `/prompt-for-claude-code` and `/autolenis-verify` (the full quality gate + verdict). The read-only phases set `disallowed-tools`, so the owner gate is mechanical. |
+| `agents/` | Sub-agents: `adversarial-diff-reviewer` (used by `/review` for a clean-context read of the diff) and `impeccable-manual-edit-applier`. |
+| `hooks/` | `guard-destructive.sh` and `guard-protected-paths.sh` (`PreToolUse` enforcement), `verification/` (the code-verification loop gate), and `session-start.sh`. Tests: `hooks/__tests__/guards.test.sh`. |
+| `OPERATING_SYSTEM.md` | **What the enforcement layers actually stop — and what they do not.** Read before trusting a boundary. |
 | `memory/` | Persistent knowledge-graph store for the Memory MCP server. |
 | `validate-skills.mjs` | **Executable guard** for this directory — run `node .claude/validate-skills.mjs`. |
 | `MCP_INVENTORY.md` | MCP server inventory, provenance, and least-privilege rules. |
