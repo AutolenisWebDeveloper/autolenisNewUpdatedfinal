@@ -266,6 +266,18 @@ export const HUB_PARENTS: Readonly<Record<string, string>> = {
   "/admin/reports/risk": "/admin/reports",
   // AMIPS
   "/admin/amips/report": "/admin/amips",
+  // Settings. The RBAC shadow-denial report is the documented precondition for
+  // flipping RBAC_ENFORCE (lib/auth/permissions.ts records RBAC_SHADOW_DENY and
+  // ALLOWS the request today), and app/admin/settings/page.tsx has linked to it
+  // from SETTINGS_LINKS since the page shipped.
+  //
+  // It was missing here because the page and this registry were built on branches
+  // that never saw each other: at fd0b2e0, which added the page, lib/admin/nav.ts
+  // did not exist and neither did test:admin-nav. Neither branch was wrong and
+  // git found no textual conflict — the guard globs app/admin/**/page.tsx off
+  // disk, so a route added anywhere becomes its input. The merge (30f3f9e) is
+  // what turned two green branches into a red main.
+  "/admin/settings/rbac-shadow": "/admin/settings",
 };
 
 /**
