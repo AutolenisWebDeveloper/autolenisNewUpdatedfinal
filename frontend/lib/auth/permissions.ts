@@ -12,13 +12,20 @@
 // route that moves money, fans out sends, or replays arbitrary jobs — there,
 // "recorded but allowed" is an authorization defect, not a rollout stage. Those
 // specific routes hard-enforce ahead of the T4 flip:
-//   • requirePermissionActorStrict() — hard-denies regardless of RBAC_ENFORCE,
-//     used by the ops.replay / comms.bulk_send / comms.reply routes.
-//   • an inline role check after requirePermission() — the pattern already used
-//     by the commission reverse/ and clawback/ routes.
-// Both draw their allow-list from PERMISSION_ROLES below, so they enforce the
-// roles the owner already ruled and invent no new policy. This is a per-route
-// correction; RBAC_ENFORCE stays unset and every other call site stays shadow.
+//   • requirePermissionStrict() — hard-denies regardless of RBAC_ENFORCE, taking
+//     a NextRequest. The widest of the three: money movement, e-sign void and
+//     evidence, contract attachment, impersonation, and buyer lifecycle.
+//   • requirePermissionActorStrict() — the same hard denial at the actor-based
+//     call sites (getAdminActor(), no NextRequest), used by the ops.replay /
+//     comms.bulk_send / comms.reply routes.
+//   • an inline role check after requirePermission() — still used by the affiliate
+//     payouts mark-paid/ and dealer terminate/ routes. (The commission reverse/
+//     and clawback/ routes have since moved to requirePermissionStrict.)
+// The two strict gates DERIVE their allow-list from PERMISSION_ROLES below, so they
+// enforce the roles the owner already ruled and invent no new policy. An inline
+// check instead restates a list at the call site — the duplication requirePermission-
+// Strict exists to remove, and it has drifted before. This is a per-route correction;
+// RBAC_ENFORCE stays unset and every other call site stays shadow.
 //
 // Ruled policies encoded here:
 //   1. SUPPORT_ADMIN: read-only; no money mutation, no PII export, no

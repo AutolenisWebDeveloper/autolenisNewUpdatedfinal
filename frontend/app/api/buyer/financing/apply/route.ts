@@ -1,100 +1,41 @@
-// POST /api/buyer/financing/apply — buyer submits a credit application for a deal
-// that is in FINANCING_PENDING. PII (SSN/income/employment/DOB) is encrypted at
-// rest by the service; this route never stores or logs plaintext. Fails closed if
-// the PII encryption key is not configured.
-import { NextRequest } from "next/server";
-import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
-import { prisma } from "@/lib/prisma";
-import { z } from "zod";
-import { createCreditApplication, submitApplication, DuplicateApplicationError } from "@/lib/services/financing/credit-application.service";
-import { isFinancingEncryptionConfigured } from "@/lib/security/field-encryption";
-import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
+// POST /api/buyer/financing/apply — RETIRED. Answers 410 Gone and nothing else.
+//
+// This endpoint used to accept a buyer's Social Security number, income, employer
+// and date of birth as JSON and write an encrypted CreditApplication row. Direct
+// online lender decisioning was never activated, so the identifier was collected
+// for a decision nothing made: the intake existed, the downstream did not.
+// Collecting an SSN that no workflow consumes is exposure without purpose, so the
+// intake is closed here, at the route.
+//
+// The handler is deliberately BODYLESS IN BOTH DIRECTIONS:
+//   • It never calls request.json(). An SSN that is never parsed cannot be held in
+//     a request buffer, attached to a Sentry breadcrumb, or echoed by a validation
+//     error. Reading the body and discarding it would still bring the identifier
+//     into the process, so the parameter is not even accepted.
+//   • It returns no response body — nothing to reflect a submitted value back.
+// It also does not authenticate. 410 describes the RESOURCE, not the caller, and
+// answering identically for every actor keeps the retirement from depending on a
+// session lookup.
+//
+// PRESERVED — this removes an intake, not a capability:
+//   • Every historical credit_applications row. No schema change, no deletion, no
+//     backfill. CreditApplication, its ssn_encrypted column, and
+//     lib/services/financing/credit-application.service.ts are untouched, so admin
+//     financing review (app/api/admin/financing-reviews/**) and
+//     financing-orchestrator.service.ts still read existing applications exactly
+//     as before.
+//   • The buyer's ability to move a deal through financing, which never ran
+//     through this route. The live rail is PATCH /api/buyer/deal/financing
+//     (financingPath DEALER | EXTERNAL | CASH), called from
+//     app/buyer/deal/financing/page.tsx:45; it advances FINANCING_PENDING →
+//     FEE_PENDING via advanceDealStatus (route.ts:23) and collects no SSN.
+//     app/buyer/financing/page.tsx already links buyers to that page.
+//
+// ROLLBACK: this is code, not SQL. Reverting the commit restores the previous
+// handler verbatim. Nothing was migrated, dropped, or rewritten, so there is no
+// data step to undo and no ordering constraint between code and database.
+import { NextResponse } from "next/server";
 
-const schema = z.object({
-  dealId: z.string().uuid("Invalid deal ID"),
-  amountRequestedCents: z.number().int().positive().max(100_000_000),
-  termMonths: z.number().int().min(6).max(96),
-  ssn: z.string().regex(/^\d{3}-?\d{2}-?\d{4}$/, "SSN must be 9 digits"),
-  annualIncomeCents: z.number().int().positive().max(1_000_000_000),
-  employment: z.string().max(200).optional().nullable(),
-  dob: z.string().max(40).optional().nullable(),
-});
-
-export async function POST(request: NextRequest) {
-  const buyer = await getRequestBuyer(request);
-  if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
-
-  // Fail closed: never accept/store PII without a configured encryption key.
-  if (!isFinancingEncryptionConfigured()) {
-    return errorResponse("NOT_CONFIGURED", "Financing is not available right now.", 503);
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse("VALIDATION_ERROR", "Invalid JSON", 400);
-  }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
-  }
-  const input = parsed.data;
-
-  // Ownership + deal-state gate: the deal must belong to this buyer and be at the
-  // financing stage.
-  const deal = await prisma.deal.findFirst({
-    where: { id: input.dealId, buyerId: buyer.id },
-    select: { id: true, status: true },
-  });
-  if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
-  if (deal.status !== "FINANCING_PENDING") {
-    return errorResponse("INVALID_STATE", "Financing can only be applied while the deal is in financing.", 400);
-  }
-
-  // Reuse prequal as the affordability gate (do NOT re-underwrite): a current
-  // approval is required, and the requested amount is capped at the approved budget.
-  const prequal = await prisma.preQualification.findUnique({
-    where: { buyerId: buyer.id },
-    select: { decision: true, expiresAt: true, maxOtdAmountCents: true },
-  });
-  if (!isPrequalValid(prequal)) {
-    return errorResponse("PREQUAL_REQUIRED", "A current pre-qualification is required before applying for financing.", 400);
-  }
-  if (input.amountRequestedCents > prequal!.maxOtdAmountCents) {
-    return errorResponse("BUDGET_EXCEEDED", "The requested amount exceeds your approved budget.", 400);
-  }
-
-  // Idempotency: one non-withdrawn application per deal. Pre-check for the friendly
-  // path; the DB partial-unique index + DuplicateApplicationError catch below close
-  // the double-submit race.
-  const existing = await prisma.creditApplication.findFirst({
-    where: { dealId: input.dealId, status: { not: "WITHDRAWN" } },
-    select: { id: true, status: true },
-  });
-  if (existing) {
-    return errorResponse("ALREADY_APPLIED", "An application already exists for this deal.", 409);
-  }
-
-  let app: { id: string };
-  try {
-    app = await createCreditApplication({
-      dealId: input.dealId,
-      buyerId: buyer.id,
-      amountRequestedCents: input.amountRequestedCents,
-      termMonths: input.termMonths,
-      ssn: input.ssn,
-      annualIncomeCents: input.annualIncomeCents,
-      employment: input.employment ?? undefined,
-      dob: input.dob ?? undefined,
-    });
-  } catch (e) {
-    if (e instanceof DuplicateApplicationError) {
-      return errorResponse("ALREADY_APPLIED", "An application already exists for this deal.", 409);
-    }
-    throw e;
-  }
-  await submitApplication(app.id, { actorId: buyer.id });
-
-  return successResponse({ applicationId: app.id, status: "SUBMITTED" });
+export async function POST(): Promise<NextResponse> {
+  return new NextResponse(null, { status: 410 });
 }
