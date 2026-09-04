@@ -10,6 +10,16 @@ refuses any non-loopback host, any database name outside `autolenis_prodbase` / 
 any server that is not PostgreSQL 17.x. It never reads a production DSN and never writes to
 production.
 
+**It also runs in CI.** The `phase1-proof` job in `.github/workflows/ci.yml` stands up a
+`postgres:17.6` service, asserts the major version, restores this baseline, asserts the eight digests
+below, and then runs `run-proof.sh` end to end. Until that job existed the strongest verification in
+this repository ran only when someone remembered to run it locally. The job reads no secret: its
+database is created and destroyed inside the run, on the runner's loopback interface.
+
+The digest assertion lives in the workflow rather than in this file, so it executes rather than being
+a claim in prose. If the committed baseline ever stops reproducing production, that job fails and says
+which of the eight definitions moved.
+
 ## Why the baseline had to change
 
 An earlier version of this proof began from `prisma migrate deploy` on an empty database. That proves

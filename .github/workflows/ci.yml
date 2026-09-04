@@ -132,8 +132,13 @@ jobs:
 
     services:
       postgres:
-        # Pinned rather than :16 so the gate cannot change underneath a PR.
-        image: postgres:16.4
+        # Pinned rather than :17 so the gate cannot change underneath a PR, and
+        # pinned to production's MAJOR (17) because that is where the DDL
+        # transaction semantics this repository depends on are decided:
+        # `ALTER TYPE ... ADD VALUE` cannot be used in the transaction that added
+        # it, and `CREATE INDEX CONCURRENTLY` cannot run inside one at all. A gate
+        # on 16.x is a gate on different rules than production enforces.
+        image: postgres:17.6
         env:
           POSTGRES_USER: autolenis_ci
           POSTGRES_DB: autolenis_ci
@@ -174,6 +179,51 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # ── PostgreSQL version gate ──────────────────────────────────────────────
+      # Runs BEFORE any migration or database-writing step, and reads only.
+      #
+      # The MAJOR version is the gate and it fails the job, because major is where
+      # the DDL transaction semantics differ — a new enum label cannot be used in
+      # the transaction that added it, and CREATE INDEX CONCURRENTLY cannot run in
+      # a transaction at all. Proving a migration on a different major proves it
+      # against different rules. That gap is what let the enum-in-transaction
+      # defect survive its first review.
+      #
+      # The PATCH level is reported, not enforced. Production runs on Supabase's
+      # upgrade schedule; a patch bump there is routine and must never turn this
+      # build red. 170006 is the level production was last observed at — it is a
+      # reference point for the warning, not an equality assertion.
+      - name: Assert PostgreSQL major version (migration chain)
+        run: |
+          set -euo pipefail
+          VER=$(psql "$DATABASE_URL" -tAc "SHOW server_version")
+          NUM=$(psql "$DATABASE_URL" -tAc "SHOW server_version_num")
+          MAJOR=$(( NUM / 10000 ))
+          echo "server_version     = $VER"
+          echo "server_version_num = $NUM"
+          echo "major              = $MAJOR"
+          {
+            echo "### PostgreSQL — migration chain"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| \`server_version\` | \`$VER\` |"
+            echo "| \`server_version_num\` | \`$NUM\` |"
+            echo "| major | \`$MAJOR\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MAJOR" -ne 17 ]; then
+            echo "::error::PostgreSQL major $MAJOR, expected 17. Production runs 17.x and the DDL transaction rules this repository relies on are decided by the major version. Refusing to verify migrations against a different major."
+            echo "**FAILED — major \`$MAJOR\`, expected \`17\`.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$NUM" -ne 170006 ]; then
+            echo "::warning::PostgreSQL patch level $NUM differs from production's last observed 170006. This is informational — Supabase patches on its own schedule and a patch bump is not a defect."
+            echo "Patch level \`$NUM\` differs from production's last observed \`170006\` (informational; not a failure)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Patch level matches production's last observed \`170006\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Assert the starting state rather than trusting it. If the service image
       # ever ships with tables, every result below would be meaningless.
@@ -246,7 +296,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16.4
+        # Production's major. See the migrations job for why 17 is the boundary.
+        image: postgres:17.6
         env:
           POSTGRES_USER: autolenis_ci
           # The database name is load-bearing, not cosmetic: every spec and the
@@ -293,6 +344,51 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # ── PostgreSQL version gate ──────────────────────────────────────────────
+      # Runs BEFORE any migration or database-writing step, and reads only.
+      #
+      # The MAJOR version is the gate and it fails the job, because major is where
+      # the DDL transaction semantics differ — a new enum label cannot be used in
+      # the transaction that added it, and CREATE INDEX CONCURRENTLY cannot run in
+      # a transaction at all. Proving a migration on a different major proves it
+      # against different rules. That gap is what let the enum-in-transaction
+      # defect survive its first review.
+      #
+      # The PATCH level is reported, not enforced. Production runs on Supabase's
+      # upgrade schedule; a patch bump there is routine and must never turn this
+      # build red. 170006 is the level production was last observed at — it is a
+      # reference point for the warning, not an equality assertion.
+      - name: Assert PostgreSQL major version (e2e)
+        run: |
+          set -euo pipefail
+          VER=$(psql "$DATABASE_URL" -tAc "SHOW server_version")
+          NUM=$(psql "$DATABASE_URL" -tAc "SHOW server_version_num")
+          MAJOR=$(( NUM / 10000 ))
+          echo "server_version     = $VER"
+          echo "server_version_num = $NUM"
+          echo "major              = $MAJOR"
+          {
+            echo "### PostgreSQL — e2e"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| \`server_version\` | \`$VER\` |"
+            echo "| \`server_version_num\` | \`$NUM\` |"
+            echo "| major | \`$MAJOR\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MAJOR" -ne 17 ]; then
+            echo "::error::PostgreSQL major $MAJOR, expected 17. Production runs 17.x and the DDL transaction rules this repository relies on are decided by the major version. Refusing to verify migrations against a different major."
+            echo "**FAILED — major \`$MAJOR\`, expected \`17\`.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$NUM" -ne 170006 ]; then
+            echo "::warning::PostgreSQL patch level $NUM differs from production's last observed 170006. This is informational — Supabase patches on its own schedule and a patch bump is not a defect."
+            echo "Patch level \`$NUM\` differs from production's last observed \`170006\` (informational; not a failure)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Patch level matches production's last observed \`170006\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Apply the migration chain
         run: pnpm exec prisma migrate deploy
@@ -352,6 +448,157 @@ jobs:
             frontend/playwright-report/**
             frontend/test-results/**
           if-no-files-found: ignore
+
+  # The strongest verification in this repository — and until now nothing ran it.
+  #
+  # The `migrations` job builds the schema from EMPTY through the Prisma chain.
+  # That is a real gate, but it is a gate on a schema production does not have:
+  # the chain yields 223 tables where production has 249, 2,684 columns where
+  # production has 2,976, and zero policies where production has 23. Four tables
+  # the Phase 1 wave adopts already exist in production and do not exist in a
+  # chain replay at all, so the chain never exercises the
+  # `CREATE TABLE IF NOT EXISTS` no-op path. The migrations job is correct about
+  # the wrong schema.
+  #
+  # This job restores production's committed schema-only baseline, proves the
+  # restore is faithful on eight full-definition digests, then applies the Phase 1
+  # pair, verifies every expected object, applies again and asserts the no-op.
+  #
+  # It needs no Node and no application dependencies: the proof is psql and SQL.
+  phase1-proof:
+    name: Phase 1 proof (production physical schema)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Production's major, same reasoning as the migrations job.
+        image: postgres:17.6
+        env:
+          POSTGRES_USER: autolenis_ci
+          POSTGRES_DB: autolenis_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autolenis_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Loopback only, and a database name the proof runner creates and destroys
+      # itself. No secret is read by this job; there is no DATABASE_URL to leak.
+      PROOF_HOST: 127.0.0.1
+      PROOF_PORT: "5432"
+      PROOF_USER: autolenis_ci
+      PROOF_DB: autolenis_prodbase
+      ADMIN_URL: postgresql://autolenis_ci@127.0.0.1:5432/postgres
+      BASE_URL: postgresql://autolenis_ci@127.0.0.1:5432/autolenis_prodbase
+      PROOF_DIR: docs/transaction-flow/phase-1-proof
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Assert PostgreSQL major version (phase 1 proof)
+        run: |
+          set -euo pipefail
+          VER=$(psql "$ADMIN_URL" -tAc "SHOW server_version")
+          NUM=$(psql "$ADMIN_URL" -tAc "SHOW server_version_num")
+          MAJOR=$(( NUM / 10000 ))
+          echo "server_version     = $VER"
+          echo "server_version_num = $NUM"
+          echo "major              = $MAJOR"
+          {
+            echo "### PostgreSQL — phase 1 proof"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| \`server_version\` | \`$VER\` |"
+            echo "| \`server_version_num\` | \`$NUM\` |"
+            echo "| major | \`$MAJOR\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MAJOR" -ne 17 ]; then
+            echo "::error::PostgreSQL major $MAJOR, expected 17. The proof asserts production's DDL transaction semantics and cannot be run on another major."
+            echo "**FAILED — major \`$MAJOR\`, expected \`17\`.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$NUM" -ne 170006 ]; then
+            echo "::warning::PostgreSQL patch level $NUM differs from production's last observed 170006. Informational only."
+            echo "Patch level \`$NUM\` differs from production's last observed \`170006\` (informational; not a failure)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Patch level matches production's last observed \`170006\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Restore the committed baseline on its own and prove it reproduces
+      # production, BEFORE any migration touches it. The eight digests below are
+      # over sorted object DEFINITIONS, not counts: two schemas with the same
+      # number of indexes but a different predicate on one of them produce
+      # different digests. They were measured against production read-only and are
+      # recorded in `${PROOF_DIR}/README.md`; a mismatch here means the committed
+      # dump no longer reproduces production and the proof built on it is void.
+      - name: Restore the baseline and assert the eight full-definition digests
+        run: |
+          set -euo pipefail
+          psql "$ADMIN_URL" -q -c 'DROP DATABASE IF EXISTS autolenis_prodbase;' \
+                               -c 'CREATE DATABASE autolenis_prodbase;'
+          for f in "$PROOF_DIR"/production-baseline/[0-9]*.sql; do
+            psql "$BASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+          psql "$BASE_URL" -At -F$'\n' -f "$PROOF_DIR/production-baseline/digests.sql" > /tmp/digests-actual.txt
+
+          # Provenance: measured read-only against production project
+          # aieybibvewmvrubcpthm and recorded in the proof README. Kept here so the
+          # assertion is executable rather than a claim in prose.
+          {
+            echo 'tables_d=20a57af430e216a81e3f78037f2e8710'
+            echo 'cols_d=9cbd2c69756985508661eb5df43b929c'
+            echo 'idx_d=e70929fd3a3f35b05ada4dd6c94b3da3'
+            echo 'cons_d=3cb59e667290ee423a36bb46c01252f4'
+            echo 'enums_d=b3da03427662d577eeeec93be5f6a950'
+            echo 'trg_d=6ae2e83c90749678d184e61fc8edac4d'
+            echo 'pol_d=0b3104b3280862b0c442f588f931224f'
+            echo 'fn_d=55b65dd6d0c412dc24a910338b2aa01b'
+          } > /tmp/digests-expected.txt
+
+          echo "--- digests computed from the restored baseline ---"
+          cat /tmp/digests-actual.txt
+          {
+            echo "### Baseline fidelity — eight full-definition digests"
+            echo ""
+            echo '```'
+            cat /tmp/digests-actual.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if ! diff -u /tmp/digests-expected.txt /tmp/digests-actual.txt; then
+            echo "::error::The restored baseline does not reproduce production. A digest is over sorted object definitions, so this means an object's DEFINITION differs, not merely a count. The Phase 1 proof below would be proving something against a schema production does not have."
+            echo "**FAILED — digest mismatch; the committed baseline no longer reproduces production.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "all eight digests match production"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All eight digests match production." >> "$GITHUB_STEP_SUMMARY"
+
+      # The committed runner, unmodified, end to end: restore -> apply both
+      # directories in order (each in ONE transaction, as Prisma runs them) ->
+      # verify every expected object -> apply both AGAIN -> verify -> assert the
+      # census and every object definition are unchanged. It fails on a missing
+      # object, on a verifier that produced no TOTAL row, and on any drift across
+      # the two applications.
+      - name: Run the committed proof end to end
+        run: |
+          set -euo pipefail
+          "$PROOF_DIR/run-proof.sh" 2>&1 | tee /tmp/proof.log
+          {
+            echo "### Phase 1 proof"
+            echo ""
+            echo '```'
+            grep -vE 'NOTICE:' /tmp/proof.log | tail -n 25
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   dependency-audit:
     name: Dependency audit

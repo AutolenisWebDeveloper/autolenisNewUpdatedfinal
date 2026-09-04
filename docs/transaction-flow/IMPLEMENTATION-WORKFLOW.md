@@ -322,10 +322,19 @@ so **no recorded checksum drifts from the repository** — including `2026050700
 already carries the rewritten file's checksum. A squashed baseline does **not** exist; the chain relies on
 `20260423999999_baseline_manual_provisioned_tables` and `20260917000000_baseline_manual_provisioned_fks`
 (reverse-engineered, idempotent) plus `20261017000000_migration_chain_functional_reconciliation`. CI
-(`.github/workflows/ci.yml`, job at lines 89–170) applies the whole chain to an empty `postgres:16.4`
+(`.github/workflows/ci.yml`, the `migrations` job) applies the whole chain to an empty **`postgres:17.6`**
 service and then re-applies it as a must-be-no-op, and `scripts/check-migration-drift.ts` pins the
 structural drift count at 345 (`prisma/drift-baseline.json`). The Phase 1 schema wave must keep both
 green and may only lower the pinned count.
+
+Both recurring CI PostgreSQL services (`migrations` and `e2e`) were pinned to `postgres:16.4` until this
+change, while the Phase 1 proof ran on 17.6. Verifying migrations on a different **major** than
+production runs is verifying them against different rules — a new enum label cannot be used in the
+transaction that added it, and `CREATE INDEX CONCURRENTLY` cannot run inside one at all — and that gap
+is what let the enum-in-transaction defect survive its first review. Every CI service is now
+`postgres:17.6`, and each of those jobs asserts the major version before it writes anything: major ≠ 17
+**fails** the job; a patch level other than production's last observed `170006` **warns** and does not,
+because Supabase patches on its own schedule and a patch bump is not a defect.
 
 ### 6.4 Objects the master prompt said to check before writing a migration
 
@@ -1362,7 +1371,7 @@ minting are designed to be switched off if confirmation is refused.
 
 Each area below is the verified table produced from the area map (finder pass + adversarial verification pass + gap-fill rounds). Columns: Ref · Document & section · Requirement · Current route / service / model / component / email / cron / queue / admin action · Status · Stronger safeguard to preserve · Exact required change · Phase · Test level · Acceptance evidence · Owner-gated dependency · Legacy path affected · Final disposition. The raw area maps (with their evidence quotes, duplicates, safeguards, legacy paths, out-of-scope findings, UNVERIFIED items and owner questions) are committed under `docs/transaction-flow/parity/`.
 
-### 10.1 Data model & schema (§4, §32, §28, §6.2, §12b–c, comms_outbox shape) — 185 rows
+### 10.1 Data model & schema (§4, §32, §28, §6.2, §12b–c, comms_outbox shape) — 186 rows
 
 Status counts: ALREADY CORRECT 53, PARTIAL 40, BROKEN 10, MISSING 69, DUPLICATED 12, UNVERIFIED 1 · Phase counts: P1 129, P2 17, P3 5, P4 5, P5 4, P6 8, P7 7, P8 5, P9 2, P10 3
 
@@ -1501,6 +1510,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 | S24 | MD §32 L1519 | `inventory_items.last_seen_at` gates shortlist eligibility at 7 and 30 days | `lastSeenAt` (prisma/schema.prisma:991); 7-day STALE + 30-day `SHORTLIST_FRESHNESS_WINDOW_MS` → EXPIRED → REQUEST_SIMILAR (lib/services/shortlist/shortlist-radius.ts:28,31,108-118) | ALREADY CORRECT | freshness gate app-level | none in schema; Phase 4 keeps windows on qualified-results cards | 4 | unit | existing shortlist-radius tests assert 7/30-day boundaries | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | S25 | MD §32 L1520 | `vehicle_offers` kept as staff intake; must write a canonical `offers` row (P1) | No relation to `Offer` (prisma/schema.prisma:3728-3788); production 6 / 2 rows (WORKFLOW §5.1) | BROKEN | none | Same as R22 | 6 | integration | see R22 | owner decision map Q2 | admin VehicleOffer intake | TO CONSOLIDATE |
 | S26 | MD §32 L1494-1520 | Spec row-count reconciliation: 25 §32 objects + 4 extra findings (VehicleRequestOffer third surface, `RefundReason` unused, `Deal.financingPath` duplicate, duplicate migration timestamp) | Covered by D1/N5, X2, D3, K2/D8 | DUPLICATED | none | Track the four extras in their owning rows; no separate change | 1 | n/a | parity map row count reconciled in Phase 1 opening | none | none | TO CONSOLIDATE |
+| S27 | Production read-only census (this branch); §5 | A disaster-recovery restore must yield a database the application can actually serve | **Production:** RLS ENABLED on **249/249** `public` tables but only **23** policies, on **23** distinct tables — so **226 tables are RLS-on with zero policies**. **Migration chain:** produces **0** policies and enables RLS on **0** tables (CI `migrations` job, empty → chain). Neither shape is serviceable: rebuilt from the chain, a restored database has RLS off and no policies; rebuilt to match production's RLS flags without its policies, every non-superuser path is denied by default | BROKEN | Production's `service_role` policies (23) and the server-side service-role client are what keep the app working today — do not remove either while closing this | **Out of scope here — record only.** Establish, per table, whether RLS-on-zero-policies is intentional (service-role-only, correct) or an unclosed gap; then make the intended state reproducible from the repository so a restore is serviceable. Requires an owner decision on the RLS model before any policy is authored | 9 | integration | A restore drill: rebuild from the chosen source, connect as `authenticated`/`anon`, and assert the buyer, dealer and admin read paths return rows rather than empty sets | owner decision on the RLS model (service-role-only vs per-role policies) | none | TO IMPLEMENT |
 | C1 | MD §27 L1290 | Outbox row carries trigger event | No column; implied by `payload.idempotencyKey/templateId` (lib/services/comms/comms-outbox.service.ts:32-46) | PARTIAL | none | Add `trigger_event`, `template_key`, `vehicle_request_id`, `deal_id`, `auction_id` columns | 1 | integration | migration job; column assert | prod deploy of the Phase 1 wave (§13-D1) | none | TO EXTEND |
 | C2 | MD §27 L1290 | Outbox row carries recipient | `payload.email` / `payload.phone` jsonb only | PARTIAL | none | Add `recipient_kind`, `recipient_id` columns (indexed); payload keeps address | 1 | integration | column assert | prod deploy of the Phase 1 wave (§13-D1) | none | TO EXTEND |
 | C3 | MD §27 L1290 | Template + required content validated at enqueue | `payload.templateId + templateVariables` or `subject/html` (comms-outbox.service.ts:191-206); no required-content validation | PARTIAL | none | `enqueueTransactional()` validates template key against the §27.1 register and required variables; rejects incomplete rows | 2 | unit, integration | dispatcher suite: missing required variable → enqueue rejected | none | none | TO EXTEND |
@@ -3565,33 +3575,33 @@ area maps, the critic rounds and the MarketCheck report contain no 13-column tab
 no rows. A line is a ledger row only when it starts with a pipe and parses to exactly
 13 cells (pipes escaped inside a cell do not split it). Excluded and counted separately:
 15 header rows, 15 separator rows and
-0 other pipe lines, out of 1598 pipe lines in total.
+0 other pipe lines, out of 1599 pipe lines in total.
 A requirement key is `area/Ref`, because bare refs are reused across areas
-(172 of them are).
+(173 of them are).
 
 | Ledger fact | Value |
 | --- | --- |
 | Source files | 13 |
-| Source ledger rows | **1568** |
-| Embedded ledger rows (section 10) | **1568** |
+| Source ledger rows | **1569** |
+| Embedded ledger rows (section 10) | **1569** |
 | Embedded copy identical to source | yes |
-| Unique requirement keys (`area/Ref`) | 1568 |
+| Unique requirement keys (`area/Ref`) | 1569 |
 | Duplicate keys | 0 |
 | Rows with a missing key | 0 |
-| Bare refs reused across areas | 172 |
+| Bare refs reused across areas | 173 |
 
 | Status | Rows |
 | --- | --- |
 | ALREADY CORRECT | 215 |
 | PARTIAL | 510 |
-| BROKEN | 150 |
+| BROKEN | 151 |
 | MISSING | 551 |
 | DUPLICATED | 105 |
 | UNVERIFIED | 37 |
 
 | Final disposition | Rows |
 | --- | --- |
-| TO IMPLEMENT | 656 |
+| TO IMPLEMENT | 657 |
 | TO EXTEND | 413 |
 | TO CONSOLIDATE | 204 |
 | ALREADY PRESENT | 102 |
@@ -3609,7 +3619,7 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | 6 | 173 |
 | 7 | 129 |
 | 8 | 140 |
-| 9 | 148 |
+| 9 | 149 |
 | 10 | 60 |
 | 11 | 9 |
 
@@ -3624,28 +3634,28 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | offers | 113 | 8 | 38 | 7 | 43 | 15 | 2 |
 | payment | 108 | 18 | 35 | 16 | 34 | 4 | 1 |
 | pickup | 131 | 11 | 17 | 6 | 86 | 10 | 1 |
-| schema | 185 | 53 | 40 | 10 | 69 | 12 | 1 |
+| schema | 186 | 53 | 40 | 11 | 69 | 12 | 1 |
 | sourcing | 86 | 5 | 42 | 9 | 30 | 0 | 0 |
 | stages1-3 | 92 | 20 | 37 | 7 | 18 | 9 | 1 |
 | tests | 91 | 17 | 26 | 9 | 36 | 0 | 3 |
 
 ```json parity-ledger
 {
-  "source_ledger_rows": 1568,
-  "embedded_ledger_rows": 1568,
-  "unique_requirement_keys": 1568,
+  "source_ledger_rows": 1569,
+  "embedded_ledger_rows": 1569,
+  "unique_requirement_keys": 1569,
   "duplicate_key_count": 0,
   "missing_key_count": 0,
   "by_status": {
     "ALREADY CORRECT": 215,
     "PARTIAL": 510,
-    "BROKEN": 150,
+    "BROKEN": 151,
     "MISSING": 551,
     "DUPLICATED": 105,
     "UNVERIFIED": 37
   },
   "by_disposition": {
-    "TO IMPLEMENT": 656,
+    "TO IMPLEMENT": 657,
     "TO EXTEND": 413,
     "TO CONSOLIDATE": 204,
     "ALREADY PRESENT": 102,
@@ -3662,7 +3672,7 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
     "6": 173,
     "7": 129,
     "8": 140,
-    "9": 148,
+    "9": 149,
     "10": 60,
     "11": 9
   }
@@ -3769,10 +3779,10 @@ hand-corrections by copying a stale source over them. Both are the same class of
 the same rows with no check that they agree. Two invariants now close it, and both were run against this
 document as it stands:
 
-1. **§10 is byte-identical to `parity/*.table.md`.** Every one of the 1,568 rows in §10 appears verbatim
+1. **§10 is byte-identical to `parity/*.table.md`.** Every one of the 1,569 rows in §10 appears verbatim
    in its area file — checked with an escape-aware 13-column parse, 0 mismatches. The repository copy is
    the single source; the generator reads it rather than overwriting it.
-2. **Every row parses to thirteen columns, with a status and a phase.** 1,568 rows, no bad columns, no
+2. **Every row parses to thirteen columns, with a status and a phase.** 1,569 rows, no bad columns, no
    unrecognised status, no missing required-change or acceptance cell, and no duplicate ref *within* an
    area. Refs are reused *across* areas (173 of them), which is why every cross-reference in this
    document is written `area/Ref`.
