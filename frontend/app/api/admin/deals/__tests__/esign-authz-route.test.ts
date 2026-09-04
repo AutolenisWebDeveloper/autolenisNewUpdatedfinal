@@ -7,13 +7,15 @@
 // passed to the runner. Routes are imported via the @/ alias, which tsx resolves
 // from tsconfig paths without shell globbing.
 //
-// Regression target (admin authz audit, batch 1): both routes gated only on
+// Regression target (admin authz audit, batch 1): both routes ONCE gated only on
 // requirePermission("deals.esign.void"), which is SHADOW-ONLY — under the default
 // runtime (RBAC_ENFORCE unset) a role outside the permission's allow-list is
 // recorded as RBAC_SHADOW_DENY and then ALLOWED. So any authenticated admin could
 // void a live signing envelope, and any authenticated admin could export the raw
 // evidence package (IP, user-agent, consent snapshot — the only surface exposing
-// that unredacted).
+// that unredacted). Both now call requirePermissionStrict(), which has no
+// enforcing() branch at all: an out-of-matrix role is audited RBAC_DENY and
+// answered 403 FORBIDDEN whatever RBAC_ENFORCE says.
 //
 // The intended policy is OPS, not FINANCE: PERMISSION_ROLES["deals.esign.void"]
 // is ["SUPER_ADMIN", "OPERATIONS_ADMIN"], the sibling deals/[dealId]/action route
@@ -23,6 +25,13 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
+// Hoisted, so it binds the REAL module: mock.module() below replaces the same
+// specifier only for the routes' own (later, dynamic) import. Being hoisted it
+// also evaluates ahead of the `server-only` stub below, which is safe only while
+// the permissions graph stays free of `server-only` — it is today: its single such
+// edge, admin-actor, is reached by `import type` (permissions.ts:39) and therefore
+// erased. Make that a value import and this file must stop importing it directly.
+import { roleAllows, rolesFor, type Permission } from "@/lib/auth/permissions";
 
 // The evidence route reads its envelope through the e-sign schema gate in
 // buyer-signing.service, which transitively imports modules marked `server-only`;
@@ -63,17 +72,32 @@ mock.module("@/lib/services/esign/esign-dto", {
   },
 });
 
-// requirePermission is SHADOW-ONLY by design: it returns the authenticated admin
-// even when the role is outside the permission's allow-list. Mocking that real
-// behaviour is the point — it proves the route's own hard check is what blocks.
+// requirePermissionStrict is the gate the routes actually call, and it is NOT
+// shadow-mode: an out-of-allow-list role is denied 403 FORBIDDEN before the
+// handler reaches any side effect. The mock reproduces that contract and resolves
+// the allow-list through the REAL matrix (roleAllows/rolesFor, imported above and
+// unaffected by this mock) rather than a role list restated here — a restated list
+// would let the mock agree with itself instead of with the policy the server
+// enforces, and a blanket allow would delete the control these tests exist to pin.
 mock.module("@/lib/auth/permissions", {
   namedExports: {
-    requirePermission: async () => ({
-      adminId: "admin_1",
-      email: "caller@autolenis.com",
-      role: callerRole,
-      mfaVerified: true,
-    }),
+    requirePermissionStrict: async (_request: NextRequest, permission: Permission) =>
+      roleAllows(permission, callerRole)
+        ? {
+            ok: true,
+            admin: {
+              adminId: "admin_1",
+              email: "caller@autolenis.com",
+              role: callerRole,
+              mfaVerified: true,
+            },
+          }
+        : {
+            ok: false,
+            status: 403,
+            code: "FORBIDDEN",
+            message: `This action requires ${rolesFor(permission).join(" or ")}.`,
+          },
   },
 });
 

@@ -5,12 +5,15 @@
 // cannot be passed to the runner. The route is imported via the @/ alias, which
 // tsx resolves from tsconfig paths without shell globbing.
 //
-// Regression target (admin authz audit, batch 1): this route gated only on
+// Regression target (admin authz audit, batch 1): this route ONCE gated only on
 // requirePermission("finance.deposit.override"), which is SHADOW-ONLY — under
 // the default runtime (RBAC_ENFORCE unset) a role outside the permission's
 // allow-list is recorded as RBAC_SHADOW_DENY and then ALLOWED. Any authenticated
 // admin, including a read-only SUPPORT_ADMIN, could mint a PAID $99 deposit with
-// no Stripe payment behind it and unblock an auction launch.
+// no Stripe payment behind it and unblock an auction launch. It now calls
+// requirePermissionStrict(), which has no enforcing() branch at all: an
+// out-of-matrix role is audited RBAC_DENY and answered 403 FORBIDDEN whatever
+// RBAC_ENFORCE says.
 //
 // The same consequential action reached through the payments surface —
 // POST /api/admin/payments/deposit/[depositId]/mark-paid — hard-enforces
@@ -20,6 +23,9 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
+// Hoisted, so it binds the REAL module: mock.module() below replaces the same
+// specifier only for the route's own (later, dynamic) import.
+import { roleAllows, rolesFor, type Permission } from "@/lib/auth/permissions";
 
 // ── Controllable caller role + mutation spy ──────────────────────────────────
 let callerRole = "FINANCE_ADMIN";
@@ -64,17 +70,32 @@ mock.module("@/lib/services/auction/deposit-activation.service", {
   namedExports: { reconcileDepositActivation: async () => "invited" },
 });
 
-// requirePermission is SHADOW-ONLY by design: it returns the authenticated admin
-// even when the role is outside the permission's allow-list. Mocking that real
-// behaviour is the point — it proves the route's own hard check is what blocks.
+// requirePermissionStrict is the gate the route actually calls, and it is NOT
+// shadow-mode: an out-of-allow-list role is denied 403 FORBIDDEN before the
+// handler reaches any side effect. The mock reproduces that contract and resolves
+// the allow-list through the REAL matrix (roleAllows/rolesFor, imported above and
+// unaffected by this mock) rather than a role list restated here — a restated list
+// would let the mock agree with itself instead of with the policy the server
+// enforces, and a blanket allow would delete the control these tests exist to pin.
 mock.module("@/lib/auth/permissions", {
   namedExports: {
-    requirePermission: async () => ({
-      adminId: "admin_1",
-      email: "caller@autolenis.com",
-      role: callerRole,
-      mfaVerified: true,
-    }),
+    requirePermissionStrict: async (_request: NextRequest, permission: Permission) =>
+      roleAllows(permission, callerRole)
+        ? {
+            ok: true,
+            admin: {
+              adminId: "admin_1",
+              email: "caller@autolenis.com",
+              role: callerRole,
+              mfaVerified: true,
+            },
+          }
+        : {
+            ok: false,
+            status: 403,
+            code: "FORBIDDEN",
+            message: `This action requires ${rolesFor(permission).join(" or ")}.`,
+          },
   },
 });
 
