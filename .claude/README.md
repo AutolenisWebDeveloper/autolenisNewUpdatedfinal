@@ -19,6 +19,7 @@ Prior: [`SKILLS_DEPENDENCY_AUDIT_2026-07.md`](../SKILLS_DEPENDENCY_AUDIT_2026-07
 | `hooks/` | `guard-destructive.sh` and `guard-protected-paths.sh` (`PreToolUse` enforcement), `verification/` (the code-verification loop gate), and `session-start.sh`. Tests: `hooks/__tests__/guards.test.sh`. |
 | `OPERATING_SYSTEM.md` | **What the enforcement layers actually stop — and what they do not.** Read before trusting a boundary. |
 | `memory/` | Persistent knowledge-graph store for the Memory MCP server. |
+| `../docs/claude/` | The prompt template the `/prompt-for-claude-code` command inlines, and `install.sh` — the AutoLenis-only bundle installer this configuration came from. |
 | `validate-skills.mjs` | **Executable guard** for this directory — run `node .claude/validate-skills.mjs`. |
 | `MCP_INVENTORY.md` | MCP server inventory, provenance, and least-privilege rules. |
 
