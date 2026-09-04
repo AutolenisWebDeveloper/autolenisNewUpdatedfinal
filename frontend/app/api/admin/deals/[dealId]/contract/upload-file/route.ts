@@ -17,11 +17,12 @@
 // and fail-closed scan) with admin authorization and a dealer-independent key,
 // rather than a parallel one. Audit-logged.
 //
-// AUTHORIZATION DEPENDENCY: requirePermission is in SHADOW MODE
-// (lib/auth/permissions.ts — RBAC_ENFORCE unset means a role outside the allow
-// list is recorded as `rbac.shadow_deny` and STILL ALLOWED). So this route is
-// authenticated as an admin but NOT role-enforced until that flag is flipped,
-// which is a separate operator action. Any authenticated admin can reach it today.
+// AUTHORIZATION: role-enforced today — NOT shadowed. The handler gates on
+// requirePermissionStrict(request, "deals.esign.void"), which derives the allow
+// list from PERMISSION_ROLES and HARD-DENIES a role outside it regardless of
+// RBAC_ENFORCE (lib/auth/permissions.ts). So only SUPER_ADMIN and OPERATIONS_ADMIN
+// can reach it with the T4 flag still unset; a denial is audited as RBAC_DENY, and
+// 401 (no session) is reported separately from 403 (wrong role).
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { requirePermissionStrict } from "@/lib/auth/permissions";

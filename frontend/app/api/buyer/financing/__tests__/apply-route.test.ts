@@ -1,161 +1,102 @@
-// Route contract for POST /api/buyer/financing/apply — auth, PII-encryption gate,
-// deal ownership + FINANCING_PENDING gate, and that PII is handed to the (encrypting)
-// service and never returned to the client.
+// Route contract for POST /api/buyer/financing/apply — RETIRED, answers 410 Gone.
+//
+// This suite previously asserted the credit-application intake: auth, the
+// PII-encryption fail-closed gate, deal ownership + FINANCING_PENDING, the prequal
+// affordability cap, duplicate handling, and that a submitted SSN reached the
+// encrypting service. That intake is gone, so those assertions are gone with it —
+// what replaces them is the proof that the route now accepts nothing at all.
+//
+// The security invariant behind it (no transaction route collects an SSN) is
+// enforced repo-wide in lib/security/__tests__/no-ssn-intake.test.ts.
 //
 // Run: pnpm test:financing-routes
 
-import test, { mock, beforeEach } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
 
-const state = {
-  buyer: { id: "buyer_1" } as { id: string } | null,
-  deal: { id: "deal_1", status: "FINANCING_PENDING" } as Record<string, unknown> | null,
-  encConfigured: true,
-  prequal: { decision: "APPROVED", expiresAt: new Date(Date.now() + 86400000), maxOtdAmountCents: 3_000_000 } as Record<string, unknown> | null,
-  prequalValid: true,
-  existingApp: null as Record<string, unknown> | null,
-  throwDuplicate: false,
-  created: [] as Array<Record<string, unknown>>,
-  submitted: [] as string[],
+const ROUTE = "app/api/buyer/financing/apply/route.ts";
+
+/** The exact shape the retired intake used to accept, SSN and all. */
+const LEGACY_PAYLOAD = {
+  dealId: "11111111-1111-1111-1111-111111111111",
+  amountRequestedCents: 2_500_000,
+  termMonths: 60,
+  ssn: "123-45-6789",
+  annualIncomeCents: 9_000_000,
+  employment: "Acme",
 };
 
-class DuplicateApplicationError extends Error {
-  constructor() { super("dup"); this.name = "DuplicateApplicationError"; }
+async function handler(): Promise<(req?: Request) => Promise<Response>> {
+  const mod = await import("@/app/api/buyer/financing/apply/route");
+  // The handler declares no parameters; the cast lets a request be offered anyway,
+  // which is the point of the "never reads the body" test below.
+  return mod.POST as unknown as (req?: Request) => Promise<Response>;
 }
 
-mock.module("@/lib/auth/api", {
-  namedExports: {
-    getRequestBuyer: async () => state.buyer,
-    successResponse: (data: unknown, status = 200) => ({ __ok: true, status, data }),
-    errorResponse: (code: string, message: string, status = 400) => ({ __ok: false, status, code, message }),
-  },
-});
-mock.module("@/lib/prisma", {
-  namedExports: {
-    prisma: {
-      deal: { findFirst: async () => state.deal },
-      preQualification: { findUnique: async () => state.prequal },
-      creditApplication: { findFirst: async () => state.existingApp },
-    },
-  },
-});
-mock.module("@/lib/security/field-encryption", {
-  namedExports: { isFinancingEncryptionConfigured: () => state.encConfigured },
-});
-mock.module("@/lib/services/prequal/prequal.service", {
-  namedExports: { isPrequalValid: () => state.prequalValid },
-});
-mock.module("@/lib/services/financing/credit-application.service", {
-  namedExports: {
-    DuplicateApplicationError,
-    createCreditApplication: async (input: Record<string, unknown>) => {
-      if (state.throwDuplicate) throw new DuplicateApplicationError();
-      state.created.push(input);
-      return { id: "app_1" };
-    },
-    submitApplication: async (id: string) => { state.submitted.push(id); },
-  },
-});
-
-function req(body: unknown) {
-  return new NextRequest("http://localhost/api/buyer/financing/apply", {
+function request(body: unknown): Request {
+  return new Request("http://localhost/api/buyer/financing/apply", {
     method: "POST",
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
   });
 }
-const VALID = { dealId: "11111111-1111-1111-1111-111111111111", amountRequestedCents: 2_500_000, termMonths: 60, ssn: "123-45-6789", annualIncomeCents: 9_000_000, employment: "Acme" };
 
-beforeEach(() => {
-  state.buyer = { id: "buyer_1" };
-  state.deal = { id: "deal_1", status: "FINANCING_PENDING" };
-  state.encConfigured = true;
-  state.prequal = { decision: "APPROVED", expiresAt: new Date(Date.now() + 86400000), maxOtdAmountCents: 3_000_000 };
-  state.prequalValid = true;
-  state.existingApp = null;
-  state.throwDuplicate = false;
-  state.created = [];
-  state.submitted = [];
+test("POST answers 410 Gone", async () => {
+  const res = await (await handler())();
+  assert.equal(res.status, 410);
 });
 
-async function POST(body: unknown) {
-  const mod = await import("@/app/api/buyer/financing/apply/route");
-  return (await mod.POST(req(body))) as unknown as { __ok: boolean; status: number; code?: string; data?: Record<string, unknown> };
-}
-
-test("401 when not authenticated", async () => {
-  state.buyer = null;
-  const res = await POST(VALID);
-  assert.equal(res.status, 401);
+test("the 410 carries no response body", async () => {
+  const res = await (await handler())();
+  assert.equal(await res.text(), "", "nothing to echo a submitted value back in");
 });
 
-test("503 fail-closed when the PII encryption key is not configured", async () => {
-  state.encConfigured = false;
-  const res = await POST(VALID);
-  assert.equal(res.status, 503);
-  assert.equal(res.code, "NOT_CONFIGURED");
-  assert.equal(state.created.length, 0, "no application is created without encryption");
+test("a legacy SSN payload is never read", async () => {
+  const req = request(LEGACY_PAYLOAD);
+  const res = await (await handler())(req);
+
+  assert.equal(res.status, 410, "an SSN payload is refused, not processed");
+  assert.equal(
+    req.bodyUsed, false,
+    "the body must never be consumed — an SSN that is not parsed cannot be buffered, " +
+      "logged, attached to a Sentry breadcrumb, or echoed by a validation error",
+  );
 });
 
-test("400 on invalid input (bad SSN)", async () => {
-  const res = await POST({ ...VALID, ssn: "not-an-ssn" });
-  assert.equal(res.status, 400);
+test("the answer does not depend on the caller — no session lookup, no 401 branch", async () => {
+  // 410 describes the resource, not the actor. With no auth import there is no path
+  // that could answer differently for an anonymous caller than for a signed-in one.
+  const first = await (await handler())();
+  const second = await (await handler())(request(LEGACY_PAYLOAD));
+  assert.equal(first.status, 410);
+  assert.equal(second.status, 410);
 });
 
-test("404 when the deal is not the buyer's", async () => {
-  state.deal = null;
-  const res = await POST(VALID);
-  assert.equal(res.status, 404);
+test("the route reaches no service, database, or encryption dependency", () => {
+  const source = readFileSync(ROUTE, "utf8");
+  // Import statements only — the header comment names these files while explaining
+  // the retirement, and prose must not be mistaken for a dependency.
+  const imports = [...source.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+
+  assert.deepEqual(imports, ["next/server"], "the retired route depends on nothing else");
+  for (const forbidden of [
+    "@/lib/prisma",
+    "@/lib/auth/api",
+    "@/lib/security/field-encryption",
+    "@/lib/services/financing/credit-application.service",
+    "@/lib/services/prequal/prequal.service",
+    "zod",
+  ]) {
+    assert.equal(imports.includes(forbidden), false, `${forbidden} must no longer be imported`);
+  }
 });
 
-test("400 when the deal is not in FINANCING_PENDING", async () => {
-  state.deal = { id: "deal_1", status: "FEE_PAID" };
-  const res = await POST(VALID);
-  assert.equal(res.status, 400);
-  assert.equal(res.code, "INVALID_STATE");
-});
-
-test("400 PREQUAL_REQUIRED when there is no current pre-qualification", async () => {
-  state.prequalValid = false;
-  const res = await POST(VALID);
-  assert.equal(res.status, 400);
-  assert.equal(res.code, "PREQUAL_REQUIRED");
-  assert.equal(state.created.length, 0, "no application without a valid prequal");
-});
-
-test("400 BUDGET_EXCEEDED when the requested amount is over the approved budget", async () => {
-  state.prequal = { decision: "APPROVED", expiresAt: new Date(Date.now() + 86400000), maxOtdAmountCents: 2_000_000 };
-  const res = await POST({ ...VALID, amountRequestedCents: 2_500_000 });
-  assert.equal(res.status, 400);
-  assert.equal(res.code, "BUDGET_EXCEEDED");
-  assert.equal(state.created.length, 0, "no application when over budget");
-});
-
-test("409 ALREADY_APPLIED when a non-withdrawn application already exists (pre-check)", async () => {
-  state.existingApp = { id: "app_existing", status: "SUBMITTED" };
-  const res = await POST(VALID);
-  assert.equal(res.status, 409);
-  assert.equal(res.code, "ALREADY_APPLIED");
-  assert.equal(state.created.length, 0, "no duplicate application created");
-});
-
-test("409 ALREADY_APPLIED on the create race (DB partial-unique → DuplicateApplicationError)", async () => {
-  state.throwDuplicate = true; // pre-check passes, but the unique index rejects the insert
-  const res = await POST(VALID);
-  assert.equal(res.status, 409);
-  assert.equal(res.code, "ALREADY_APPLIED");
-  assert.equal(state.submitted.length, 0, "nothing submitted when the create loses the race");
-});
-
-test("happy path creates + submits, hands PII to the service, returns no PII", async () => {
-  const res = await POST(VALID);
-  assert.equal(res.status, 200);
-  assert.equal(res.data!.applicationId, "app_1");
-  assert.equal(res.data!.status, "SUBMITTED");
-  assert.equal(state.created.length, 1);
-  assert.equal((state.created[0] as Record<string, unknown>).ssn, "123-45-6789", "PII passed to the encrypting service");
-  assert.equal(state.submitted[0], "app_1");
-  // The response must not echo the SSN/income back.
-  assert.equal(JSON.stringify(res.data).includes("123-45-6789"), false);
+test("no CreditApplication can be created through this route", async () => {
+  // The service is unreachable from here (asserted above), so the strongest
+  // behavioural statement is that a full, previously-valid submission produces a
+  // refusal and no response payload that could carry an application id.
+  const res = await (await handler())(request(LEGACY_PAYLOAD));
+  assert.equal(res.status, 410);
+  assert.equal(await res.text(), "", "no applicationId is ever returned");
 });
