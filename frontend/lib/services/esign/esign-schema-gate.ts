@@ -4,28 +4,36 @@
 // schema.
 //
 // Migrations 20261014000000_esign_envelope_history and
-// 20261015000000_esign_consent_and_executed_artifact are AUTHORED BUT
-// DELIBERATELY UNAPPLIED in production (owner-gated; ESIGN/UETA legal
-// sufficiency is NOT VERIFIED and the consent policy is blocked pending
-// attorney/compliance review). The Prisma schema, however, already declares
-// everything those migrations add. Prisma always emits an EXPLICIT column list
-// in its generated SQL, so any unprojected read, any write naming one of those
-// columns, and any query against e_sign_envelope_history fails in production
-// with 42703 (undefined_column) / 42P01 (undefined_table).
+// 20261015000000_esign_consent_and_executed_artifact are owner-gated:
+// ESIGN/UETA legal sufficiency is NOT VERIFIED and the consent policy is
+// blocked pending attorney/compliance review. The Prisma schema already
+// declares everything those migrations add. Prisma always emits an EXPLICIT
+// column list in its generated SQL, so against a database that LACKS those
+// objects any unprojected read, any write naming one of those columns, and any
+// query against e_sign_envelope_history fails with 42703 (undefined_column) /
+// 42P01 (undefined_table).
 //
-// Production reality (verified against the live database): e_sign_envelopes has
-// 28 columns; the Prisma model declares 35. The 7 listed in GATED_ENVELOPE_DEFAULTS
-// do not exist, and e_sign_envelope_history does not exist at all.
+// PRODUCTION SCHEMA STATUS — CORRECTED 2026-09-05. An earlier version of this
+// comment asserted that production had 28 columns on e_sign_envelopes and no
+// e_sign_envelope_history table. That assertion is STALE and was wrong. An
+// owner-run read-only probe on 2026-09-05 measured production as:
+// e_sign_envelopes 35 columns, e_sign_envelope_history PRESENT with 32 columns.
+// The objects both migrations add ARE physically present; what was missing was
+// only the _prisma_migrations ledger record, reconciled under
+// docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md §6.2 / §13-D1.
 //
-// So this module is a COMPATIBILITY GATE, not a feature flag in the usual sense.
-// It answers exactly one question — "may this process touch the columns and
-// tables those two migrations add?" — and every e-sign caller routes its reads
-// and writes through the helpers here instead of asking Prisma for the full row.
+// So this module is NO LONGER a schema-compatibility gate. Its live purpose is
+// the COMPLIANCE gate (§13-D4): the executed-artifact / consent-snapshot
+// behaviour stays off until attorney/compliance sign-off, independently of the
+// schema. It answers exactly one question — "may this process touch the columns
+// and tables those two migrations add?" — and every e-sign caller routes its
+// reads and writes through the helpers here instead of asking Prisma for the
+// full row. The projection helpers below are retained deliberately: they are
+// what makes the flag safe to leave off against a fully migrated database.
 //
-// Defaults to OFF, matching the unmigrated production database. Flip it to
-// "true" ONLY in an environment where both migrations have actually been
-// applied; turning it on against an unmigrated database re-introduces exactly
-// the 42703/42P01 failures it exists to prevent.
+// Defaults to OFF, and STAYS OFF until the compliance sign-off recorded in
+// §13-D4 exists. The default is a compliance decision, not a schema one — do
+// not flip it because the schema check now passes.
 //
 // Follows the established CRM_INAPP_ENGINE_ENABLED cutover-flag pattern
 // (app/api/cron/lead-magnet-sequence/route.ts): strict === "true", default off.
