@@ -876,10 +876,20 @@ BEGIN
       -- is its own @unique FK to User). A key onto `users(id)` would therefore reject every real
       -- assignment at runtime with a 23503.
       --
-      -- `assigned_admin_id` already exists here as a bare text column with no key at all (R2). This
-      -- is a CORRECTNESS defect, not a deploy hazard: the column holds 0 non-NULL rows in production
-      -- (§5.7), so `ADD CONSTRAINT` validates an empty set and cannot fail either way. It is fixed
-      -- because the next writer would otherwise populate it against the wrong parent.
+      -- `assigned_admin_id` already exists here as a bare text column with no key at all (R2).
+      --
+      -- The column held 0 non-NULL rows when production was read on 2026-09-05 (§5.7). That is a
+      -- MEASUREMENT, not a property of the column, and the deploy is later: one admin assignment
+      -- between the two makes this `ADD CONSTRAINT` fail on existing data, and Prisma runs the file
+      -- in a single transaction, so the whole wave would roll back. The zero is therefore not the
+      -- safety argument. `preflight.sql` is: it asserts at DEPLOY TIME, read-only against the data
+      -- that will actually be there, that every non-NULL `assigned_admin_id` resolves in
+      -- `admins(id)`, and a non-zero result stops the deploy for owner-run reconciliation — the same
+      -- pattern §13-D2 already uses for the one-open-request index.
+      --
+      -- What the zero does establish is that this is a CORRECTNESS defect rather than a backlog of
+      -- bad data: nothing has been written against the wrong parent yet, and the fix is here so
+      -- nothing ever is.
       ('vehicle_requests_assigned_admin_id_fkey',    'vehicle_requests',      'assigned_admin_id',    'admins',            'SET NULL'),
       -- deposits / auctions
       ('deposits_vehicle_request_id_fkey',           'deposits',              'vehicle_request_id',   'vehicle_requests',  'SET NULL'),
