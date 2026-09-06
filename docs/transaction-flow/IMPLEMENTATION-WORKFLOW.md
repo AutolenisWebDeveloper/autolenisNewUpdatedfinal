@@ -646,7 +646,7 @@ HINT:  New enum values must be committed before they can be used.
 The same two statements in two transactions both succeed and the index is created (exit 0;
 `split_probe_one_open` present in `pg_indexes`). The full restore → apply → verify → re-apply → verify
 evidence is `docs/transaction-flow/phase-1-proof/` — the production physical-schema dump, the
-materialised statements, the object-verification query (368 expected objects, 0 missing), and
+materialised statements, the object-verification query (371 assertions, 0 failed), and
 `run-proof.sh`, which re-runs the whole thing from scratch. Running it against production's physical
 schema rather than an empty chain replay is what caught the missing statement separators in the
 `ip_unavailable_reason` columns, and the fact that `audit_logs.action` is an enum rather than text. Those files are a **proof copy only**: they are deliberately not in
@@ -860,20 +860,22 @@ Zero route reads or writes a new field.
   `cancel_reason` (C11); `terminal_failed_at` (C12); `delivered_at` (C9/R88). Every consumer is
   Phase 2. Nothing in the list lacks a citation, so nothing was dropped for want of one.
 
-  **Two cited rows are not fully satisfied by this wave, recorded rather than taken silently.** C2
-  asks for `recipient_kind`/`recipient_id` **indexed** at Phase 1 and only the columns land; R37a
-  asks for `queue_items` indexes on `(status, type)` and `(assigned_admin_id)` and only §13-D11
-  correction 6's `(owner_role, status)` lands. Constraint C1 allows exactly one schema wave, so an
-  index those rows place in Phase 1 cannot land in a later phase without a second wave. Each is
-  therefore an **owner decision** — add it to this wave, or move that half of the row to Phase 2 in
-  the ledger. Adding schema beyond the three corrections this batch was scoped to is not a call the
-  batch makes for itself.
+  **The index halves of C2 and R37a land too** (owner instruction, 2026-09-06). C2 asks for
+  `recipient_kind`/`recipient_id` **indexed** at Phase 1 and R37a for `queue_items` indexes on
+  `(status, type)` and `(assigned_admin_id)`; an earlier revision landed the columns and recorded the
+  gap. All three are now in the wave — `comms_outbox_recipient_idx`, `queue_items_status_type_idx`,
+  `queue_items_assigned_admin_id_idx` — because constraint C1 allows exactly one schema wave, so an
+  index a Phase 1 row calls for cannot land later without a second one. `queue_items_status_idx` on
+  the bare `(status)` is now a left-prefix of `(status, type)` and therefore redundant; it is **not**
+  dropped, because removing a capability silently is what the capability-preservation rule forbids,
+  and consolidating the pair is a follow-up rather than a decision this wave takes.
 
   **`comms_outbox.vehicle_request_id` / `deal_id` / `auction_id` get no foreign key**, unlike every
-  other cross-entity reference in the wave. Deliberate: the outbox is a durable send record, and a
-  row saying "this message was sent" must outlive deletion of the transaction it referred to, which
-  a cascade would destroy and a `SET NULL` would blank. They are correlation keys, not ownership
-  edges. Flagged for owner confirmation, because the alternative reading is that it is an oversight.
+  other cross-entity reference in the wave — the one place section 6's rule is deliberately not
+  applied, **confirmed by the owner 2026-09-06**. The outbox is a durable send record, and a row
+  saying "this message was sent" must outlive deletion of the transaction it referred to: a cascade
+  would destroy the audit and a `SET NULL` would blank it. They are correlation keys, not ownership
+  edges.
 
   **The `status` CHECK widens with them (§13-D24 gap (b)).** Production admits
   `pending, sending, sent, failed, suppressed, skipped` and neither `'cancelled'` nor `'delivered'`

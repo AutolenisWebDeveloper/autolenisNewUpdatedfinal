@@ -783,24 +783,19 @@ CREATE INDEX IF NOT EXISTS "idx_dlq_failed_at" ON "jobs_dead_letter" ("failed_at
 -- `parity/control.table.md` (M27-04a/b). Fifteen columns and one channel value; every one has a
 -- citation, so nothing is dropped for want of one.
 --
--- WHAT THE CITATIONS DO NOT COVER, stated so the trace is not read as "these rows are satisfied":
---   * C2 asks for `recipient_kind` / `recipient_id` "(indexed)" at PHASE 1. The COLUMNS land here;
---     no index does. Constraint C1 allows exactly one schema wave, so an index C2 places in Phase 1
---     cannot land in a later one without a second wave — this is an owner decision, either add the
---     index to this wave or move C2's index half to Phase 2 in the ledger. It is recorded rather
---     than silently taken because it is a schema addition beyond the three conditions this batch
---     was scoped to.
---   * R37a likewise asks for `queue_items` indexes on `(status, type)` and `(assigned_admin_id)`.
---     Neither is here; §13-D11 correction 6 asked only for `owner_role`, which is. Same one-wave
---     consequence, same owner decision.
+-- INDEX HALVES, closed on owner instruction 2026-09-06. C2 asks for `recipient_kind`/`recipient_id`
+-- "(indexed)" at Phase 1 and R37a for `queue_items` `(status, type)` and `(assigned_admin_id)`; an
+-- earlier revision of this wave landed the columns without the indexes and recorded the gap. All
+-- three indexes are now in section 7. Constraint C1 allows exactly one schema wave, so an index a
+-- Phase 1 row calls for cannot land later without a second wave — that is why deferring them was
+-- not a free choice.
 --
 -- NO FOREIGN KEY on `vehicle_request_id` / `deal_id` / `auction_id`, unlike every other cross-entity
--- reference in this wave (section 6: "a guarded FK with a relation, never a bare id column"). That
--- is deliberate and is the one place the rule is not applied: the outbox is a durable send record,
--- and a row saying "this message was sent" has to survive deletion of the transaction it referred
--- to — a cascade or a SET NULL would either destroy or blank the audit. They are correlation keys,
--- not ownership edges. Flagged for owner confirmation, since the alternative reading is that this
--- is an oversight.
+-- reference in this wave (section 6: "a guarded FK with a relation, never a bare id column"). This
+-- is the one place that rule is deliberately not applied, CONFIRMED by the owner 2026-09-06: the
+-- outbox is a durable send record, and a row saying "this message was sent" has to survive deletion
+-- of the transaction it referred to — a cascade would destroy the audit and a `SET NULL` would blank
+-- it. They are correlation keys, not ownership edges.
 --
 --   channel 'in_app'      M27-04a  schema half Phase 1, delivery M27-04b Phase 2
 --   trigger_event         C1       Phase 2      template_key        C1   Phase 2 (validated by C3)
@@ -868,7 +863,8 @@ ALTER TABLE "comms_outbox"
   ADD COLUMN IF NOT EXISTS "vehicle_request_id" TEXT,
   ADD COLUMN IF NOT EXISTS "deal_id"            TEXT,
   ADD COLUMN IF NOT EXISTS "auction_id"         TEXT,
-  -- C2 — the row carries its recipient; the address itself stays in `payload`.
+  -- C2 — the row carries its recipient; the address itself stays in `payload`. C2 also asks for
+  -- these to be INDEXED at Phase 1; the index follows the column list below.
   ADD COLUMN IF NOT EXISTS "recipient_kind"     TEXT,
   ADD COLUMN IF NOT EXISTS "recipient_id"       TEXT,
   -- C4 — send-time transaction-state recheck: what to re-read, and what result still justifies sending.
@@ -885,6 +881,12 @@ ALTER TABLE "comms_outbox"
   -- C9 / R88 (§13-D24 gap (b)) — the provider-confirmed delivery timestamp that pairs with the
   -- `delivered` status above. Its writer is the Resend/Twilio status webhook in Phase 2.
   ADD COLUMN IF NOT EXISTS "delivered_at"       TIMESTAMPTZ;
+
+-- C2's index half, added on owner instruction 2026-09-06. Composite in (recipient_kind,
+-- recipient_id) because the read C2 exists for is "this recipient's outbox rows", which needs both:
+-- an id is only unique within its kind. Same one-wave reasoning as the queue_items pair above.
+CREATE INDEX IF NOT EXISTS "comms_outbox_recipient_idx"
+  ON "comms_outbox" ("recipient_kind", "recipient_id");
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 -- 6. FOREIGN KEYS
@@ -1018,6 +1020,17 @@ CREATE INDEX IF NOT EXISTS "queue_items_status_idx"                    ON "queue
 -- `FinancingReviewTask` — the shape this table reuses — so "the open items Operations owns" is one
 -- index scan rather than a filter across every row that role has ever owned.
 CREATE INDEX IF NOT EXISTS "queue_items_owner_role_status_idx"         ON "queue_items" ("owner_role", "status");
+-- R37a's remaining two, added on owner instruction 2026-09-06. Constraint C1 allows exactly one
+-- schema wave, so an index R37a places in Phase 1 cannot land in a later phase without a second
+-- wave — which is why these are here rather than deferred.
+--   (status, type)        the queue's own dimension: "the open DEAL_EXCEPTIONs".
+--   (assigned_admin_id)   "the items assigned to me", the per-admin view.
+-- `queue_items_status_idx` on the bare `(status)` above is a left-prefix of `(status, type)` and is
+-- therefore redundant once this exists. It is NOT dropped here: the draft created it, and removing
+-- a capability silently is exactly what the capability-preservation rule forbids. Consolidating the
+-- pair is a follow-up for the owner, not a decision this wave makes.
+CREATE INDEX IF NOT EXISTS "queue_items_status_type_idx"               ON "queue_items" ("status", "type");
+CREATE INDEX IF NOT EXISTS "queue_items_assigned_admin_id_idx"         ON "queue_items" ("assigned_admin_id");
 
 -- Master rule 10: one sourcing case per request; one co-buyer per request.
 CREATE UNIQUE INDEX IF NOT EXISTS "sourcing_cases_vehicle_request_id_key"

@@ -46,7 +46,7 @@ Only the production baseline exercises that path.
 ## What this proves, and what it does not
 
 **PROVES.** Both directories apply, in order, each inside a single transaction (the way Prisma runs
-them), against production's physical schema; all **368 assertions pass, 0 fail** — the count is
+them), against production's physical schema; all **371 assertions pass, 0 fail** — the count is
 assertions rather than objects, because 2 of them require a label to be ABSENT and 14 require a
 table to carry NO RLS policy; **no CHECK
 constraint stopped admitting a value production admits**; a second application of both directories
@@ -159,7 +159,7 @@ keys resolve to `admins(id) ON DELETE SET NULL`; `queue_items.owner_role` is `Qu
 its 8 members and neither `SUPPORT` nor `CONCIERGE`; `QueueItemType` holds 20 labels including
 `LINEAGE_ORPHAN`; `queue_items_owner_role_status_idx` exists; `comms_outbox` carries `delivered_at`
 and a `status` CHECK admitting eight values. Run against the *pre*-correction database the same
-`verify.sql` reports 17 `MISSING` rows naming exactly those objects — the assertions fail first, so
+`verify.sql` reports 20 `MISSING` rows naming exactly those objects — the assertions fail first, so
 they are not decorative.
 
 Running against the production baseline caught a defect the chain-based proof had not: the four
@@ -331,7 +331,7 @@ each, then rolled back.
 
 ## Phase 1 is additive
 
-`verify.sql` asserts, among its 368 assertions, that `e_sign_envelopes_deal_id_key` is **still
+`verify.sql` asserts, among its 371 assertions, that `e_sign_envelopes_deal_id_key` is **still
 present** after the wave. Replacing that live constraint is the signatures-phase
 expand/backfill/verify/cutover/contract sequence, not this one. If a future edit to Phase 1 drops it,
 the verifier fails.

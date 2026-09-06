@@ -89,6 +89,8 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('e_sign_envelopes_deal_id_signer_kind_key'),('audit_logs_legacy_path_write_idx'),
   ('co_buyers_vehicle_request_id_key'),('sourcing_cases_vehicle_request_id_key'),
   ('queue_items_idempotency_key_key'),('queue_items_exception_code_idx'),('queue_items_owner_role_status_idx'),
+  -- R37a's index list and C2's index half, landed on owner instruction 2026-09-06.
+  ('queue_items_status_type_idx'),('queue_items_assigned_admin_id_idx'),('comms_outbox_recipient_idx'),
   ('auction_invitations_token_hash_key'),('auction_invitations_auction_rooftop_key'),
   ('dealer_rooftops_mc_rooftop_id_key'),('inventory_query_cache_criteria_hash_key'),
   ('uq_comms_outbox_dedup_key'),('idx_comms_outbox_drain'),
