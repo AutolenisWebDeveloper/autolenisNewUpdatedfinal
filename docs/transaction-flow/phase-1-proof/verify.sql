@@ -20,10 +20,16 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('FinancingAuditEventType','TERMS_LOCKED'),('FinancingAuditEventType','FINANCING_COMPLETED'),('FinancingAuditEventType','FINANCING_FAILED'),
   ('FinancingAuditEventType','FINANCING_EXPIRED'),('FinancingAuditEventType','CASH_CONFIRMED'),('FinancingAuditEventType','EVIDENCE_ATTACHED'),
   ('AdminActionType','LEGACY_PATH_WRITE'),
+  ('QueueItemType','LINEAGE_ORPHAN'),
+  -- §13-D11 correction 3: one member per distinct §26 Owner cell, and no member without a cell.
+  ('QueueOwnerRole','OPERATIONS'),('QueueOwnerRole','BUYER'),('QueueOwnerRole','FINANCE'),
+  ('QueueOwnerRole','SYSTEM'),('QueueOwnerRole','BUYER_OPERATIONS'),('QueueOwnerRole','COMPLIANCE'),
+  ('QueueOwnerRole','OPERATIONS_FINANCE'),('QueueOwnerRole','BUYER_DEALER'),
   ('OfferStatus','NOT_SELECTED')
 ), expected_types(name) AS (VALUES
   ('VehicleRequestEntryType'),('DeliveryPreference'),('AuctionInvitationStatus'),('DealerReaffirmationStatus'),
-  ('PostCompletionObligationStatus'),('AuctionVehicleCandidateStatus'),('ESignSignerKind'),('SourcingCandidateSource')
+  ('PostCompletionObligationStatus'),('AuctionVehicleCandidateStatus'),('ESignSignerKind'),('SourcingCandidateSource'),
+  ('QueueOwnerRole')
 ), expected_tables(name) AS (VALUES
   ('co_buyers'),('plan_snapshots'),('sourcing_cases'),('sourcing_candidates'),('dealer_reaffirmations'),('deal_recaps'),
   ('queue_items'),('post_completion_obligations'),('deal_corrections'),('inventory_query_cache'),
@@ -76,12 +82,15 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('circumvention_attempts','dealer_id'),
   ('inventory_items','listing_id'),('inventory_items','provider_last_seen_at'),('inventory_items','mc_website_id'),
   ('dealer_rooftops','mc_rooftop_id'),('dealer_rooftops','operating_status'),('dealer_rooftops','operating_status_checked_at'),
-  ('comms_outbox','trigger_event'),('comms_outbox','cancel_key'),('comms_outbox','state_recheck'),('comms_outbox','max_attempts')
+  ('comms_outbox','trigger_event'),('comms_outbox','cancel_key'),('comms_outbox','state_recheck'),('comms_outbox','max_attempts'),
+  ('comms_outbox','cancelled_at'),('comms_outbox','cancel_reason'),('comms_outbox','delivered_at')
 ), expected_indexes(name) AS (VALUES
   ('vehicle_requests_one_open_per_buyer_key'),('offers_one_live_per_rooftop_candidate_key'),
   ('e_sign_envelopes_deal_id_signer_kind_key'),('audit_logs_legacy_path_write_idx'),
   ('co_buyers_vehicle_request_id_key'),('sourcing_cases_vehicle_request_id_key'),
-  ('queue_items_idempotency_key_key'),('queue_items_exception_code_idx'),
+  ('queue_items_idempotency_key_key'),('queue_items_exception_code_idx'),('queue_items_owner_role_status_idx'),
+  -- R37a's index list and C2's index half, landed on owner instruction 2026-09-06.
+  ('queue_items_status_type_idx'),('queue_items_assigned_admin_id_idx'),('comms_outbox_recipient_idx'),
   ('auction_invitations_token_hash_key'),('auction_invitations_auction_rooftop_key'),
   ('dealer_rooftops_mc_rooftop_id_key'),('inventory_query_cache_criteria_hash_key'),
   ('uq_comms_outbox_dedup_key'),('idx_comms_outbox_drain'),
@@ -124,6 +133,58 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('co_buyers'),('plan_snapshots'),('sourcing_cases'),('sourcing_candidates'),('dealer_reaffirmations'),('deal_recaps'),
   ('queue_items'),('post_completion_obligations'),('deal_corrections'),('inventory_query_cache'),
   ('comms_outbox'),('lifecycle_touch_schedule'),('idempotency_keys'),('jobs_dead_letter')
+
+-- Every value a rewritten CHECK must still admit afterwards (§13-D24 gaps (a) and (b); R88's
+-- acceptance evidence — "verify.sql asserts the constraint definition"). This list is production's
+-- CURRENT value set plus the wave's additions, so a future edit that drops one of production's
+-- values fails here rather than in production with a 23514. `run-proof.sh` additionally re-derives
+-- the "before" side from the committed baseline on every run, so a narrowing cannot pass by being
+-- deleted from this list too.
+), expected_check_values(conname, value) AS (VALUES
+  -- comms_outbox.channel — production {email, sms}; M27-04a adds in_app.
+  ('comms_outbox_channel_check','email'),('comms_outbox_channel_check','sms'),
+  ('comms_outbox_channel_check','in_app'),
+  -- comms_outbox.status — production's six; R88/C9/C11 add delivered and cancelled.
+  ('comms_outbox_status_check','pending'),('comms_outbox_status_check','sending'),
+  ('comms_outbox_status_check','sent'),('comms_outbox_status_check','failed'),
+  ('comms_outbox_status_check','suppressed'),('comms_outbox_status_check','skipped'),
+  ('comms_outbox_status_check','delivered'),('comms_outbox_status_check','cancelled'),
+  -- lifecycle_touch_schedule.sequence — production's 19, unchanged. deposit_reminder_5 and _6 are
+  -- the six-touch $99 recovery cadence (PAY-19, B1); losing either is a 23514 at touch five.
+  ('lifecycle_touch_sequence_allowed','deposit_reminder_1'),('lifecycle_touch_sequence_allowed','deposit_reminder_2'),
+  ('lifecycle_touch_sequence_allowed','deposit_reminder_3'),('lifecycle_touch_sequence_allowed','deposit_reminder_4'),
+  ('lifecycle_touch_sequence_allowed','deposit_reminder_5'),('lifecycle_touch_sequence_allowed','deposit_reminder_6'),
+  ('lifecycle_touch_sequence_allowed','auction_active'),('lifecycle_touch_sequence_allowed','auction_midpoint'),
+  ('lifecycle_touch_sequence_allowed','auction_closing'),('lifecycle_touch_sequence_allowed','dealer_invited'),
+  ('lifecycle_touch_sequence_allowed','offer_received'),('lifecycle_touch_sequence_allowed','offer_follow_up_1'),
+  ('lifecycle_touch_sequence_allowed','offer_follow_up_2'),('lifecycle_touch_sequence_allowed','deal_complete'),
+  ('lifecycle_touch_sequence_allowed','review_request'),('lifecycle_touch_sequence_allowed','form_submitted'),
+  ('lifecycle_touch_sequence_allowed','check_form_completion_1'),('lifecycle_touch_sequence_allowed','check_form_completion_2'),
+  ('lifecycle_touch_sequence_allowed','check_form_completion_3'),
+  -- The two CHECKs the wave adopts without rewriting, asserted so an edit cannot quietly restate
+  -- them narrower inside the guarded CREATE TABLE.
+  ('lifecycle_touch_schedule_status_check','pending'),('lifecycle_touch_schedule_status_check','sending'),
+  ('lifecycle_touch_schedule_status_check','done'),('lifecycle_touch_schedule_status_check','canceled'),
+  ('lifecycle_touch_schedule_status_check','failed'),
+  ('idempotency_keys_execution_status_check','processing'),('idempotency_keys_execution_status_check','completed'),
+  ('idempotency_keys_execution_status_check','failed')
+
+-- §13-D11 correction 1. Constraint existence is not enough: a key onto `users(id)` carries the same
+-- name and would pass the FK check above while rejecting every real assignment at runtime, because
+-- the admin actor id is `Admin.id` and `Admin.id` <> `Admin.userId`.
+), expected_fk_targets(conname, parent) AS (VALUES
+  ('queue_items_assigned_admin_id_fkey','admins'),
+  ('vehicle_requests_assigned_admin_id_fkey','admins')
+
+-- §13-D11 correction 3. Both had zero §26 Owner cells; neither may come back.
+), forbidden_enum_labels(typname, label) AS (VALUES
+  ('QueueOwnerRole','SUPPORT'),('QueueOwnerRole','CONCIERGE')
+
+-- §13-D11 correction 2. Asserting that the TYPE exists is not the same as asserting the COLUMN uses
+-- it: a DDL edit that declared `QueueOwnerRole` and left `owner_role` as TEXT would satisfy every
+-- other assertion here.
+), expected_column_types(tbl, col, udt) AS (VALUES
+  ('queue_items','owner_role','QueueOwnerRole')
 )
 SELECT 'MISSING' AS status, 'enum_label' AS kind, typname || '.' || label AS object FROM expected_enum_labels e
   WHERE NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_enum v ON v.enumtypid=t.oid
@@ -150,11 +211,48 @@ UNION ALL SELECT 'MISSING', 'rls_policy_present_unexpectedly', r.name FROM expec
 -- signatures-phase cutover, not this wave. Flag it if this wave dropped it.
 UNION ALL SELECT 'MISSING', 'live_constraint_wrongly_dropped', 'e_sign_envelopes_deal_id_key'
   WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_key')
+-- A CHECK must still admit every value production admitted, plus the wave's additions. The literal
+-- is matched QUOTED on both sides, and that is what makes it exact: `'deposit_reminder_1'` cannot be
+-- satisfied by `'deposit_reminder_10'`, nor `'sent'` by `'suppressed'`, because the closing quote
+-- has to match too. `strpos`, not `LIKE`, because LIKE would read `%` and `_` in the value as
+-- wildcards — 24 of the values below contain `_` — and a renamed label could then satisfy an
+-- assertion it should fail. `strpos` has no pattern metacharacters at all.
+UNION ALL SELECT 'MISSING', 'check_admitted_value', v.conname || ' admits ' || v.value
+  FROM expected_check_values v
+  WHERE NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public' AND c.contype = 'c' AND c.conname = v.conname
+       AND strpos(pg_get_constraintdef(c.oid), quote_literal(v.value)) > 0)
+-- A foreign key must point at the table it is supposed to point at, not merely exist.
+UNION ALL SELECT 'MISSING', 'foreign_key_target', f.conname || ' -> ' || f.parent
+  FROM expected_fk_targets f
+  WHERE NOT EXISTS (
+    SELECT 1 FROM pg_constraint c JOIN pg_class p ON p.oid = c.confrelid
+     WHERE c.conname = f.conname AND c.contype = 'f' AND p.relname = f.parent)
+-- A column must have the type the correction gave it, not merely exist.
+UNION ALL SELECT 'MISSING', 'column_type', c.tbl || '.' || c.col || ' :: ' || c.udt
+  FROM expected_column_types c
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = c.tbl AND column_name = c.col
+       AND udt_name = c.udt)
+-- A label that must NOT exist. Enum labels cannot be dropped once shipped, so this fails while it
+-- is still cheap to fail.
+UNION ALL SELECT 'MISSING', 'forbidden_enum_label_present', e.typname || '.' || e.label
+  FROM forbidden_enum_labels e
+  WHERE EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_enum v ON v.enumtypid = t.oid
+     WHERE t.typname = e.typname AND v.enumlabel = e.label)
 -- Positive evidence: what this run actually checked. Always exactly one row.
 UNION ALL SELECT 'TOTAL', 'expected_objects_checked',
   ((SELECT count(*) FROM expected_enum_labels) + (SELECT count(*) FROM expected_types)
    + (SELECT count(*) FROM expected_tables) + (SELECT count(*) FROM expected_columns)
    + (SELECT count(*) FROM expected_indexes) + (SELECT count(*) FROM expected_fks)
    + (SELECT count(*) FROM expected_checks) + (SELECT count(*) FROM expected_triggers)
-   + (SELECT count(*) FROM expected_rls) * 2 + 1)::text
+   + (SELECT count(*) FROM expected_rls) * 2
+   + (SELECT count(*) FROM expected_check_values) + (SELECT count(*) FROM expected_fk_targets)
+   + (SELECT count(*) FROM forbidden_enum_labels) + (SELECT count(*) FROM expected_column_types)
+   + 1)::text
 ORDER BY 1 DESC, 2, 3;

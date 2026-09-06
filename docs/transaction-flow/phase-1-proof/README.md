@@ -46,9 +46,12 @@ Only the production baseline exercises that path.
 ## What this proves, and what it does not
 
 **PROVES.** Both directories apply, in order, each inside a single transaction (the way Prisma runs
-them), against production's physical schema; all 311 expected objects exist afterwards; a second
-application of both directories changes nothing — neither the object census nor the *definitions* of
-tables, columns, indexes, constraints, enums, triggers, policies or functions (compared by digest).
+them), against production's physical schema; all **371 assertions pass, 0 fail** — the count is
+assertions rather than objects, because 2 of them require a label to be ABSENT and 14 require a
+table to carry NO RLS policy; **no CHECK
+constraint stopped admitting a value production admits**; a second application of both directories
+changes nothing — neither the object census nor the *definitions* of tables, columns, indexes,
+constraints, enums, triggers, policies or functions (compared by digest).
 
 **DOES NOT PROVE.** Anything about `_prisma_migrations`. The restore deliberately carries **no
 ledger**. Ledger correctness is a separate question, addressed in §6 of the implementation workflow,
@@ -150,6 +153,15 @@ policies=23     rls_enabled=249
 
 ## What the proof found
 
+Running against the production baseline with the §13-D11 / §13-D24 corrections applied (2026-09-06)
+confirmed each of them in the database rather than only in the DDL: both `assigned_admin_id` foreign
+keys resolve to `admins(id) ON DELETE SET NULL`; `queue_items.owner_role` is `QueueOwnerRole` with
+its 8 members and neither `SUPPORT` nor `CONCIERGE`; `QueueItemType` holds 20 labels including
+`LINEAGE_ORPHAN`; `queue_items_owner_role_status_idx` exists; `comms_outbox` carries `delivered_at`
+and a `status` CHECK admitting eight values. Run against the *pre*-correction database the same
+`verify.sql` reports 20 `MISSING` rows naming exactly those objects — the assertions fail first, so
+they are not decorative.
+
 Running against the production baseline caught a defect the chain-based proof had not: the four
 `ALTER TABLE` statements that add `ip_unavailable_reason` / `consent_ip_unavailable_reason` were each
 missing the comma terminating the preceding clause, so `20261106000100` was **syntactically invalid**
@@ -169,9 +181,157 @@ defaults, `CHECK`s, index predicates — lands in `20261106000100_transaction_sp
 Relatedly, `CREATE INDEX CONCURRENTLY` is illegal inside a transaction and so can never appear in a
 Prisma migration; the enforcement indexes here are plain `CREATE INDEX`.
 
+## The CHECK preservation gate — why a rewritten CHECK gets its own step
+
+A rewritten `CHECK` is the one statement in this wave that can **narrow production silently**.
+`DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT` succeeds whether the new predicate is weaker or
+stronger than the old one. A narrowing does not fail at deploy; it fails later, as a `23514` on a
+value production used to accept — and by then the migration is in the chain and CLAUDE.md forbids
+editing it, so the correction is a *new forward migration* and the wrong definition stays in the
+chain permanently.
+
+The concrete case: `lifecycle_touch_sequence_allowed` carries `deposit_reminder_5` and
+`deposit_reminder_6`. Dropping either would break the six-touch $99 recovery cadence (PAY-19, B1) at
+touch five.
+
+So the wave restates production's current values in full before adding any, and step **4b** of
+`run-proof.sh` *measures* that rather than trusting it. Three assertions, in this order, because the
+third is a valid proof for one predicate shape only:
+
+**(i) Nothing may vanish.** A CHECK production has must still be there afterwards. A constraint
+dropped and never re-added contributes no values, so the value comparison in (iii) would not notice
+it going.
+
+**(ii) The method has to fit the predicate.** Enumerating accepted values proves preservation for a
+*finite list of literals* and for nothing else. A range, an arithmetic expression, a conditional or a
+cross-column relationship contributes no literals at all — so a rewrite that narrowed one would sail
+through a value comparison reporting "nothing lost". This schema already holds eight such predicates
+(the `*_ip_unavailable_reason_exclusive` pair rules, `a IS NULL OR b IS NULL`), so the shape is not
+hypothetical. `production-baseline/check-defs.sql` classifies every CHECK as `ENUMERABLE` or
+`OPAQUE` against the two canonical finite-list forms PostgreSQL prints, and the run **fails** if any
+constraint whose definition changed is not `ENUMERABLE` on both sides. The message says what to do
+instead: demonstrate the implication old ⇒ new explicitly and record it, or do not ship the rewrite.
+The classifier is deliberately strict — misreading an opaque predicate as enumerable is the failure
+that matters, and an unfamiliar-but-safe shape costs only one explicit demonstration.
+
+Current classification: **38 ENUMERABLE, 8 OPAQUE**, and all three CHECKs this wave rewrites are
+ENUMERABLE on both sides, so enumeration is a valid proof for each of them — established, not
+assumed.
+
+**(iii) No admitted value may be lost.** For those finite lists,
+`production-baseline/check-sets.sql` emits every `(constraint, admitted value)` pair after the
+baseline is restored and **before** anything is applied, again after both directories are applied,
+and any pair present before and absent after fails the run and is printed.
+
+The "before" side is therefore re-derived from the committed baseline on every run, not transcribed
+into an expectation that can rot. `verify.sql` independently asserts the values each of five CHECKs
+must admit, so a narrowing cannot pass by being quietly deleted from one list — it would have to be
+deleted from both, and the run-proof comparison does not read `verify.sql`'s list at all.
+
+Measured on 2026-09-06 against the PostgreSQL 17.6 restore:
+
+| # | constraint(s) | before | after | delta |
+| ---: | --- | --- | --- | --- |
+| 1 | `comms_outbox_channel_check` | `{email, sms}` | `{email, sms, in_app}` | +1, none lost |
+| 1 | `comms_outbox_status_check` | `{pending, sending, sent, failed, suppressed, skipped}` | those six + `{delivered, cancelled}` | +2, none lost |
+| 1 | `lifecycle_touch_sequence_allowed` | 19 sequences | the same 19 — `pg_get_constraintdef` byte-identical | +0, none lost |
+| 26 | the rest of the baseline's CHECKs | — | untouched | — |
+| 9 | 8 × `*_ip_unavailable_reason_check`, `sourcing_cases_band_check` | no production predecessor | their own sets | new, ENUMERABLE |
+| 8 | 8 × `*_ip_unavailable_reason_exclusive` | no production predecessor | `a IS NULL OR b IS NULL` | new, OPAQUE — enumerates nothing, so it contributes no value pairs |
+
+Those reconcile: the baseline has **29** CHECKs (`census.sql` reports `check=29`), of which the wave
+rewrites 3 and leaves 26 alone; it creates 17 more, 9 carrying literals and 8 not. 3 + 26 + 9 + 8 =
+**46**, which is what `check-defs.sql` counts afterwards.
+
+168 admitted `(constraint, value)` pairs before, 215 after, **0 lost**. All 29 CHECKs in the
+baseline classify as ENUMERABLE, so nothing production has needed an explicit implication argument
+this time.
+
+### The gates fail first
+
+A gate that has never been seen to fail is a gate nobody has tested. Each was exercised on
+2026-09-06 by temporarily appending the edit in the first column to
+`20261106000100_transaction_spine_foundation/migration.sql` (or, for the third and fourth,
+by deleting the two values), running `./run-proof.sh`, confirming a non-zero exit, and reverting the
+file. Nothing from the probes is committed; each is reproducible from its description in one edit.
+
+| probe | gate that fired | exit |
+| --- | --- | ---: |
+| drop `campaigns_type_check` and never re-add it | (i) `VANISHED: campaigns.campaigns_type_check` | 1 |
+| rewrite `campaigns_type_check` from a finite list to `length(type) BETWEEN 3 AND 5` | (ii) *"was rewritten but is not a finite-list predicate (before=ENUMERABLE after=OPAQUE)"* | 1 |
+| drop `deposit_reminder_5`/`_6` from the sequence CHECK | step 4 — `verify.sql`'s own value assertions | 1 |
+| drop them from the CHECK **and** from `verify.sql`'s list, the way an author narrowing "consistently" would | (iii) `LOST: … deposit_reminder_5`, `… deposit_reminder_6` | 1 |
+| replace `check-defs.sql` with a query that errors | the capture guard — `psql` `ON_ERROR_STOP` | 3 |
+| re-add `comms_outbox_status_check` against `last_result` instead of `status`, same eight literals | (i) `VANISHED: comms_outbox.comms_outbox_status_check(status)` | 1 |
+
+Three of these matter especially.
+
+The `verify.sql`-narrowed-too row is the proof that the two lists are independent: step 4b re-derives
+its "before" side from the committed baseline and never reads `verify.sql`, so narrowing both in
+lockstep does not hide the narrowing.
+
+The broken-capture row is why every capture runs with `-v ON_ERROR_STOP=1` and both "before" files
+are asserted non-empty. `psql -At -f x.sql > out` exits **0** and writes an empty file when the SQL
+errors, so without that guard `set -euo pipefail` would not trip, all four files would be empty, and
+the run would print "no CHECK weakened against production" having measured nothing at all.
+
+The `last_result` row is why the key carries the constrained column and not just the constraint name.
+That rewrite keeps the canonical enumerable shape, keeps all eight literals, and satisfies every
+`strpos` in `verify.sql` — so with a name-only key it passed all three gates while leaving `status`
+entirely unconstrained.
+
+A fifth probe deliberately did **not** fire, and should not have: rewriting
+`vehicle_requests_ip_unavailable_reason_exclusive` — an OPAQUE predicate — passed, because that
+constraint has no production predecessor. The wave creates it, so there is nothing to preserve. The
+gate is about production's constraints, not the wave's own.
+
+## `preflight.sql` — the two statements that validate against DATA, not schema
+
+Everything else in this directory reasons about *schema*, which the committed baseline reproduces
+exactly. Two statements in the wave instead validate against **rows**, and rows are not in the
+baseline:
+
+- `vehicle_requests_one_open_per_buyer_key` cannot be created while any buyer holds more than one
+  open request (§13-D2);
+- `vehicle_requests_assigned_admin_id_fkey → admins(id)` validates existing data, so every non-NULL
+  `assigned_admin_id` must already resolve there (§13-D11 correction 1).
+
+Both are inside `prisma migrate deploy`'s single transaction, so either one failing rolls the whole
+wave back.
+
+**A row count read during review does not bind at deploy time.** §5.7 records
+`vehicle_requests.assigned_admin_id` as holding 0 non-NULL rows *when it was read on 2026-09-05*.
+That is a measurement, not a property of the column: one admin assignment between then and the
+deploy makes `ADD CONSTRAINT` fail. So the safety argument is not the zero — it is `preflight.sql`,
+run read-only against production in the same maintenance window as the deploy, immediately before
+it. Same contract as `verify.sql`:
+
+```
+PASS  <=>  no row has status = 'BLOCK'
+```
+
+with exactly one `CHECKED` row proving it executed. Each `BLOCK` row names a record to reconcile by
+an owner-run audited change first — never by migration SQL, because a migration that repairs its own
+preconditions with an `UPDATE` is a migration that hides them.
+
+`run-proof.sh` step **4c** runs it against the restore. That proves only that the file is valid SQL
+and honours its contract; the baseline carries no rows, so it says **nothing** about whether
+production is clean. That is precisely why the check belongs at deploy time.
+
+One ordering detail the proof caught: the D2 predicate compares `status::text`, not `status`. The
+preflight runs *before* `prisma migrate deploy`, so `VehicleRequestStatus` does not yet carry
+`DRAFT`, `PAYMENT_REQUIRED` or `RADIUS_AUTHORIZATION_REQUIRED` — directory 1 adds them. Comparing the
+enum against a label it does not have yet is a `22P02` that aborts the whole preflight, so the one
+query meant to protect the deploy would fail to run at all. The index in directory 2 keeps the enum
+comparison, because by then directory 1 has committed the labels.
+
+Exercised both ways on a disposable restore: clean baseline → only the `CHECKED` row; seeded with an
+`assigned_admin_id` holding a `User.id` and a buyer holding three open requests → one `BLOCK` row
+each, then rolled back.
+
 ## Phase 1 is additive
 
-`verify.sql` asserts, among the 311 expected objects, that `e_sign_envelopes_deal_id_key` is **still
+`verify.sql` asserts, among its 371 assertions, that `e_sign_envelopes_deal_id_key` is **still
 present** after the wave. Replacing that live constraint is the signatures-phase
 expand/backfill/verify/cutover/contract sequence, not this one. If a future edit to Phase 1 drops it,
 the verifier fails.

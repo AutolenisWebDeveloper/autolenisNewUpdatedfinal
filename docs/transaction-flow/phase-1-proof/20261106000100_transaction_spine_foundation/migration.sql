@@ -48,6 +48,32 @@ BEGIN
   IF to_regtype('"SourcingCandidateSource"') IS NULL THEN
     CREATE TYPE "SourcingCandidateSource" AS ENUM ('HOLDING','COMPARABLE');
   END IF;
+  -- §13-D11 shape corrections 2 and 3. Correction 2: `owner_role` was TEXT in the DDL and an enum in
+  -- D11's prose; it is an enum, because §26 is a closed vocabulary — the register names an owner for
+  -- every one of its 48 rows and no row invents one.
+  --
+  -- Correction 3 fixes the MEMBERSHIP, under the rule: exactly one member per DISTINCT §26 Owner
+  -- cell, and no member without a cell. Counted from the register's 48 data rows (MD §26 L1239-1286;
+  -- L1237 is the header and L1238 the separator):
+  --
+  --     OPERATIONS         23    BUYER_OPERATIONS    4    OPERATIONS_FINANCE  1
+  --     BUYER               7    SYSTEM              4    BUYER_DEALER        1
+  --     FINANCE             6    COMPLIANCE          2                    = 48
+  --
+  -- The rejected draft broke that rule in both directions: `SUPPORT` and `CONCIERGE` had zero cells,
+  -- while Buyer (7), Buyer / Operations (4), System (4) and Buyer / Dealer (1) — 16 rows — had no
+  -- member. The three composite cells get their own members rather than collapsing to a first-named
+  -- owner, because "Buyer / Operations" is SHARED ownership in the register; resolving it to one side
+  -- would silently discard the fact this column exists to record.
+  --
+  -- Not a near-duplicate of `AdminRole` (`schema.prisma:1466-1472`, golden rule 1): AdminRole is RBAC
+  -- over admin ACCOUNTS (SUPER_ADMIN … SUPPORT_ADMIN) and cannot express BUYER, SYSTEM or a shared
+  -- owner at all. The two vocabularies share no member.
+  IF to_regtype('"QueueOwnerRole"') IS NULL THEN
+    CREATE TYPE "QueueOwnerRole" AS ENUM (
+      'OPERATIONS','BUYER','FINANCE','SYSTEM','BUYER_OPERATIONS','COMPLIANCE',
+      'OPERATIONS_FINANCE','BUYER_DEALER');
+  END IF;
 END $$;
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -559,7 +585,9 @@ CREATE TABLE IF NOT EXISTS "queue_items" (
   "type"                  "QueueItemType" NOT NULL,
   "status"                "QueueItemStatus" NOT NULL DEFAULT 'OPEN',
   "exception_code"        TEXT,
-  "owner_role"            TEXT,
+  -- §13-D11 corrections 2/3: the §26 Owner cell, typed. See the QueueOwnerRole note in section 1.
+  "owner_role"            "QueueOwnerRole",
+  -- §13-D11 correction 1: this holds `Admin.id`, never `User.id`. FK in section 6.
   "assigned_admin_id"     TEXT,
   "vehicle_request_id"    TEXT,
   "deal_id"               TEXT,
@@ -567,6 +595,13 @@ CREATE TABLE IF NOT EXISTS "queue_items" (
   "deposit_id"            TEXT,
   "buyer_id"              TEXT,
   "dealer_id"             TEXT,
+  -- §13-D11 correction 4: this is NOT "taken verbatim from the §26 column". §26 has three columns —
+  -- Exception, Owner, Required result — and none of them is a buyer-facing string. The 48+ strings
+  -- must be AUTHORED, and authoring them is not Phase 1 work. DEFINED SOURCE: a catalogue keyed by
+  -- `exception_code`, authored and owned by `lib/services/operations/queue-item.service.ts` in
+  -- Phase 2 — the phase that owns every writer of this table (C14, L3-01) — which stamps the string
+  -- onto the row at raise time. Phase 1 owes the column and nothing more, so it is nullable and
+  -- carries no CHECK: a CHECK here would pin a vocabulary Phase 2 has not written yet.
   "buyer_visible_status"  TEXT,
   "required_action"       TEXT,
   "deadline_at"           TIMESTAMP(3),
@@ -623,15 +658,32 @@ CREATE TABLE IF NOT EXISTS "inventory_query_cache" (
 );
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
--- 5. ADOPTING THE RAW-SQL BACKGROUND TABLES INTO THE CHAIN  (§5.2, §13-D24)
+-- 5. ADOPTING THE RAW-SQL BACKGROUND TABLES INTO THE CHAIN  (§5.2, §13-D24)  — ADOPTION ONLY
 --
--- These four already exist in production with live rows, provisioned outside Prisma. Written here to
--- match the definitions probed read-only from production on 2026-09-03, so CREATE TABLE IF NOT EXISTS
--- creates nothing there and everything on a from-zero replay. rollback.sql must never DROP them.
+-- These four already exist in production, provisioned outside Prisma (`comms_outbox` with 0 rows,
+-- §5.1/§5.7). Everything in THIS section writes production's CURRENT definition verbatim, so
+-- `CREATE TABLE IF NOT EXISTS` creates nothing in production and everything on a from-zero replay,
+-- and no live definition changes. `rollback.sql` must never DROP them.
+--
+-- §13-D24 GAP (a), CLOSED. The draft mixed two different things under the D24 label: adopting four
+-- tables at production's definitions, and adding fourteen columns plus a channel widening that
+-- production does not have — expansion, not adoption. D24 authorises only the first. The second is
+-- not deleted (constraint C1 allows exactly one schema wave, so a column a later phase needs must
+-- land here) but it is SPLIT OUT into section 5b, where every item carries the parity row that
+-- requires it and the phase that consumes it. Anything that would change a live definition belongs
+-- there, never here.
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS "comms_outbox" (
   "id"            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "channel"       TEXT NOT NULL,
+  -- Production's own 2-value channel CHECK, restated here where the rest of the adoption lives.
+  -- It belongs in THIS section, not in 5b: section 5 is what a from-zero replay uses to reproduce
+  -- production, and 5b is explicitly movable to another phase (§13-D24 gap (a) offers exactly that).
+  -- Were the only copy of this constraint to live in 5b and 5b to move, a chain replay would create
+  -- `comms_outbox` with no channel constraint at all and accept `channel = 'anything'`. PostgreSQL
+  -- names an inline column constraint `<table>_<column>_check`, which is production's own name, so
+  -- 5b's widening finds it under the right name on both sides.
+  "channel"       TEXT NOT NULL
+                  CHECK ("channel" IN ('email','sms')),
   "dedup_key"     TEXT NOT NULL,
   "status"        TEXT NOT NULL DEFAULT 'pending'
                   CHECK ("status" IN ('pending','sending','sent','failed','suppressed','skipped')),
@@ -649,27 +701,6 @@ CREATE TABLE IF NOT EXISTS "comms_outbox" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_comms_outbox_dedup_key" ON "comms_outbox" ("dedup_key");
 CREATE INDEX IF NOT EXISTS "idx_comms_outbox_drain" ON "comms_outbox" ("run_at")
   WHERE "status" IN ('pending','sending');
-
--- §27: in-app notices ride the same rail, so the channel CHECK widens. Idempotent drop-then-add.
-ALTER TABLE "comms_outbox" DROP CONSTRAINT IF EXISTS "comms_outbox_channel_check";
-ALTER TABLE "comms_outbox" ADD CONSTRAINT "comms_outbox_channel_check"
-  CHECK ("channel" IN ('email','sms','in_app'));
-
-ALTER TABLE "comms_outbox"
-  ADD COLUMN IF NOT EXISTS "trigger_event"      TEXT,
-  ADD COLUMN IF NOT EXISTS "template_key"       TEXT,
-  ADD COLUMN IF NOT EXISTS "recipient_kind"     TEXT,
-  ADD COLUMN IF NOT EXISTS "recipient_id"       TEXT,
-  ADD COLUMN IF NOT EXISTS "vehicle_request_id" TEXT,
-  ADD COLUMN IF NOT EXISTS "deal_id"            TEXT,
-  ADD COLUMN IF NOT EXISTS "auction_id"         TEXT,
-  ADD COLUMN IF NOT EXISTS "cancel_key"         TEXT,
-  ADD COLUMN IF NOT EXISTS "cancelled_at"       TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS "cancel_reason"      TEXT,
-  ADD COLUMN IF NOT EXISTS "next_attempt_at"    TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS "max_attempts"       INTEGER NOT NULL DEFAULT 5,
-  ADD COLUMN IF NOT EXISTS "terminal_failed_at" TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS "state_recheck"      JSONB;
 
 CREATE TABLE IF NOT EXISTS "lifecycle_touch_schedule" (
   "id"          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -693,8 +724,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_lifecycle_touch_key_sequence"
 CREATE INDEX IF NOT EXISTS "idx_lifecycle_touch_due" ON "lifecycle_touch_schedule" ("run_at")
   WHERE "status" IN ('pending','sending');
 
--- Production already admits 19 sequences (the repo's manual SQL, which admits 17, is the stale side —
--- §5.2, §13-D24). Written to production's list, so no constraint swap runs there.
+-- Production already admits 19 sequences (the repo's manual SQL, which admits only
+-- `deposit_reminder_1..4`, is the stale side — §5.2, §13-D24). The list below is production's own,
+-- restated in full, so this rewrite is a no-op there and brings a from-zero replay up to it.
+--
+-- SUPERSET RULE. This is a `DROP` + `ADD` on a live constraint and therefore the one statement in
+-- the adoption that could narrow production. Its before and after value sets are identical — all 19
+-- — which `production-baseline/check-sets.sql` re-derives and compares on every proof run rather
+-- than trusting this comment. Dropping `deposit_reminder_5` or `_6` here would break the six-touch
+-- $99 recovery cadence (PAY-19, B1) with a 23514 at touch five, and CLAUDE.md forbids editing an
+-- applied migration, so the wrong list would stay in the chain permanently.
+--
+-- The first DROP names a constraint production does not have: it is the stale repo-side name, and
+-- `IF EXISTS` makes it a no-op in production and a cleanup on any database built from that SQL.
 ALTER TABLE "lifecycle_touch_schedule" DROP CONSTRAINT IF EXISTS "lifecycle_touch_schedule_sequence_check";
 ALTER TABLE "lifecycle_touch_schedule" DROP CONSTRAINT IF EXISTS "lifecycle_touch_sequence_allowed";
 ALTER TABLE "lifecycle_touch_schedule" ADD CONSTRAINT "lifecycle_touch_sequence_allowed" CHECK ("sequence" IN (
@@ -729,6 +771,124 @@ CREATE INDEX IF NOT EXISTS "idx_dlq_event" ON "jobs_dead_letter" ("event_name");
 CREATE INDEX IF NOT EXISTS "idx_dlq_failed_at" ON "jobs_dead_letter" ("failed_at" DESC);
 
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
+-- 5b. comms_outbox SCHEMA THAT LATER PHASES NEED  —  NOT §13-D24 ADOPTION
+--
+-- §13-D24 gap (a) required this to be split out of the adoption above and named. Every item below is
+-- a CHANGE to production's definition, so each one carries the parity row that requires it and the
+-- phase that consumes it. Nothing here is D24; D24 authorised adopting four tables at production's
+-- definitions and nothing more. They land in Phase 1 only because constraint C1 allows exactly one
+-- schema wave: the column has to exist before the phase that writes it can be built.
+--
+-- Traced 2026-09-06 against `docs/transaction-flow/parity/schema.table.md` (rows C1-C14, R88) and
+-- `parity/control.table.md` (M27-04a/b). Fifteen columns and one channel value; every one has a
+-- citation, so nothing is dropped for want of one.
+--
+-- INDEX HALVES, closed on owner instruction 2026-09-06. C2 asks for `recipient_kind`/`recipient_id`
+-- "(indexed)" at Phase 1 and R37a for `queue_items` `(status, type)` and `(assigned_admin_id)`; an
+-- earlier revision of this wave landed the columns without the indexes and recorded the gap. All
+-- three indexes are now in section 7. Constraint C1 allows exactly one schema wave, so an index a
+-- Phase 1 row calls for cannot land later without a second wave — that is why deferring them was
+-- not a free choice.
+--
+-- NO FOREIGN KEY on `vehicle_request_id` / `deal_id` / `auction_id`, unlike every other cross-entity
+-- reference in this wave (section 6: "a guarded FK with a relation, never a bare id column"). This
+-- is the one place that rule is deliberately not applied, CONFIRMED by the owner 2026-09-06: the
+-- outbox is a durable send record, and a row saying "this message was sent" has to survive deletion
+-- of the transaction it referred to — a cascade would destroy the audit and a `SET NULL` would blank
+-- it. They are correlation keys, not ownership edges.
+--
+--   channel 'in_app'      M27-04a  schema half Phase 1, delivery M27-04b Phase 2
+--   trigger_event         C1       Phase 2      template_key        C1   Phase 2 (validated by C3)
+--   vehicle_request_id    C1       Phase 2      deal_id             C1   Phase 2
+--   auction_id            C1       Phase 2      recipient_kind      C2   Phase 2
+--   recipient_id          C2       Phase 2      state_recheck       C4   Phase 2
+--   max_attempts          C8       Phase 2      next_attempt_at     C8/C10 Phase 2
+--   cancel_key            C11      Phase 2      cancelled_at        C11  Phase 2
+--   cancel_reason         C11      Phase 2      terminal_failed_at  C12  Phase 2
+--   delivered_at          C9/R88   Phase 2  (ADDED HERE — see gap (b) below)
+--
+-- ── §13-D24 gap (b), CLOSED — the status CHECK ──────────────────────────────────────────────────
+-- The draft added `cancel_key`/`cancelled_at`/`cancel_reason` and never widened `status`, whose live
+-- definition admits neither `'cancelled'` nor `'delivered'` (§5.7). A cancellation rail whose
+-- terminal value the CHECK rejects does not fail at deploy — it fails the first time C11's
+-- `cancelByKey()` runs, with a 23514, and by then the migration is in the chain and CLAUDE.md
+-- forbids editing it. R88 requires both values and `delivered_at`; all three land here.
+--
+-- ── The superset rule, applied to every CHECK this wave rewrites ────────────────────────────────
+-- A `DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT` pair succeeds whether the new list is a superset
+-- of production's or a subset of it, and a subset narrows production silently. So every rewritten
+-- CHECK below restates production's CURRENT values in full and only then adds. Read from
+-- `pg_constraint` in the review session (§5.7) and re-derived from the committed baseline on every
+-- proof run by `production-baseline/check-sets.sql`, which fails the run if any admitted value is
+-- lost:
+--
+--   comms_outbox_channel_check   before {email, sms}
+--                                 after {email, sms, in_app}                       +1, none lost
+--   comms_outbox_status_check    before {pending, sending, sent, failed, suppressed, skipped}
+--                                 after  … + {delivered, cancelled}                +2, none lost
+--   lifecycle_touch_sequence_allowed  before = after, all 19 sequences              +0, none lost
+--
+-- That third one is the reason the rule is mechanical rather than eyeballed: it is the CHECK that
+-- carries `deposit_reminder_5` and `_6`, and dropping either would break the six-touch $99 recovery
+-- cadence (PAY-19, B1) with a 23514 at touch five.
+-- ════════════════════════════════════════════════════════════════════════════════════════════════
+
+-- M27-04a: in-app notices ride the same rail, so the channel CHECK widens (§27 L1290 — "all
+-- transactional email, SMS, and in-app notices dispatch through the durable outbox"). Idempotent
+-- drop-then-add; production's two values are both restated.
+ALTER TABLE "comms_outbox" DROP CONSTRAINT IF EXISTS "comms_outbox_channel_check";
+ALTER TABLE "comms_outbox" ADD CONSTRAINT "comms_outbox_channel_check"
+  CHECK ("channel" IN ('email','sms','in_app'));
+
+-- R88 / C9 / C11 (§13-D24 gap (b)): the status CHECK widens to admit the cancellation and delivery
+-- terminals. Production's six values are restated first, then the two additions.
+ALTER TABLE "comms_outbox" DROP CONSTRAINT IF EXISTS "comms_outbox_status_check";
+ALTER TABLE "comms_outbox" ADD CONSTRAINT "comms_outbox_status_check"
+  CHECK ("status" IN ('pending','sending','sent','failed','suppressed','skipped','delivered','cancelled'));
+
+-- SPELLING, deliberately divergent and worth stating because a shared Phase 2 helper will meet both:
+-- `comms_outbox.status` uses `'cancelled'` (two l's, per R88 and §28.2), while the sibling rail
+-- `lifecycle_touch_schedule.status` uses production's existing `'canceled'` (one l). Writing the
+-- comms spelling to the lifecycle table is a 23514. Neither is changed here — the comms value is new
+-- and follows the spec, the lifecycle value is production's and adoption does not rename it.
+
+-- The partial drain index predicate is deliberately NOT widened: `idx_comms_outbox_drain` covers
+-- `status IN ('pending','sending')`, and neither new value is drainable. `delivered` and `cancelled`
+-- are terminal, so including them would grow the index with rows the drain must never claim.
+
+ALTER TABLE "comms_outbox"
+  -- C1 — the row carries its trigger event, its template, and the transaction it belongs to.
+  ADD COLUMN IF NOT EXISTS "trigger_event"      TEXT,
+  ADD COLUMN IF NOT EXISTS "template_key"       TEXT,
+  ADD COLUMN IF NOT EXISTS "vehicle_request_id" TEXT,
+  ADD COLUMN IF NOT EXISTS "deal_id"            TEXT,
+  ADD COLUMN IF NOT EXISTS "auction_id"         TEXT,
+  -- C2 — the row carries its recipient; the address itself stays in `payload`. C2 also asks for
+  -- these to be INDEXED at Phase 1; the index follows the column list below.
+  ADD COLUMN IF NOT EXISTS "recipient_kind"     TEXT,
+  ADD COLUMN IF NOT EXISTS "recipient_id"       TEXT,
+  -- C4 — send-time transaction-state recheck: what to re-read, and what result still justifies sending.
+  ADD COLUMN IF NOT EXISTS "state_recheck"      JSONB,
+  -- C8 / C10 — attempts and retry schedule persisted; the policy itself stays code-level.
+  ADD COLUMN IF NOT EXISTS "max_attempts"       INTEGER NOT NULL DEFAULT 5,
+  ADD COLUMN IF NOT EXISTS "next_attempt_at"    TIMESTAMPTZ,
+  -- C11 — cancellation rule: `cancelByKey()` cancels every unsent row sharing a `cancel_key`.
+  ADD COLUMN IF NOT EXISTS "cancel_key"         TEXT,
+  ADD COLUMN IF NOT EXISTS "cancelled_at"       TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS "cancel_reason"      TEXT,
+  -- C12 — terminal failure raises COMMS_EXCEPTION; this is the fact the raise is keyed on.
+  ADD COLUMN IF NOT EXISTS "terminal_failed_at" TIMESTAMPTZ,
+  -- C9 / R88 (§13-D24 gap (b)) — the provider-confirmed delivery timestamp that pairs with the
+  -- `delivered` status above. Its writer is the Resend/Twilio status webhook in Phase 2.
+  ADD COLUMN IF NOT EXISTS "delivered_at"       TIMESTAMPTZ;
+
+-- C2's index half, added on owner instruction 2026-09-06. Composite in (recipient_kind,
+-- recipient_id) because the read C2 exists for is "this recipient's outbox rows", which needs both:
+-- an id is only unique within its kind. Same one-wave reasoning as the queue_items pair above.
+CREATE INDEX IF NOT EXISTS "comms_outbox_recipient_idx"
+  ON "comms_outbox" ("recipient_kind", "recipient_id");
+
+-- ════════════════════════════════════════════════════════════════════════════════════════════════
 -- 6. FOREIGN KEYS
 --
 -- ADD CONSTRAINT has no IF NOT EXISTS, so each key is added only when pg_constraint lacks its name.
@@ -745,8 +905,28 @@ BEGIN
       ('vehicle_requests_inventory_item_id_fkey',    'vehicle_requests',      'inventory_item_id',    'inventory_items',   'SET NULL'),
       ('vehicle_requests_pre_qualification_id_fkey', 'vehicle_requests',      'pre_qualification_id', 'pre_qualifications','SET NULL'),
       ('vehicle_requests_affiliate_id_fkey',         'vehicle_requests',      'affiliate_id',         'affiliates',        'SET NULL'),
-      -- assigned_admin_id already exists as a bare text column with no key at all (R2).
-      ('vehicle_requests_assigned_admin_id_fkey',    'vehicle_requests',      'assigned_admin_id',    'users',             'SET NULL'),
+      -- §13-D11 shape correction 1. The target is `admins`, NOT `users`. The admin actor id carried
+      -- everywhere in this codebase is `Admin.id` — `admin-session.ts:18-19` and `admin-api.ts:23`
+      -- both resolve the JWT's `adminId` with `prisma.admin.findUnique({ where: { id } })` — and
+      -- `Admin.id` is a different value from `Admin.userId` (`schema.prisma:270-271`, where `userId`
+      -- is its own @unique FK to User). A key onto `users(id)` would therefore reject every real
+      -- assignment at runtime with a 23503.
+      --
+      -- `assigned_admin_id` already exists here as a bare text column with no key at all (R2).
+      --
+      -- The column held 0 non-NULL rows when production was read on 2026-09-05 (§5.7). That is a
+      -- MEASUREMENT, not a property of the column, and the deploy is later: one admin assignment
+      -- between the two makes this `ADD CONSTRAINT` fail on existing data, and Prisma runs the file
+      -- in a single transaction, so the whole wave would roll back. The zero is therefore not the
+      -- safety argument. `preflight.sql` is: it asserts at DEPLOY TIME, read-only against the data
+      -- that will actually be there, that every non-NULL `assigned_admin_id` resolves in
+      -- `admins(id)`, and a non-zero result stops the deploy for owner-run reconciliation — the same
+      -- pattern §13-D2 already uses for the one-open-request index.
+      --
+      -- What the zero does establish is that this is a CORRECTNESS defect rather than a backlog of
+      -- bad data: nothing has been written against the wrong parent yet, and the fix is here so
+      -- nothing ever is.
+      ('vehicle_requests_assigned_admin_id_fkey',    'vehicle_requests',      'assigned_admin_id',    'admins',            'SET NULL'),
       -- deposits / auctions
       ('deposits_vehicle_request_id_fkey',           'deposits',              'vehicle_request_id',   'vehicle_requests',  'SET NULL'),
       ('auctions_sourcing_case_id_fkey',             'auctions',              'sourcing_case_id',     'sourcing_cases',    'SET NULL'),
@@ -787,7 +967,8 @@ BEGIN
       ('trade_in_submissions_vehicle_request_id_fkey','trade_in_submissions', 'vehicle_request_id',   'vehicle_requests',  'SET NULL'),
       ('trade_in_submissions_deal_id_fkey',          'trade_in_submissions',  'deal_id',              'deals',             'SET NULL'),
       -- queue (§8.2: a guarded FK with a relation, never a bare id column)
-      ('queue_items_assigned_admin_id_fkey',         'queue_items',           'assigned_admin_id',    'users',             'SET NULL'),
+      -- §13-D11 shape correction 1, same reasoning as vehicle_requests above: `Admin.id`, not `User.id`.
+      ('queue_items_assigned_admin_id_fkey',         'queue_items',           'assigned_admin_id',    'admins',            'SET NULL'),
       ('queue_items_vehicle_request_id_fkey',        'queue_items',           'vehicle_request_id',   'vehicle_requests',  'SET NULL'),
       ('queue_items_deal_id_fkey',                   'queue_items',           'deal_id',              'deals',             'SET NULL'),
       ('queue_items_auction_id_fkey',                'queue_items',           'auction_id',           'auctions',          'SET NULL'),
@@ -834,6 +1015,22 @@ CREATE INDEX IF NOT EXISTS "sourcing_candidates_case_idx"              ON "sourc
 -- The §26 row identifier is the queue's lookup key.
 CREATE INDEX IF NOT EXISTS "queue_items_exception_code_idx"            ON "queue_items" ("exception_code");
 CREATE INDEX IF NOT EXISTS "queue_items_status_idx"                    ON "queue_items" ("status");
+-- §13-D11 shape correction 6. The table's whole premise is per-owner queues, and the draft indexed
+-- `owner_role` not at all. Composite, following the `@@index([status, taskType])` precedent on
+-- `FinancingReviewTask` — the shape this table reuses — so "the open items Operations owns" is one
+-- index scan rather than a filter across every row that role has ever owned.
+CREATE INDEX IF NOT EXISTS "queue_items_owner_role_status_idx"         ON "queue_items" ("owner_role", "status");
+-- R37a's remaining two, added on owner instruction 2026-09-06. Constraint C1 allows exactly one
+-- schema wave, so an index R37a places in Phase 1 cannot land in a later phase without a second
+-- wave — which is why these are here rather than deferred.
+--   (status, type)        the queue's own dimension: "the open DEAL_EXCEPTIONs".
+--   (assigned_admin_id)   "the items assigned to me", the per-admin view.
+-- `queue_items_status_idx` on the bare `(status)` above is a left-prefix of `(status, type)` and is
+-- therefore redundant once this exists. It is NOT dropped here: the draft created it, and removing
+-- a capability silently is exactly what the capability-preservation rule forbids. Consolidating the
+-- pair is a follow-up for the owner, not a decision this wave makes.
+CREATE INDEX IF NOT EXISTS "queue_items_status_type_idx"               ON "queue_items" ("status", "type");
+CREATE INDEX IF NOT EXISTS "queue_items_assigned_admin_id_idx"         ON "queue_items" ("assigned_admin_id");
 
 -- Master rule 10: one sourcing case per request; one co-buyer per request.
 CREATE UNIQUE INDEX IF NOT EXISTS "sourcing_cases_vehicle_request_id_key"

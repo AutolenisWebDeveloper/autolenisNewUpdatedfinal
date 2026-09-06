@@ -147,6 +147,13 @@ this repository these resolve as follows (VERIFIED against `.claude/skills/`):
 
 ### 5.1 Record volumes
 
+**Every number in this section is POINT-IN-TIME, observed 2026-09-03 (row counts re-read
+2026-09-05 where §5.7 says so).** A row count is a measurement, not a property: it can change
+between this reading and any later action. Column counts, constraint definitions and enum
+memberships elsewhere in §5 are schema facts and stay true until a migration changes them; row
+counts do not. Wherever a statement in the wave depends on a row count, the count is asserted again
+at deploy time by `docs/transaction-flow/phase-1-proof/preflight.sql`, never relied on from here.
+
 | Table | Rows | Table | Rows |
 | --- | --- | --- | --- |
 | `buyers` | 16 | `deals` | **0** |
@@ -162,7 +169,7 @@ this repository these resolve as follows (VERIFIED against `.claude/skills/`):
 | `vehicle_offers` / `dealer_offer_submissions` (concierge track) | 6 / 2 | `comms_outbox` | **0** |
 | `shortlists` / `shortlist_items` | 3 / 15 | `credit_applications` | **0** |
 | `inventory_items` | 221 | `dealers` / `dealer_rooftops` / `dealer_contact_profiles` | 2 / 1,422 / 583 |
-| `cron_job_logs` | 118,504 | | |
+| `cron_job_logs` | 118,504 | `contract_scans` | **0** |
 
 The Appendix statement "seven paid deposits and seven auctions, and zero offers, zero deals, zero
 contracts, zero signatures, zero pickups, and zero outbox messages" is **re-verified** as still true
@@ -236,7 +243,13 @@ contracts, zero signatures, zero pickups, and zero outbox messages" is **re-veri
 | `users` | UNIQUE `email` (exact case) | normalization at write time is an application invariant — see defect #2 |
 | `financing` | UNIQUE `deal_id`; 10 columns | checkpoint fields (§12b) |
 
-### 5.6 Preconditions for the Phase 1 enforcement objects (VERIFIED)
+### 5.6 Preconditions for the Phase 1 enforcement objects (VERIFIED 2026-09-03, POINT-IN-TIME)
+
+Each row here is a **count**, so each is a measurement that can move before the deploy. They are
+re-asserted at deploy time by `docs/transaction-flow/phase-1-proof/preflight.sql`, which returns one
+`BLOCK` row per violation and exactly one `CHECKED` row, and whose contract is
+`PASS ⇔ no BLOCK row`. The two preconditions it asserts are the first row below and the
+`assigned_admin_id` foreign key added by §13-D11 correction 1.
 
 | Check | Result | Consequence |
 | --- | --- | --- |
@@ -244,6 +257,40 @@ contracts, zero signatures, zero pickups, and zero outbox messages" is **re-veri
 | `vehicle_requests` status distribution | `ACTIVE_SOURCING` 12, `SUBMITTED` 6, `CLOSED_NO_MATCH` 1 | 12 requests sit in `ACTIVE_SOURCING` with no auction linked to 11 of them — the lineage gap this plan closes. |
 | Shortlists over the five-candidate cap | 0 (sizes 5, 5, 5) | The DB-level cap trigger can be created without cleanup. |
 | Buyers with more than one PAID deposit | 1 (`70568e7b…`, 3 deposits → 3 auctions) | Consistent with "plan per request"; each deposit will attach to its own request in Phase 3 backfill (owner-run). |
+| Non-NULL `vehicle_requests.assigned_admin_id` values that do not resolve in `admins(id)` (added 2026-09-06 for §13-D11 correction 1) | **0** — the column held 0 non-NULL rows at all when read 2026-09-05 (§5.7) | The FK `vehicle_requests_assigned_admin_id_fkey → admins(id)` validates existing data on `ADD CONSTRAINT`. The zero is point-in-time: one admin assignment before the deploy makes it fail, and Prisma runs the file in one transaction, so the whole wave rolls back. Asserted at deploy time by `preflight.sql`; a non-zero result stops the deploy for owner-run reconciliation. |
+
+### 5.7 Figures the Phase 1 shape corrections rest on — provenance (VERIFIED)
+
+These six are not recollection and are not owner-supplied. Each was **read directly from production
+project `aieybibvewmvrubcpthm` by read-only `SELECT` in the review session (2026-09-05)**, by the §4
+method: `execute_sql` through the Supabase MCP as role `postgres`, catalogue sources consulted
+separately and never inferred from one another, no `INSERT`/`UPDATE`/`DELETE`/`DDL` issued. They are
+recorded here because §13-D11 and §13-D24 turn on them, and because two of them (the last two) were
+not carried anywhere else in this document.
+
+**Two kinds of figure, and they do not carry the same weight.** A *schema* figure — a column count,
+a constraint definition, an enum membership — is stable evidence: it stays true until a migration
+changes it, and this repository can re-derive it without a credential from the committed baseline. A
+*row count* is a measurement at an instant; it can move between the reading and the deploy, and
+nothing in the wave may rest on one. Where the wave's safety depends on a row count, it is asserted
+again at deploy time by `docs/transaction-flow/phase-1-proof/preflight.sql` rather than carried
+forward from here.
+
+| # | Kind | Figure | Value as read | Observed | Where it is load-bearing |
+| --- | --- | --- | --- | --- | --- |
+| 1 | schema | `e_sign_envelopes` column count | **35** (incl. every consent / executed-artifact column) | 2026-09-05 | §5.2, §6.2 class-(b) ledger rows — the objects are physically applied, so the remedy is `migrate resolve --applied`, not a re-run (§13-D1) |
+| 2 | schema | `e_sign_envelope_history` | **present, 32 columns** | 2026-09-05 | same |
+| 3 | schema | `contract_scans` version-link columns | **present** (`contract_version_id` + index + FK) | 2026-09-05 | same |
+| 4 | **row count** | `contract_scans` rows | **0** | 2026-09-05 | §5.1; nothing sits behind the version link. Nothing in the wave depends on it, so it needs no deploy-time assertion. |
+| 5 | **row count** | `vehicle_requests.assigned_admin_id` non-NULL rows | **0** | 2026-09-05 | §13-D11 correction 1. This is what makes the wrong FK target a **correctness** defect rather than a data backlog — nothing has been written against the wrong parent yet. It is **not** the deploy-safety argument: `ADD CONSTRAINT` validates existing data, and an admin assignment between this reading and the deploy would abort the whole wave. `preflight.sql` asserts it at deploy time instead. |
+| 6 | schema | `comms_outbox` shape | **14 columns**, `CHECK (status IN ('pending','sending','sent','failed','suppressed','skipped'))`, `CHECK (channel IN ('email','sms'))` | 2026-09-05 | §13-D24 gaps (a) and (b) — the exact "before" side of the CHECK preservation proof |
+| 6b | **row count** | `comms_outbox` rows | **0** | 2026-09-05 | §5.1, §27 ("holds zero production records") — the outbox is not yet carrying transactional mail |
+
+Figure 6 is also the one figure this repository can re-derive without a production credential: the
+committed schema-only baseline under `docs/transaction-flow/phase-1-proof/production-baseline/`
+reproduces it, and the `phase1-proof` CI job asserts eight full-definition digests over that baseline
+on every run. `production-baseline/check-sets.sql` re-derives the two CHECK value sets from it at
+proof time, so the "before" side of the superset comparison is measured rather than transcribed.
 
 ---
 
@@ -599,7 +646,7 @@ HINT:  New enum values must be committed before they can be used.
 The same two statements in two transactions both succeed and the index is created (exit 0;
 `split_probe_one_open` present in `pg_indexes`). The full restore → apply → verify → re-apply → verify
 evidence is `docs/transaction-flow/phase-1-proof/` — the production physical-schema dump, the
-materialised statements, the object-verification query (311 expected objects, 0 missing), and
+materialised statements, the object-verification query (371 assertions, 0 failed), and
 `run-proof.sh`, which re-runs the whole thing from scratch. Running it against production's physical
 schema rather than an empty chain replay is what caught the missing statement separators in the
 `ip_unavailable_reason` columns, and the fact that `audit_logs.action` is an enum rather than text. Those files are a **proof copy only**: they are deliberately not in
@@ -711,7 +758,40 @@ Zero route reads or writes a new field.
   additively with the category values the 48 rows need that the 8 existing labels do not cover
   (`PAYMENT_EXCEPTION`, `SOURCING_EXCEPTION`, `AUCTION_EXCEPTION`, `OFFER_EXCEPTION`, `DEAL_EXCEPTION`,
   `FINANCING_EXCEPTION`, `COMMS_EXCEPTION`, `INVENTORY_EXCEPTION`, `DEALER_EXCEPTION`, `PLAN_EXCEPTION`,
-  `POST_COMPLETION_EXCEPTION`).
+  `POST_COMPLETION_EXCEPTION`), **plus `LINEAGE_ORPHAN`** — twelve additive labels, so the type holds
+  **20** afterwards (R36). `LINEAGE_ORPHAN` comes from L3-01, not from §26, which is why an
+  enumeration derived from the register alone missed it (§13-D11 correction 5). **It is the
+  `QueueItemType` label**, and it is the only spelling: three places in this document (§8.2 Phase 2
+  Part A twice, §12) previously called the same concept `ORPHAN_EXCEPTION`, which matches the
+  `*_EXCEPTION` naming of the eleven category labels closely enough that a Phase 2 implementer would
+  reasonably have written it as the type — and it is not one, so every orphan raise would have failed
+  on an enum that does not carry it, or been "fixed" with an `ADD VALUE` that can never be dropped and
+  that breaks R36's assertion of 20. Corrected to `LINEAGE_ORPHAN` throughout 2026-09-06.
+
+  **Shape, as corrected by §13-D11 (all six corrections applied 2026-09-06; the DDL is in
+  `docs/transaction-flow/phase-1-proof/`).**
+  - `assigned_admin_id` is a guarded FK to **`admins(id)`** `ON DELETE SET NULL`, never `users(id)`.
+    The admin actor id throughout the codebase is `Admin.id` (`lib/auth/admin-session.ts:18-19`,
+    `lib/auth/admin-api.ts:23`, both resolving the JWT's `adminId` through
+    `prisma.admin.findUnique({ where: { id } })`), and `Admin.id` ≠ `Admin.userId`
+    (`schema.prisma:270-271`). The same correction lands on `vehicle_requests.assigned_admin_id`
+    (correction 1).
+  - `owner_role` is the enum **`QueueOwnerRole`**, not TEXT (correction 2), with exactly one member
+    per distinct §26 Owner cell and no member without a cell (correction 3):
+    `OPERATIONS` (23 rows), `BUYER` (7), `FINANCE` (6), `SYSTEM` (4), `BUYER_OPERATIONS` (4),
+    `COMPLIANCE` (2), `OPERATIONS_FINANCE` (1), `BUYER_DEALER` (1) — 48, reconciling with the
+    register. `SUPPORT` and `CONCIERGE` are dropped: zero cells each. The three composite cells keep
+    their own members rather than collapsing to a first-named owner, because the register means
+    shared ownership there. This duplicates no part of `AdminRole` (`schema.prisma:1466-1472`), which
+    is RBAC over admin accounts and cannot express `BUYER`, `SYSTEM` or a shared owner at all.
+  - `buyer_visible_status` is **not** "taken verbatim from the §26 column" — §26 has no such column
+    (correction 4). **Defined source:** a catalogue keyed by `exception_code`, authored and owned by
+    `lib/services/operations/queue-item.service.ts` in **Phase 2**, the phase that owns every writer
+    of this table (C14, L3-01), and stamped onto the row at raise time. Phase 1 lands the column
+    nullable and with no CHECK; authoring 48+ buyer-facing strings is Phase 2 work and is not on the
+    Phase 1 critical path.
+  - `owner_role` is **indexed** — `(owner_role, status)`, following the `@@index([status, taskType])`
+    precedent on `FinancingReviewTask`, the shape this table reuses (correction 6).
 - **Possession:** `deals.possession_confirmed_at` is listed above; the buyer-side facts live on the
   pickup row (`buyer_confirmed_at`, `odometer_at_release`, `condition_at_release`, `due_bill_items`) so a
   correction is append-only (§11.7).
@@ -759,19 +839,68 @@ Zero route reads or writes a new field.
   validation has a fact to read — today `DealerRooftop` has no status column at all (§10 *sourcing*); new table `inventory_query_cache` (criteria_hash unique,
   buyer_id, params jsonb, result jsonb, num_found, fetched_at, expires_at) — **created only if §13-D8
   (MarketCheck terms) is confirmed**; otherwise the live-query path runs uncached.
-- **Communications**: `comms_outbox` brought under the Prisma chain with `CREATE TABLE IF NOT EXISTS`
-  matching the production definition exactly (§5.2), the channel CHECK widened to
-  `('email','sms','in_app')` so in-app notices ride the same rail (§27; today every in-app Notification
-  is created inline), then additive columns: `trigger_event`, `template_key`,
-  `recipient_kind`, `recipient_id`, `vehicle_request_id`, `deal_id`, `auction_id`, `cancel_key`,
-  `cancelled_at`, `cancel_reason`, `next_attempt_at`, `max_attempts`, `terminal_failed_at`,
-  `state_recheck jsonb`. `dedup_key` remains the idempotency key. The same guarded pattern brings the
-  other raw-SQL background tables the substrate depends on — `lifecycle_touch_schedule`,
-  `idempotency_keys`, `jobs_dead_letter` — under the chain with `CREATE TABLE IF NOT EXISTS` /
-  `ADD COLUMN IF NOT EXISTS`, written to match the **production** definitions probed on 2026-09-03
-  (§5.2: all four present, RLS enabled with zero policies; `lifecycle_touch_sequence_allowed` already
-  lists 19 sequences, so the repo's manual SQL is the stale side and no constraint swap runs in
-  production; §13-D24).
+- **Communications**: two separable things, kept separable because §13-D24 authorises only the first
+  (gap (a)).
+
+  **(i) Adoption — §13-D24.** `comms_outbox`, `lifecycle_touch_schedule`, `idempotency_keys` and
+  `jobs_dead_letter` come under the Prisma chain with `CREATE TABLE IF NOT EXISTS` /
+  `ADD COLUMN IF NOT EXISTS`, written to match the **production** definitions (§5.2, §5.7: all four
+  present, RLS enabled with zero policies). Every statement restates what production already has, so
+  it creates nothing there and everything on a from-zero replay, and no live definition changes.
+  `lifecycle_touch_sequence_allowed` already lists 19 sequences, so the repo's manual SQL is the stale
+  side; the wave restates production's list in full and the rewrite is byte-identical in production.
+  `dedup_key` remains the idempotency key.
+
+  **(ii) Expansion — NOT D24.** Fifteen `comms_outbox` columns and one channel value that production
+  does not have. These land in Phase 1 only because constraint C1 allows exactly one schema wave, and
+  each is named against the parity row that requires it and the phase that consumes it:
+  channel `'in_app'` (M27-04a; delivery is M27-04b, Phase 2); `trigger_event`, `template_key`,
+  `vehicle_request_id`, `deal_id`, `auction_id` (C1); `recipient_kind`, `recipient_id` (C2);
+  `state_recheck jsonb` (C4); `max_attempts`, `next_attempt_at` (C8/C10); `cancel_key`, `cancelled_at`,
+  `cancel_reason` (C11); `terminal_failed_at` (C12); `delivered_at` (C9/R88). Every consumer is
+  Phase 2. Nothing in the list lacks a citation, so nothing was dropped for want of one.
+
+  **The index halves of C2 and R37a land too** (owner instruction, 2026-09-06). C2 asks for
+  `recipient_kind`/`recipient_id` **indexed** at Phase 1 and R37a for `queue_items` indexes on
+  `(status, type)` and `(assigned_admin_id)`; an earlier revision landed the columns and recorded the
+  gap. All three are now in the wave — `comms_outbox_recipient_idx`, `queue_items_status_type_idx`,
+  `queue_items_assigned_admin_id_idx` — because constraint C1 allows exactly one schema wave, so an
+  index a Phase 1 row calls for cannot land later without a second one. `queue_items_status_idx` on
+  the bare `(status)` is now a left-prefix of `(status, type)` and therefore redundant; it is **not**
+  dropped, because removing a capability silently is what the capability-preservation rule forbids,
+  and consolidating the pair is a follow-up rather than a decision this wave takes.
+
+  **`comms_outbox.vehicle_request_id` / `deal_id` / `auction_id` get no foreign key**, unlike every
+  other cross-entity reference in the wave — the one place section 6's rule is deliberately not
+  applied, **confirmed by the owner 2026-09-06**. The outbox is a durable send record, and a row
+  saying "this message was sent" must outlive deletion of the transaction it referred to: a cascade
+  would destroy the audit and a `SET NULL` would blank it. They are correlation keys, not ownership
+  edges.
+
+  **The `status` CHECK widens with them (§13-D24 gap (b)).** Production admits
+  `pending, sending, sent, failed, suppressed, skipped` and neither `'cancelled'` nor `'delivered'`
+  (§5.7). Adding a cancellation rail whose terminal value the CHECK rejects does not fail at deploy —
+  it fails the first time C11's `cancelByKey()` runs, with a 23514, by which point the migration is in
+  the chain and CLAUDE.md forbids editing it. R88 requires both values plus `delivered_at`; all three
+  are in the wave, and `verify.sql` asserts the constraint admits each of the eight.
+
+  **Preservation rule for every CHECK this wave rewrites.** `DROP CONSTRAINT IF EXISTS` +
+  `ADD CONSTRAINT` succeeds whether the new predicate is weaker or stronger, and a narrowing surfaces
+  only later as a 23514. So each rewrite restates production's current values in full before adding,
+  and `run-proof.sh` step 4b measures it rather than asserting it, in three parts: no CHECK
+  production has may vanish; any CHECK whose definition changed must be a **finite list of literals
+  on both sides** (classified by `production-baseline/check-defs.sql` — enumeration is not a proof
+  for a range, an expression, a conditional or a cross-column rule, and the run **fails** on a
+  changed predicate of those shapes so the implication old ⇒ new must be demonstrated explicitly
+  instead); and for the finite lists, no admitted value may be lost, re-derived from the committed
+  baseline on both sides by `production-baseline/check-sets.sql`. All three rewrites here classify as
+  finite lists. Measured 2026-09-06 —
+  `comms_outbox_channel_check` `{email, sms}` → `{email, sms, in_app}`;
+  `comms_outbox_status_check` `{pending, sending, sent, failed, suppressed, skipped}` → those six plus
+  `{delivered, cancelled}`; `lifecycle_touch_sequence_allowed` 19 → the same 19, definition text
+  byte-identical. Nothing lost anywhere. That last one is why the rule is mechanical: it carries
+  `deposit_reminder_5` and `_6`, and dropping either breaks the six-touch $99 recovery cadence
+  (PAY-19, B1) with a 23514 at touch five.
 - **Objects the area maps add to this wave (reconciled after the second review).** Constraint C1 allows
   exactly one schema wave, so anything a later phase's behaviour needs must land here. Seven area
   groups each ended with a "not in the Phase 1 list — add" note; those notes were never folded into
@@ -821,11 +950,14 @@ Zero route reads or writes a new field.
     `deal_corrections` (append-only: deal_id, kind, before/after jsonb, reason, actor, created_at);
     `dealer_scorecard_snapshots.no_show_count`, `contract_delay_count`, `overdue_obligation_count`;
     trade-in `appraisal_changed_at` and `final_allowance_cents`.
-  - *Queue* — `queue_items.assigned_admin_id` is a guarded FK to `users` with `ON DELETE SET NULL` and a
-    Prisma relation, not a bare id column. The same treatment lands on
-    `vehicle_requests.assigned_admin_id`, which exists today as a bare `text` column with no foreign
-    key at all (R2): the wave adds the guarded FK and the relation, so an admin row cannot be deleted
-    into a dangling reference.
+  - *Queue* — `queue_items.assigned_admin_id` is a guarded FK to **`admins`** with `ON DELETE SET NULL`
+    and a Prisma relation, not a bare id column. (An earlier draft of this line and of the proof DDL
+    said `users`; §13-D11 correction 1 is the ruling that it is `admins`, and the reasoning is in the
+    Queue bullet above.) The same treatment lands on `vehicle_requests.assigned_admin_id`, which
+    exists today as a bare `text` column with no foreign key at all (R2): the wave adds the guarded FK
+    and the relation, so an admin row cannot be deleted into a dangling reference. That column holds
+    **0 non-NULL rows** in production (§5.7), so `ADD CONSTRAINT` validates an empty set — the
+    correction is about future writes, not about the deploy.
 
   Every item above is additive. The enum additions go in the first migration directory, everything else
   in the second. Items marked owner-gated are written into the migration only if that decision selects
@@ -869,7 +1001,10 @@ Zero route reads or writes a new field.
   bodyless 410, so refusing to allowlist it is a standing guarantee rather than a pending change.
   §8.2a is the single canonical account of the `credit_applications` lifecycle.
 - **Tests/gates for Phase 1:** `pnpm test:migrations` (chain guards), CI migration job (from-zero +
-  re-apply no-op), `pnpm db:check-drift` (count may only fall), new tests for the three enforcement
+  re-apply no-op), the `phase1-proof` CI job (production physical schema: restore → apply → verify →
+  re-apply → verify, plus the CHECK-preservation gate), `docs/transaction-flow/phase-1-proof/preflight.sql`
+  read-only against production immediately before the deploy (no `BLOCK` row),
+  `pnpm db:check-drift` (count may only fall), new tests for the three enforcement
   objects run against the local Postgres in CI's migration job (unique-index violation, trigger raise,
   allowlist scan), `pnpm typecheck`, `pnpm lint`, `pnpm test:all`, `pnpm build`. Playwright:
   NOT APPLICABLE (no behaviour). Visual: NOT APPLICABLE.
@@ -879,9 +1014,10 @@ Zero route reads or writes a new field.
   *and* ledger afterwards). Decisions that must be answered before the wave is authored: **§13-D5**
   (which statuses count as an open request — RULED 2026-09-05 option A, and the index predicate below
   is that answer), **§13-D7** (`InsuranceStatus` additions), **§13-D11** (`QueueItemType` extension —
-  RULED 2026-09-05 option A) including the six `queue_items` shape corrections that ruling sent
-  back, still OPEN, **§13-D24** (adopting the raw-SQL background tables — RULED
-  2026-09-05 adopt-with-models, conditional on gaps (a) and (b) closing), **§13-D43** (RLS posture —
+  RULED 2026-09-05 option A; the six `queue_items` shape corrections that ruling sent back were
+  **applied to the proof DDL on 2026-09-06** and are asserted by `verify.sql`), **§13-D24**
+  (adopting the raw-SQL background tables — RULED 2026-09-05 adopt-with-models, conditional on gaps
+  (a) and (b) closing; **both closed 2026-09-06**), **§13-D43** (RLS posture —
   both the tables this wave creates and the five existing tables that have none) and **§13-D50** (the
   freeze test's exemptions). **§13-D49** (contract state representation) was **re-triaged out of Phase
   1 to Phase 8 on 2026-09-05** — it never had a statement in this wave and no longer gates it. **§13-D51** is not a Phase 1 gate but is listed here because
@@ -891,8 +1027,9 @@ Zero route reads or writes a new field.
   and contract-scan schema is already in production, so this wave adds nothing there.
 - **Rollback:** `rollback.sql` drops only the objects **this wave itself created** — guarded, and with an
   explicit deny-list so the four adopted tables can never be dropped by it. `comms_outbox`,
-  `lifecycle_touch_schedule`, `idempotency_keys` and `jobs_dead_letter` already exist in production with
-  live rows (§5.2); the wave adopts them with `CREATE TABLE IF NOT EXISTS`, which creates nothing, so a
+  `lifecycle_touch_schedule`, `idempotency_keys` and `jobs_dead_letter` already exist in production
+  (§5.2, §5.7 — `comms_outbox` with 0 rows); the wave adopts them with `CREATE TABLE IF NOT EXISTS`,
+  which creates nothing, so a
   rollback that "drops what the wave created" must not touch them. The file names them in a comment and
   the Phase 1 test asserts `rollback.sql` contains no `DROP TABLE` for any of the four. Enum values are
   append-only and stay; the columns added to adopted tables are dropped individually by name.
@@ -910,7 +1047,7 @@ Zero route reads or writes a new field.
   exception_code, refs, owner role, buyer-visible status, required action, deadline, return point,
   idempotency key → upsert), `assign()`, `escalate()`, `resolve()`, `listOpen()`.
   **§3 orphan rule (both halves).** A payment, auction, offer, deal, contract or pickup that cannot
-  resolve its parent raises `ORPHAN_EXCEPTION` through this writer and is **never** silently
+  resolve its parent raises `LINEAGE_ORPHAN` through this writer and is **never** silently
   re-parented or duplicated into a parallel transaction. Today only the payment half exists
   (unroutable payment → Finance alert). Implemented as one `assertParentResolvable()` helper called by
   each creation path, a reconciler pass that sweeps existing rows with a null parent, and a build-failing
@@ -921,7 +1058,7 @@ Zero route reads or writes a new field.
   section); `deposits` 8 rows, all of which need attaching because the column itself does not exist
   until this wave (§5.2); `offers`, `deals`, `pickups` and `contract_versions` are **empty in production
   today**, so for those four classes the rule ships as a guard against future orphans rather than as a
-  cleanup. Each recovered row raises one `ORPHAN_EXCEPTION` for a human to resolve; nothing is
+  cleanup. Each recovered row raises one `LINEAGE_ORPHAN` for a human to resolve; nothing is
   auto-re-parented. Admin surface:
   extend the existing operations dashboard (`app/admin/...` ops queue) — no new page family.
 - `lib/services/comms/comms-outbox.service.ts` — extend to the §27 contract: `enqueueTransactional()`
@@ -1495,7 +1632,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 | R85 | MD §28.2 L1417; §32 L1510; HTML SUPSTATES[8] L927 | Insurance states uploaded, under review, verified, policy bound, rejected, expired | `InsuranceStatus` 8 values incl. EXTERNAL_UPLOADED/FAILED (prisma/schema.prisma:1493-1502); `InsurancePolicyStatus` (1705-1709) | PARTIAL | none | Same change as S15a (+UNDER_REVIEW, REJECTED, EXPIRED; FAILED retained per §13-D7) | 1 | integration | see S15a | prod deploy of the Phase 1 wave (§13-D1); §13-D7 | none | TO IMPLEMENT |
 | R86 | MD §28.2 L1418; HTML SUPSTATES[9] L928 | Contract states uploaded, scanning, review, warning, revision required, approved, signing, executed | `ContractVersionStatus` UPLOADED/SCANNING/APPROVED/REJECTED/SUPERSEDED (prisma/schema.prisma:1805-1811); `ContractScan.status` free String (658); `Deal.contractShieldStatus` String | PARTIAL | approval binding to `contract_version_id` | Plan models executed as `is_dealer_executed/executed_at` (S19) and signing via DealStatus. **§13-D49 RULED 2026-09-05: DEFERRED out of Phase 1 to Phase 8**, and the "add them to `ContractVersionStatus`" option is rejected — that enum is the *document lifecycle* on `ContractVersion`, while the verdict lives on `ContractScan.status` and no buyer surface reads `ContractVersion.status`. Live verdict set is **five**: `PASS`/`WARNING`/`FAIL` (`lib/constants.ts:71-77`) plus `FLAGGED` and `REVISION_REQUESTED` (`app/api/admin/contract-shield/[reviewId]/route.ts:158`, `:209`). Phase 8 direction: closed `ContractScanStatus` on the verdict + a separate typed review-disposition column, shipped WITH replacement queue predicates (the verdict string is today the queue state machine — `lib/services/admin/admin-queue.service.ts:10,58,112`; `app/admin/contract-shield/page.tsx:88`). | 8 | integration, state-machine | pg_enum/column assert; contract state-machine test covers all eight; no free-text status reaches a buyer surface; both admin queues still clearable after the split | §13-D49 (ruled — deferred to Phase 8) | none | TO EXTEND |
 | R87 | MD §28.2 L1419; HTML SUPSTATES[10] L929 | Pickup states incl. dealer released, buyer confirmed, missed, rescheduling | `PickupStatus` NOT_SCHEDULED/PROPOSED/DEALER_COUNTERED/SCHEDULED/CHECKED_IN/COMPLETED/RESCHEDULED/EXCEPTION (prisma/schema.prisma:1583-1594) | PARTIAL | turn-taking counters | Plan records released/confirmed as timestamps (S17); `MISSED` has no value or fact column — add `missed_at` or enum value (gap in Phase 1 list) | 1 | integration, state-machine | column assert; pickup state-machine test derives all ten | prod deploy of the Phase 1 wave (§13-D1) | none | TO EXTEND |
-| R88 | MD §28.2 L1420; §27 L1290; HTML SUPSTATES[11] L930 | Communication states queued, sent, delivered, suppressed, failed (+ cancelled) | `comms_outbox.status` CHECK pending/sending/sent/failed/suppressed/skipped (prisma/manual_supabase_sql/comms_outbox.sql:28-30); no `delivered`, no `cancelled` | PARTIAL | CAS claim + `dispatched_at` RECLAIM_UNCERTAIN | Replace the CHECK (drop + re-add, guarded) to admit `delivered`, `cancelled`; add `delivered_at`; webhook-driven `delivered` in Phase 2 (C9). **§13-D24 gap (b), OPEN:** the proof DDL adds `cancel_key`/`cancelled_at`/`cancel_reason` but never widens this CHECK, and `verify.sql` asserts it not at all. Production confirmed 2026-09-05 as `CHECK (status IN ('pending','sending','sent','failed','suppressed','skipped'))` — neither new value is admitted. | 1 | integration | migration job; CHECK assert accepts `delivered` and `cancelled`; `verify.sql` asserts the constraint definition | prod deploy of the Phase 1 wave (§13-D1, all six rows); §13-D24 gap (b) closed | none | TO EXTEND |
+| R88 | MD §28.2 L1420; §27 L1290; HTML SUPSTATES[11] L930 | Communication states queued, sent, delivered, suppressed, failed (+ cancelled) | `comms_outbox.status` CHECK pending/sending/sent/failed/suppressed/skipped (prisma/manual_supabase_sql/comms_outbox.sql:28-30); no `delivered`, no `cancelled` | PARTIAL | CAS claim + `dispatched_at` RECLAIM_UNCERTAIN | Replace the CHECK (drop + re-add, guarded) to admit `delivered`, `cancelled`; add `delivered_at`; webhook-driven `delivered` in Phase 2 (C9). **§13-D24 gap (b), CLOSED 2026-09-06:** the schema half is done — the proof DDL now drops and re-adds `comms_outbox_status_check` admitting production's six plus `'delivered'` and `'cancelled'`, adds `delivered_at`, and `verify.sql` asserts all eight values. Production's live definition, read directly from `aieybibvewmvrubcpthm` by read-only query in the review session (§5.7), is `CHECK (status IN ('pending','sending','sent','failed','suppressed','skipped'))`; the rewrite restates all six before adding, and `run-proof.sh` re-derives the before/after value sets from the committed baseline and fails on any loss. Remaining half is behavioural: the provider webhook that writes `delivered`/`delivered_at` is Phase 2 (C9). | 1 | integration | migration job; CHECK assert accepts `delivered` and `cancelled`; `verify.sql` asserts the constraint definition | prod deploy of the Phase 1 wave (§13-D1, all six rows) | none | TO EXTEND |
 | R89 | MD §28.2 L1421; §32 L1516; HTML SUPSTATES[12] L931, S[20] L748 | Post-completion obligation states pending, overdue, resolved | No table; production ABSENT (WORKFLOW §5.2) | MISSING | none | Same change as S21 | 1 | integration | see S21 | prod deploy of the Phase 1 wave (§13-D1) | none | TO IMPLEMENT |
 | R90 | MD §28.3 L1423-1436; HTML TRANSITION L932 | Universal controls: legal-transition table, CAS, history, activity, idempotent comms, exactly-once completion seam | `advanceDealStatus`: `TRANSITIONS`, `canTransition`, `expectedFrom` optional (deal.service.ts:89), `force` bypass (77), `updateMany` CAS (148-151) and history create (167-175) in separate statements with no `$transaction`; `actorRole` recorded not checked | PARTIAL | `TRANSITIONS` table + `expectedFrom` CAS + completion seam (`emitDealCompletionEvent`) | Wrap CAS + history + outbox enqueue in one `$transaction`; make `expectedFrom` mandatory; authz check on `actorRole` inside the seam; `force` admin-only + audited | 6 | unit, state-machine, concurrency | deal.service tests: crash between CAS and history impossible (single tx); concurrent advance → exactly one wins; unauthorised role rejected | none | every existing `advanceDealStatus` caller passing no `expectedFrom` | TO EXTEND |
 | S1 | MD §32 L1496 | `vehicle_requests` additive column set (P0) | 0 of ~22 columns present (prisma/schema.prisma:1022-1071) | MISSING | none | One additive migration: rows R4-R14a + `radius_authorization_requested_at`, `abandoned_at`; all nullable; FKs SetNull; index every FK | 1 | integration | migration job; transaction-spine-foundation test asserts full column list | prod deploy of the Phase 1 wave (§13-D1) | none | TO IMPLEMENT |
@@ -3036,7 +3173,7 @@ Schema additions the §8.2 Phase 1 list does **not** enumerate and that this are
 | M27-02a | MD §27 L1292 | No page request determines survival — allowlist + build-failing rule | ~90 request/after()/webhook-bound sites (D1 rows) | BROKEN | EmailSendLog dedup on R1 keys — keep as parity keys | `lib/services/comms/__tests__/no-direct-transactional-send.test.ts` with allowlist tagged by removal phase; `LEGACY_PATH_WRITE` adapters | 2 | unit | The rule test itself (fails on new direct send; fails on stale allowlist entry) | none | R1/R2/R3/R5 rails | TO IMPLEMENT |
 | M27-02b | MD §27 L1292 | Allowlist reaches zero; every send durable | Same | BROKEN | none | Each D1 row migrated in its phase; Phase 10 asserts allowlist empty and removes wrappers | 10 | unit, integration | `no-direct-transactional-send.test.ts` allowlist length 0; `LEGACY_PATH_WRITE` counter review | legacy removal (owner-gated per §8.4) | R1/R2/R3/R5 rails | TO CONSOLIDATE |
 | M27-03 | MD §27 L1294 | Zero production outbox rows reconciled with code | Only CRM/nurture + 10 lifecycle senders enqueue (map Deliverable 3); table present in production per workflow §5.2 | ALREADY CORRECT | none | No code change; Phase 1 `CREATE TABLE IF NOT EXISTS` is a no-op in production | 1 | n/a | Workflow §5.2 probe record; Phase 1 migration job re-apply no-op | production migration (Phase 1 wave) | none | ALREADY PRESENT (VERIFY IN PHASE) |
-| M27-04a | MD §27 L1290 | In-app notices dispatch through the outbox — channel | `channel CHECK IN ('email','sms')` `comms_outbox.sql:24` | MISSING | none | Extend CHECK with `'in_app'` in the Phase 1 wave (not in §8.2 list) | 1 | integration | Migration job; DB assertion insert with `channel='in_app'` succeeds | production migration (Phase 1 wave) | none | TO IMPLEMENT |
+| M27-04a | MD §27 L1290 | In-app notices dispatch through the outbox — channel | `channel CHECK IN ('email','sms')` `comms_outbox.sql:24` | MISSING | none | Extend CHECK with `'in_app'` in the Phase 1 wave — in the §8.2 Communications bullet, split out from §13-D24 adoption as expansion this row is the citation for (D24 gap (a)) | 1 | integration | Migration job; DB assertion insert with `channel='in_app'` succeeds; `verify.sql` asserts the CHECK admits `email`, `sms` and `in_app` | production migration (Phase 1 wave) | none | TO IMPLEMENT |
 | M27-04b | MD §27 L1290 | In-app notices dispatch through the outbox — delivery | Inline `prisma.notification.create` at 10+ sites, e.g. `deals/[dealId]/action/route.ts:107,121,193,207`, `acquisition-comms.ts:434-452` | MISSING | Notification dedup-by-title where present | `deliverInApp()` in dispatcher writing `Notification` idempotently on `dedup_key`; sites migrate with their phase | 2 | unit, integration | `comms-delivery.test.ts` in_app case; register completeness test counts in-app templates | none | inline `notification.create` | TO IMPLEMENT |
 | M27-05 | MD §27 L1290 | Cancellation rule per row (cancel on entity terminal) | No `cancelled` status `comms_outbox.sql:28-29`; no entity refs to key on | MISSING | none | Phase 1 `cancel_key`, `cancelled_at`, `cancel_reason`, status `'cancelled'`; Phase 2 drain checks entity terminal via recheck before send | 2 | unit, integration | `comms-outbox-queue.test.ts`: cancelled row never sent; recheck on terminal deal → skipped | production migration (Phase 1 wave) | none | TO IMPLEMENT |
 | M27-06 | MD §27 L1290 | Outbox SMS honours quiet hours | `isRecipientInQuietHours` only in `lib/crm/recipient-timezone.ts`, `lib/crm/sms-gate.ts`, `lib/services/sms/crm-sms.ts`, `dealer-sms-wiring.ts`; outbox SMS path `comms-outbox.service.ts:291-331` ignores it | PARTIAL | `sendCrmSms` quiet-hours + TCPA + suppression gates — port, do not drop | `deliverSms` applies quiet hours by deferring `run_at` (not skipping) | 2 | unit | `comms-delivery.test.ts`: in-quiet-hours SMS re-queued with later `run_at` | none | `sendCrmSms` R5 | TO EXTEND |
@@ -3736,7 +3873,7 @@ transaction" appeared nowhere), and the dealer-provided **preliminary** trade al
 (`S11D-01` — the recap payload enumerated every other figure and dropped this one; the only allowance
 in the map was the *verified* figure at handover, a different number at a different stage). Both are
 now carried in the Phase 1 wave (`deal_recaps.preliminary_allowance_cents`) and the Phase 2 queue
-writer (`ORPHAN_EXCEPTION` plus `assertParentResolvable()`), §8.2.
+writer (`LINEAGE_ORPHAN` plus `assertParentResolvable()`), §8.2.
 
 Twelve of the nineteen round-1 gaps were §30. That block matters more than its size suggests: the §34 passing
 condition requires the buyer portal, the dealer portal and the Operations queue to display **the same
@@ -3961,7 +4098,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | # | Item | Type | Needed before | Detail | Triage |
 | --- | --- | --- | --- | --- | --- |
 | D1 | Reconcile the six class-(b) ledger rows (`§6.2`) | ACTION | Phase 1 production deploy | **RULED 2026-09-05: resolve ALL SIX.** The three e-sign/AI rows are included — the env flag (`ESIGN_EXECUTED_ARTIFACT_ENABLED`, default off) is the enforcement, not the ledger, and Phase 1's deploy runbook excludes nothing. Grounded on the owner's read-only probe of 2026-09-05: `e_sign_envelopes` 35 columns, `e_sign_envelope_history` present (32 columns), `contract_scans` version columns present — no row is resolved against an absent object. Take a `_prisma_migrations` snapshot; run the six `prisma migrate resolve --applied …` commands from `frontend/` against production; verify with `SELECT migration_name FROM _prisma_migrations WHERE migration_name IN (…six…)` (6 rows) and re-probe one object per migration. | BLOCKING PHASE 1 |
-| D2 | Clean the three buyers holding multiple open Vehicle Requests (`§5.6`) | ACTION | Phase 1 index creation | Audited status change of superseded rows (`CANCELLED`, `cancel_reason = 'superseded-duplicate-request'`) run by an admin through the existing cancel path, not by migration SQL. Verify: the §5.6 query returns 0. | BLOCKING PHASE 1 |
+| D2 | Clean the three buyers holding multiple open Vehicle Requests (`§5.6`) | ACTION | Phase 1 index creation | Audited status change of superseded rows (`CANCELLED`, `cancel_reason = 'superseded-duplicate-request'`) run by an admin through the existing cancel path, not by migration SQL. Verify: `docs/transaction-flow/phase-1-proof/preflight.sql` returns no `BLOCK` row for `index:vehicle_requests_one_open_per_buyer_key`. That file is the §5.6 query made executable and committed, so the check is run rather than described; it carries the §13-D11 foreign-key precondition in the same run, and its contract is `PASS ⇔ no BLOCK row` with exactly one `CHECKED` row proving it executed. | BLOCKING PHASE 1 |
 | D3 | Confirm the duplicate-buyer pair (`§7.2`) | DECISION | Phase 2 regression tests | Confirm `6cc7bfa6…` / `64479e6c…` is the §9C duplicate, and whether the second email was intentional. Confirm the rule-16-compliant remedy: flag + human merge on phone collision, never auto-merge. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D4 | E-sign evidence activation (`ESIGN_EXECUTED_ARTIFACT_ENABLED=true`) | ACTION (compliance-gated) | Phase 8 acceptance in production | Schema is present (§5.2); the env flag is the runtime gate. Requires the attorney/compliance sign-off the runbook records as pending. Verify after: signing route returns 200 in preview with flag on; production flag flipped only after sign-off. | BLOCKING A NAMED LATER PHASE (Phase 8) |
 | D5 | Open-status set for the one-open-request index (`§8.2 Phase 1`) | DECISION | Phase 1 | **RULED 2026-09-05: option A — exclude `DEAL_CREATED` and the three terminals.** Open set = `DRAFT, SUBMITTED, INTAKE, PAYMENT_REQUIRED, ACTIVE_SOURCING, RADIUS_AUTHORIZATION_REQUIRED, OFFER_READY, OFFER_SENT, OFFER_ACCEPTED, OFFER_DECLINED` (10 of 14), as `§8.2` already spells out. The alternative (include `DEAL_CREATED`) is rejected: no writer moves a request out of `DEAL_CREATED` at deal completion or cancellation (`lib/services/deal/deal.service.ts:202-203`, `:377-401`), no admin transition has it in a `from:` list (`app/api/admin/requests/[requestId]/route.ts:19-50`) and buyer cancel refuses it (`cancel/route.ts:19-24`) — so it would wedge the buyer permanently. Its stated benefit is also illusory: buyer acceptance creates the Deal while leaving the request at `OFFER_ACCEPTED` (already in the set), and admin `CREATE_DEAL` sets `DEAL_CREATED` while creating no Deal. **Reversal note:** narrowing later is free; widening later to include `DEAL_CREATED` raises 23505 against any buyer holding `DEAL_CREATED` plus another open row and needs a D2-class audited cleanup, a first-in-repo live `DROP INDEX`, and a `prisma/drift-baseline.json` edit — take it together with building the completion writer, never as a cheap tweak. | BLOCKING PHASE 1 |
@@ -3970,9 +4107,9 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D8 | MarketCheck terms and plan (`§9`) | DECISION (contractual) | Phase 4 | Written confirmation that persisting listings, caching qualified-results by criteria hash, and capturing rooftop name/address/phone/email from listings into the dealer graph are permitted under AutoLenis' agreement; and the production key's plan (call quota, pagination cap). Until confirmed: no cache table, no rooftop minting from listings; the catalogue sweep continues as today. | BLOCKING A NAMED LATER PHASE (Phase 4) |
 | D9 | `credit_applications` physical removal | ACTION (legal-gated) | after Phase 7, retention sign-off | Table has 0 rows; drop only after retention sign-off. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D10 | Backfill the 10 NULL-location buyers | ACTION | Phase 3 (before any of them can pass eligibility) | Per `docs/plans/BUYER-LOCATION-BACKFILL.md` (owner-run script, city+state+ZIP, never ZIP alone). Verify: `SELECT count(*) FROM buyers WHERE city IS NULL OR state IS NULL OR zip IS NULL` falls to the guest-only residue. | BLOCKING A NAMED LATER PHASE (Phase 3) |
-| D11 | `QueueItemType` extension approach and `queue_items` shape | DECISION | Phase 1 | **RULED 2026-09-05: option A — keep the 8 existing labels, add broad category labels, carry the §26 row identity in TEXT `exception_code`.** One-label-per-row (48+) is rejected: the register is demonstrably unsettled (MD §26 48 rows, HTML EXC 49, parity 54 identifiers), the repo reserves enums for closed vocabularies and uses free text with an inline comment for open ones (`AdminAuditLog.action`, `PlatformAlert.source`), and `FinancingReviewTask` — the shape this table reuses — already made exactly this choice. Reversal is asymmetric in A's favour: `ADD VALUE IF NOT EXISTS` is one idempotent line, while an unwanted label can never be dropped (repo doctrine leaves it inert, `20261001000000_pickup_confirm_roundtrip/migration.sql:23-24`), so B's real cost is ~50 dead labels pinned permanently by the hard-zero functional drift gate. **SHAPE SENT BACK FOR CORRECTION.** **Six shape corrections the ruling requires before the wave is authored, none of them optional.** (1) **`assigned_admin_id` FK target is wrong.** §13-D11 and the proof DDL name `users` (`phase-1-proof/…foundation/migration.sql:790`, and `:749` for `vehicle_requests`), but the admin actor id everywhere is `Admin.id` (`lib/auth/admin-session.ts:18-19`, `lib/auth/admin-api.ts:23`), and `Admin.id` ≠ `Admin.userId` (`schema.prisma:270-271`). Target must be `admins(id)` `ON DELETE SET NULL`. This is a **correctness defect, not a deploy hazard** — the owner's 2026-09-05 probe returned **0 non-NULL `vehicle_requests.assigned_admin_id` rows**, so `ADD CONSTRAINT` cannot fail on existing data; left uncorrected it would instead reject every future assignment at runtime. (2) `owner_role` is `TEXT` in the proof DDL (`:562`) but an enum in D11's prose — pick one. (3) The proposed `QueueOwnerRole` members cannot express the register: `SUPPORT` and `CONCIERGE` appear in **zero** §26 Owner cells, while Buyer (7), Buyer/Operations (4), System (4) and Buyer/Dealer (1) — 16 rows — have no member. It would also near-duplicate the existing `AdminRole` (`schema.prisma:1466-1472`), against golden rule 1. (4) `buyer_visible_status` cannot be "taken verbatim from the §26 column" — §26 is three columns (`Exception` / `Owner` / `Required result`); 48+ buyer-facing strings must be **authored** and owned, which is unbudgeted work on the Phase 1 critical path. (5) The additive label count is **12, not 11**: `LINEAGE_ORPHAN` is required by L3-01 and appears in neither the §8.2 list nor the proof DDL, so R36's "pg_enum assert 19 values" becomes **20**. (6) `owner_role` gets no index though the table's entire premise is per-owner queues; follow the `@@index([status, taskType])` precedent. | BLOCKING PHASE 1 |
+| D11 | `QueueItemType` extension approach and `queue_items` shape | DECISION | Phase 1 | **RULED 2026-09-05: option A — keep the 8 existing labels, add broad category labels, carry the §26 row identity in TEXT `exception_code`.** One-label-per-row (48+) is rejected: the register is demonstrably unsettled (MD §26 48 rows, HTML EXC 49, parity 54 identifiers), the repo reserves enums for closed vocabularies and uses free text with an inline comment for open ones (`AdminAuditLog.action`, `PlatformAlert.source`), and `FinancingReviewTask` — the shape this table reuses — already made exactly this choice. Reversal is asymmetric in A's favour: `ADD VALUE IF NOT EXISTS` is one idempotent line, while an unwanted label can never be dropped (repo doctrine leaves it inert, `20261001000000_pickup_confirm_roundtrip/migration.sql:23-24`), so B's real cost is ~50 dead labels pinned permanently by the hard-zero functional drift gate. **SHAPE SENT BACK FOR CORRECTION — ALL SIX CORRECTIONS APPLIED TO THE PROOF DDL 2026-09-06.** Each is recorded below as *finding → resolution*, and each resolution is asserted by `phase-1-proof/verify.sql`, so a later edit that undoes one fails the `phase1-proof` CI job rather than reaching production. (1) **`assigned_admin_id` FK target was wrong.** D11's prose and the proof DDL named `users`, but the admin actor id everywhere is `Admin.id` (`lib/auth/admin-session.ts:18-19`, `lib/auth/admin-api.ts:23`, both resolving the JWT's `adminId` through `prisma.admin.findUnique({ where: { id } })`), and `Admin.id` ≠ `Admin.userId` (`schema.prisma:270-271`). **RESOLVED:** both `queue_items.assigned_admin_id` and `vehicle_requests.assigned_admin_id` now key to `admins(id)` `ON DELETE SET NULL`; `verify.sql` asserts the FK *target*, not merely the constraint name, because a key onto `users` carries the same name and would otherwise pass. This is a **correctness defect rather than a data backlog** — `vehicle_requests.assigned_admin_id` held **0 non-NULL rows** when read on 2026-09-05 (§5.7, read directly from `aieybibvewmvrubcpthm` by read-only query in the review session), so nothing has yet been written against the wrong parent; left uncorrected it would have rejected every future assignment at runtime with a 23503. **That zero is not the deploy-safety argument, and an earlier draft of this row wrongly used it as one.** It is a point-in-time measurement, the deploy is later, and `ADD CONSTRAINT` validates existing data: a single admin assignment in between makes the statement fail, and Prisma runs the file in one transaction, so the whole wave rolls back. Safety comes from a deploy-time assertion instead — `docs/transaction-flow/phase-1-proof/preflight.sql`, in the same pattern §13-D2 already uses for the unique index, returns one `BLOCK` row per `vehicle_requests` row whose non-NULL `assigned_admin_id` does not resolve in `admins(id)`, and a non-zero result stops the deploy for owner-run reconciliation. `queue_items` needs no such assertion: the table does not exist in production (§5.2), so the wave creates it empty and its FK validates an empty set by construction. (2) `owner_role` was `TEXT` in the proof DDL but an enum in D11's prose. **RESOLVED: enum**, because §26 is a closed vocabulary — the register names an owner for every one of its 48 rows and no row invents one. (3) The proposed `QueueOwnerRole` members could not express the register: `SUPPORT` and `CONCIERGE` appeared in **zero** §26 Owner cells, while Buyer (7), Buyer/Operations (4), System (4) and Buyer/Dealer (1) — 16 rows — had no member. **RESOLVED** by a membership rule rather than a list: exactly one member per **distinct** §26 Owner cell, and no member without a cell — `OPERATIONS` (23), `BUYER` (7), `FINANCE` (6), `SYSTEM` (4), `BUYER_OPERATIONS` (4), `COMPLIANCE` (2), `OPERATIONS_FINANCE` (1), `BUYER_DEALER` (1), summing to the register's 48. `SUPPORT` and `CONCIERGE` are dropped and `verify.sql` fails if either reappears (an enum label cannot be dropped once shipped). The three composite cells keep their own members rather than collapsing to a first-named owner, because the register means **shared** ownership there and resolving it to one side would discard the fact the column exists to record. This duplicates no part of `AdminRole` (`schema.prisma:1466-1472`), which is RBAC over admin *accounts* and cannot express `BUYER`, `SYSTEM` or a shared owner at all — the two vocabularies share no member, so golden rule 1 is satisfied. (4) `buyer_visible_status` could not be "taken verbatim from the §26 column" — §26 is three columns (`Exception` / `Owner` / `Required result`) and none of them is a buyer-facing string; 48+ such strings must be **authored**, which is unbudgeted work on the Phase 1 critical path. **RESOLVED with a defined source:** a catalogue keyed by `exception_code`, authored and owned by `lib/services/operations/queue-item.service.ts` in **Phase 2** — the phase that owns every writer of this table (C14, L3-01) — and stamped onto the row at raise time. Phase 1 lands the column nullable with **no** CHECK; a CHECK here would pin a vocabulary Phase 2 has not written. (5) The additive label count is **12, not 11**: `LINEAGE_ORPHAN` is required by L3-01 and appeared in neither the §8.2 list nor the proof DDL. **RESOLVED:** the label is in directory 1 and `QueueItemType` now holds **20** (8 + 12), which is what R36 asserts. (6) `owner_role` had no index though the table's entire premise is per-owner queues. **RESOLVED:** `queue_items_owner_role_status_idx` on `(owner_role, status)`, following the `@@index([status, taskType])` precedent on `FinancingReviewTask`, the shape this table reuses. **Still owner-gated:** the corrections settle the shape; authorising Phase 1 to begin, and promoting these directories into `frontend/prisma/migrations/`, remains the owner's (§13-D13). | BLOCKING PHASE 1 |
 | D12 | Enable the Stripe payment settlement reconciler in production | ACTION (money path) | Phase 3 acceptance | `DEPOSIT_SETTLEMENT_RECONCILE_ENABLED="true"` (default off; `lib/services/payment/deposit-settlement.service.ts:74-76`); the reconciler also carries a hard-coded excluded production deposit id (`:69-71`) that Phase 3 removes. Enable only after the recovered-gap alert is verified in preview, after the excluded deposit `77934f10-…` is resolved by hand, and after choosing **one** alert rail: Phase 3 folds the duplicate read-only detector (`health.service.checkDepositProviderEvidence` via `sla-check`) into `raiseException` (recommended) rather than keeping two rails. | BLOCKING A NAMED LATER PHASE (Phase 3) |
-| D13 | Production deploy of the Phase 1 migration wave | ACTION | end of Phase 1 | Order: D1 (**all six rows** — ruled 2026-09-05, §13-D1) → D2 → `prisma migrate deploy` → verify physical schema (information_schema/pg_indexes/pg_trigger) **and** ledger. The order is forced, not preferred: the wave creates `vehicle_requests_one_open_per_buyer_key` and the deploy does not run until §5.6's violator query returns zero. **Precondition the order does not state:** the wave does not yet exist in the chain — `frontend/prisma/migrations/` ends at `20261105000000` and there is no `20261106*` directory; both files live under `docs/transaction-flow/phase-1-proof/` and say so in their own headers. Authoring and promoting those two directories is Phase 1 implementation work and is gated on §13-D5, §13-D11 (including its six shape corrections) and §13-D24 being answered first; until then `prisma migrate deploy` would apply nothing. **Reversal:** enum labels cannot be dropped, so no wave that adds one is fully reversible (§8.2); `rollback.sql` is specified but **not yet authored** — it does not exist under `phase-1-proof/`. | BLOCKING PHASE 1 |
+| D13 | Production deploy of the Phase 1 migration wave | ACTION | end of Phase 1 | Order: D1 (**all six rows** — ruled 2026-09-05, §13-D1) → D2 → **`preflight.sql` read-only against production, in the same maintenance window, returning no `BLOCK` row** → `prisma migrate deploy` → verify physical schema (information_schema/pg_indexes/pg_trigger) **and** ledger. The preflight step is not optional and is not satisfied by §5's readings: those are point-in-time, and two statements in the wave validate against DATA rather than schema — the `vehicle_requests_one_open_per_buyer_key` unique index and the `assigned_admin_id → admins(id)` foreign key. Both are inside `prisma migrate deploy`'s single transaction, so either one failing rolls the entire wave back. The order is forced, not preferred: the wave creates `vehicle_requests_one_open_per_buyer_key` and the deploy does not run until §5.6's violator query returns zero. **Precondition the order does not state:** the wave does not yet exist in the chain — `frontend/prisma/migrations/` ends at `20261105000000` and there is no `20261106*` directory; both files live under `docs/transaction-flow/phase-1-proof/` and say so in their own headers. Authoring and promoting those two directories is Phase 1 implementation work and is gated on §13-D5, §13-D11 (including its six shape corrections) and §13-D24 being answered first; until then `prisma migrate deploy` would apply nothing. **Reversal:** enum labels cannot be dropped, so no wave that adds one is fully reversible (§8.2); `rollback.sql` is specified but **not yet authored** — it does not exist under `phase-1-proof/`. | BLOCKING PHASE 1 |
 | D14 | Legacy path physical removal (`§8.4`) | ACTION | after 30 days of zero `LEGACY_PATH_WRITE` rows in production | Each path listed with its counter; preview traffic never counts. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — gated on 30 days of production evidence, not on an answer; no phase waits for it |
 | D15 | Real provider delivery verification (Resend, Twilio, Stripe settlement, MicroBilt returns, e-sign evidence storage, MarketCheck live queries) | ACTION | Phase 11 | Live-only; remains UNVERIFIED until run under owner authorisation. | BLOCKING A NAMED LATER PHASE (Phase 11) |
 | D16 | Approved-amount filtering on the buyer search | DECISION | Phase 4 | Today `/api/buyer/search` hard-filters listings to `price ≤ approved amount` and the detail page disables shortlisting above budget (§10 area *inventory*). §22a says filter generously and enforce the ceiling only at offer validation, selection and contract request. Proposed: follow §22a (headroom filter, no hard cut) — this is a case where existing code is stricter than the spec but contradicts a stated rule, so the spec wins unless the owner overrides. | BLOCKING A NAMED LATER PHASE (Phase 4) |
@@ -3983,7 +4120,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D21 | Permission for recording financing checkpoints | DECISION | Phase 7 | Proposed: reuse `finance.preapproval.decide` (MONEY tier) for `TERMS_LOCKED`/`COMPLETED` recording, with the ≥10-char reason the external-approval route already requires. Alternative: a new `finance.financing.record` permission if Finance and Ops must be separated. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D22 | Identity-firewall lift scope | ACKNOWLEDGEMENT | Phase 7 | The lift moves from award dispatch to reaffirmation on **every** dealer surface, including the dealer Finance Manager page (`app/dealer/financing/page.tsx`), which today lists buyer name/email for dealer-path financings at any stage. Unless the owner objects, no dealer surface shows full PII before reaffirmation. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D23 | QStash decommission confirmation | DECISION | Phase 2 | Confirm the QStash token is revoked. If yes, every flag-OFF lifecycle workload and `affiliate-inactive` is silently dropped today; approve making all workloads internal-by-default (flag `null`) in Phase 2 ahead of the Phase 10 code deletion. If QStash is still live, Phase 2 still cuts the producers over (master §6: no vendor queue) and the deletion is unchanged. | BLOCKING A NAMED LATER PHASE (Phase 2) |
-| D24 | Raw-SQL background tables under the migration chain | DECISION | Phase 1 | **RULED 2026-09-05: adopt all four, WITH matching Prisma models — after gaps (a) and (b) below close.** Bring `comms_outbox` (14 cols), `lifecycle_touch_schedule` (14 cols), `idempotency_keys` (4 cols) and `jobs_dead_letter` (7 cols) — all VERIFIED present in production on 2026-09-03 with RLS enabled and zero policies — under the Prisma chain with guarded DDL. Adoption is effectively already built: the DDL is authored and the `phase1-proof` CI job (`.github/workflows/ci.yml:460-609`) exists precisely because a chain replay from empty "never exercises the `CREATE TABLE IF NOT EXISTS` no-op path". Production's `lifecycle_touch_sequence_allowed` already admits `deposit_reminder_5/6` (19 sequences); the repo's `manual_supabase_sql/lifecycle_touch_schedule.sql` is stale and is retired once the chain owns the table, and the proof DDL correctly applies that list by unconditional `DROP CONSTRAINT IF EXISTS` ×2 + `ADD CONSTRAINT` rather than relying on the guarded `CREATE TABLE` (`…foundation/migration.sql:696-708`). **GAP (a) — the `comms_outbox` `channel` widening is a CHANGE, not an adoption.** The owner's 2026-09-05 probe confirms the live constraint is `CHECK (channel IN ('email','sms'))`; `…foundation/migration.sql:654-656` unconditionally drops and re-adds it to admit `'in_app'`, and `:658-672` adds fourteen columns. That is C8/C11/C12 scope arriving under the D24 label — split it out and name it, or move it to the phase that owns it. **GAP (b) — the `status` CHECK is never widened.** The live constraint is `CHECK (status IN ('pending','sending','sent','failed','suppressed','skipped'))` — it admits neither `'cancelled'` nor `'delivered'` — yet the wave adds `cancel_key`/`cancelled_at`/`cancel_reason` without widening it, and R88 requires both new values plus `delivered_at`. `verify.sql` asserts neither CHECK. **Reversal:** a wrong CHECK is the expensive failure — it either aborts the deploy loudly or silently narrows production (dropping `deposit_reminder_5/6` would break the six-touch $99 recovery cadence with 23514), and CLAUDE.md forbids editing an applied migration, so correction is a new forward migration and the wrong definition stays in the chain permanently. | BLOCKING PHASE 1 |
+| D24 | Raw-SQL background tables under the migration chain | DECISION | Phase 1 | **RULED 2026-09-05: adopt all four, WITH matching Prisma models — after gaps (a) and (b) below close.** Bring `comms_outbox` (14 cols), `lifecycle_touch_schedule` (14 cols), `idempotency_keys` (4 cols) and `jobs_dead_letter` (7 cols) — all VERIFIED present in production on 2026-09-03 with RLS enabled and zero policies — under the Prisma chain with guarded DDL. Adoption is effectively already built: the DDL is authored and the `phase1-proof` CI job (`.github/workflows/ci.yml:460-609`) exists precisely because a chain replay from empty "never exercises the `CREATE TABLE IF NOT EXISTS` no-op path". Production's `lifecycle_touch_sequence_allowed` already admits `deposit_reminder_5/6` (19 sequences); the repo's `manual_supabase_sql/lifecycle_touch_schedule.sql` is stale and is retired once the chain owns the table, and the proof DDL correctly applies that list by unconditional `DROP CONSTRAINT IF EXISTS` ×2 + `ADD CONSTRAINT` rather than relying on the guarded `CREATE TABLE` (`…foundation/migration.sql:696-708`). **GAP (a) — the `comms_outbox` `channel` widening was a CHANGE, not an adoption — CLOSED 2026-09-06.** The live constraint is `CHECK (channel IN ('email','sms'))` (§5.7, read directly from `aieybibvewmvrubcpthm` by read-only query in the review session); the draft unconditionally dropped and re-added it to admit `'in_app'` and added fourteen columns, doubling the table. That is C1/C2/C4/C8/C11/C12 and M27-04a scope arriving under the D24 label. **RESOLVED by splitting, not by deleting:** Phase 1 is the only schema wave (constraint C1), so a column a later phase needs must land here. Section 5 of the foundation migration is now **adoption only** — every statement restates production's current definition — and a new **section 5b** carries the expansion, each item named against the parity row that requires it and the phase that consumes it. **Traced 2026-09-06: all fourteen columns and the `in_app` value have a citation, so the kept/removed split is 14 kept / 0 removed, and one column is ADDED (`delivered_at`, C9/R88, required by gap (b)).** Citations: channel `'in_app'` → M27-04a (schema half Phase 1, delivery M27-04b Phase 2); `trigger_event`, `template_key`, `vehicle_request_id`, `deal_id`, `auction_id` → C1; `recipient_kind`, `recipient_id` → C2; `state_recheck` → C4; `max_attempts`, `next_attempt_at` → C8/C10; `cancel_key`, `cancelled_at`, `cancel_reason` → C11; `terminal_failed_at` → C12; `delivered_at` → C9/R88. Every consumer is Phase 2. **GAP (b) — the `status` CHECK was never widened — CLOSED 2026-09-06.** The live constraint is `CHECK (status IN ('pending','sending','sent','failed','suppressed','skipped'))` — it admits neither `'cancelled'` nor `'delivered'` — yet the draft added `cancel_key`/`cancelled_at`/`cancel_reason` without widening it. **RESOLVED:** the wave now drops and re-adds `comms_outbox_status_check` admitting production's six plus `'delivered'` and `'cancelled'`, and adds `delivered_at`; R88's third requirement is therefore met too. `verify.sql`, which asserted neither CHECK, now asserts every value each of five CHECKs must admit. **The preservation rule, now applied to every CHECK the wave rewrites — and only by a method that fits the predicate.** A `DROP` + `ADD` pair succeeds whether the new predicate is weaker or stronger than the old one, and a narrowing surfaces only later, as a 23514 on a value production used to accept. Each rewrite therefore restates production's current values in full before adding, and the proof **measures** it. Three assertions run in `run-proof.sh` step 4b, in order, because the third is valid for one predicate shape only: **(i)** no CHECK production has may be absent afterwards — a constraint dropped and never re-added contributes no values, so a value comparison alone would not notice it going; **(ii)** any constraint whose *definition* changed must be a **finite list of literals on both sides**, classified mechanically by `production-baseline/check-defs.sql` — enumeration proves nothing about a range, an arithmetic expression, a conditional or a cross-column relationship, since such a predicate contributes no literals at all and a narrowing of it would report "nothing lost". This schema already holds eight of them (the `*_ip_unavailable_reason_exclusive` pair rules, `a IS NULL OR b IS NULL`), so the shape is not hypothetical; a changed constraint that is not a finite list **fails the run**, and its preservation has to be demonstrated as an explicit implication old ⇒ new before the rewrite can ship. **(iii)** for the finite lists, every value production admits the wave must still admit — `production-baseline/check-sets.sql` re-derives every admitted value from the committed baseline before the wave is applied and again after, so the "before" side cannot go stale, and deleting a value from `verify.sql`'s list would not hide a narrowing. All three CHECKs this wave rewrites classify as finite lists on both sides, so enumeration is a valid proof for each of them — established by the classifier, not assumed. Measured 2026-09-06 against the PostgreSQL 17.6 restore: `comms_outbox_channel_check` `{email, sms}` → `{email, sms, in_app}` (+1, none lost); `comms_outbox_status_check` `{pending, sending, sent, failed, suppressed, skipped}` → those six plus `{delivered, cancelled}` (+2, none lost); `lifecycle_touch_sequence_allowed` 19 → the same 19, `pg_get_constraintdef` byte-identical (+0, none lost); the wave creates 17 further CHECKs with no production predecessor — 9 carrying literals (∅ → their sets) and 8 enumerating nothing (the `*_exclusive` pair rules); the baseline's other 26 are untouched. 3 + 26 + 9 + 8 = 46, which is what `check-defs.sql` counts afterwards. **No admitted value lost anywhere.** **Reversal:** a wrong CHECK is the expensive failure — it either aborts the deploy loudly or silently narrows production (dropping `deposit_reminder_5/6` would break the six-touch $99 recovery cadence with 23514), and CLAUDE.md forbids editing an applied migration, so correction is a new forward migration and the wrong definition stays in the chain permanently. That is the failure the measured gate above exists to make impossible. **Still owner-gated:** the gaps are closed; authorising Phase 1 and promoting the directories into the chain remains the owner's (§13-D13). | BLOCKING PHASE 1 |
 | D25 | `financing_review_tasks` and the credit-application review queue | ACTION (legal-gated) | with D9 | Retired from code in Phase 7 together with the review queue; physical drop of the table and enums shares D9's retention sign-off. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D26 | `holds` cron | DECISION | Phase 7 | Proposed: repurpose the documented no-op `app/api/cron/holds` for §10c vehicle-hold expiry (same schedule slot, `withCronRun`), rather than adding a new cron route. Alternative: delete it and add `vehicle-hold-expire`. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D27 | §5c "immediately" touch latency | ACKNOWLEDGEMENT | Phase 3 | The series runs on the every-minute `comms-outbox-drain`, not the 15-minute `lifecycle-touch-drain`; no schedule change is needed and the question in §10 *jobs* dissolves. | BLOCKING A NAMED LATER PHASE (Phase 3) |
