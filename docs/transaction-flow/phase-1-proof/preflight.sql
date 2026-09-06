@@ -31,6 +31,11 @@ fk_violations AS (
   WHERE vr.assigned_admin_id IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM admins a WHERE a.id = vr.assigned_admin_id)
 ),
+-- The preconditions this file asserts, named once so the CHECKED count is derived from them.
+preconditions(name) AS (VALUES
+  ('fk:vehicle_requests_assigned_admin_id_fkey'),
+  ('index:vehicle_requests_one_open_per_buyer_key')
+),
 -- §13-D2 / §5.6. The predicate is the one `vehicle_requests_one_open_per_buyer_key` uses, and it is
 -- kept in lockstep with the index in `20261106000100_transaction_spine_foundation/migration.sql`:
 -- if one changes and the other does not, this preflight stops asserting the right thing.
@@ -65,7 +70,9 @@ SELECT 'BLOCK',
          || 'owner-run audited cancellation of the superseded rows must land first; the unique index '
          || 'cannot be created while this returns rows.'
   FROM open_request_violations
--- Positive evidence: what this run actually asserted. Always exactly one row.
+-- Positive evidence: what this run actually asserted. Always exactly one row, and the number is
+-- COMPUTED from the list below rather than typed, so adding a third precondition without updating a
+-- literal cannot leave this file reporting 2 while asserting 3.
 UNION ALL
-SELECT 'CHECKED', 'preconditions_asserted', '2'
+SELECT 'CHECKED', 'preconditions_asserted', (SELECT count(*)::text FROM preconditions)
 ORDER BY 1, 2, 3;

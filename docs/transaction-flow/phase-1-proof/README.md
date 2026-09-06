@@ -46,7 +46,9 @@ Only the production baseline exercises that path.
 ## What this proves, and what it does not
 
 **PROVES.** Both directories apply, in order, each inside a single transaction (the way Prisma runs
-them), against production's physical schema; all 368 expected objects exist afterwards; **no CHECK
+them), against production's physical schema; all **368 assertions pass, 0 fail** — the count is
+assertions rather than objects, because 2 of them require a label to be ABSENT and 14 require a
+table to carry NO RLS policy; **no CHECK
 constraint stopped admitting a value production admits**; a second application of both directories
 changes nothing — neither the object census nor the *definitions* of tables, columns, indexes,
 constraints, enums, triggers, policies or functions (compared by digest).
@@ -228,13 +230,18 @@ deleted from both, and the run-proof comparison does not read `verify.sql`'s lis
 
 Measured on 2026-09-06 against the PostgreSQL 17.6 restore:
 
-| constraint | before | after | delta |
-| --- | --- | --- | --- |
-| `comms_outbox_channel_check` | `{email, sms}` | `{email, sms, in_app}` | +1, none lost |
-| `comms_outbox_status_check` | `{pending, sending, sent, failed, suppressed, skipped}` | those six + `{delivered, cancelled}` | +2, none lost |
-| `lifecycle_touch_sequence_allowed` | 19 sequences | the same 19 — `pg_get_constraintdef` byte-identical | +0, none lost |
-| 9 further CHECKs | no production predecessor | their own sets | new |
-| 27 CHECKs | — | unchanged | — |
+| # | constraint(s) | before | after | delta |
+| ---: | --- | --- | --- | --- |
+| 1 | `comms_outbox_channel_check` | `{email, sms}` | `{email, sms, in_app}` | +1, none lost |
+| 1 | `comms_outbox_status_check` | `{pending, sending, sent, failed, suppressed, skipped}` | those six + `{delivered, cancelled}` | +2, none lost |
+| 1 | `lifecycle_touch_sequence_allowed` | 19 sequences | the same 19 — `pg_get_constraintdef` byte-identical | +0, none lost |
+| 26 | the rest of the baseline's CHECKs | — | untouched | — |
+| 9 | 8 × `*_ip_unavailable_reason_check`, `sourcing_cases_band_check` | no production predecessor | their own sets | new, ENUMERABLE |
+| 8 | 8 × `*_ip_unavailable_reason_exclusive` | no production predecessor | `a IS NULL OR b IS NULL` | new, OPAQUE — enumerates nothing, so it contributes no value pairs |
+
+Those reconcile: the baseline has **29** CHECKs (`census.sql` reports `check=29`), of which the wave
+rewrites 3 and leaves 26 alone; it creates 17 more, 9 carrying literals and 8 not. 3 + 26 + 9 + 8 =
+**46**, which is what `check-defs.sql` counts afterwards.
 
 168 admitted `(constraint, value)` pairs before, 215 after, **0 lost**. All 29 CHECKs in the
 baseline classify as ENUMERABLE, so nothing production has needed an explicit implication argument
@@ -243,8 +250,10 @@ this time.
 ### The gates fail first
 
 A gate that has never been seen to fail is a gate nobody has tested. Each was exercised on
-2026-09-06 by temporarily editing the wave and confirming `run-proof.sh` exits non-zero, then
-reverting:
+2026-09-06 by temporarily appending the edit in the first column to
+`20261106000100_transaction_spine_foundation/migration.sql` (or, for the third and fourth,
+by deleting the two values), running `./run-proof.sh`, confirming a non-zero exit, and reverting the
+file. Nothing from the probes is committed; each is reproducible from its description in one edit.
 
 | probe | gate that fired | exit |
 | --- | --- | ---: |
@@ -252,10 +261,24 @@ reverting:
 | rewrite `campaigns_type_check` from a finite list to `length(type) BETWEEN 3 AND 5` | (ii) *"was rewritten but is not a finite-list predicate (before=ENUMERABLE after=OPAQUE)"* | 1 |
 | drop `deposit_reminder_5`/`_6` from the sequence CHECK | step 4 — `verify.sql`'s own value assertions | 1 |
 | drop them from the CHECK **and** from `verify.sql`'s list, the way an author narrowing "consistently" would | (iii) `LOST: … deposit_reminder_5`, `… deposit_reminder_6` | 1 |
+| replace `check-defs.sql` with a query that errors | the capture guard — `psql` `ON_ERROR_STOP` | 3 |
+| re-add `comms_outbox_status_check` against `last_result` instead of `status`, same eight literals | (i) `VANISHED: comms_outbox.comms_outbox_status_check(status)` | 1 |
 
-The last row is the one that matters: it is the proof that the two lists are independent. Step 4b
-re-derives its "before" side from the committed baseline and never reads `verify.sql`, so narrowing
-both in lockstep does not hide the narrowing.
+Three of these matter especially.
+
+The `verify.sql`-narrowed-too row is the proof that the two lists are independent: step 4b re-derives
+its "before" side from the committed baseline and never reads `verify.sql`, so narrowing both in
+lockstep does not hide the narrowing.
+
+The broken-capture row is why every capture runs with `-v ON_ERROR_STOP=1` and both "before" files
+are asserted non-empty. `psql -At -f x.sql > out` exits **0** and writes an empty file when the SQL
+errors, so without that guard `set -euo pipefail` would not trip, all four files would be empty, and
+the run would print "no CHECK weakened against production" having measured nothing at all.
+
+The `last_result` row is why the key carries the constrained column and not just the constraint name.
+That rewrite keeps the canonical enumerable shape, keeps all eight literals, and satisfies every
+`strpos` in `verify.sql` — so with a name-only key it passed all three gates while leaving `status`
+entirely unconstrained.
 
 A fifth probe deliberately did **not** fire, and should not have: rewriting
 `vehicle_requests_ip_unavailable_reason_exclusive` — an OPAQUE predicate — passed, because that
@@ -308,7 +331,7 @@ each, then rolled back.
 
 ## Phase 1 is additive
 
-`verify.sql` asserts, among the 368 expected objects, that `e_sign_envelopes_deal_id_key` is **still
+`verify.sql` asserts, among its 368 assertions, that `e_sign_envelopes_deal_id_key` is **still
 present** after the wave. Replacing that live constraint is the signatures-phase
 expand/backfill/verify/cutover/contract sequence, not this one. If a future edit to Phase 1 drops it,
 the verifier fails.

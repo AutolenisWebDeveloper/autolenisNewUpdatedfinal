@@ -210,10 +210,11 @@ UNION ALL SELECT 'MISSING', 'rls_policy_present_unexpectedly', r.name FROM expec
 UNION ALL SELECT 'MISSING', 'live_constraint_wrongly_dropped', 'e_sign_envelopes_deal_id_key'
   WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_key')
 -- A CHECK must still admit every value production admitted, plus the wave's additions. The literal
--- is matched QUOTED on both sides, so `'deposit_reminder_1'` cannot be satisfied by
--- `'deposit_reminder_10'` and `'sent'` cannot be satisfied by `'suppressed'`. `strpos`, not `LIKE`:
--- every value here contains `_`, which LIKE would treat as a single-character wildcard and let a
--- renamed label satisfy an assertion it should fail.
+-- is matched QUOTED on both sides, and that is what makes it exact: `'deposit_reminder_1'` cannot be
+-- satisfied by `'deposit_reminder_10'`, nor `'sent'` by `'suppressed'`, because the closing quote
+-- has to match too. `strpos`, not `LIKE`, because LIKE would read `%` and `_` in the value as
+-- wildcards — 24 of the values below contain `_` — and a renamed label could then satisfy an
+-- assertion it should fail. `strpos` has no pattern metacharacters at all.
 UNION ALL SELECT 'MISSING', 'check_admitted_value', v.conname || ' admits ' || v.value
   FROM expected_check_values v
   WHERE NOT EXISTS (

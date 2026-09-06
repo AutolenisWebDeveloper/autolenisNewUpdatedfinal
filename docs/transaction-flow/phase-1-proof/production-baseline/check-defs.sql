@@ -24,8 +24,13 @@
 -- deliberately strict: misreading an opaque predicate as enumerable is the failure that matters, and
 -- an unfamiliar-but-safe shape only costs one explicit demonstration.
 --
+-- The key carries the constrained column for the same reason `check-sets.sql` does: a rewrite that
+-- keeps the canonical shape but changes the column would otherwise look like no change at all.
+--
 -- Read-only. Runs unchanged against either side, like `census.sql` and `digests.sql`.
-SELECT t.relname || '.' || c.conname || '|'
+SELECT t.relname || '.' || c.conname || '(' || coalesce((SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                  FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+                  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum), '-') || ')|'
     || CASE
          WHEN pg_get_constraintdef(c.oid) ~
               $re$^CHECK \(\("?[a-zA-Z_][a-zA-Z0-9_]*"? = ANY \(ARRAY\['[^']*'::text(, '[^']*'::text)*\]\)\)\)$$re$

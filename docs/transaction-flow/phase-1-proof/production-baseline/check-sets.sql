@@ -11,6 +11,12 @@
 -- side is therefore re-derived from the committed baseline on every run rather than transcribed into
 -- an expectation that can go stale.
 --
+-- THE KEY INCLUDES THE CONSTRAINED COLUMN, not just the constraint name. Without it a rewrite that
+-- keeps the shape but moves to a different column —
+--     ADD CONSTRAINT comms_outbox_status_check CHECK (last_result = ANY (ARRAY[…the same 8…]))
+-- a plausible copy-paste error — emits byte-identical `(constraint, value)` pairs, so the comparison
+-- reports "nothing lost" while `status` is left entirely unconstrained.
+--
 -- Read-only. Runs unchanged against either side, like `census.sql` and `digests.sql`.
 --
 -- SCOPE. It reports the string literals of a constraint's definition. For the `x IN (…)` form
@@ -19,7 +25,9 @@
 -- correct — it enumerates nothing. A literal containing an embedded quote would be reported
 -- truncated; none exists in this schema, and the constraint digest in `digests.sql` would catch a
 -- change to one regardless.
-SELECT DISTINCT t.relname || '.' || c.conname || '|' || g[1] AS check_value
+SELECT DISTINCT t.relname || '.' || c.conname || '(' || coalesce((SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                  FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+                  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum), '-') || ')|' || g[1] AS check_value
 FROM pg_constraint c
 JOIN pg_class t ON t.oid = c.conrelid
 JOIN pg_namespace n ON n.oid = t.relnamespace,

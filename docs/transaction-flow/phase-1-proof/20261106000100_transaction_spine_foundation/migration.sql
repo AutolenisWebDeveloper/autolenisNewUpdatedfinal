@@ -53,7 +53,8 @@ BEGIN
   -- every one of its 48 rows and no row invents one.
   --
   -- Correction 3 fixes the MEMBERSHIP, under the rule: exactly one member per DISTINCT §26 Owner
-  -- cell, and no member without a cell. Counted from the register (MD §26 L1237-1285):
+  -- cell, and no member without a cell. Counted from the register's 48 data rows (MD §26 L1239-1286;
+  -- L1237 is the header and L1238 the separator):
   --
   --     OPERATIONS         23    BUYER_OPERATIONS    4    OPERATIONS_FINANCE  1
   --     BUYER               7    SYSTEM              4    BUYER_DEALER        1
@@ -665,7 +666,7 @@ CREATE TABLE IF NOT EXISTS "inventory_query_cache" (
 -- and no live definition changes. `rollback.sql` must never DROP them.
 --
 -- §13-D24 GAP (a), CLOSED. The draft mixed two different things under the D24 label: adopting four
--- tables at production's definitions, and adding fifteen columns plus a channel widening that
+-- tables at production's definitions, and adding fourteen columns plus a channel widening that
 -- production does not have — expansion, not adoption. D24 authorises only the first. The second is
 -- not deleted (constraint C1 allows exactly one schema wave, so a column a later phase needs must
 -- land here) but it is SPLIT OUT into section 5b, where every item carries the parity row that
@@ -674,7 +675,15 @@ CREATE TABLE IF NOT EXISTS "inventory_query_cache" (
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS "comms_outbox" (
   "id"            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "channel"       TEXT NOT NULL,
+  -- Production's own 2-value channel CHECK, restated here where the rest of the adoption lives.
+  -- It belongs in THIS section, not in 5b: section 5 is what a from-zero replay uses to reproduce
+  -- production, and 5b is explicitly movable to another phase (§13-D24 gap (a) offers exactly that).
+  -- Were the only copy of this constraint to live in 5b and 5b to move, a chain replay would create
+  -- `comms_outbox` with no channel constraint at all and accept `channel = 'anything'`. PostgreSQL
+  -- names an inline column constraint `<table>_<column>_check`, which is production's own name, so
+  -- 5b's widening finds it under the right name on both sides.
+  "channel"       TEXT NOT NULL
+                  CHECK ("channel" IN ('email','sms')),
   "dedup_key"     TEXT NOT NULL,
   "status"        TEXT NOT NULL DEFAULT 'pending'
                   CHECK ("status" IN ('pending','sending','sent','failed','suppressed','skipped')),
@@ -774,6 +783,25 @@ CREATE INDEX IF NOT EXISTS "idx_dlq_failed_at" ON "jobs_dead_letter" ("failed_at
 -- `parity/control.table.md` (M27-04a/b). Fifteen columns and one channel value; every one has a
 -- citation, so nothing is dropped for want of one.
 --
+-- WHAT THE CITATIONS DO NOT COVER, stated so the trace is not read as "these rows are satisfied":
+--   * C2 asks for `recipient_kind` / `recipient_id` "(indexed)" at PHASE 1. The COLUMNS land here;
+--     no index does. Constraint C1 allows exactly one schema wave, so an index C2 places in Phase 1
+--     cannot land in a later one without a second wave — this is an owner decision, either add the
+--     index to this wave or move C2's index half to Phase 2 in the ledger. It is recorded rather
+--     than silently taken because it is a schema addition beyond the three conditions this batch
+--     was scoped to.
+--   * R37a likewise asks for `queue_items` indexes on `(status, type)` and `(assigned_admin_id)`.
+--     Neither is here; §13-D11 correction 6 asked only for `owner_role`, which is. Same one-wave
+--     consequence, same owner decision.
+--
+-- NO FOREIGN KEY on `vehicle_request_id` / `deal_id` / `auction_id`, unlike every other cross-entity
+-- reference in this wave (section 6: "a guarded FK with a relation, never a bare id column"). That
+-- is deliberate and is the one place the rule is not applied: the outbox is a durable send record,
+-- and a row saying "this message was sent" has to survive deletion of the transaction it referred
+-- to — a cascade or a SET NULL would either destroy or blank the audit. They are correlation keys,
+-- not ownership edges. Flagged for owner confirmation, since the alternative reading is that this
+-- is an oversight.
+--
 --   channel 'in_app'      M27-04a  schema half Phase 1, delivery M27-04b Phase 2
 --   trigger_event         C1       Phase 2      template_key        C1   Phase 2 (validated by C3)
 --   vehicle_request_id    C1       Phase 2      deal_id             C1   Phase 2
@@ -822,6 +850,12 @@ ALTER TABLE "comms_outbox" ADD CONSTRAINT "comms_outbox_channel_check"
 ALTER TABLE "comms_outbox" DROP CONSTRAINT IF EXISTS "comms_outbox_status_check";
 ALTER TABLE "comms_outbox" ADD CONSTRAINT "comms_outbox_status_check"
   CHECK ("status" IN ('pending','sending','sent','failed','suppressed','skipped','delivered','cancelled'));
+
+-- SPELLING, deliberately divergent and worth stating because a shared Phase 2 helper will meet both:
+-- `comms_outbox.status` uses `'cancelled'` (two l's, per R88 and §28.2), while the sibling rail
+-- `lifecycle_touch_schedule.status` uses production's existing `'canceled'` (one l). Writing the
+-- comms spelling to the lifecycle table is a 23514. Neither is changed here — the comms value is new
+-- and follows the spec, the lifecycle value is production's and adoption does not rename it.
 
 -- The partial drain index predicate is deliberately NOT widened: `idx_comms_outbox_drain` covers
 -- `status IN ('pending','sending')`, and neither new value is drainable. `delivered` and `cancelled`

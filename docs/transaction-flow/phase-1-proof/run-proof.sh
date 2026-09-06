@@ -50,9 +50,20 @@ psql "$URL" -At -f "$HERE/production-baseline/census.sql" | tee /tmp/proof-censu
 # it admits — captured before anything is applied. This is the "before" side of the preservation
 # proof in step 4b, re-derived from the committed baseline on every run rather than transcribed into
 # an expectation that can go stale.
-psql "$URL" -At -f "$HERE/production-baseline/check-defs.sql" > /tmp/proof-checkdefs-before.txt
-psql "$URL" -At -f "$HERE/production-baseline/check-sets.sql" > /tmp/proof-checks-before.txt
-echo "  baseline CHECKs captured: $(wc -l < /tmp/proof-checkdefs-before.txt) constraints, $(wc -l < /tmp/proof-checks-before.txt) admitted values"
+#
+# ON_ERROR_STOP on every one of these four captures, and a non-empty assertion on both "before"
+# files. Without it the whole of step 4b degrades to a SILENT PASS: `psql -At -f x.sql > out` exits
+# 0 and writes an empty file when the SQL errors (verified: exit 0, 0 bytes; with ON_ERROR_STOP,
+# exit 3), `set -euo pipefail` does not trip, and every comparison below then finds nothing changed
+# and nothing lost — reporting "no CHECK weakened against production" having measured nothing.
+psql "$URL" -v ON_ERROR_STOP=1 -At -f "$HERE/production-baseline/check-defs.sql" > /tmp/proof-checkdefs-before.txt
+psql "$URL" -v ON_ERROR_STOP=1 -At -f "$HERE/production-baseline/check-sets.sql"  > /tmp/proof-checks-before.txt
+ckdefs_n=$(wc -l < /tmp/proof-checkdefs-before.txt); cksets_n=$(wc -l < /tmp/proof-checks-before.txt)
+echo "  baseline CHECKs captured: $ckdefs_n constraints, $cksets_n admitted values"
+# The baseline is committed, so these are known quantities, not guesses. A capture that comes back
+# short has not measured the schema it claims to have measured.
+[ "$ckdefs_n" -ge 29 ] || { echo "FAIL: baseline CHECK definition capture returned $ckdefs_n rows, expected >= 29" >&2; exit 1; }
+[ "$cksets_n" -ge 168 ] || { echo "FAIL: baseline CHECK value capture returned $cksets_n rows, expected >= 168" >&2; exit 1; }
 
 echo "== 3. apply both Phase 1 directories, each in ONE transaction (as Prisma does) =="
 for d in 20261106000000_transaction_spine_enums 20261106000100_transaction_spine_foundation; do
@@ -77,8 +88,10 @@ echo "== 4b. no CHECK weakened against production =="
 #
 # Three assertions, in order. The first two exist because the third — enumerating admitted values —
 # is a valid proof for ONE predicate shape only.
-psql "$URL" -At -f "$HERE/production-baseline/check-defs.sql" > /tmp/proof-checkdefs-after.txt
-psql "$URL" -At -f "$HERE/production-baseline/check-sets.sql"  > /tmp/proof-checks-after.txt
+psql "$URL" -v ON_ERROR_STOP=1 -At -f "$HERE/production-baseline/check-defs.sql" > /tmp/proof-checkdefs-after.txt
+psql "$URL" -v ON_ERROR_STOP=1 -At -f "$HERE/production-baseline/check-sets.sql"  > /tmp/proof-checks-after.txt
+[ -s /tmp/proof-checkdefs-after.txt ] || { echo "FAIL: post-wave CHECK definition capture is empty" >&2; exit 1; }
+[ -s /tmp/proof-checks-after.txt ]    || { echo "FAIL: post-wave CHECK value capture is empty" >&2; exit 1; }
 
 # (i) No CHECK production has may vanish. A constraint dropped and never re-added contributes no
 #     values, so the value comparison in (iii) would not notice it going.
