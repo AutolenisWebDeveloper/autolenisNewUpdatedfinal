@@ -42,7 +42,10 @@ ALTER TYPE "InsuranceStatus" ADD VALUE IF NOT EXISTS 'UNDER_REVIEW';
 ALTER TYPE "InsuranceStatus" ADD VALUE IF NOT EXISTS 'REJECTED';
 ALTER TYPE "InsuranceStatus" ADD VALUE IF NOT EXISTS 'EXPIRED';
 
--- ── Exception queue categories (§26; the 48 rows need these beyond the 8 existing labels) ───────
+-- ── Exception queue categories (§13-D11 option A: broad categories, the §26 row identity carried in
+--    TEXT `queue_items.exception_code`). TWELVE additive labels on top of production's 8, so
+--    `QueueItemType` holds 20 afterwards (R36). Eleven come from the §26 register's 48 rows; the
+--    twelfth, LINEAGE_ORPHAN, does not — see its own note below. ─────────────────────────────────
 ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'PAYMENT_EXCEPTION';
 ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'SOURCING_EXCEPTION';
 ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'AUCTION_EXCEPTION';
@@ -54,6 +57,11 @@ ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'INVENTORY_EXCEPTION';
 ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'DEALER_EXCEPTION';
 ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'PLAN_EXCEPTION';
 ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'POST_COMPLETION_EXCEPTION';
+-- §13-D11 shape correction 5. LINEAGE_ORPHAN is required by L3-01 (the §3 "one lineage, never broken"
+-- rule for the five non-payment record classes) and is covered by NO §26 register row, which is why
+-- an enumeration derived from §26 alone missed it. Phase 2 writes it from `assertParentResolvable()`
+-- in `lib/services/operations/queue-item.service.ts`; Phase 1 owes only the label.
+ALTER TYPE "QueueItemType" ADD VALUE IF NOT EXISTS 'LINEAGE_ORPHAN';
 
 -- ── Pickup outcomes (§17) ───────────────────────────────────────────────────────────────────────
 ALTER TYPE "PickupStatus" ADD VALUE IF NOT EXISTS 'NO_SHOW';

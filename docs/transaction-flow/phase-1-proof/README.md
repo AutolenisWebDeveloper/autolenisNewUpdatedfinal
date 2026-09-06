@@ -46,9 +46,10 @@ Only the production baseline exercises that path.
 ## What this proves, and what it does not
 
 **PROVES.** Both directories apply, in order, each inside a single transaction (the way Prisma runs
-them), against production's physical schema; all 311 expected objects exist afterwards; a second
-application of both directories changes nothing — neither the object census nor the *definitions* of
-tables, columns, indexes, constraints, enums, triggers, policies or functions (compared by digest).
+them), against production's physical schema; all 368 expected objects exist afterwards; **no CHECK
+constraint stopped admitting a value production admits**; a second application of both directories
+changes nothing — neither the object census nor the *definitions* of tables, columns, indexes,
+constraints, enums, triggers, policies or functions (compared by digest).
 
 **DOES NOT PROVE.** Anything about `_prisma_migrations`. The restore deliberately carries **no
 ledger**. Ledger correctness is a separate question, addressed in §6 of the implementation workflow,
@@ -150,6 +151,15 @@ policies=23     rls_enabled=249
 
 ## What the proof found
 
+Running against the production baseline with the §13-D11 / §13-D24 corrections applied (2026-09-06)
+confirmed each of them in the database rather than only in the DDL: both `assigned_admin_id` foreign
+keys resolve to `admins(id) ON DELETE SET NULL`; `queue_items.owner_role` is `QueueOwnerRole` with
+its 8 members and neither `SUPPORT` nor `CONCIERGE`; `QueueItemType` holds 20 labels including
+`LINEAGE_ORPHAN`; `queue_items_owner_role_status_idx` exists; `comms_outbox` carries `delivered_at`
+and a `status` CHECK admitting eight values. Run against the *pre*-correction database the same
+`verify.sql` reports 17 `MISSING` rows naming exactly those objects — the assertions fail first, so
+they are not decorative.
+
 Running against the production baseline caught a defect the chain-based proof had not: the four
 `ALTER TABLE` statements that add `ip_unavailable_reason` / `consent_ip_unavailable_reason` were each
 missing the comma terminating the preceding clause, so `20261106000100` was **syntactically invalid**
@@ -169,9 +179,47 @@ defaults, `CHECK`s, index predicates — lands in `20261106000100_transaction_sp
 Relatedly, `CREATE INDEX CONCURRENTLY` is illegal inside a transaction and so can never appear in a
 Prisma migration; the enforcement indexes here are plain `CREATE INDEX`.
 
+## The CHECK superset gate — why a rewritten CHECK gets its own step
+
+A rewritten `CHECK` is the one statement in this wave that can **narrow production silently**.
+`DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT` succeeds whether the new value list is a superset of
+the old one or a subset of it. A subset does not fail at deploy; it fails later, as a `23514` on a
+value production used to accept — and by then the migration is in the chain and CLAUDE.md forbids
+editing it, so the correction is a *new forward migration* and the wrong definition stays in the
+chain permanently.
+
+The concrete case: `lifecycle_touch_sequence_allowed` carries `deposit_reminder_5` and
+`deposit_reminder_6`. Dropping either would break the six-touch $99 recovery cadence (PAY-19, B1) at
+touch five.
+
+So the wave restates production's current values in full before adding any, and step **4b** of
+`run-proof.sh` *measures* that rather than trusting it:
+
+1. after the baseline is restored and **before** anything is applied, `production-baseline/check-sets.sql`
+   emits every `(constraint, admitted value)` pair in `public`;
+2. after both directories are applied, it runs again;
+3. any pair present before and absent after fails the run and is printed.
+
+The "before" side is therefore re-derived from the committed baseline on every run, not transcribed
+into an expectation that can rot. `verify.sql` independently asserts the values each of five CHECKs
+must admit, so a narrowing cannot pass by being quietly deleted from one list — it would have to be
+deleted from both, and the run-proof comparison does not read `verify.sql`'s list at all.
+
+Measured on 2026-09-06 against the PostgreSQL 17.6 restore:
+
+| constraint | before | after | delta |
+| --- | --- | --- | --- |
+| `comms_outbox_channel_check` | `{email, sms}` | `{email, sms, in_app}` | +1, none lost |
+| `comms_outbox_status_check` | `{pending, sending, sent, failed, suppressed, skipped}` | those six + `{delivered, cancelled}` | +2, none lost |
+| `lifecycle_touch_sequence_allowed` | 19 sequences | the same 19 — `pg_get_constraintdef` byte-identical | +0, none lost |
+| 9 further CHECKs | no production predecessor | their own sets | new |
+| 27 CHECKs | — | unchanged | — |
+
+168 admitted `(constraint, value)` pairs before, 215 after, **0 lost**.
+
 ## Phase 1 is additive
 
-`verify.sql` asserts, among the 311 expected objects, that `e_sign_envelopes_deal_id_key` is **still
+`verify.sql` asserts, among the 368 expected objects, that `e_sign_envelopes_deal_id_key` is **still
 present** after the wave. Replacing that live constraint is the signatures-phase
 expand/backfill/verify/cutover/contract sequence, not this one. If a future edit to Phase 1 drops it,
 the verifier fails.
