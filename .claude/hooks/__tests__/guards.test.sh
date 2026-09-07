@@ -169,10 +169,14 @@ cmd deny 'node -e "console.log(process.env.DATABASE_URL)"'
 cmd deny 'node -p process.env.DIRECT_URL'
 cmd deny 'python3 -c "import os; print(os.environ[\"DIRECT_URL\"])"'
 cmd deny "$(printf 'node <<EOF\nconsole.log(process.env.DATABASE_URL)\nEOF\n')"
-cmd deny 'DATABASE_URL=postgresql://postgres.aieybibvewmvrubcpthm:secret@aws-0-us-east-1.pooler.supabase.com:6543/postgres pnpm exec prisma migrate deploy'
-cmd deny 'export DIRECT_URL="postgresql://postgres:secret@db.aieybibvewmvrubcpthm.supabase.co:5432/postgres"'
-cmd deny 'psql postgresql://postgres:secret@db.ynxaqeejjmeilpwmuuie.supabase.co:5432/postgres -c "select 1"'
-cmd deny 'PGPASSWORD=hunter2 psql -h db.aieybibvewmvrubcpthm.supabase.co -U postgres -c "select 1"'
+# Fixtures use `.invalid` hosts and a placeholder password on purpose: a placeholder
+# password against a REAL hostname still reads as a credential to secret scanners
+# (GitGuardian flagged an earlier revision of these lines), and the rules under test
+# key on the DSN shape, not on the host.
+cmd deny 'DATABASE_URL=postgresql://app:placeholder-not-a-secret@db.example.invalid:5432/postgres pnpm exec prisma migrate deploy'
+cmd deny 'export DIRECT_URL="postgresql://app:placeholder-not-a-secret@db.example.invalid:5432/postgres"'
+cmd deny 'psql postgresql://app:placeholder-not-a-secret@db.example.invalid:5432/postgres -c "select 1"'
+cmd deny 'PGPASSWORD=placeholder-not-a-secret psql -h db.example.invalid -U app -c "select 1"'
 cmd deny 'supabase migration up'
 cmd deny 'supabase migration repair --status applied 20260901000000'
 cmd deny 'supabase db dump -f prod.sql'
@@ -227,7 +231,7 @@ cmd deny 'pg_restore -d "$DIRECT_URL" /tmp/dump.file'
 cmd allow 'pg_restore -d "postgresql://pgtest@127.0.0.1:55432/autolenis_e2e" /tmp/dump.file'
 
 echo "== deploy session: a non-loopback production DSN is in the environment =="
-GUARD_ENV='DATABASE_URL=postgresql://u:p@aws-0-us-east-1.pooler.supabase.com:6543/postgres'
+GUARD_ENV='DATABASE_URL=postgresql://u:p@db.example.invalid:5432/postgres'     # non-loopback: any remote host
 cmd deny 'pnpm test:all'
 cmd deny 'cd frontend && pnpm test'
 cmd deny 'pnpm build'
@@ -261,7 +265,7 @@ cmd allow 'cat docs/transaction-flow/phase-1-proof/README.md'
 cmd allow 'grep -rn "vehicleRequest.updateMany" frontend/lib'
 cmd allow 'jq . .claude/settings.json'
 cmd allow 'psql --version'
-GUARD_ENV='DIRECT_URL=postgresql://u:p@db.aieybibvewmvrubcpthm.supabase.co:5432/postgres'
+GUARD_ENV='DIRECT_URL=postgresql://u:p@direct.example.invalid:5432/postgres'
 cmd deny 'pnpm test'                                                               # any of the three variables triggers it
 GUARD_ENV='DATABASE_URL=postgresql://u:p@127.0.0.1:55432/autolenis_e2e'
 cmd allow 'pnpm test:all'                                                          # a loopback DSN is not a deploy session
