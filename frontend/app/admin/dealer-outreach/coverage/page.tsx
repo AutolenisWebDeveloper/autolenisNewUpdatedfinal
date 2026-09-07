@@ -167,6 +167,18 @@ export default async function DealerCoveragePage() {
               testId="stat-apollo-enabled"
             />
             <StatCard
+              icon={Power}
+              label="Unattended backfill spend"
+              value={coverage.apollo.backfillSpendEnabled ? "Armed" : "Off"}
+              sub={
+                coverage.apollo.backfillSpendEnabled
+                  ? "the daily cron may draw credits with nobody watching"
+                  : "cron resolves rooftops only; no scheduled reveal can bill"
+              }
+              tone={coverage.apollo.backfillSpendEnabled ? "warning" : "neutral"}
+              testId="stat-apollo-backfill-armed"
+            />
+            <StatCard
               icon={Coins}
               label="Credits spent"
               value={coverage.apollo.spentCredits.toLocaleString()}

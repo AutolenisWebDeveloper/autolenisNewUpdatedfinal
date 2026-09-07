@@ -48,6 +48,17 @@
 // (CONTACT_STALE_MONTHS) is likewise owned by the live waterfall. OFF until Apollo
 // is enabled + the probe cap is set — when off it neither queries nor spends nor
 // resolves.
+//
+// TWO GATES, ON PURPOSE. apolloEnabled() (APOLLO_REVEAL_ENABLED) turns the paid
+// tier on for everything that reveals — the live waterfall, the contract probe,
+// and this job. It is ALREADY "true" in production. Since the API-contract batch
+// an attempt bills for the organization resolution as well as the match, so the
+// daily cron would spend ~2 credits per rooftop unattended the moment that
+// change deploys. backfillSpendEnabled() (APOLLO_BACKFILL_ENABLED) is therefore
+// a SECOND, separate switch on Phase 1 alone: it lets the owner keep the paid
+// tier on for supervised, one-shot use (the probe, a live reveal) while the
+// unattended scheduled spend stays off until deliberately armed. Phase 0 is
+// free and keeps running under the first gate only. Default OFF.
 
 import type { PrismaClient } from "@prisma/client";
 import { logger } from "@/lib/logger";
@@ -58,6 +69,16 @@ import { revealRooftopContact, REVEAL_TOTAL_COST_CREDITS } from "./apollo-reveal
 import { remainingCredits, cycleKeyFor } from "./apollo-credit-ledger.service";
 import { upsertContactProfile, reconcileProspectContact } from "@/lib/services/dealer/dealer-contact-profile.service";
 import { resolveRooftop } from "@/lib/services/dealer/dealer-rooftop.service";
+
+/**
+ * The unattended-spend switch for Phase 1. True only when the key is present AND
+ * APOLLO_BACKFILL_ENABLED is exactly "true". Deliberately independent of
+ * apolloEnabled(): that flag is already on in production, and this one exists so
+ * the scheduled cron cannot start billing just because the paid tier is.
+ */
+export function backfillSpendEnabled(): boolean {
+  return !!process.env.APOLLO_API_KEY && process.env.APOLLO_BACKFILL_ENABLED === "true";
+}
 
 // Iteration safety cap (independent of the budget cap) so a single run can never
 // churn the whole rooftop table. The real spend ceiling is the ledger budget.
@@ -93,6 +114,8 @@ export interface BackfillDeps {
   prisma: PrismaClient;
   now: Date;
   enabled: () => boolean;
+  /** Phase 1's own gate (APOLLO_BACKFILL_ENABLED). Phase 0 never consults it. */
+  spendEnabled: () => boolean;
   reveal: typeof revealRooftopContact;
   upsert: typeof upsertContactProfile;
   remaining: typeof remainingCredits;
@@ -103,6 +126,13 @@ export interface BackfillDeps {
 
 export interface BackfillResult {
   enabled: boolean;
+  /**
+   * True when Phase 1 was skipped because APOLLO_BACKFILL_ENABLED is not "true".
+   * Phase 0 still ran. A gated run is a HEALTHY run — the cron completed and
+   * did what it was allowed to — so this is a field on the result, never an
+   * error, and the dead-cron monitor never reads it as OVERDUE.
+   */
+  phase1Gated: boolean;
   // Phase 0 — canonical rooftop resolution.
   dealersResolved: number;
   prospectsResolved: number;
@@ -252,6 +282,7 @@ export async function runDealerContactBackfill(
   const prisma = deps?.prisma ?? defaultPrisma;
   const now = deps?.now ?? new Date();
   const enabled = deps?.enabled ?? apolloEnabled;
+  const spendEnabled = deps?.spendEnabled ?? backfillSpendEnabled;
   const reveal = deps?.reveal ?? revealRooftopContact;
   const upsert = deps?.upsert ?? upsertContactProfile;
   const remaining = deps?.remaining ?? remainingCredits;
@@ -265,6 +296,7 @@ export async function runDealerContactBackfill(
 
   const result: BackfillResult = {
     enabled: false,
+    phase1Gated: false,
     dealersResolved: 0,
     prospectsResolved: 0,
     contactsReconciled: 0,
@@ -294,6 +326,19 @@ export async function runDealerContactBackfill(
     result.resolveFailed = r0.resolveFailed;
   } catch (err) {
     logger.warn("[dealer-contact-backfill] Phase 0 rooftop resolution failed — continuing to gap-fill:", err);
+  }
+
+  // Phase 1 gate — the unattended-spend switch. Checked AFTER Phase 0 (free,
+  // always allowed) and BEFORE the first Phase 1 query or budget read, so a gated
+  // run touches neither the ledger nor Apollo. INFO, not warn: gated is the
+  // configured state, not a fault.
+  if (!spendEnabled()) {
+    result.phase1Gated = true;
+    logger.info(
+      "[dealer-contact-backfill] Phase 1 gated — APOLLO_BACKFILL_ENABLED is not \"true\"; " +
+        `Phase 0 ran (dealers=${result.dealersResolved} prospects=${result.prospectsResolved}), no reveal attempted, nothing drawn`,
+    );
+    return result;
   }
 
   // Candidates = rooftops with NO send-safe contact (email present + send-safe

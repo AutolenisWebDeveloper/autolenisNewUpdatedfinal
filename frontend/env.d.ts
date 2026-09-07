@@ -61,6 +61,16 @@ declare namespace NodeJS {
     MICROBILT_USERNAME?: string;        // MsgRqHdr.UserName
     MICROBILT_PRODUCT_ID?: string;      // MsgRqHdr.ProductID — selects IPredict Advantage
 
+    // ── Apollo dealer-contact backfill — the unattended-spend switch ─────────
+    // APOLLO_REVEAL_ENABLED turns the paid tier on for everything that reveals
+    // and is already "true" in production. This flag is a SECOND switch on the
+    // scheduled backfill's Phase 1 (the paid gap-fill) alone: unset or anything
+    // but "true" → the daily cron resolves rooftops (free) and attempts no
+    // reveal, drawing nothing. Read only by backfillSpendEnabled() in
+    // lib/services/dealer-recruitment/dealer-contact-backfill.service.ts. Off by
+    // default; arm deliberately.
+    APOLLO_BACKFILL_ENABLED?: string; // "true" to arm unattended backfill spend
+
     // Communication (Resend ONLY)
     RESEND_API_KEY: string;
     FROM_NAME: string;

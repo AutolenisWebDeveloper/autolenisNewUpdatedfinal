@@ -94,6 +94,10 @@ beforeEach(() => {
   orgAnswer = { status: 200, json: { organization: { id: "o-1", name: "Berman CDJR" } } };
   process.env.APOLLO_API_KEY = "test-key";
   process.env.APOLLO_REVEAL_ENABLED = "true";
+  // The probe is supervised, one-shot spend: it must run while the UNATTENDED
+  // switch (APOLLO_BACKFILL_ENABLED) is off, which is the state that lets an
+  // admin prove the contract without arming the daily cron.
+  delete process.env.APOLLO_BACKFILL_ENABLED;
 });
 
 test("refuses an unauthenticated caller and a read-only role, spending nothing", async () => {
@@ -170,4 +174,12 @@ test("a 404 from enrich is returned raw and the credit is kept (conservative)", 
   assert.equal(body.data.rooftops[0].orgResolution.status, 404);
   assert.equal(body.data.rooftops[0].orgResolution.ok, false);
   assert.deepEqual(body.data.rooftops[0].orgResolution.body, { error: "not found" });
+});
+
+test("the probe runs with APOLLO_BACKFILL_ENABLED unset — it gates on the paid tier alone", async () => {
+  assert.equal(process.env.APOLLO_BACKFILL_ENABLED, undefined);
+  const res = await post({ acknowledgeSpend: true });
+  assert.equal(res.status, 200, "the unattended-spend switch must not block supervised use");
+  const body = await json<{ data: { creditsDrawn: number } }>(res);
+  assert.equal(body.data.creditsDrawn, 3);
 });

@@ -29,7 +29,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { SEND_SAFE_STATUSES } from "./contact-resolution.service";
-import { PROSPECT_RESOLVE_EXCLUDE } from "./dealer-contact-backfill.service";
+import { PROSPECT_RESOLVE_EXCLUDE, backfillSpendEnabled } from "./dealer-contact-backfill.service";
 import { apolloEnabled } from "./apollo.service";
 import { remainingCredits, cycleKeyFor } from "./apollo-credit-ledger.service";
 
@@ -53,6 +53,13 @@ export interface RooftopCoverage {
 
 export interface ApolloCoverage {
   enabled: boolean;
+  /**
+   * Whether the scheduled backfill may spend (APOLLO_BACKFILL_ENABLED). Distinct
+   * from `enabled`: the paid tier can be on for supervised use while unattended
+   * cron spend stays disarmed. This is the figure that says whether credits can
+   * leave the ledger with nobody watching.
+   */
+  backfillSpendEnabled: boolean;
   cycleKey: string;
   capCredits: number;
   spentCredits: number;
@@ -76,6 +83,7 @@ export interface CoverageDeps {
   prisma: PrismaClient;
   now: Date;
   enabled: () => boolean;
+  spendEnabled: () => boolean;
   remaining: typeof remainingCredits;
 }
 
@@ -91,6 +99,7 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
   const prisma = deps?.prisma ?? defaultPrisma;
   const now = deps?.now ?? new Date();
   const enabled = deps?.enabled ?? apolloEnabled;
+  const spendEnabled = deps?.spendEnabled ?? backfillSpendEnabled;
   const remaining = deps?.remaining ?? remainingCredits;
 
   const cycleKey = cycleKeyFor(now);
@@ -163,6 +172,7 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
     contactProfiles: { total: profilesTotal, sendSafe: profilesSendSafe },
     apollo: {
       enabled: enabled(),
+      backfillSpendEnabled: spendEnabled(),
       cycleKey,
       // No ledger row yet → report zeros rather than implying budget exists.
       capCredits: ledger?.capCredits ?? 0,
