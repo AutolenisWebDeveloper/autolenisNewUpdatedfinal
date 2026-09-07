@@ -27,6 +27,7 @@ import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
 } from "@/lib/services/email/resend.service";
+import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 
 // 90-day validity, matching the manual-override path so both admin decision
 // rails stamp the same expiry window (the record AND the email agree).
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     // FCRA § 615 adverse-action notice with the record's principal-reason
     // codes, and an honest send-outcome ComplianceEvent — parity with the
     // manual-override rail (SENT / SUPPRESSED_DUPLICATE / SEND_FAILED).
-    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let outcome: AdverseActionDelivery = "THREW";
     let sendErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
@@ -241,12 +242,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       sendErrorMessage = err instanceof Error ? err.message : String(err);
     }
     try {
-      const eventType =
-        outcome === "SENT"
-          ? "ADVERSE_ACTION_NOTICE_SENT"
-          : outcome === "DUPLICATE"
-            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
-            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      const eventType = classifyAdverseActionDelivery(outcome);
       await prisma.complianceEvent.create({
         data: {
           eventType,

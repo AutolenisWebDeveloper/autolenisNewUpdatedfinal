@@ -27,6 +27,7 @@ import {
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
+import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 
 // ── Provider-failure observability ──────────────────────────────────────────
 // A MicroBilt failure and a risk-triggered compliance hold both land as
@@ -645,7 +646,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     // ambiguous (DUPLICATE / FAILED / DEV_SKIPPED). Mislabeling a Resend
     // outage as SUPPRESSED_DUPLICATE would leave a false FCRA § 615 audit
     // trail.
-    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let outcome: AdverseActionDelivery = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
       const result = await sendAdverseActionEmail({
@@ -664,12 +665,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     }
 
     try {
-      const eventType =
-        outcome === "SENT"
-          ? "ADVERSE_ACTION_NOTICE_SENT"
-          : outcome === "DUPLICATE"
-            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
-            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      const eventType = classifyAdverseActionDelivery(outcome);
       await prisma.complianceEvent.create({
         data: {
           eventType,

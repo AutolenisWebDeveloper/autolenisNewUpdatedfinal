@@ -31,6 +31,7 @@ import {
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
+import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 
 // Expiry durations — iPredict results expire after 30 days (same as buyer path).
 const IPREDICT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
@@ -641,7 +642,7 @@ export async function runAdminIPredictPrequalForBuyer(
 
     // See prequal.service.ts for the SENT/DUPLICATE/FAILED/DEV_SKIPPED contract —
     // we map on the discriminated outcome, not on the boolean `sent`.
-    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let outcome: AdverseActionDelivery = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
@@ -660,12 +661,7 @@ export async function runAdminIPredictPrequalForBuyer(
     }
 
     try {
-      const eventType =
-        outcome === "SENT"
-          ? "ADVERSE_ACTION_NOTICE_SENT"
-          : outcome === "DUPLICATE"
-            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
-            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      const eventType = classifyAdverseActionDelivery(outcome);
       await prisma.complianceEvent.create({
         data: {
           eventType,

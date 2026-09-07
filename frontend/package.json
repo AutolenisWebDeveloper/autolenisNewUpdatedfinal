@@ -86,7 +86,7 @@
     "test:crm-services": "tsx --test --experimental-test-module-mocks lib/services/crm/__tests__/*.test.ts",
     "test:comms-outbox": "tsx --test --experimental-test-module-mocks lib/services/comms/__tests__/*.test.ts",
     "test:campaign": "tsx --test --experimental-test-module-mocks lib/services/campaign/__tests__/*.test.ts",
-    "test:operations": "tsx --test --experimental-test-module-mocks lib/services/__tests__/*.test.ts",
+    "test:operations": "tsx --test --experimental-test-module-mocks lib/services/__tests__/*.test.ts lib/services/operations/__tests__/*.test.ts",
     "test:inventory": "tsx --test --experimental-test-module-mocks lib/services/inventory/__tests__/*.test.ts",
     "test:shortlist": "tsx --test --experimental-test-module-mocks lib/services/shortlist/__tests__/*.test.ts app/api/buyer/shortlist/__tests__/*.test.ts",
     "test:vehicle-request": "tsx --test --experimental-test-module-mocks lib/services/vehicle-request/__tests__/*.test.ts",

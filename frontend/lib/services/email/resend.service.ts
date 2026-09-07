@@ -123,7 +123,14 @@ export type EmailSendOutcome =
   | { sent: true;  outcome: "SENT";        resendId?: string }
   | { sent: false; outcome: "DUPLICATE";   resendId?: string }
   | { sent: false; outcome: "FAILED" }
-  | { sent: false; outcome: "DEV_SKIPPED" };
+  | { sent: false; outcome: "DEV_SKIPPED" }
+  /**
+   * The idempotency log could not be read, so we cannot tell whether this message
+   * has already gone out. Nothing was sent. RETRYABLE — see `sendIdempotent`.
+   */
+  | { sent: false; outcome: "LOG_UNAVAILABLE" }
+  /** The address is HARD-suppressed (bounce/complaint). Nothing was sent, and a retry will not help. */
+  | { sent: false; outcome: "SUPPRESSED" };
 
 // Idempotent send — check EmailSendLog before sending
 async function sendIdempotent(params: {
@@ -133,17 +140,44 @@ async function sendIdempotent(params: {
   html: string;
   templateId: string;
 }): Promise<EmailSendOutcome> {
-  // Check idempotency — never send duplicate emails. If the lookup fails
-  // (e.g. transient DB connectivity issue), log and proceed with the send
-  // rather than silently skipping it.
+  // HARD suppression. A transactional email deliberately bypasses MARKETING
+  // suppression — a buyer who unsubscribed from marketing must still receive their
+  // own deal emails — but a hard bounce or a spam complaint is not a preference,
+  // it is an address that must not be mailed. `deliverEmail` on the outbox rail has
+  // always applied this gate; this direct rail did not, so the same address could
+  // be suppressed on one path and mailed on the other.
+  //
+  // A lookup OUTAGE throws out of SuppressionService by design, and it is caught
+  // here as LOG_UNAVAILABLE rather than being treated as "not suppressed".
+  try {
+    const { getServiceSupabase } = await import("@/lib/supabase-service");
+    const { SuppressionService } = await import("@/lib/services/suppression.service");
+    if (await SuppressionService.isEmailHardSuppressed(getServiceSupabase(), params.to)) {
+      return { sent: false, outcome: "SUPPRESSED" };
+    }
+  } catch (err) {
+    logger.error("[EMAIL] hard-suppression lookup failed — refusing to send:", err);
+    return { sent: false, outcome: "LOG_UNAVAILABLE" };
+  }
+
+  // Idempotency. control/X-02: this lookup used to FAIL OPEN — a transient database
+  // error left `existing` null and the send proceeded, so a blip could deliver a
+  // second copy of an FCRA §615 adverse-action notice, a payment receipt, or any
+  // other transactional message. It now FAILS CLOSED.
+  //
+  // Closed is the safe direction here because nothing is lost by it: every caller
+  // either goes through the durable outbox, which retries, or receives
+  // LOG_UNAVAILABLE and can retry itself. The key is not poisoned — no row is
+  // written — so the next attempt behaves as if this one never happened. Sending a
+  // duplicate, by contrast, cannot be undone.
   let existing: Awaited<ReturnType<typeof prisma.emailSendLog.findUnique>> | null = null;
   try {
     existing = await prisma.emailSendLog.findUnique({
       where: { idempotencyKey: params.idempotencyKey },
     });
   } catch (err) {
-    logger.error("[EMAIL] EmailSendLog check failed — proceeding with send:", err);
-    // Non-blocking — allow send to proceed even if idempotency check fails
+    logger.error("[EMAIL] EmailSendLog check failed — refusing to send (cannot rule out a duplicate):", err);
+    return { sent: false, outcome: "LOG_UNAVAILABLE" };
   }
   // Only a genuinely-SENT prior attempt blocks a re-send. A previously FAILED
   // (transient Resend/DB outage) or DEV_SKIPPED attempt MUST be retriable —
