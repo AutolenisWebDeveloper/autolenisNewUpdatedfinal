@@ -256,7 +256,7 @@ re-asserted at deploy time by `docs/transaction-flow/phase-1-proof/preflight.sql
 | Buyers holding more than one Vehicle Request in the proposed open-status set | **3 buyers** (`053d546b…` 4 rows; `70568e7b…` 5 rows; `dd2411be…` 2 rows — all May–June 2026, statuses `SUBMITTED`/`ACTIVE_SOURCING`) | The partial unique index cannot be created until these are reconciled by an owner-run, audited status change (e.g. superseded rows → `CANCELLED` with `cancel_reason`), never by a migration `UPDATE`. §13-D2. |
 | `vehicle_requests` status distribution | `ACTIVE_SOURCING` 12, `SUBMITTED` 6, `CLOSED_NO_MATCH` 1 | 12 requests sit in `ACTIVE_SOURCING` with no auction linked to 11 of them — the lineage gap this plan closes. |
 | Shortlists over the five-candidate cap | 0 (sizes 5, 5, 5) | The DB-level cap trigger can be created without cleanup. |
-| Buyers with more than one PAID deposit | 1 (`70568e7b…`, 3 deposits → 3 auctions) | Consistent with "plan per request"; each deposit will attach to its own request in Phase 3 backfill (owner-run). |
+| Buyers with more than one PAID deposit | 1 (`70568e7b…`, 3 `PAID` rows → 3 auctions; read 2026-09-07: two real Stripe charges and one admin-minted row with no payment intent — §8.1a.1 items 3 and 5) | Consistent with "plan per request"; each real deposit will attach to its own request in Phase 3 backfill (owner-run); the synthetic row needs a Phase 3 disposition first. |
 | Non-NULL `vehicle_requests.assigned_admin_id` values that do not resolve in `admins(id)` (added 2026-09-06 for §13-D11 correction 1) | **0** — the column held 0 non-NULL rows at all when read 2026-09-05 (§5.7) | The FK `vehicle_requests_assigned_admin_id_fkey → admins(id)` validates existing data on `ADD CONSTRAINT`. The zero is point-in-time: one admin assignment before the deploy makes it fail, and Prisma runs the file in one transaction, so the whole wave rolls back. Asserted at deploy time by `preflight.sql`; a non-zero result stops the deploy for owner-run reconciliation. |
 
 ### 5.7 Figures the Phase 1 shape corrections rest on — provenance (VERIFIED)
@@ -714,31 +714,118 @@ operational need for one.
    that would be false for these buyers.
 2. **The count is eleven open requests, not "three buyers holding 2–5" as a rough figure.**
    Read from production 2026-09-07: buyer `053d546b` 4 open + 1 CLOSED_NO_MATCH (29 May–3 Jun,
-   1 deposit); `70568e7b` 5 open (13 May–3 Jun, **3 deposits**); `dd2411be` 2 open (27 May–2 Jun,
-   0 deposits). Every one has zero auctions. §5.6's "three buyers" is correct; the per-buyer counts
-   are 4 / 5 / 2.
-3. **One buyer holds paid deposits against the duplicates, so §23.1 governs.** Cancelling a request
-   for a buyer who paid is not neutral. Today's `deposits` carries **no request reference** —
-   `deposits.vehicle_request_id` is created by THIS wave and does not exist until step 4 — and the
-   standard checkout puts only `{ buyerId, type: "deposit" }` into Stripe metadata
-   (`app/api/buyer/deposit/create-intent/route.ts:212-218`). Deposit → request mapping before
-   deploy is therefore by evidence, not by key: creation-time correlation, `admin_audit_logs`, and
-   whether `stripe_payment_intent_id` is NULL (admin override / journey-complete fabricated `PAID`
-   rows — `deposit/override/route.ts:64-69`, `journey/complete-all/route.ts:103` — versus a real
-   Stripe charge). Refund review under §23.1 must precede any cancellation of a request that a real
-   charge can be attributed to.
-4. **A sub-second bulk touch of seven of the eleven rows at 01:30:42–43 UTC on 2026-09-07** is under
-   investigation and is NOT attributable from the codebase alone. Candidates that run at :30 and
-   write `vehicle_requests`: `coverage-hold-reconcile` (`*/15`), whose progression half advances
-   SUBMITTED/INTAKE → ACTIVE_SOURCING and writes `AUTO_INTAKE`/`AUTO_SOURCING` events, and whose
-   hold half **writes unconditionally every tick** on a thin-coverage held request
-   (`request-coverage-gate.service.ts:162-167`) without writing an event. The progression
-   reconciler has run every 15 minutes since 2026-08-26 (PR #335), so a first-time sweep of May/June
-   rows tonight is implausible for that half. `intake-reconcile` is excluded by its 48-hour
-   eligibility window. `cron_job_logs` (which stamps `result.build.commitSha`), `vehicle_request_events`
-   and `admin_audit_logs` for 01:25–01:50 UTC decide it; the reconciliation must not proceed until
-   they have, because if the seven were moved into an open status tonight the duplicate set is an
-   artefact and the reconciliation target changes.
+   1 deposit); `70568e7b` 5 open (13 May–3 Jun, 3 `PAID` deposit rows — item 3); `dd2411be` 2 open
+   (27 May–2 Jun, 0 deposits). Every one has zero auctions. §5.6's "three buyers" is correct; the
+   per-buyer counts are 4 / 5 / 2.
+3. **One buyer holds real charges against the duplicates, so §23.1 governs — two charges, not
+   three.** Read 2026-09-07: `70568e7b`'s three `PAID` rows are `6d940f91` (12 May 23:46 UTC,
+   payment intent present, unrefunded), `ac00344b` (13 May 23:23 UTC, **payment intent NULL** —
+   admin-minted, no money moved; item 5) and `9ce1b59c` (15 May 16:30 UTC, payment intent present,
+   unrefunded). Two charges sit under §23.1 manual refund review; the third row carries no refund
+   exposure. Cancelling a request for a buyer who paid is not neutral. Today's `deposits` carries
+   **no request reference** — `deposits.vehicle_request_id` is created by THIS wave and does not
+   exist until step 4 — and the standard checkout puts only `{ buyerId, type: "deposit" }` into
+   Stripe metadata (`app/api/buyer/deposit/create-intent/route.ts:212-218`). Deposit → request
+   attribution before deploy is therefore by evidence, in this order of strength: **(a)**
+   `admin_audit_logs` `AUCTION_LAUNCHED_BY_ADMIN` metadata, which records
+   `{ vehicleRequestId, depositId }` whenever the admin launch path minted or attached the deposit
+   (`app/api/admin/buyers/[buyerId]/launch-auction/route.ts:323-346`); **(b)** the auction each
+   deposit owns (`auctions.deposit_id` is unique; all three of this buyer's auctions carry NULL
+   `vehicle_request_id`) and its `auction_vehicles` row, which `ensureAuctionVehicleFromRequest`
+   (`lib/services/auction/dealer-invitation.service.ts:117-150`) copies from the buyer's **newest
+   non-cancelled request at invitation time** — so the make/model/year on the auction identifies
+   the request that was current when that deposit's auction was invited; **(c)** creation-time
+   proximity, noting that the first real charge (12 May 23:46 UTC) precedes the buyer's earliest
+   request (13 May), so "nearest request before" is empty for it and the pairing must read
+   forward. Two requests created the same day before a deposit are flagged as ambiguous, never
+   resolved by timing. Refund review under §23.1 precedes any cancellation of a request that a real
+   charge attributes to; the attribution result is owner-read and recorded with the D2 execution.
+4. **The sub-second bulk touch of seven of the eleven rows at 01:30:42–43 UTC on 2026-09-07 —
+   RESOLVED: the hold half of `coverage-hold-reconcile` refreshing `coverage_hold_reason`; no
+   status transition.** Forensics read 2026-09-07 (owner-run): `vehicle_request_events` 0 rows and
+   `admin_audit_logs` 0 rows for 01:00–02:00 UTC; every touched row carries
+   `coverage_hold_at = 2026-08-25 03:00:2x UTC` and `coverage_hold_reason = 'thin_coverage:2@150mi'`
+   while the four untouched rows have `coverage_hold_at IS NULL` — an exact correlation with the
+   reconciler's selection predicate (`coverage_hold_at IS NOT NULL AND status IN (SUBMITTED, INTAKE,
+   ACTIVE_SOURCING)`, `request-coverage-gate.service.ts:218-225`); no buyer row was touched (ZIPs
+   last changed 27 May, 19 Aug, 25 Aug); every cron row in 01:14–01:52 UTC is stamped
+   `commitSha 70e237b6`. The thin branch writes `coverage_hold_at` (preserved) and the refreshed
+   reason on every call (`:164-167`), and `VehicleRequest.updatedAt` is `@updatedAt`, stamped
+   client-side by Prisma on every `update` whether or not a value changed — hence seven
+   `updated_at` bumps ~90 ms apart and no event. The eleven duplicates are historical buyer
+   behaviour. **D2 proceeds on the original analysis, the original reason string and the original
+   target set.**
+
+   **Loose end, explained before closing: the 01:45 tick — and every tick since — did not re-bump
+   the seven.** Both obvious readings are refuted by the code. The write is not conditional on the
+   reason changing: the thin branch writes unconditionally and the adequate branch writes whenever
+   the row was held, so every held row that reaches the end of a gate call is written. Eligibility
+   did not change: status and hold columns are unchanged per the forensics, and `take: 50`
+   oldest-hold-first cannot exclude seven rows it selected fifteen minutes earlier. `withCronRun`
+   holds no lease and never skips a tick (`lib/services/monitoring/cron-monitor.service.ts:96-135`).
+   A silent tick therefore means one of two things: the tick never reached the hold half, or
+   `applyRequestCoverageGate` threw before its `update` on every row — the reconcile loop catches
+   per row and counts it `stillHeld` (`:235-244`), so `cron_job_logs` shows `COMPLETED` with
+   `holds.found = 7, stillHeld = 7` in **both** the writing and the throwing case; only `updated_at`
+   and the runtime log line `[coverage-gate] reconcile failed for request …` tell them apart.
+   **Leading candidate — the 42703 window §8.1a.2 was written to prevent, opened by the merge
+   itself:** PR #404 merged to `main` at 01:37:12 UTC, seven minutes after the last successful
+   write, and `vercel.json` sets no `git.deploymentEnabled`, so Vercel's default deploys every push
+   to `main` to production. A production build of `48e473f` carries the Phase 1 `schema.prisma`;
+   `prisma.vehicleRequest.update` with no `select` RETURNs every scalar column of the model,
+   including this wave's (`current_plan_snapshot_id`, `abandoned_at`, …), which production lacks
+   until directory 2 is applied → SQLSTATE 42703 → Prisma `P2022`, thrown before the write —
+   exactly this silence — and it would also mean every full-row read or write on any table this
+   wave extends has failed in production since roughly 01:45 UTC. Q1 covered 01:14–01:52 only, so
+   it cannot exclude this; Vercel deployment and runtime-error reads were refused (403) to the
+   session. **UNVERIFIED — decided by one read-only query, then closed either way:**
+
+   ```sql
+   SELECT started_at, status, result->'holds' AS holds,
+          result->'build'->>'commitSha' AS commit_sha, left(error, 200) AS error
+   FROM cron_job_logs
+   WHERE cron_name = 'coverage-hold-reconcile' AND started_at >= '2026-09-07 01:30'
+   ORDER BY started_at;
+   ```
+
+   | Rows after 01:52 UTC show | Mechanism | Action |
+   | --- | --- | --- |
+   | `commit_sha` = `48e473f…` (any post-#404 SHA), `COMPLETED`, `found = 7` | Phase 1 client ahead of the database — the 42703 window is open now | Apply directory 2 per §8.1a.2 (after the D1 resolves and D2), or roll production back to `70e237b6` until it is. Every cron and page touching the extended tables is affected meanwhile. |
+   | `commit_sha` = `70e237b6`, `COMPLETED`, `found = 7` | Gate throwing per row for another reason (connectivity, pool, geocode path) | Vercel runtime logs for `[coverage-gate] reconcile failed` name it. |
+   | No rows after 01:30 | Ticks not reaching the handler (Vercel cron state, or `authorizeCronRequest` 401) | Vercel cron dashboard; cron-secret rotation. |
+   | `FAILED` | The `error` column names it | — |
+
+5. **A synthetic `PAID` deposit exists in production — a Phase 3 money-model finding, recorded,
+   not changed.** `deposits` row `ac00344b` (buyer `70568e7b`, 13 May 2026 23:23 UTC) has
+   `status = PAID` and `stripe_payment_intent_id IS NULL`: no charge, no provider evidence, and it
+   owns an auction. It was minted by an admin path — the candidates are
+   `app/api/admin/buyers/[buyerId]/launch-auction/route.ts:136-145` (creates
+   `{ buyerId, amountCents, status: "PAID" }` when the buyer has no unattached `PAID` row, then
+   launches an auction on it), `deposit/override/route.ts:64-69`, `journey/complete-all/route.ts:103`
+   and `journey/complete/route.ts:143-145`; the 13 May `admin_audit_logs` names which. Everything
+   built on `status = PAID` reads it as settled money: the fulfilment gate unlocks paid enrichment
+   and outreach on it (`lib/services/payment/fulfillment-gate.ts:30-38`), the revenue report sums
+   its `amount_cents` (`app/admin/reports/revenue/page.tsx:29`), the analytics counters count it
+   (`lib/services/analytics/analytics.service.ts:11`, `admin-analytics.service.ts:63,332-349`), and
+   the QStash state gate passes on it (`lib/qstash/state.ts:10`). Only the refund executor
+   distinguishes — `NO_CHARGE` for a NULL or `pi_admin_` intent
+   (`lib/services/payment/refund.service.ts:26-28,50-55`) — so the row can never leave `PAID`.
+   **Phase 3, which owns the money model, must** (a) make "paid" mean provider-settled — an
+   explicit synthetic state or a settlement-evidence predicate, so the gate, reports and analytics
+   stop reading minted rows as revenue; (b) census and disposition of the existing synthetic rows —
+   owner-run, audited, never a migration `UPDATE`; (c) S7-01a: remove the minting. The row is not
+   touched by this wave or by D2.
+6. **§6c is in production data now — seven of the eleven open requests parked thirteen days on two
+   rooftops.** The seven held rows all read `thin_coverage:2@150mi`, set 2026-08-25 03:00 UTC and
+   geocoded (no `:ungeocoded` suffix): two contactable rooftops at 150 miles, the widest tier of the
+   ladder (`RADIUS_TIERS = [25, 50, 100, 150]`, `lib/services/auction/coverage.service.ts:38`;
+   `MIN_COVERAGE_DEALERS = 3`, `:33`). That is §6c's 1–2 case (S6-25: continue expansion, source
+   manually, or close after review) with no operator surface today: the hold is a flag pair, raises
+   no queue item and sends no buyer notice, and its only automatic remedy — the reconciler's
+   recruitment nudge every fifteen minutes — has not recovered coverage in thirteen days. Phase 4
+   (radius ladder and qualified results) and Phase 5 (sourcing case, §6c decision table, Ops
+   exception + buyer notice) exist to replace this. Recorded so that D2's cancellation of superseded
+   rows is not mistaken for resolving it: the surviving request per buyer inherits the same hold.
 
 **`shortlist_items.inventory_item_id ON DELETE RESTRICT` — sweep interaction CHECKED AND CLEAR.**
 The daily stale sweep **soft-deletes**: `lib/services/inventory/stale-sweep.service.ts:236-238` is
@@ -1403,6 +1490,10 @@ Zero route reads or writes a new field.
   and one refund primitive (`refund.service.ts`), three implementations consolidated to one. (4) Admin
   `create-intent`/`send-link` can issue a second $99 intent to a buyer who already paid; the
   provider-side existing-obligation check covers the admin routes too.
+- **Production finding to carry (§8.1a.1 item 5):** at least one `deposits` row is `PAID` with no
+  payment intent (admin-minted), and every `status = PAID` reader treats it as settled money. The
+  money model here makes "paid" mean provider-settled, and the disposition of existing synthetic
+  rows is owner-run before any backfill attaches deposits to requests.
 - Gates: `test:payments`, `test:webhooks`, new deposit/plan suites incl. replay + concurrency on
   PaymentIntent creation, the four regression tests above; Playwright (Stripe test mode,
   `livemode=false` asserted): request → checkout → webhook → sourcing case opened, no auction row
@@ -1414,6 +1505,10 @@ Zero route reads or writes a new field.
 - **Rollback:** The settlement side-effect change is behind the legacy adapter, so the previous behaviour is restored by flipping the adapter back and reverting the commit; no deposit row is rewritten. The reconciler is env-gated (`DEPOSIT_SETTLEMENT_RECONCILE_ENABLED`), so production reverts by unsetting the flag without a deploy. Plan snapshots are append-only: a revert stops writing them and leaves history intact.
 
 #### Phase 4 — Inventory, qualified results, shortlist candidates, co-buyer, trade packet
+- **Production finding to carry (§8.1a.1 item 6):** seven open requests have sat on
+  `thin_coverage:2@150mi` since 2026-08-25 — the ladder's widest tier finding two rooftops. The
+  radius ladder and qualified-results work here is the first half of the remedy; Phase 5 owns the
+  §6c decision that today does not exist.
 - Adapter corrections from §9 (request `dealer` + `mc_dealership` + `build`; read ids from
   `mc_dealership`; keep `dealer.website`; reject `dist > radius`; classify 422 by message; read
   `Retry-After`/`Quota-*`), sweep market configuration on the served markets, run-size anomaly → Ops
@@ -1437,6 +1532,9 @@ Zero route reads or writes a new field.
 - **Rollback:** The adapter changes are additive fields and stricter parsing; reverting the commit restores the previous adapter. The cache table, if D8 permits it, is a pure read-through — dropping it degrades to live queries. No inventory row is deleted; the qualified-results service is new and unreferenced until its surface ships.
 
 #### Phase 5 — Dealer sourcing, invitations, launch readiness, identity firewall
+- **Production finding to carry (§8.1a.1 item 6):** the §6c 1–2 case is live in production data —
+  seven requests, two rooftops at 150 miles, thirteen days, no queue item, no buyer notice. The
+  sourcing case, the §6c decision table and the Ops exception + buyer notice below are the remedy.
 - Sourcing case service (server-side 100→150→250 ladder; band-by-band expansion; buyer authorisation
   beyond 250 with `RADIUS_AUTHORIZATION_REQUIRED`, 24h/72h reminders, 14-day close preserving history);
   candidate → holding rooftop + comparable rooftops, unioned and deduped per rooftop with served-candidate
