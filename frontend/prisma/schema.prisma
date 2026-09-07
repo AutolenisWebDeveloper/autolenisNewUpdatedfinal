@@ -90,6 +90,16 @@ model Buyer {
 
   // D7 — the inactive-affiliate cron and admin KPIs filter buyers by
   // affiliate_id; previously an unindexed scan per affiliate in a loop.
+  planSnapshots       PlanSnapshot[]
+  coBuyers            CoBuyer[]
+  queueItems          QueueItem[]
+  inventoryQueryCache InventoryQueryCache[]
+  // Phase 1 transaction spine (20261106000100).
+  geocodeSource       String?               @map("geocode_source")
+  geocodedAt          DateTime?             @map("geocoded_at")
+  latitude            Float?
+  longitude           Float?
+
   @@index([affiliateId])
   @@map("buyers")
 }
@@ -192,7 +202,12 @@ model Dealer {
   agreementSignature DealerAgreementSignature?
 
   // D1 — pickup scheduling availability (per-weekday hours, timezone, blackouts).
-  availability DealerAvailability?
+  availability          DealerAvailability?
+  dealerReaffirmations  DealerReaffirmation[]
+  queueItems            QueueItem[]
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  circumventionAttempts CircumventionAttempt[]
+  deals                 Deal[]
 
   @@index([rooftopId])
   @@map("dealers")
@@ -262,6 +277,25 @@ model Affiliate {
   clicks              AffiliateClick[]
 
   // D8 — network/digest/leaderboard/referrals all filter on parentId.
+  // Phase 1 transaction spine (20261106000100).
+  acquisitionChannel         String             @default("direct") @map("acquisition_channel")
+  consentIp                  String?            @map("consent_ip")
+  consentIpUnavailableReason String?            @map("consent_ip_unavailable_reason")
+  consentSurface             String?            @map("consent_surface")
+  consentTextHash            String?            @map("consent_text_hash")
+  consentVersion             String?            @map("consent_version")
+  ipAddress                  String?            @map("ip_address")
+  ipUnavailableReason        String?            @map("ip_unavailable_reason")
+  referrer                   String?
+  sourceUrl                  String?            @map("source_url")
+  utmCampaign                String?            @map("utm_campaign")
+  utmContent                 String?            @map("utm_content")
+  utmMedium                  String?            @map("utm_medium")
+  utmSource                  String?            @map("utm_source")
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  buyerOpportunities         BuyerOpportunity[]
+  vehicleRequests            VehicleRequest[]
+
   @@index([parentId])
   @@map("affiliates")
 }
@@ -286,6 +320,9 @@ model Admin {
   updatedAt              DateTime             @updatedAt @map("updated_at")
   user                   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   mfaEmailTokens         AdminMfaEmailToken[]
+  queueItems             QueueItem[]
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  vehicleRequests        VehicleRequest[]
 
   @@map("admins")
 }
@@ -340,6 +377,8 @@ model PreQualification {
   buyer                      Buyer             @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   consents                   PrequalConsent[]
   complianceEvents           ComplianceEvent[]
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  vehicleRequests            VehicleRequest[]
 
   @@map("pre_qualifications")
 }
@@ -387,35 +426,55 @@ model Shortlist {
 }
 
 model ShortlistItem {
-  id              String    @id @default(uuid())
-  shortlistId     String    @map("shortlist_id")
-  inventoryItemId String    @map("inventory_item_id")
-  addedAt         DateTime  @default(now()) @map("added_at")
-  readinessState  String    @default("AUCTION_READY") @map("readiness_state")
-  shortlist       Shortlist @relation(fields: [shortlistId], references: [id], onDelete: Cascade)
+  id              String        @id @default(uuid())
+  shortlistId     String        @map("shortlist_id")
+  inventoryItemId String        @map("inventory_item_id")
+  addedAt         DateTime      @default(now()) @map("added_at")
+  readinessState  String        @default("AUCTION_READY") @map("readiness_state")
+  shortlist       Shortlist     @relation(fields: [shortlistId], references: [id], onDelete: Cascade)
+  // Phase 1 transaction spine (20261106000100).
+  distanceMiles   Float?        @map("distance_miles")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
 
   @@unique([shortlistId, inventoryItemId])
   @@map("shortlist_items")
 }
 
 model Deposit {
-  id                    String        @id @default(uuid())
-  buyerId               String        @map("buyer_id")
-  amountCents           Int           @map("amount_cents")
-  status                DepositStatus @default(PENDING)
-  stripePaymentIntentId String?       @unique @map("stripe_payment_intent_id")
-  stripeSessionId       String?       @unique @map("stripe_session_id")
-  refundedAt            DateTime?     @map("refunded_at")
-  createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
+  id                    String          @id @default(uuid())
+  buyerId               String          @map("buyer_id")
+  amountCents           Int             @map("amount_cents")
+  status                DepositStatus   @default(PENDING)
+  stripePaymentIntentId String?         @unique @map("stripe_payment_intent_id")
+  stripeSessionId       String?         @unique @map("stripe_session_id")
+  refundedAt            DateTime?       @map("refunded_at")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
   auction               Auction?
-  buyer                 Buyer         @relation(fields: [buyerId], references: [id])
+  buyer                 Buyer           @relation(fields: [buyerId], references: [id])
+  queueItems            QueueItem[]
+  // Phase 1 transaction spine (20261106000100).
+  disclosuresAcceptedAt DateTime?       @map("disclosures_accepted_at")
+  disclosuresVersion    String?         @map("disclosures_version")
+  disputedAt            DateTime?       @map("disputed_at")
+  holdReason            String?         @map("hold_reason")
+  holdReleasedAt        DateTime?       @map("hold_released_at")
+  refundReason          RefundReason?   @map("refund_reason")
+  vehicleRequestId      String?         @map("vehicle_request_id")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  vehicleRequest        VehicleRequest? @relation(fields: [vehicleRequestId], references: [id])
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  deals                 Deal[]
 
+  // Phase 1 transaction spine (20261106000100).
+  @@index([vehicleRequestId], map: "deposits_vehicle_request_id_idx")
   @@map("deposits")
 }
 
 model Auction {
   id                   String                 @id @default(uuid())
+  sourcingCaseId       String?                @map("sourcing_case_id")
   buyerId              String                 @map("buyer_id")
   depositId            String                 @unique @map("deposit_id")
   status               AuctionStatus          @default(PENDING)
@@ -452,6 +511,11 @@ model Auction {
   originalAuction      Auction?               @relation("AuctionRetry", fields: [originalAuctionId], references: [id])
   retryAuctions        Auction[]              @relation("AuctionRetry")
   offers               Offer[]
+  queueItems           QueueItem[]
+  sourcingCase         SourcingCase?          @relation(fields: [sourcingCaseId], references: [id])
+  // Phase 1 transaction spine (20261106000100).
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  deals                Deal[]
 
   @@index([vehicleRequestId])
   @@map("auctions")
@@ -498,120 +562,254 @@ model OutsideAuctionInvite {
 }
 
 model AuctionVehicle {
-  id              String         @id @default(uuid())
-  auctionId       String         @map("auction_id")
-  inventoryItemId String?        @map("inventory_item_id")
-  year            Int?
-  make            String?
-  model           String?
-  trim            String?
-  mileage         Int?
-  notes           String?
-  createdAt       DateTime       @default(now()) @map("created_at")
-  auction         Auction        @relation(fields: [auctionId], references: [id], onDelete: Cascade)
-  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  id               String                        @id @default(uuid())
+  auctionId        String                        @map("auction_id")
+  inventoryItemId  String?                       @map("inventory_item_id")
+  year             Int?
+  make             String?
+  model            String?
+  trim             String?
+  mileage          Int?
+  notes            String?
+  createdAt        DateTime                      @default(now()) @map("created_at")
+  auction          Auction                       @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  inventoryItem    InventoryItem?                @relation(fields: [inventoryItemId], references: [id])
+  // Phase 1 transaction spine (20261106000100).
+  candidateStatus  AuctionVehicleCandidateStatus @default(ACTIVE) @map("candidate_status")
+  distanceMiles    Float?                        @map("distance_miles")
+  droppedReason    String?                       @map("dropped_reason")
+  listingSnapshot  Json?                         @map("listing_snapshot")
+  revalidatedAt    DateTime?                     @map("revalidated_at")
+  vehicleRequestId String?                       @map("vehicle_request_id")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  vehicleRequest   VehicleRequest?               @relation(fields: [vehicleRequestId], references: [id])
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  offers           Offer[]
 
   @@index([auctionId])
+  // Phase 1 transaction spine (20261106000100).
+  @@index([vehicleRequestId], map: "auction_vehicles_vehicle_request_id_idx")
   @@map("auction_vehicles")
 }
 
 model AuctionInvitation {
-  id              String    @id @default(uuid())
-  auctionId       String    @map("auction_id")
-  dealerId        String    @map("dealer_id")
-  invitationScore Float?    @map("invitation_score")
-  sentAt          DateTime  @default(now()) @map("sent_at")
-  viewedAt        DateTime? @map("viewed_at")
-  respondedAt     DateTime? @map("responded_at")
-  auction         Auction   @relation(fields: [auctionId], references: [id], onDelete: Cascade)
-  dealer          Dealer    @relation("DealerInvitations", fields: [dealerId], references: [id])
+  id                 String                  @id @default(uuid())
+  auctionId          String                  @map("auction_id")
+  dealerId           String?                 @map("dealer_id")
+  invitationScore    Float?                  @map("invitation_score")
+  sentAt             DateTime                @default(now()) @map("sent_at")
+  viewedAt           DateTime?               @map("viewed_at")
+  respondedAt        DateTime?               @map("responded_at")
+  auction            Auction                 @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  dealer             Dealer?                 @relation("DealerInvitations", fields: [dealerId], references: [id], onDelete: Restrict)
+  // Phase 1 transaction spine (20261106000100).
+  bouncedAt          DateTime?               @map("bounced_at")
+  candidateIds       String[]                @map("candidate_ids")
+  contactName        String?                 @map("contact_name")
+  dealershipName     String?                 @map("dealership_name")
+  declinedAt         DateTime?               @map("declined_at")
+  deliveredAt        DateTime?               @map("delivered_at")
+  distanceMiles      Float?                  @map("distance_miles")
+  email              String?
+  expiresAt          DateTime?               @map("expires_at")
+  isRegisteredDealer Boolean                 @default(true) @map("is_registered_dealer")
+  offerSubmittedAt   DateTime?               @map("offer_submitted_at")
+  openedAt           DateTime?               @map("opened_at")
+  phone              String?
+  queuedAt           DateTime?               @map("queued_at")
+  reminder50SentAt   DateTime?               @map("reminder_50_sent_at")
+  reminder90SentAt   DateTime?               @map("reminder_90_sent_at")
+  rooftopId          String?                 @map("rooftop_id")
+  status             AuctionInvitationStatus @default(QUEUED)
+  tokenHash          String?                 @map("token_hash")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  rooftop            DealerRooftop?          @relation(fields: [rooftopId], references: [id])
 
   @@unique([auctionId, dealerId])
   @@map("auction_invitations")
 }
 
 model Offer {
-  id                  String      @id @default(uuid())
-  auctionId           String      @map("auction_id")
-  dealerId            String      @map("dealer_id")
-  status              OfferStatus @default(DRAFT)
-  otdPriceCents       Int         @map("otd_price_cents")
-  vehiclePriceCents   Int         @map("vehicle_price_cents")
-  taxCents            Int         @default(0) @map("tax_cents")
-  feesCents           Int         @default(0) @map("fees_cents")
-  junkFeeItems        Json        @default("[]") @map("junk_fee_items")
-  includesFinancing   Boolean     @default(false) @map("includes_financing")
-  aprRate             Float?      @map("apr_rate")
-  termMonths          Int?        @map("term_months")
-  bestPriceScore      Float?      @map("best_price_score")
-  rankCash            Int?        @map("rank_cash")
-  rankMonthly         Int?        @map("rank_monthly")
-  rankBalanced        Int?        @map("rank_balanced")
-  aprFlag             String?     @map("apr_flag")
-  version             Int         @default(1)
-  originalOfferId     String?     @unique @map("original_offer_id")
-  submittedAt         DateTime?   @map("submitted_at")
+  id                              String          @id @default(uuid())
+  auctionId                       String          @map("auction_id")
+  dealerId                        String          @map("dealer_id")
+  status                          OfferStatus     @default(DRAFT)
+  otdPriceCents                   Int             @map("otd_price_cents")
+  vehiclePriceCents               Int             @map("vehicle_price_cents")
+  taxCents                        Int             @default(0) @map("tax_cents")
+  feesCents                       Int             @default(0) @map("fees_cents")
+  junkFeeItems                    Json            @default("[]") @map("junk_fee_items")
+  includesFinancing               Boolean         @default(false) @map("includes_financing")
+  aprRate                         Float?          @map("apr_rate")
+  termMonths                      Int?            @map("term_months")
+  bestPriceScore                  Float?          @map("best_price_score")
+  rankCash                        Int?            @map("rank_cash")
+  rankMonthly                     Int?            @map("rank_monthly")
+  rankBalanced                    Int?            @map("rank_balanced")
+  aprFlag                         String?         @map("apr_flag")
+  version                         Int             @default(1)
+  originalOfferId                 String?         @unique @map("original_offer_id")
+  submittedAt                     DateTime?       @map("submitted_at")
   // Outside / unregistered dealer support. When an offer is submitted on behalf
   // of a dealer that has no Dealer account, `dealerId` points to the system
   // "Outside Dealer" placeholder and these fields carry the real identity.
-  externalDealerName  String?     @map("external_dealer_name")
-  externalDealerEmail String?     @map("external_dealer_email")
-  externalDealerPhone String?     @map("external_dealer_phone")
-  notes               String?
+  externalDealerName              String?         @map("external_dealer_name")
+  externalDealerEmail             String?         @map("external_dealer_email")
+  externalDealerPhone             String?         @map("external_dealer_phone")
+  notes                           String?
   // Set when an admin entered this offer manually on behalf of a dealer.
-  submittedByAdminId  String?     @map("submitted_by_admin_id")
-  createdAt           DateTime    @default(now()) @map("created_at")
-  updatedAt           DateTime    @updatedAt @map("updated_at")
-  deal                Deal?
-  auction             Auction     @relation(fields: [auctionId], references: [id], onDelete: Cascade)
-  dealer              Dealer      @relation(fields: [dealerId], references: [id])
-  originalOffer       Offer?      @relation("OfferRevision", fields: [originalOfferId], references: [id])
-  revisedOffer        Offer?      @relation("OfferRevision")
+  submittedByAdminId              String?         @map("submitted_by_admin_id")
+  createdAt                       DateTime        @default(now()) @map("created_at")
+  updatedAt                       DateTime        @updatedAt @map("updated_at")
+  deal                            Deal?
+  auction                         Auction         @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  dealer                          Dealer          @relation(fields: [dealerId], references: [id])
+  originalOffer                   Offer?          @relation("OfferRevision", fields: [originalOfferId], references: [id])
+  revisedOffer                    Offer?          @relation("OfferRevision")
+  // Phase 1 transaction spine (20261106000100).
+  addOnItems                      Json?           @map("add_on_items")
+  auctionVehicleId                String?         @map("auction_vehicle_id")
+  availabilityConfirmed           Boolean?        @map("availability_confirmed")
+  availabilityConfirmedAt         DateTime?       @map("availability_confirmed_at")
+  canCompleteSaleConfirmed        Boolean?        @map("can_complete_sale_confirmed")
+  conditionReportUrl              String?         @map("condition_report_url")
+  deliveryFeeCents                Int?            @map("delivery_fee_cents")
+  deliveryTerms                   String?         @map("delivery_terms")
+  disqualifiedReason              String?         @map("disqualified_reason")
+  docFeeCents                     Int?            @map("doc_fee_cents")
+  expiresAt                       DateTime?       @map("expires_at")
+  exteriorColor                   String?         @map("exterior_color")
+  incentiveItems                  Json?           @map("incentive_items")
+  interiorColor                   String?         @map("interior_color")
+  isDisqualified                  Boolean         @default(false) @map("is_disqualified")
+  odometer                        Int?
+  outOfStateRegistrationSupported Boolean?        @map("out_of_state_registration_supported")
+  photoUrls                       String[]        @map("photo_urls")
+  requiredFeatureMatches          Json?           @map("required_feature_matches")
+  requiredFeatureMismatches       Json?           @map("required_feature_mismatches")
+  rooftopId                       String?         @map("rooftop_id")
+  stockNumber                     String?         @map("stock_number")
+  titleRegistrationCents          Int?            @map("title_registration_cents")
+  vehicleCondition                String?         @map("vehicle_condition")
+  vehicleHistoryReportUrl         String?         @map("vehicle_history_report_url")
+  vehicleMake                     String?         @map("vehicle_make")
+  vehicleModel                    String?         @map("vehicle_model")
+  vehicleTrim                     String?         @map("vehicle_trim")
+  vehicleYear                     Int?            @map("vehicle_year")
+  vin                             String?
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  auctionVehicle                  AuctionVehicle? @relation(fields: [auctionVehicleId], references: [id])
+  rooftop                         DealerRooftop?  @relation(fields: [rooftopId], references: [id])
 
+  // Phase 1 transaction spine (20261106000100).
+  @@index([auctionVehicleId], map: "offers_auction_vehicle_id_idx")
   @@map("offers")
 }
 
 model Deal {
-  id                      String                 @id @default(uuid())
-  buyerId                 String                 @map("buyer_id")
-  offerId                 String?                @unique @map("offer_id")
-  vehicleRequestOfferId   String?                @unique @map("vehicle_request_offer_id")
-  status                  DealStatus             @default(PENDING)
-  financingPath           String?                @map("financing_path")
-  insuranceStatus         InsuranceStatus        @default(NOT_STARTED) @map("insurance_status")
-  feePaidAt               DateTime?              @map("fee_paid_at")
-  feeAmountCents          Int?                   @map("fee_amount_cents")
-  stripeFeePIId           String?                @map("stripe_fee_pi_id")
-  feeRefundedAt           DateTime?              @map("fee_refunded_at")
-  feeRefundedAmountCents  Int?                   @map("fee_refunded_amount_cents")
-  contractShieldScore     Int?                   @map("contract_shield_score")
-  contractShieldStatus    String?                @map("contract_shield_status")
-  riskScore               Int?                   @map("risk_score")
-  riskTier                RiskTier?              @map("risk_tier")
+  id                        String                     @id @default(uuid())
+  coBuyerId                 String?                    @map("co_buyer_id")
+  currentPlanSnapshotId     String?                    @map("current_plan_snapshot_id")
+  buyerId                   String                     @map("buyer_id")
+  offerId                   String?                    @unique @map("offer_id")
+  vehicleRequestOfferId     String?                    @unique @map("vehicle_request_offer_id")
+  status                    DealStatus                 @default(PENDING)
+  financingPath             String?                    @map("financing_path")
+  insuranceStatus           InsuranceStatus            @default(NOT_STARTED) @map("insurance_status")
+  feePaidAt                 DateTime?                  @map("fee_paid_at")
+  feeAmountCents            Int?                       @map("fee_amount_cents")
+  stripeFeePIId             String?                    @map("stripe_fee_pi_id")
+  feeRefundedAt             DateTime?                  @map("fee_refunded_at")
+  feeRefundedAmountCents    Int?                       @map("fee_refunded_amount_cents")
+  contractShieldScore       Int?                       @map("contract_shield_score")
+  contractShieldStatus      String?                    @map("contract_shield_status")
+  riskScore                 Int?                       @map("risk_score")
+  riskTier                  RiskTier?                  @map("risk_tier")
   // Durable marker for the internal dealer-award dispatch (Inngest dealer.award
   // retirement). NULL = award/non-award notifications not yet dispatched; the
   // dealer-award-dispatch cron scans offer-accepted deals with a NULL marker,
   // dispatches, then stamps this. Existing deals are backfilled = created_at so
   // only NEW acceptances dispatch.
-  dealerAwardDispatchedAt DateTime?              @map("dealer_award_dispatched_at")
+  dealerAwardDispatchedAt   DateTime?                  @map("dealer_award_dispatched_at")
   // Bounded-retry counter for the dealer-award dispatch. At MAX the drain stamps
   // the marker terminal anyway (stops the retry loop) and leaves this >= MAX as a
   // queryable recovery handle for a still-undelivered award.
-  dealerAwardAttempts     Int                    @default(0) @map("dealer_award_attempts")
-  createdAt               DateTime               @default(now()) @map("created_at")
-  updatedAt               DateTime               @updatedAt @map("updated_at")
-  contractScans           ContractScan[]
-  buyer                   Buyer                  @relation(fields: [buyerId], references: [id])
-  offer                   Offer?                 @relation(fields: [offerId], references: [id])
-  vehicleRequestOffer     VehicleRequestOffer?   @relation(fields: [vehicleRequestOfferId], references: [id])
-  eSignEnvelope           ESignEnvelope?
-  eSignEnvelopeHistory    ESignEnvelopeHistory[]
-  pickup                  Pickup?
-  financing               Financing?
-  creditApplications      CreditApplication[] // Phase 5 — lender decisioning applications
-  contractVersions        ContractVersion[]
-  notes                   DealNote[]
+  dealerAwardAttempts       Int                        @default(0) @map("dealer_award_attempts")
+  createdAt                 DateTime                   @default(now()) @map("created_at")
+  updatedAt                 DateTime                   @updatedAt @map("updated_at")
+  contractScans             ContractScan[]
+  buyer                     Buyer                      @relation(fields: [buyerId], references: [id])
+  offer                     Offer?                     @relation(fields: [offerId], references: [id])
+  vehicleRequestOffer       VehicleRequestOffer?       @relation(fields: [vehicleRequestOfferId], references: [id])
+  eSignEnvelope             ESignEnvelope?
+  eSignEnvelopeHistory      ESignEnvelopeHistory[]
+  pickup                    Pickup?
+  financing                 Financing?
+  creditApplications        CreditApplication[] // Phase 5 — lender decisioning applications
+  contractVersions          ContractVersion[]
+  notes                     DealNote[]
+  planSnapshots_deal        PlanSnapshot[]             @relation("plan_snapshots_deal_idTodeals")
+  dealerReaffirmations      DealerReaffirmation[]
+  dealRecaps                DealRecap[]
+  queueItems                QueueItem[]
+  postCompletionObligations PostCompletionObligation[]
+  dealCorrections           DealCorrection[]
+  coBuyer                   CoBuyer?                   @relation(fields: [coBuyerId], references: [id])
+  // COMPOSITE key: the pointer must name a snapshot whose own lineage names THIS deal.
+  // Prisma cannot express `ON DELETE SET NULL (column_list)`, which is what the hand-written
+  // migration uses and what keeps this from nulling the primary key. Never regenerate this FK
+  // from schema.prisma - see 20261106000100_transaction_spine_foundation/migration.sql.
+  currentPlanSnapshot       PlanSnapshot?              @relation("deals_id_current_plan_snapshot_idToplan_snapshots", fields: [id, currentPlanSnapshotId], references: [dealId, id], onDelete: SetNull, onUpdate: NoAction, map: "deals_current_plan_snapshot_fkey")
 
+  // Prisma requires the defining side of a 1-1 composite relation to be unique. The pair is
+  // already unique by construction (`id` is the primary key), so this adds an index, not a rule.
+  // Phase 1 transaction spine (20261106000100).
+  auctionId                         String?               @map("auction_id")
+  completedAt                       DateTime?             @map("completed_at")
+  conditionDisclosureAcknowledgedAt DateTime?             @map("condition_disclosure_acknowledged_at")
+  dealerExecutedContractId          String?               @map("dealer_executed_contract_id")
+  dealerId                          String?               @map("dealer_id")
+  depositId                         String?               @map("deposit_id")
+  downPaymentCents                  Int?                  @map("down_payment_cents")
+  feeRefundReason                   RefundReason?         @map("fee_refund_reason")
+  financingCompletedAt              DateTime?             @map("financing_completed_at")
+  financingTermsLockedAt            DateTime?             @map("financing_terms_locked_at")
+  frozenAt                          DateTime?             @map("frozen_at")
+  frozenReason                      String?               @map("frozen_reason")
+  fundingClearedAt                  DateTime?             @map("funding_cleared_at")
+  holdReason                        String?               @map("hold_reason")
+  odometerAtOffer                   Int?                  @map("odometer_at_offer")
+  otdCentsConfirmed                 Int?                  @map("otd_cents_confirmed")
+  pickupReadyAt                     DateTime?             @map("pickup_ready_at")
+  possessionConfirmedAt             DateTime?             @map("possession_confirmed_at")
+  recapConfirmedByBuyerAt           DateTime?             @map("recap_confirmed_by_buyer_at")
+  recapConfirmedByDealerAt          DateTime?             @map("recap_confirmed_by_dealer_at")
+  rooftopId                         String?               @map("rooftop_id")
+  vehicleHoldUntil                  DateTime?             @map("vehicle_hold_until")
+  vehicleMake                       String?               @map("vehicle_make")
+  vehicleModel                      String?               @map("vehicle_model")
+  vehicleRequestId                  String?               @map("vehicle_request_id")
+  vehicleTrim                       String?               @map("vehicle_trim")
+  vehicleYear                       Int?                  @map("vehicle_year")
+  vin                               String?
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  auction                           Auction?              @relation(fields: [auctionId], references: [id])
+  dealerExecutedContract            ContractVersion?      @relation("deals_dealer_executed_contract_idTocontract_versions", fields: [dealerExecutedContractId], references: [id])
+  dealer                            Dealer?               @relation(fields: [dealerId], references: [id])
+  deposit                           Deposit?              @relation(fields: [depositId], references: [id])
+  rooftop                           DealerRooftop?        @relation(fields: [rooftopId], references: [id])
+  vehicleRequest                    VehicleRequest?       @relation(fields: [vehicleRequestId], references: [id])
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  dealStatusHistory                 DealStatusHistory[]
+  externalPreApprovals              ExternalPreApproval[]
+  tradeInSubmissions                TradeInSubmission[]
+
+  @@unique([id, currentPlanSnapshotId])
+  // Phase 1 transaction spine (20261106000100).
+  @@index([auctionId], map: "deals_auction_id_idx")
+  @@index([currentPlanSnapshotId], map: "deals_current_plan_snapshot_idx")
+  @@index([dealerId], map: "deals_dealer_id_idx")
+  @@index([vehicleRequestId], map: "deals_vehicle_request_id_idx")
   @@map("deals")
 }
 
@@ -824,43 +1022,73 @@ model ESignEnvelopeHistory {
 }
 
 model Pickup {
-  id                     String       @id @default(uuid())
-  dealId                 String       @unique @map("deal_id")
-  status                 PickupStatus @default(NOT_SCHEDULED)
-  scheduledAt            DateTime?    @map("scheduled_at")
-  completedAt            DateTime?    @map("completed_at")
-  location               String?
-  qrCodeData             String?      @map("qr_code_data")
-  qrCodeImage            String?      @map("qr_code_image")
-  qrExpiresAt            DateTime?    @map("qr_expires_at")
+  id                       String       @id @default(uuid())
+  dealId                   String       @unique @map("deal_id")
+  status                   PickupStatus @default(NOT_SCHEDULED)
+  scheduledAt              DateTime?    @map("scheduled_at")
+  completedAt              DateTime?    @map("completed_at")
+  location                 String?
+  qrCodeData               String?      @map("qr_code_data")
+  qrCodeImage              String?      @map("qr_code_image")
+  qrExpiresAt              DateTime?    @map("qr_expires_at")
   // D2 — confirm/propose round-trip. `proposedTime` is the pending slot awaiting
   // the other party; `proposedBy` is "BUYER" | "DEALER" (String, not an enum,
   // mirroring Dealer.tier). `proposedAt` doubles as the compare-and-swap token
   // for atomic transitions (anti-snipe idiom). On confirm/accept the agreed slot
   // moves to `scheduledAt`. `counterCount` caps the ping-pong (2 → admin).
-  proposedTime           DateTime?    @map("proposed_time")
-  proposedBy             String?      @map("proposed_by")
-  proposedAt             DateTime?    @map("proposed_at")
-  counterCount           Int          @default(0) @map("counter_count")
+  proposedTime             DateTime?    @map("proposed_time")
+  proposedBy               String?      @map("proposed_by")
+  proposedAt               DateTime?    @map("proposed_at")
+  counterCount             Int          @default(0) @map("counter_count")
   // SLA-nudge markers (D2b cron): reset on each new proposal, one nudge per side.
-  proposedReminderSentAt DateTime?    @map("proposed_reminder_sent_at")
-  counterReminderSentAt  DateTime?    @map("counter_reminder_sent_at")
-  createdAt              DateTime     @default(now()) @map("created_at")
-  updatedAt              DateTime     @updatedAt @map("updated_at")
-  deal                   Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  proposedReminderSentAt   DateTime?    @map("proposed_reminder_sent_at")
+  counterReminderSentAt    DateTime?    @map("counter_reminder_sent_at")
+  createdAt                DateTime     @default(now()) @map("created_at")
+  updatedAt                DateTime     @updatedAt @map("updated_at")
+  deal                     Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  // Phase 1 transaction spine (20261106000100).
+  buyerConfirmedAt         DateTime?    @map("buyer_confirmed_at")
+  conditionAtRelease       String?      @map("condition_at_release")
+  dealerReadinessChecklist Json?        @map("dealer_readiness_checklist")
+  dealerReleasedAt         DateTime?    @map("dealer_released_at")
+  deliveryAddress          String?      @map("delivery_address")
+  dueBillItems             Json?        @map("due_bill_items")
+  fulfillmentMode          String?      @map("fulfillment_mode")
+  fundsCollectedMethod     String?      @map("funds_collected_method")
+  identityVerifiedAt       DateTime?    @map("identity_verified_at")
+  noShowAt                 DateTime?    @map("no_show_at")
+  noShowParty              String?      @map("no_show_party")
+  odometerAtPossession     Int?         @map("odometer_at_possession")
+  odometerAtRelease        Int?         @map("odometer_at_release")
+  possessionDiscrepancy    Json?        @map("possession_discrepancy")
+  readinessConfirmedAt     DateTime?    @map("readiness_confirmed_at")
+  releasedBy               String?      @map("released_by")
+  reminder24hSentAt        DateTime?    @map("reminder_24h_sent_at")
+  reminder2hSentAt         DateTime?    @map("reminder_2h_sent_at")
+  tokenConsumedAt          DateTime?    @map("token_consumed_at")
+  tokenExpiresAt           DateTime?    @map("token_expires_at")
+  tokenHash                String?      @map("token_hash")
+  tokenRevokedAt           DateTime?    @map("token_revoked_at")
+  tradeReceivedAt          DateTime?    @map("trade_received_at")
+  vehiclePreparedAt        DateTime?    @map("vehicle_prepared_at")
+  vinMatch                 Boolean?     @map("vin_match")
 
   @@index([status, proposedAt])
   @@map("pickups")
 }
 
 model PaymentProviderEvent {
-  id          String    @id @default(uuid())
-  eventId     String    @unique @map("event_id")
-  eventType   String    @map("event_type")
-  payload     Json
-  processed   Boolean   @default(false)
-  processedAt DateTime? @map("processed_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id                      String    @id @default(uuid())
+  eventId                 String    @unique @map("event_id")
+  eventType               String    @map("event_type")
+  payload                 Json
+  processed               Boolean   @default(false)
+  processedAt             DateTime? @map("processed_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  // Phase 1 transaction spine (20261106000100).
+  disputedAt              DateTime? @map("disputed_at")
+  processingAt            DateTime? @map("processing_at")
+  reconciliationPendingAt DateTime? @map("reconciliation_pending_at")
 
   @@map("payment_provider_events")
 }
@@ -943,59 +1171,70 @@ model NudgeEvent {
 }
 
 model InventoryItem {
-  id                   String           @id @default(uuid())
-  dealerId             String?          @map("dealer_id")
-  lane                 InventoryLane    @default(LANE_3)
-  vin                  String?          @unique
-  year                 Int
-  make                 String
-  model                String
-  trim                 String?
-  mileage              Int?
-  priceCents           Int              @map("price_cents")
-  condition            String? // "new" | "used"
-  bodyType             String?          @map("body_type")
-  exteriorColor        String?          @map("exterior_color")
-  interiorColor        String?          @map("interior_color")
-  engine               String?
-  transmission         String?
-  drivetrain           String?
-  fuelType             String?          @map("fuel_type")
-  city                 String?
-  state                String?
-  zip                  String?
-  description          String?
-  features             String[]         @default([])
-  priceHistory         Json             @default("[]") @map("price_history")
-  latitude             Decimal?         @db.Decimal(10, 7)
-  longitude            Decimal?         @db.Decimal(10, 7)
-  externalListingUrl   String?          @map("external_listing_url")
-  externalDealerName   String?          @map("external_dealer_name")
-  externalDealerPhone  String?          @map("external_dealer_phone")
-  externalDealerCity   String?          @map("external_dealer_city")
-  externalDealerState  String?          @map("external_dealer_state")
+  id                    String           @id @default(uuid())
+  dealerId              String?          @map("dealer_id")
+  lane                  InventoryLane    @default(LANE_3)
+  vin                   String?          @unique
+  year                  Int
+  make                  String
+  model                 String
+  trim                  String?
+  mileage               Int?
+  priceCents            Int              @map("price_cents")
+  condition             String? // "new" | "used"
+  bodyType              String?          @map("body_type")
+  exteriorColor         String?          @map("exterior_color")
+  interiorColor         String?          @map("interior_color")
+  engine                String?
+  transmission          String?
+  drivetrain            String?
+  fuelType              String?          @map("fuel_type")
+  city                  String?
+  state                 String?
+  zip                   String?
+  description           String?
+  features              String[]         @default([])
+  priceHistory          Json             @default("[]") @map("price_history")
+  latitude              Decimal?         @db.Decimal(10, 7)
+  longitude             Decimal?         @db.Decimal(10, 7)
+  externalListingUrl    String?          @map("external_listing_url")
+  externalDealerName    String?          @map("external_dealer_name")
+  externalDealerPhone   String?          @map("external_dealer_phone")
+  externalDealerCity    String?          @map("external_dealer_city")
+  externalDealerState   String?          @map("external_dealer_state")
   // The rest of the provider's `dealer` object. Persisted so a swept listing can be resolved
   // to the rooftop physically holding the car: 0 of 148 active rows carry a dealer_id, so
   // without these a listing names a dealership we cannot match to anything we own.
-  externalDealerStreet String?          @map("external_dealer_street")
-  externalDealerZip    String?          @map("external_dealer_zip")
-  externalDealerEmail  String?          @map("external_dealer_email")
-  externalDealerType   String?          @map("external_dealer_type")
+  externalDealerStreet  String?          @map("external_dealer_street")
+  externalDealerZip     String?          @map("external_dealer_zip")
+  externalDealerEmail   String?          @map("external_dealer_email")
+  externalDealerType    String?          @map("external_dealer_type")
   // The provider's own identifiers. Strongest available join key when name/address are noisy.
-  mcRooftopId          String?          @map("mc_rooftop_id")
-  mcDealerId           String?          @map("mc_dealer_id")
+  mcRooftopId           String?          @map("mc_rooftop_id")
+  mcDealerId            String?          @map("mc_dealer_id")
   // Resolved holding rooftop. Nullable: resolution is best-effort and never blocks ingest.
-  rooftopId            String?          @map("rooftop_id")
-  images               String[]
-  isActive             Boolean          @default(true) @map("is_active")
-  lastSeenAt           DateTime?        @map("last_seen_at")
-  sourceAdapter        String?          @map("source_adapter")
-  addedByAdminId       String?          @map("added_by_admin_id")
-  createdAt            DateTime         @default(now()) @map("created_at")
-  updatedAt            DateTime         @updatedAt @map("updated_at")
-  dealer               Dealer?          @relation(fields: [dealerId], references: [id])
-  rooftop              DealerRooftop?   @relation(fields: [rooftopId], references: [id])
-  auctionVehicles      AuctionVehicle[]
+  rooftopId             String?          @map("rooftop_id")
+  images                String[]
+  isActive              Boolean          @default(true) @map("is_active")
+  lastSeenAt            DateTime?        @map("last_seen_at")
+  sourceAdapter         String?          @map("source_adapter")
+  addedByAdminId        String?          @map("added_by_admin_id")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  dealer                Dealer?          @relation(fields: [dealerId], references: [id])
+  rooftop               DealerRooftop?   @relation(fields: [rooftopId], references: [id])
+  auctionVehicles       AuctionVehicle[]
+  // Phase 1 transaction spine (20261106000100).
+  daysOnLot             Int?             @map("days_on_lot")
+  externalDealerWebsite String?          @map("external_dealer_website")
+  listingId             String?          @map("listing_id")
+  mcCategory            String?          @map("mc_category")
+  mcLocationId          String?          @map("mc_location_id")
+  mcWebsiteId           String?          @map("mc_website_id")
+  providerLastSeenAt    DateTime?        @map("provider_last_seen_at")
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  shortlistItems        ShortlistItem[]
+  vehicleRequests       VehicleRequest[]
 
   @@index([lane, isActive])
   @@index([sourceAdapter])
@@ -1020,32 +1259,33 @@ model InventoryUploadBatch {
 }
 
 model VehicleRequest {
-  id                 String                                 @id @default(uuid())
-  buyerId            String                                 @map("buyer_id")
-  status             VehicleRequestStatus                   @default(SUBMITTED)
-  makePreference     String?                                @map("make_preference")
-  modelPreference    String?                                @map("model_preference")
-  yearMin            Int?                                   @map("year_min")
-  yearMax            Int?                                   @map("year_max")
-  maxBudgetCents     Int?                                   @map("max_budget_cents")
-  notes              String?
-  assignedAdminId    String?                                @map("assigned_admin_id")
-  cancelledAt        DateTime?                              @map("cancelled_at")
-  cancelReason       String?                                @map("cancel_reason")
+  id                           String                                 @id @default(uuid())
+  currentPlanSnapshotId        String?                                @map("current_plan_snapshot_id")
+  buyerId                      String                                 @map("buyer_id")
+  status                       VehicleRequestStatus                   @default(SUBMITTED)
+  makePreference               String?                                @map("make_preference")
+  modelPreference              String?                                @map("model_preference")
+  yearMin                      Int?                                   @map("year_min")
+  yearMax                      Int?                                   @map("year_max")
+  maxBudgetCents               Int?                                   @map("max_budget_cents")
+  notes                        String?
+  assignedAdminId              String?                                @map("assigned_admin_id")
+  cancelledAt                  DateTime?                              @map("cancelled_at")
+  cancelReason                 String?                                @map("cancel_reason")
   // Attribution — populated when the request originates from a landing page.
-  utmSource          String?                                @map("utm_source")
-  utmMedium          String?                                @map("utm_medium")
-  utmCampaign        String?                                @map("utm_campaign")
-  sourceUrl          String?                                @map("source_url")
-  ipAddress          String?                                @map("ip_address")
+  utmSource                    String?                                @map("utm_source")
+  utmMedium                    String?                                @map("utm_medium")
+  utmCampaign                  String?                                @map("utm_campaign")
+  sourceUrl                    String?                                @map("source_url")
+  ipAddress                    String?                                @map("ip_address")
   // Hybrid SEO attribution — semantic FormSource (paid vs organic segmentation)
   // and document.referrer. Added by migration add_landing_source_referrer.
-  landingSource      String?                                @map("landing_source")
-  referrer           String?                                @map("referrer")
+  landingSource                String?                                @map("landing_source")
+  referrer                     String?                                @map("referrer")
   // Group 5 — link to the AI-enrichment BuyerOpportunity created alongside
   // this canonical request. Soft link: no cascade, application-enforced.
-  buyerOpportunityId String?                                @map("buyer_opportunity_id")
-  buyerOpportunity   BuyerOpportunity?                      @relation(fields: [buyerOpportunityId], references: [id])
+  buyerOpportunityId           String?                                @map("buyer_opportunity_id")
+  buyerOpportunity             BuyerOpportunity?                      @relation(fields: [buyerOpportunityId], references: [id])
   // Y2 — request-time coverage gate. When the shared coverage primitive counts
   // fewer than MIN_COVERAGE_DEALERS contactable rooftops around the buyer at
   // request time, this request is SOFT-HELD (flag only — never a new status,
@@ -1053,22 +1293,85 @@ model VehicleRequest {
   // clear once coverage recovers (the gate is idempotent set-or-clear). Reason
   // is a short machine tag (e.g. "thin_coverage:1@150mi"). Added by migration
   // add_vehicle_request_coverage_hold.
-  coverageHoldAt     DateTime?                              @map("coverage_hold_at")
-  coverageHoldReason String?                                @map("coverage_hold_reason")
-  createdAt          DateTime                               @default(now()) @map("created_at")
-  updatedAt          DateTime                               @updatedAt @map("updated_at")
-  buyerUpdates       VehicleRequestBuyerUpdate[]
-  checkpoints        VehicleRequestDueDiligenceCheckpoint[]
-  events             VehicleRequestEvent[]
-  offers             VehicleRequestOffer[]
-  researchLogs       VehicleRequestResearchLog[]
-  financing          VehicleRequestFinancing?
-  auctions           Auction[] // C1 — auctions originated from this request (SetNull on delete)
-  buyer              Buyer                                  @relation(fields: [buyerId], references: [id])
+  coverageHoldAt               DateTime?                              @map("coverage_hold_at")
+  coverageHoldReason           String?                                @map("coverage_hold_reason")
+  createdAt                    DateTime                               @default(now()) @map("created_at")
+  updatedAt                    DateTime                               @updatedAt @map("updated_at")
+  buyerUpdates                 VehicleRequestBuyerUpdate[]
+  checkpoints                  VehicleRequestDueDiligenceCheckpoint[]
+  events                       VehicleRequestEvent[]
+  offers                       VehicleRequestOffer[]
+  researchLogs                 VehicleRequestResearchLog[]
+  financing                    VehicleRequestFinancing?
+  auctions                     Auction[] // C1 — auctions originated from this request (SetNull on delete)
+  buyer                        Buyer                                  @relation(fields: [buyerId], references: [id])
+  planSnapshots_vehicleRequest PlanSnapshot[]                         @relation("plan_snapshots_vehicle_request_idTovehicle_requests")
+  coBuyers                     CoBuyer[]
+  sourcingCases                SourcingCase[]
+  queueItems                   QueueItem[]
+  // COMPOSITE key - see the note on Deal.currentPlanSnapshot; the same caution applies.
+  currentPlanSnapshot          PlanSnapshot?                          @relation("vehicle_requests_id_current_plan_snapshot_idToplan_snapshots", fields: [id, currentPlanSnapshotId], references: [vehicleRequestId, id], onDelete: SetNull, onUpdate: NoAction, map: "vehicle_requests_current_plan_snapshot_fkey")
 
+  // Prisma requires the defining side of a 1-1 composite relation to be unique. The pair is
+  // already unique by construction (`id` is the primary key), so this adds an index, not a rule.
+  // Phase 1 transaction spine (20261106000100).
+  abandonedAt                    DateTime?                @map("abandoned_at")
+  acquisitionChannel             String                   @default("direct") @map("acquisition_channel")
+  affiliateId                    String?                  @map("affiliate_id")
+  authorizedMaxRadiusMiles       Int?                     @map("authorized_max_radius_miles")
+  bodyType                       String?                  @map("body_type")
+  city                           String?
+  coBuyerElected                 Boolean?                 @map("co_buyer_elected")
+  conditionPreference            String?                  @map("condition_preference")
+  consentIp                      String?                  @map("consent_ip")
+  consentIpUnavailableReason     String?                  @map("consent_ip_unavailable_reason")
+  consentSurface                 String?                  @map("consent_surface")
+  consentTextHash                String?                  @map("consent_text_hash")
+  consentVersion                 String?                  @map("consent_version")
+  deliveryPreference             DeliveryPreference?      @map("delivery_preference")
+  disclosuresAcceptedAt          DateTime?                @map("disclosures_accepted_at")
+  disclosuresVersion             String?                  @map("disclosures_version")
+  downPaymentCents               Int?                     @map("down_payment_cents")
+  drivetrain                     String?
+  entryType                      VehicleRequestEntryType? @map("entry_type")
+  expectedDownPaymentCents       Int?                     @map("expected_down_payment_cents")
+  exteriorColors                 String[]                 @map("exterior_colors")
+  interiorColors                 String[]                 @map("interior_colors")
+  inventoryItemId                String?                  @map("inventory_item_id")
+  ipUnavailableReason            String?                  @map("ip_unavailable_reason")
+  latitude                       Float?
+  longitude                      Float?
+  maxMileage                     Int?                     @map("max_mileage")
+  preQualificationId             String?                  @map("pre_qualification_id")
+  preferredFeatures              String[]                 @map("preferred_features")
+  purchaseTimeframe              String?                  @map("purchase_timeframe")
+  radiusAuthorizationRequestedAt DateTime?                @map("radius_authorization_requested_at")
+  requiredFeatures               String[]                 @map("required_features")
+  state                          String?
+  statedBudgetCents              Int?                     @map("stated_budget_cents")
+  utmContent                     String?                  @map("utm_content")
+  zip                            String?
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  affiliate                      Affiliate?               @relation(fields: [affiliateId], references: [id])
+  assignedAdmin                  Admin?                   @relation(fields: [assignedAdminId], references: [id])
+  inventoryItem                  InventoryItem?           @relation(fields: [inventoryItemId], references: [id])
+  preQualification               PreQualification?        @relation(fields: [preQualificationId], references: [id])
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  auctionVehicles                AuctionVehicle[]
+  deals                          Deal[]
+  deposits                       Deposit[]
+  tradeInSubmissions             TradeInSubmission[]
+
+  @@unique([id, currentPlanSnapshotId])
   @@index([buyerId, status])
   @@index([buyerOpportunityId])
   @@index([coverageHoldAt])
+  // Phase 1 transaction spine (20261106000100).
+  @@index([affiliateId], map: "vehicle_requests_affiliate_id_idx")
+  @@index([assignedAdminId], map: "vehicle_requests_assigned_admin_id_idx")
+  @@index([currentPlanSnapshotId], map: "vehicle_requests_current_plan_snapshot_idx")
+  @@index([inventoryItemId], map: "vehicle_requests_inventory_item_id_idx")
+  @@index([preQualificationId], map: "vehicle_requests_pre_qualification_id_idx")
   @@map("vehicle_requests")
 }
 
@@ -1253,17 +1556,22 @@ model HopePageContent {
 }
 
 model DealerScorecardSnapshot {
-  id                  String   @id @default(uuid())
-  dealerId            String   @map("dealer_id")
-  tier                String
-  offerWinRate        Float    @map("offer_win_rate")
-  dealCompletionRate  Float    @map("deal_completion_rate")
-  auctionResponseRate Float    @map("auction_response_rate")
-  avgResponseHours    Float    @map("avg_response_hours")
-  junkFeeRatio        Float    @map("junk_fee_ratio")
-  snapshotDate        DateTime @map("snapshot_date")
-  createdAt           DateTime @default(now()) @map("created_at")
-  dealer              Dealer   @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  id                        String   @id @default(uuid())
+  dealerId                  String   @map("dealer_id")
+  tier                      String
+  offerWinRate              Float    @map("offer_win_rate")
+  dealCompletionRate        Float    @map("deal_completion_rate")
+  auctionResponseRate       Float    @map("auction_response_rate")
+  avgResponseHours          Float    @map("avg_response_hours")
+  junkFeeRatio              Float    @map("junk_fee_ratio")
+  snapshotDate              DateTime @map("snapshot_date")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  dealer                    Dealer   @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  // Phase 1 transaction spine (20261106000100).
+  contractDelayCount        Int      @default(0) @map("contract_delay_count")
+  noShowCount               Int      @default(0) @map("no_show_count")
+  overdueObligationCount    Int      @default(0) @map("overdue_obligation_count")
+  reaffirmationFailureCount Int      @default(0) @map("reaffirmation_failure_count")
 
   @@index([dealerId, snapshotDate])
   @@map("dealer_scorecard_snapshots")
@@ -1499,6 +1807,11 @@ enum InsuranceStatus {
   EXTERNAL_UPLOADED
   VERIFIED
   FAILED
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  UNDER_REVIEW
+  REJECTED
+  EXPIRED
 }
 
 enum AuctionStatus {
@@ -1527,6 +1840,15 @@ enum DealStatus {
   COMPLETED
   CANCELLED
   REFUNDED
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  DEALER_CONFIRMATION
+  RECAP_PENDING
+  DEALER_EXECUTED
+  FUNDING_PENDING
+  PICKUP_READINESS
+  HANDOVER_PENDING
+  FROZEN_PENDING_RELEASE
 }
 
 enum OfferStatus {
@@ -1590,6 +1912,10 @@ enum PickupStatus {
   COMPLETED
   RESCHEDULED
   EXCEPTION // round-trip escalated to admin (counter cap reached)
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  NO_SHOW
+  RELEASED
 }
 
 enum NotificationChannel {
@@ -1663,6 +1989,11 @@ enum VehicleRequestStatus {
   CLOSED_NO_MATCH
   CANCELLED
   EXPIRED
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  DRAFT
+  PAYMENT_REQUIRED
+  RADIUS_AUTHORIZATION_REQUIRED
 }
 
 // ─── Additional Enums (Step 5 — complete schema) ─────────────────────────────
@@ -1713,6 +2044,15 @@ enum FinancingStatus {
   SELECTED
   APPROVED
   DECLINED
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  NOT_STARTED
+  IN_PROGRESS
+  TERMS_LOCKED
+  COMPLETED
+  FAILED
+  EXPIRED
+  NOT_REQUIRED_CASH
 }
 
 enum ExternalPreApprovalStatus {
@@ -1820,6 +2160,9 @@ enum AdminActionType {
   AUCTION_EXTENDED
   IMPERSONATION_STARTED
   STATUS_CHANGE
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  LEGACY_PATH_WRITE
 }
 
 enum DocumentType {
@@ -1904,6 +2247,20 @@ enum QueueItemType {
   PREQUAL_MANUAL
   SUPPORT_TICKET
   SYSTEM_ALERT
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  PAYMENT_EXCEPTION
+  SOURCING_EXCEPTION
+  AUCTION_EXCEPTION
+  OFFER_EXCEPTION
+  DEAL_EXCEPTION
+  FINANCING_EXCEPTION
+  COMMS_EXCEPTION
+  INVENTORY_EXCEPTION
+  DEALER_EXCEPTION
+  PLAN_EXCEPTION
+  POST_COMPLETION_EXCEPTION
+  LINEAGE_ORPHAN
 }
 
 enum ImpersonationStatus {
@@ -2013,61 +2370,97 @@ model AcceptedTerms {
 }
 
 model ExternalPreApproval {
-  id                     String                    @id @default(uuid())
-  buyerId                String                    @map("buyer_id")
-  buyer                  Buyer                     @relation(fields: [buyerId], references: [id])
-  status                 ExternalPreApprovalStatus @default(SUBMITTED)
-  lenderName             String?                   @map("lender_name")
-  approvedAmountCents    Int?                      @map("approved_amount_cents")
-  aprRate                Float?                    @map("apr_rate")
-  termMonths             Int?                      @map("term_months")
-  expiryDate             DateTime?                 @map("expiry_date")
-  documentUrl            String?                   @map("document_url")
-  reviewedAt             DateTime?                 @map("reviewed_at")
-  reviewedBy             String?                   @map("reviewed_by")
-  rejectionReason        String?                   @map("rejection_reason")
-  additionalInfoRequired String?                   @map("additional_info_required")
-  createdAt              DateTime                  @default(now()) @map("created_at")
-  updatedAt              DateTime                  @updatedAt @map("updated_at")
+  id                           String                        @id @default(uuid())
+  buyerId                      String                        @map("buyer_id")
+  buyer                        Buyer                         @relation(fields: [buyerId], references: [id])
+  status                       ExternalPreApprovalStatus     @default(SUBMITTED)
+  lenderName                   String?                       @map("lender_name")
+  approvedAmountCents          Int?                          @map("approved_amount_cents")
+  aprRate                      Float?                        @map("apr_rate")
+  termMonths                   Int?                          @map("term_months")
+  expiryDate                   DateTime?                     @map("expiry_date")
+  documentUrl                  String?                       @map("document_url")
+  reviewedAt                   DateTime?                     @map("reviewed_at")
+  reviewedBy                   String?                       @map("reviewed_by")
+  rejectionReason              String?                       @map("rejection_reason")
+  additionalInfoRequired       String?                       @map("additional_info_required")
+  createdAt                    DateTime                      @default(now()) @map("created_at")
+  updatedAt                    DateTime                      @updatedAt @map("updated_at")
+  // Phase 1 transaction spine (20261106000100).
+  dealId                       String?                       @map("deal_id")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  deal                         Deal?                         @relation(fields: [dealId], references: [id])
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  externalPreApprovalDocuments ExternalPreApprovalDocument[]
 
   @@map("external_pre_approvals")
 }
 
 model TradeInSubmission {
-  id               String           @id @default(uuid())
-  buyerId          String           @map("buyer_id")
-  buyer            Buyer            @relation(fields: [buyerId], references: [id])
-  vin              String?
-  year             Int
-  make             String
-  model            String
-  trim             String?
-  mileage          Int?
-  condition        TradeInCondition
-  loanStatus       String?          @map("loan_status")
-  loanBalanceCents Int?             @map("loan_balance_cents")
-  notes            String?
-  status           TradeInStatus    @default(SUBMITTED)
-  valuationCents   Int?             @map("valuation_cents")
-  valuedAt         DateTime?        @map("valued_at")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
+  id                        String           @id @default(uuid())
+  buyerId                   String           @map("buyer_id")
+  buyer                     Buyer            @relation(fields: [buyerId], references: [id])
+  vin                       String?
+  year                      Int
+  make                      String
+  model                     String
+  trim                      String?
+  mileage                   Int?
+  condition                 TradeInCondition
+  loanStatus                String?          @map("loan_status")
+  loanBalanceCents          Int?             @map("loan_balance_cents")
+  notes                     String?
+  status                    TradeInStatus    @default(SUBMITTED)
+  valuationCents            Int?             @map("valuation_cents")
+  valuedAt                  DateTime?        @map("valued_at")
+  createdAt                 DateTime         @default(now()) @map("created_at")
+  updatedAt                 DateTime         @updatedAt @map("updated_at")
+  // Phase 1 transaction spine (20261106000100).
+  appraisalChangedAt        DateTime?        @map("appraisal_changed_at")
+  bringingToPickup          Boolean?         @map("bringing_to_pickup")
+  dealId                    String?          @map("deal_id")
+  finalAllowanceCents       Int?             @map("final_allowance_cents")
+  hasSecondKey              Boolean?         @map("has_second_key")
+  lienholderName            String?          @map("lienholder_name")
+  payoffGoodThroughDate     DateTime?        @map("payoff_good_through_date")
+  photoUrls                 String[]         @map("photo_urls")
+  preliminaryAllowanceCents Int?             @map("preliminary_allowance_cents")
+  shareConsentAt            DateTime?        @map("share_consent_at")
+  titleInHand               Boolean?         @map("title_in_hand")
+  titleState                String?          @map("title_state")
+  vehicleRequestId          String?          @map("vehicle_request_id")
+  verifiedPayoffCents       Int?             @map("verified_payoff_cents")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  deal                      Deal?            @relation(fields: [dealId], references: [id])
+  vehicleRequest            VehicleRequest?  @relation(fields: [vehicleRequestId], references: [id])
 
   @@map("trade_in_submissions")
 }
 
 model Financing {
-  id                  String          @id @default(uuid())
-  dealId              String          @unique @map("deal_id")
-  deal                Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  path                FinancingPath
-  selectedAt          DateTime        @default(now()) @map("selected_at")
-  lenderName          String?         @map("lender_name")
-  approvedAmountCents Int?            @map("approved_amount_cents")
-  aprRate             Float?          @map("apr_rate")
-  termMonths          Int?            @map("term_months")
-  monthlyPaymentCents Int?            @map("monthly_payment_cents")
-  status              FinancingStatus @default(PENDING)
+  id                   String                @id @default(uuid())
+  dealId               String                @unique @map("deal_id")
+  deal                 Deal                  @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  path                 FinancingPath
+  selectedAt           DateTime              @default(now()) @map("selected_at")
+  lenderName           String?               @map("lender_name")
+  approvedAmountCents  Int?                  @map("approved_amount_cents")
+  aprRate              Float?                @map("apr_rate")
+  termMonths           Int?                  @map("term_months")
+  monthlyPaymentCents  Int?                  @map("monthly_payment_cents")
+  status               FinancingStatus       @default(PENDING)
+  // Phase 1 transaction spine (20261106000100).
+  completedAt          DateTime?             @map("completed_at")
+  downPaymentCents     Int?                  @map("down_payment_cents")
+  evidenceDocumentId   String?               @map("evidence_document_id")
+  expiresAt            DateTime?             @map("expires_at")
+  externalReference    String?               @map("external_reference")
+  failureReason        String?               @map("failure_reason")
+  termsLockedAt        DateTime?             @map("terms_locked_at")
+  verifiedAt           DateTime?             @map("verified_at")
+  verifiedBy           String?               @map("verified_by")
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  financingAuditEvents FinancingAuditEvent[]
 
   @@map("financing")
 }
@@ -2109,20 +2502,26 @@ model InsuranceQuote {
 }
 
 model InsurancePolicy {
-  id            String                @id @default(uuid())
-  buyerId       String                @map("buyer_id")
-  buyer         Buyer                 @relation(fields: [buyerId], references: [id])
-  dealId        String?               @map("deal_id")
-  status        InsurancePolicyStatus @default(ACTIVE)
-  policyNumber  String?               @map("policy_number")
-  providerName  String?               @map("provider_name")
-  proofUrl      String?               @map("proof_url")
-  effectiveDate DateTime?             @map("effective_date")
-  expiryDate    DateTime?             @map("expiry_date")
-  verifiedAt    DateTime?             @map("verified_at")
-  verifiedBy    String?               @map("verified_by")
-  isExternal    Boolean               @default(false) @map("is_external")
-  createdAt     DateTime              @default(now()) @map("created_at")
+  id              String                @id @default(uuid())
+  buyerId         String                @map("buyer_id")
+  buyer           Buyer                 @relation(fields: [buyerId], references: [id])
+  dealId          String?               @map("deal_id")
+  status          InsurancePolicyStatus @default(ACTIVE)
+  policyNumber    String?               @map("policy_number")
+  providerName    String?               @map("provider_name")
+  proofUrl        String?               @map("proof_url")
+  effectiveDate   DateTime?             @map("effective_date")
+  expiryDate      DateTime?             @map("expiry_date")
+  verifiedAt      DateTime?             @map("verified_at")
+  verifiedBy      String?               @map("verified_by")
+  isExternal      Boolean               @default(false) @map("is_external")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  // Phase 1 transaction spine (20261106000100).
+  coversCoBuyer   Boolean?              @map("covers_co_buyer")
+  rejectionReason String?               @map("rejection_reason")
+  reviewedAt      DateTime?             @map("reviewed_at")
+  reviewedBy      String?               @map("reviewed_by")
+  vin             String?
 
   @@map("insurance_policies")
 }
@@ -2235,7 +2634,17 @@ model RefinanceApplication {
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
-  complianceLogs RefinanceComplianceLog[]
+  complianceLogs             RefinanceComplianceLog[]
+  // Phase 1 transaction spine (20261106000100).
+  consentIp                  String?                  @map("consent_ip")
+  consentIpUnavailableReason String?                  @map("consent_ip_unavailable_reason")
+  consentSurface             String?                  @map("consent_surface")
+  consentTextHash            String?                  @map("consent_text_hash")
+  consentVersion             String?                  @map("consent_version")
+  interestedInBuying         Boolean?                 @map("interested_in_buying")
+  partnerOutcome             String?                  @map("partner_outcome")
+  partnerOutcomeAt           DateTime?                @map("partner_outcome_at")
+  partnerReference           String?                  @map("partner_reference")
 
   @@index([status])
   @@index([state])
@@ -2622,19 +3031,26 @@ enum OnboardingStatus {
 }
 
 model ContractVersion {
-  id              String                @id @default(uuid())
-  dealId          String                @map("deal_id")
-  deal            Deal                  @relation(fields: [dealId], references: [id])
-  documentUrl     String                @map("document_url")
-  version         Int                   @default(1)
-  uploadedBy      String                @map("uploaded_by")
-  status          ContractVersionStatus @default(UPLOADED)
-  scanRunAt       DateTime?             @map("scan_run_at")
-  approvedAt      DateTime?             @map("approved_at")
-  rejectedAt      DateTime?             @map("rejected_at")
-  rejectionReason String?               @map("rejection_reason")
-  uploadedAt      DateTime              @default(now()) @map("uploaded_at")
-  scans           ContractScan[]
+  id                           String                @id @default(uuid())
+  dealId                       String                @map("deal_id")
+  deal                         Deal                  @relation(fields: [dealId], references: [id])
+  documentUrl                  String                @map("document_url")
+  version                      Int                   @default(1)
+  uploadedBy                   String                @map("uploaded_by")
+  status                       ContractVersionStatus @default(UPLOADED)
+  scanRunAt                    DateTime?             @map("scan_run_at")
+  approvedAt                   DateTime?             @map("approved_at")
+  rejectedAt                   DateTime?             @map("rejected_at")
+  rejectionReason              String?               @map("rejection_reason")
+  uploadedAt                   DateTime              @default(now()) @map("uploaded_at")
+  scans                        ContractScan[]
+  // Phase 1 transaction spine (20261106000100).
+  documentHash                 String?               @map("document_hash")
+  executedAt                   DateTime?             @map("executed_at")
+  executedDocumentHash         String?               @map("executed_document_hash")
+  isDealerExecuted             Boolean               @default(false) @map("is_dealer_executed")
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  deals_dealerExecutedContract Deal[]                @relation("deals_dealer_executed_contract_idTocontract_versions")
 
   @@map("contract_versions")
 }
@@ -2748,6 +3164,10 @@ model CircumventionAttempt {
   detectedAt DateTime              @default(now()) @map("detected_at")
   resolved   Boolean               @default(false)
   resolvedBy String?               @map("resolved_by")
+  // Phase 1 transaction spine (20261106000100).
+  dealerId   String?               @map("dealer_id")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  dealer     Dealer?               @relation(fields: [dealerId], references: [id])
 
   @@map("circumvention_attempts")
 }
@@ -2816,6 +3236,8 @@ model DealStatusHistory {
   actorRole  String?  @map("actor_role")
   reason     String?
   createdAt  DateTime @default(now()) @map("created_at")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  deal       Deal     @relation(fields: [dealId], references: [id])
 
   @@index([dealId])
   @@map("deal_status_history")
@@ -3320,13 +3742,15 @@ model ContractScanHistory {
 }
 
 model ExternalPreApprovalDocument {
-  id            String    @id @default(uuid())
-  preApprovalId String    @map("pre_approval_id")
-  documentUrl   String    @map("document_url")
-  mimeType      String?   @map("mime_type")
-  sizeBytes     Int?      @map("size_bytes")
-  uploadedAt    DateTime  @default(now()) @map("uploaded_at")
-  verifiedAt    DateTime? @map("verified_at")
+  id            String              @id @default(uuid())
+  preApprovalId String              @map("pre_approval_id")
+  documentUrl   String              @map("document_url")
+  mimeType      String?             @map("mime_type")
+  sizeBytes     Int?                @map("size_bytes")
+  uploadedAt    DateTime            @default(now()) @map("uploaded_at")
+  verifiedAt    DateTime?           @map("verified_at")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  preApproval   ExternalPreApproval @relation(fields: [preApprovalId], references: [id], onDelete: Cascade)
 
   @@map("external_pre_approval_documents")
 }
@@ -3624,25 +4048,40 @@ enum DealerInvitationStatus {
 }
 
 model DealerApplication {
-  id             String                  @id @default(uuid())
-  dealershipName String                  @map("dealership_name")
-  dealershipType String                  @map("dealership_type")
-  state          String
-  city           String
-  zip            String
-  licenseNumber  String                  @map("license_number")
-  contactName    String                  @map("contact_name")
-  contactEmail   String                  @map("contact_email")
-  contactPhone   String?                 @map("contact_phone")
-  annualVolume   String?                 @map("annual_volume")
-  notes          String?
-  status         DealerApplicationStatus @default(PENDING)
-  reviewedBy     String?                 @map("reviewed_by")
-  reviewedAt     DateTime?               @map("reviewed_at")
-  rejectReason   String?                 @map("reject_reason")
-  dealerId       String?                 @unique @map("dealer_id")
-  createdAt      DateTime                @default(now()) @map("created_at")
-  updatedAt      DateTime                @updatedAt @map("updated_at")
+  id                         String                  @id @default(uuid())
+  dealershipName             String                  @map("dealership_name")
+  dealershipType             String                  @map("dealership_type")
+  state                      String
+  city                       String
+  zip                        String
+  licenseNumber              String                  @map("license_number")
+  contactName                String                  @map("contact_name")
+  contactEmail               String                  @map("contact_email")
+  contactPhone               String?                 @map("contact_phone")
+  annualVolume               String?                 @map("annual_volume")
+  notes                      String?
+  status                     DealerApplicationStatus @default(PENDING)
+  reviewedBy                 String?                 @map("reviewed_by")
+  reviewedAt                 DateTime?               @map("reviewed_at")
+  rejectReason               String?                 @map("reject_reason")
+  dealerId                   String?                 @unique @map("dealer_id")
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+  // Phase 1 transaction spine (20261106000100).
+  acquisitionChannel         String                  @default("direct") @map("acquisition_channel")
+  consentIp                  String?                 @map("consent_ip")
+  consentIpUnavailableReason String?                 @map("consent_ip_unavailable_reason")
+  consentSurface             String?                 @map("consent_surface")
+  consentTextHash            String?                 @map("consent_text_hash")
+  consentVersion             String?                 @map("consent_version")
+  ipAddress                  String?                 @map("ip_address")
+  ipUnavailableReason        String?                 @map("ip_unavailable_reason")
+  referrer                   String?
+  sourceUrl                  String?                 @map("source_url")
+  utmCampaign                String?                 @map("utm_campaign")
+  utmContent                 String?                 @map("utm_content")
+  utmMedium                  String?                 @map("utm_medium")
+  utmSource                  String?                 @map("utm_source")
 
   @@index([status])
   @@map("dealer_applications")
@@ -3986,8 +4425,26 @@ model BuyerOpportunity {
   buyerEmailSent   Boolean @default(false) @map("buyer_email_sent")
   founderEmailSent Boolean @default(false) @map("founder_email_sent")
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt                  DateTime   @default(now()) @map("created_at")
+  updatedAt                  DateTime   @updatedAt @map("updated_at")
+  // Phase 1 transaction spine (20261106000100).
+  acquisitionChannel         String     @default("direct") @map("acquisition_channel")
+  affiliateId                String?    @map("affiliate_id")
+  consentIp                  String?    @map("consent_ip")
+  consentIpUnavailableReason String?    @map("consent_ip_unavailable_reason")
+  consentSurface             String?    @map("consent_surface")
+  consentTextHash            String?    @map("consent_text_hash")
+  consentVersion             String?    @map("consent_version")
+  ipAddress                  String?    @map("ip_address")
+  ipUnavailableReason        String?    @map("ip_unavailable_reason")
+  referrer                   String?
+  sourceUrl                  String?    @map("source_url")
+  utmCampaign                String?    @map("utm_campaign")
+  utmContent                 String?    @map("utm_content")
+  utmMedium                  String?    @map("utm_medium")
+  utmSource                  String?    @map("utm_source")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  affiliate                  Affiliate? @relation(fields: [affiliateId], references: [id])
 
   @@index([buyerId])
   @@index([leadTemperature])
@@ -4033,6 +4490,16 @@ model DealerRooftop {
 
   // websiteHost lookups are served by its @unique index (above) — no separate
   // @@index (that would drift from the migration, which creates only the unique).
+  sourcingCandidates       SourcingCandidate[]
+  // Phase 1 transaction spine (20261106000100).
+  mcRooftopId              String?             @map("mc_rooftop_id")
+  operatingStatus          String?             @map("operating_status")
+  operatingStatusCheckedAt DateTime?           @map("operating_status_checked_at")
+  // Phase 1 transaction spine (20261106000100) — back-relations.
+  auctionInvitations       AuctionInvitation[]
+  deals                    Deal[]
+  offers                   Offer[]
+
   @@index([phoneKey])
   @@index([nameZipKey])
   @@index([nameCityStateKey])
@@ -5692,6 +6159,14 @@ enum FinancingAuditEventType {
   STATE_TRANSITION
   REVIEW_ROUTED
   REVIEW_RESOLVED
+
+  // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
+  TERMS_LOCKED
+  FINANCING_COMPLETED
+  FINANCING_FAILED
+  FINANCING_EXPIRED
+  CASH_CONFIRMED
+  EVIDENCE_ATTACHED
 }
 
 model FinancingAuditEvent {
@@ -5712,6 +6187,10 @@ model FinancingAuditEvent {
   prevHash            String?                 @map("prev_hash")
   hash                String
   createdAt           DateTime                @default(now()) @map("created_at")
+  // Phase 1 transaction spine (20261106000100).
+  financingId         String?                 @map("financing_id")
+  // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
+  financing           Financing?              @relation(fields: [financingId], references: [id])
 
   @@index([creditApplicationId])
   @@index([dealId])
@@ -5815,4 +6294,409 @@ model FinancingReviewTask {
   @@index([status, taskType])
   @@index([creditApplicationId])
   @@map("financing_review_tasks")
+}
+
+// ================================================================================================
+// Phase 1 transaction spine (§13-D24 - adopt with Prisma models).
+// These fourteen tables are created or adopted by 20261106000100_transaction_spine_foundation.
+// Four of them - comms_outbox, lifecycle_touch_schedule, idempotency_keys, jobs_dead_letter -
+// already existed in production but had never been declared here, so nothing in the application
+// could reach them and the migration-chain guard counted them as squatting on their names.
+// ================================================================================================
+
+model PlanSnapshot {
+  id                  String          @id
+  buyerId             String          @map("buyer_id")
+  vehicleRequestId    String?         @map("vehicle_request_id")
+  dealId              String?         @map("deal_id")
+  plan                BuyerPlan
+  effectiveAt         DateTime        @default(now()) @map("effective_at")
+  actor               String?
+  touchpoint          String?
+  settledDepositCents Int?            @map("settled_deposit_cents")
+  settledPremiumCents Int?            @map("settled_premium_cents")
+  reason              String?
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @default(now()) @map("updated_at")
+  deals               Deal?           @relation("deals_id_current_plan_snapshot_idToplan_snapshots")
+  buyer               Buyer           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  deal                Deal?           @relation("plan_snapshots_deal_idTodeals", fields: [dealId], references: [id])
+  vehicleRequest      VehicleRequest? @relation("plan_snapshots_vehicle_request_idTovehicle_requests", fields: [vehicleRequestId], references: [id])
+  vehicleRequests     VehicleRequest? @relation("vehicle_requests_id_current_plan_snapshot_idToplan_snapshots")
+
+  @@unique([dealId, id])
+  @@unique([vehicleRequestId, id])
+  @@index([buyerId])
+  @@index([dealId])
+  @@map("plan_snapshots")
+}
+
+model CoBuyer {
+  id                   String          @id
+  buyerId              String          @map("buyer_id")
+  vehicleRequestId     String?         @map("vehicle_request_id")
+  legalFirstName       String?         @map("legal_first_name")
+  legalLastName        String?         @map("legal_last_name")
+  email                String?
+  phone                String?
+  address              String?
+  city                 String?
+  state                String?
+  zip                  String?
+  role                 String?
+  requestedByPrimaryAt DateTime?       @map("requested_by_primary_at")
+  shareConsentAt       DateTime?       @map("share_consent_at")
+  shareConsentVersion  String?         @map("share_consent_version")
+  isRequiredSigner     Boolean         @default(false) @map("is_required_signer")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @default(now()) @map("updated_at")
+  buyer                Buyer           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  vehicleRequest       VehicleRequest? @relation(fields: [vehicleRequestId], references: [id])
+  deals                Deal[]
+  // NOTE: `e_sign_envelopes.co_buyer_id` and its foreign key ARE created by this wave, but the
+  // Prisma relation is deliberately NOT declared and is deferred to Phase 8, which owns e-sign.
+  // `lib/services/esign/esign-schema-gate.ts` projects an explicit list of only the columns
+  // production has today, and its schema-gate test requires every ESignEnvelope scalar to be
+  // classified as either present-in-production or added-by-the-two-unapplied-migrations.
+  // `coBuyerId` is neither - it is added by THIS wave - so declaring it would let an ungated
+  // read expand the full scalar list and ask for a column production does not have until this
+  // wave deploys: a 42703 for the whole window between merge and `prisma migrate deploy`.
+
+  @@index([buyerId])
+  @@map("co_buyers")
+}
+
+model SourcingCase {
+  id                       String              @id
+  vehicleRequestId         String              @unique @map("vehicle_request_id")
+  status                   String
+  band                     String              @default("100")
+  openedAt                 DateTime            @default(now()) @map("opened_at")
+  bandExpandedAt           DateTime?           @map("band_expanded_at")
+  authorizationRequestedAt DateTime?           @map("authorization_requested_at")
+  authorizedRadiusMiles    Int?                @map("authorized_radius_miles")
+  coverageCount            Int                 @default(0) @map("coverage_count")
+  limitedAuctionApprovedBy String?             @map("limited_auction_approved_by")
+  limitedAuctionApprovedAt DateTime?           @map("limited_auction_approved_at")
+  closedAt                 DateTime?           @map("closed_at")
+  closeReason              String?             @map("close_reason")
+  createdAt                DateTime            @default(now()) @map("created_at")
+  updatedAt                DateTime            @default(now()) @map("updated_at")
+  auctions                 Auction[]
+  sourcingCandidates       SourcingCandidate[]
+  vehicleRequest           VehicleRequest      @relation(fields: [vehicleRequestId], references: [id], onDelete: Cascade)
+
+  @@map("sourcing_cases")
+}
+
+model SourcingCandidate {
+  id                 String                  @id
+  sourcingCaseId     String                  @map("sourcing_case_id")
+  rooftopId          String?                 @map("rooftop_id")
+  source             SourcingCandidateSource
+  distanceMiles      Float?                  @map("distance_miles")
+  servedCandidateIds String[]                @default([]) @map("served_candidate_ids")
+  validation         Json?
+  invitedAt          DateTime?               @map("invited_at")
+  excludedReason     String?                 @map("excluded_reason")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  rooftop            DealerRooftop?          @relation(fields: [rooftopId], references: [id])
+  sourcingCase       SourcingCase            @relation(fields: [sourcingCaseId], references: [id], onDelete: Cascade)
+
+  @@index([sourcingCaseId], map: "sourcing_candidates_case_idx")
+  @@map("sourcing_candidates")
+}
+
+model DealerReaffirmation {
+  id                         String                    @id
+  dealId                     String                    @map("deal_id")
+  dealerId                   String?                   @map("dealer_id")
+  status                     DealerReaffirmationStatus @default(PENDING)
+  confirmedVin               String?                   @map("confirmed_vin")
+  confirmedOdometer          Int?                      @map("confirmed_odometer")
+  confirmedOtdCents          Int?                      @map("confirmed_otd_cents")
+  confirmedFeeItems          Json?                     @map("confirmed_fee_items")
+  confirmedIncentiveItems    Json?                     @map("confirmed_incentive_items")
+  confirmedAddOnItems        Json?                     @map("confirmed_add_on_items")
+  confirmedDeliveryTerms     String?                   @map("confirmed_delivery_terms")
+  outOfStateHandling         String?                   @map("out_of_state_handling")
+  tradeSubjectToAppraisalAck Boolean?                  @map("trade_subject_to_appraisal_ack")
+  holdUntil                  DateTime?                 @map("hold_until")
+  disclosureArtifactUrls     String[]                  @map("disclosure_artifact_urls")
+  buyerAcknowledgedAt        DateTime?                 @map("buyer_acknowledged_at")
+  materialChangeProposal     Json?                     @map("material_change_proposal")
+  buyerDecision              String?                   @map("buyer_decision")
+  decidedAt                  DateTime?                 @map("decided_at")
+  reminded12hAt              DateTime?                 @map("reminded_12h_at")
+  dueAt                      DateTime?                 @map("due_at")
+  createdAt                  DateTime                  @default(now()) @map("created_at")
+  updatedAt                  DateTime                  @default(now()) @map("updated_at")
+  deal                       Deal                      @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  dealer                     Dealer?                   @relation(fields: [dealerId], references: [id])
+
+  @@index([dealId])
+  @@map("dealer_reaffirmations")
+}
+
+model DealRecap {
+  id                        String     @id
+  dealId                    String     @map("deal_id")
+  version                   Int        @default(1)
+  itemized                  Json?
+  optionalProducts          Json?      @map("optional_products")
+  preliminaryAllowanceCents Int?       @map("preliminary_allowance_cents")
+  payoffGoodThroughDate     DateTime?  @map("payoff_good_through_date")
+  equityCents               Int?       @map("equity_cents")
+  downPaymentCents          Int?       @map("down_payment_cents")
+  financingPath             String?    @map("financing_path")
+  amountFinancedCents       Int?       @map("amount_financed_cents")
+  estimatedPaymentCents     Int?       @map("estimated_payment_cents")
+  delivery                  Json?
+  plan                      BuyerPlan?
+  buyerConfirmedAt          DateTime?  @map("buyer_confirmed_at")
+  dealerConfirmedAt         DateTime?  @map("dealer_confirmed_at")
+  supersededBy              String?    @map("superseded_by")
+  disputeReason             String?    @map("dispute_reason")
+  createdAt                 DateTime   @default(now()) @map("created_at")
+  updatedAt                 DateTime   @default(now()) @map("updated_at")
+  deal                      Deal       @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@map("deal_recaps")
+}
+
+model QueueItem {
+  id                 String          @id
+  type               QueueItemType
+  status             QueueItemStatus @default(OPEN)
+  exceptionCode      String?         @map("exception_code")
+  ownerRole          QueueOwnerRole? @map("owner_role")
+  assignedAdminId    String?         @map("assigned_admin_id")
+  vehicleRequestId   String?         @map("vehicle_request_id")
+  dealId             String?         @map("deal_id")
+  auctionId          String?         @map("auction_id")
+  depositId          String?         @map("deposit_id")
+  buyerId            String?         @map("buyer_id")
+  dealerId           String?         @map("dealer_id")
+  buyerVisibleStatus String?         @map("buyer_visible_status")
+  requiredAction     String?         @map("required_action")
+  deadlineAt         DateTime?       @map("deadline_at")
+  returnPoint        String?         @map("return_point")
+  resolution         String?
+  resolvedAt         DateTime?       @map("resolved_at")
+  resolvedBy         String?         @map("resolved_by")
+  escalatedAt        DateTime?       @map("escalated_at")
+  idempotencyKey     String?         @map("idempotency_key")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @default(now()) @map("updated_at")
+  assignedAdmin      Admin?          @relation(fields: [assignedAdminId], references: [id])
+  auction            Auction?        @relation(fields: [auctionId], references: [id])
+  buyer              Buyer?          @relation(fields: [buyerId], references: [id])
+  deal               Deal?           @relation(fields: [dealId], references: [id])
+  dealer             Dealer?         @relation(fields: [dealerId], references: [id])
+  deposit            Deposit?        @relation(fields: [depositId], references: [id])
+  vehicleRequest     VehicleRequest? @relation(fields: [vehicleRequestId], references: [id])
+
+  @@index([assignedAdminId])
+  @@index([exceptionCode])
+  @@index([ownerRole, status])
+  @@index([status])
+  @@index([status, type])
+  @@map("queue_items")
+}
+
+model PostCompletionObligation {
+  id               String                         @id
+  dealId           String                         @map("deal_id")
+  type             String
+  status           PostCompletionObligationStatus @default(PENDING)
+  ownerRole        String?                        @map("owner_role")
+  dueAt            DateTime?                      @map("due_at")
+  expectedDate     DateTime?                      @map("expected_date")
+  tempTagExpiresAt DateTime?                      @map("temp_tag_expires_at")
+  evidence         Json?
+  resolvedAt       DateTime?                      @map("resolved_at")
+  notes            String?
+  createdAt        DateTime                       @default(now()) @map("created_at")
+  updatedAt        DateTime                       @default(now()) @map("updated_at")
+  deal             Deal                           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@map("post_completion_obligations")
+}
+
+model DealCorrection {
+  id        String   @id
+  dealId    String   @map("deal_id")
+  kind      String
+  before    Json?
+  after     Json?
+  reason    String?
+  actor     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@map("deal_corrections")
+}
+
+model InventoryQueryCache {
+  id           String    @id
+  criteriaHash String    @unique @map("criteria_hash")
+  buyerId      String?   @map("buyer_id")
+  params       Json
+  result       Json
+  numFound     Int       @default(0) @map("num_found")
+  fetchedAt    DateTime  @default(now()) @map("fetched_at")
+  expiresAt    DateTime? @map("expires_at")
+  buyer        Buyer?    @relation(fields: [buyerId], references: [id])
+
+  @@map("inventory_query_cache")
+}
+
+model CommsOutbox {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  channel          String
+  dedupKey         String    @unique(map: "uq_comms_outbox_dedup_key") @map("dedup_key")
+  status           String    @default("pending")
+  payload          Json
+  attempts         Int       @default(0)
+  lastError        String?   @map("last_error")
+  lastResult       String?   @map("last_result")
+  providerId       String?   @map("provider_id")
+  runAt            DateTime  @default(now()) @map("run_at") @db.Timestamptz(6)
+  claimedAt        DateTime? @map("claimed_at") @db.Timestamptz(6)
+  dispatchedAt     DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  triggerEvent     String?   @map("trigger_event")
+  templateKey      String?   @map("template_key")
+  vehicleRequestId String?   @map("vehicle_request_id")
+  dealId           String?   @map("deal_id")
+  auctionId        String?   @map("auction_id")
+  recipientKind    String?   @map("recipient_kind")
+  recipientId      String?   @map("recipient_id")
+  stateRecheck     Json?     @map("state_recheck")
+  maxAttempts      Int       @default(5) @map("max_attempts")
+  nextAttemptAt    DateTime? @map("next_attempt_at") @db.Timestamptz(6)
+  cancelKey        String?   @map("cancel_key")
+  cancelledAt      DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason     String?   @map("cancel_reason")
+  terminalFailedAt DateTime? @map("terminal_failed_at") @db.Timestamptz(6)
+  deliveredAt      DateTime? @map("delivered_at") @db.Timestamptz(6)
+
+  @@index([recipientKind, recipientId], map: "comms_outbox_recipient_idx")
+  @@map("comms_outbox")
+}
+
+model LifecycleTouchSchedule {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  baseKey   String    @map("base_key")
+  sequence  String
+  entityId  String    @map("entity_id")
+  firstName String?   @map("first_name")
+  email     String
+  phone     String?
+  runAt     DateTime  @map("run_at") @db.Timestamptz(6)
+  status    String    @default("pending")
+  attempts  Int       @default(0)
+  lastError String?   @map("last_error")
+  claimedAt DateTime? @map("claimed_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([baseKey, sequence], map: "uq_lifecycle_touch_key_sequence")
+  @@map("lifecycle_touch_schedule")
+}
+
+model IdempotencyKey {
+  keyHash         String   @id @map("key_hash")
+  executionStatus String   @map("execution_status")
+  responsePayload Json?    @default("{}") @map("response_payload")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt], map: "idx_idempotency_created")
+  @@map("idempotency_keys")
+}
+
+model JobsDeadLetter {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId          String   @map("job_id")
+  eventName      String   @map("event_name")
+  payload        Json     @default("{}")
+  errorMessage   String   @map("error_message")
+  failedAt       DateTime @default(now()) @map("failed_at") @db.Timestamptz(6)
+  autoRetryCount Int      @default(0) @map("auto_retry_count")
+
+  @@index([eventName], map: "idx_dlq_event")
+  @@index([failedAt(sort: Desc)], map: "idx_dlq_failed_at")
+  @@map("jobs_dead_letter")
+}
+
+// Phase 1 transaction-spine enum types (20261106000000_transaction_spine_enums).
+
+enum AuctionInvitationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  OPENED
+  BOUNCED
+  DECLINED
+  RESPONDED
+  OFFER_SUBMITTED
+  EXPIRED
+  REPLACED
+}
+
+enum AuctionVehicleCandidateStatus {
+  ACTIVE
+  DROPPED
+  SELECTED
+  CLOSED
+  REVALIDATION_PENDING
+}
+
+enum DealerReaffirmationStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  TIMED_OUT
+  MATERIAL_CHANGE_PENDING
+}
+
+enum DeliveryPreference {
+  PICKUP
+  DELIVERY
+}
+
+enum ESignSignerKind {
+  BUYER
+  CO_BUYER
+}
+
+enum PostCompletionObligationStatus {
+  PENDING
+  OVERDUE
+  RESOLVED
+}
+
+enum QueueOwnerRole {
+  OPERATIONS
+  BUYER
+  FINANCE
+  SYSTEM
+  BUYER_OPERATIONS
+  COMPLIANCE
+  OPERATIONS_FINANCE
+  BUYER_DEALER
+}
+
+enum SourcingCandidateSource {
+  HOLDING
+  COMPARABLE
+}
+
+enum VehicleRequestEntryType {
+  INVENTORY_SELECTION
+  CUSTOM_REQUEST
 }

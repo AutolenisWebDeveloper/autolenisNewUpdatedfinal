@@ -24,6 +24,11 @@ export const VEHICLE_REQUEST_STATUS_LABEL: Record<VehicleRequestStatus, string> 
   CLOSED_NO_MATCH: "Closed — No Match",
   CANCELLED: "Cancelled",
   EXPIRED: "Expired",
+
+  // Phase 1 transaction spine (20261106000000) — new VehicleRequestStatus members.
+  DRAFT: "Draft",
+  PAYMENT_REQUIRED: "Payment Required",
+  RADIUS_AUTHORIZATION_REQUIRED: "Radius Authorization Required",
 };
 
 /** Buyer-facing labels — softer, never expose internal-only states. */
@@ -39,6 +44,11 @@ export const VEHICLE_REQUEST_STATUS_BUYER_LABEL: Record<VehicleRequestStatus, st
   CLOSED_NO_MATCH: "Closed",
   CANCELLED: "Cancelled",
   EXPIRED: "Expired",
+
+  // Phase 1 transaction spine (20261106000000) — new VehicleRequestStatus members.
+  DRAFT: "Draft",
+  PAYMENT_REQUIRED: "Payment Required",
+  RADIUS_AUTHORIZATION_REQUIRED: "Confirm Search Area",
 };
 
 /** Tailwind badge tone classes for VehicleRequestStatus (internal surfaces). */
@@ -54,6 +64,11 @@ export const VEHICLE_REQUEST_STATUS_TONE: Record<VehicleRequestStatus, string> =
   CLOSED_NO_MATCH: "bg-slate-100 text-slate-600 border-slate-200",
   CANCELLED: "bg-slate-100 text-slate-600 border-slate-200",
   EXPIRED: "bg-slate-100 text-slate-600 border-slate-200",
+
+  // Phase 1 transaction spine (20261106000000) — new VehicleRequestStatus members.
+  DRAFT: "bg-slate-100 text-slate-600 border-slate-200",
+  PAYMENT_REQUIRED: "bg-amber-100 text-amber-700 border-amber-200",
+  RADIUS_AUTHORIZATION_REQUIRED: "bg-amber-100 text-amber-700 border-amber-200",
 };
 
 export function vehicleRequestStatusLabel(
@@ -84,6 +99,15 @@ export const DEAL_STATUS_LABEL: Record<DealStatus, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   REFUNDED: "Refunded",
+  // Phase 1 transaction spine (20261106000000) — new DealStatus members. Nothing writes these
+  // in Phase 1; the phases that own each state supply the buyer-facing copy.
+  DEALER_CONFIRMATION: "Dealer Confirmation",
+  RECAP_PENDING: "Recap Pending",
+  DEALER_EXECUTED: "Dealer Executed",
+  FUNDING_PENDING: "Funding Pending",
+  PICKUP_READINESS: "Pickup Readiness",
+  HANDOVER_PENDING: "Handover Pending",
+  FROZEN_PENDING_RELEASE: "Frozen — Pending Release",
 };
 
 /** Coarse tone key for a DealStatus, so buyer + admin badges agree. */

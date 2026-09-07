@@ -255,6 +255,20 @@ export function dealStatusCommsPlan(status: DealStatus): DealCommPlan | null {
         sms: "Your AutoLenis refund has been processed. Allow a few business days for it to appear:",
       };
 
+    // Phase 1 transaction spine (20261106000000). The guard below demands an explicit
+    // plan or an explicit null for every new DealStatus; these seven are given an
+    // explicit null because nothing in Phase 1 can put a deal into them, so there is
+    // no event to tell the buyer about yet. The phases that own each state supply the
+    // copy — and until they do, this sends nothing rather than sending something wrong.
+    case "DEALER_CONFIRMATION":
+    case "RECAP_PENDING":
+    case "DEALER_EXECUTED":
+    case "FUNDING_PENDING":
+    case "PICKUP_READINESS":
+    case "HANDOVER_PENDING":
+    case "FROZEN_PENDING_RELEASE":
+      return null;
+
     default: {
       // Exhaustiveness guard — a new DealStatus must be given an explicit plan
       // (or an explicit `null`) rather than silently sending nothing.

@@ -187,11 +187,14 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
     }).catch(() => []);
     const vehicleRef = `Auction ${auctionId.slice(0, 8)}`;
     for (const inv of invitedDealers) {
-      const email = inv.dealer?.user?.email;
+      // An invitation to a non-registered rooftop carries no dealer and no mailbox (S7-18).
+      const dealer = inv.dealer;
+      if (!dealer) continue;
+      const email = dealer.user?.email;
       if (!email) continue;
       await sendDealerAuctionClosedNoWinnerEmail({
         to: email,
-        contactName: inv.dealer.dealershipName,
+        contactName: dealer.dealershipName,
         vehicleRef,
         auctionId,
       }).catch(() => {});

@@ -572,6 +572,176 @@ The §12 preflight is re-asserted at the start of every phase before any Playwri
 | 10 | **Control-plane completion: cancellation orchestration, exception register, communications register, legacy neutralisation, cross-portal parity** | §24, §26 (all 48 rows wired), §27.1 (all 76 rows wired), §28.3, §29 (re-verified), §25.2 consequences | EXC; SAFE; TRANSITION; every portal status surface | 25, 27, 23/24 (completeness) | 9 |
 | 11 | **Acceptance** (no new capability) | §34, §35, master §13 | ACCEPT | — | 10 |
 
+### 8.1a Phase 1 — AS BUILT (2026-09-07)
+
+Implemented on `claude/txflow-01-schema-jvh3sh`. This section records how the phase was actually
+implemented where that differs from how it was planned; the parity rows below are satisfied unless
+marked otherwise.
+
+**Beyond the objects §8.2 named.** Nine coverage-gap groups were found against the §10 parity tables
+and closed in this wave, each traced to the row that assigns it to Phase 1: `deposits.hold_reason` +
+`hold_released_at` (PAY-38a); `deposits.disclosures_accepted_at` + `disclosures_version` and the
+`vehicle_requests` mirror (PAY-D); `deals.fee_refund_reason` (PAY-46a); `offers.availability_confirmed_at`
+(A4a); `shortlist_items.distance_miles` (R43a); the four guarded keys R3, R45/R70/U3, R59/U3 and R43a;
+`refinance_applications.consent_ip_unavailable_reason` and its two CHECKs (§7); and the R30 `deals`
+lineage CHECK.
+
+**Two latent defects, found by execution rather than review, and fixed before promotion.** Both
+passed all of `verify.sql`'s assertions and would have been unfixable afterwards, since CLAUDE.md
+forbids editing an applied migration. (a) Both composite plan-snapshot FKs used a bare
+`ON DELETE SET NULL`, which on a composite key nulls every referencing column including the parent's
+PRIMARY KEY — 23502 on any snapshot deletion. (b) The append-only trigger caught the referential
+SET NULL that a parent's deletion issues, making every `vehicle_request` and `deal` holding a snapshot
+undeletable and breaking the live buyer account-deletion route
+(`frontend/app/api/buyer/account/route.ts:63`). `behaviour.sql` and `run-proof.sh` step 4d now gate
+this class: 11 behaviours exercised on every run.
+
+**Rulings whose implementation differed from their wording.**
+
+- **§13-D39 — `OfferStatus.NOT_SELECTED` is WITHHELD, not added.** The decision is unruled and a
+  PostgreSQL enum label cannot be dropped once shipped, so adding it would foreclose the decision
+  while withholding it forecloses nothing. Both consuming rows are Phase 6 and both name an
+  alternative that already exists (S4 writes "`DECLINED` (or `NOT_SELECTED`)"). `verify.sql` asserts
+  the label ABSENT so the omission stays a decision. If D39 is later ruled for the distinct label,
+  Phase 6 adds it with `auctions.relaunched_at`/`relaunch_count` so D39 lands whole.
+- **R43a's "SET NULL vs RESTRICT" is not a live choice.** `shortlist_items.inventory_item_id` is
+  NOT NULL in production, so SET NULL is impossible; the key is RESTRICT — a listing may not be
+  deleted out from under a buyer's shortlist.
+- **B3 (WF:3575) and V18 (WF:3675) name `deposits.dispute_hold_at`; no such column was created.**
+  PAY-38a is the Phase-1 row and it names `disputed_at` + `hold_reason` + `hold_released_at`, which
+  is what shipped. The Phase-3 hold predicate is DERIVED, not stored:
+  `disputed_at IS NOT NULL AND hold_released_at IS NULL`. A stored fourth column would be a second
+  spelling of the same fact and could disagree with it. **Phase 3 must read the derived predicate.**
+- **§13-D24 — adopted with Prisma models, with one deferral.** All fourteen tables now have models
+  (`@@map`'d, with relations); the four adopted tables had existed in production without ever being
+  declared, so nothing in the application could reach them. Three of them — `comms_outbox`,
+  `lifecycle_touch_schedule`, `jobs_dead_letter` — genuinely have `uuid` primary keys in production,
+  so they carry `@db.Uuid`, and the migration-chain UUID guard was re-scoped from a blanket ban to a
+  named three-table exemption plus the invariant it was a proxy for (no FK may cross the uuid/text
+  boundary). **DEFERRED TO PHASE 8:** the `ESignEnvelope` ↔ `CoBuyer` Prisma relation. The column and
+  its FK ARE created by this wave, but `lib/services/esign/esign-schema-gate.ts` projects only the
+  columns production has today, and declaring `coBuyerId` would let an ungated read ask for a column
+  production lacks until this wave deploys — a 42703 across the whole merge-to-deploy window. Phase 8
+  owns e-sign and lands it there.
+
+**A caution for every later phase.** Prisma cannot express `ON DELETE SET NULL (column_list)`. The
+two composite plan-snapshot relations in `schema.prisma` therefore read as a bare `SetNull`, and
+`prisma validate` warns about exactly that. **Never regenerate those two foreign keys from
+`schema.prisma`** — doing so reintroduces defect (a) above. The hand-written migration is
+authoritative.
+
+**Application files this schema phase had to touch, and why.** The phase is schema-only in intent, but
+two schema facts propagate into TypeScript the moment `schema.prisma` declares them, and leaving them
+undeclared was the worse option (it puts `schema.prisma` at odds with the chain, which the drift gate
+fails at hard zero for columns and enum values). Nine files changed; none reads or writes a new field.
+
+- **Seven new `DealStatus` members and three new `VehicleRequestStatus` members** make every exhaustive
+  `Record<Status, …>` incomplete. `lib/domain/status-labels.ts` gains labels/tones;
+  `lib/services/deal/deal.service.ts` gains the seven states with **empty transition lists**, which is
+  fail-closed — nothing in Phase 1 can enter them, and `canTransition()` refuses to leave a state whose
+  exits have not been designed; `lib/services/notifications/acquisition-comms.ts` gives each an explicit
+  `null` plan, which is exactly what its own exhaustiveness guard demands ("an explicit plan or an
+  explicit `null` rather than silently sending nothing"). The phases owning those states replace all
+  three with real content.
+- **`auction_invitations.dealer_id` becomes nullable** (S7-18: a rooftop that is not a registered dealer
+  can be invited). Six call sites assumed it non-null. `app/api/cron/auction-close/route.ts`,
+  `app/api/cron/dealer-invitation-reminder/route.ts`, `lib/services/auction/auction.service.ts`,
+  `lib/services/auction/dealer-invitation.service.ts` and two in
+  `app/api/admin/auctions/[auctionId]/action/route.ts` now skip invitations with no dealer. This IS a
+  runtime behaviour change, and it is inert today: nothing writes a NULL until Phase 5, and every site
+  already skipped when the dealer's email was absent. `releaseAuctionLoad()` was a latent defect —
+  a NULL in `id: { in: [...] }` would have widened the update; an invitation with no dealer never took
+  a dealer's slot and so must not release one.
+- **`app/api/admin/inventory/[id]/route.ts`** pre-checks the new R43a `RESTRICT` key and returns a 409
+  naming the blocking shortlists. Without it the constraint surfaced as an opaque 500 *after* the admin
+  had typed the DELETE confirmation — a capability silently lost rather than a rule explained.
+
+**Independent adversarial review** (clean context, own restore of the baseline) returned **0 blockers,
+2 major, 4 minor, 3 nits**; all nine are resolved. The major one it found in this work: `rollback.sql`
+did not restore `auction_invitations.dealer_id NOT NULL` — the wave's only change to an existing
+column's *definition* — and `run-proof.sh`'s census captured `data_type` but not `is_nullable`, so the
+rollback proof was structurally unable to notice. Both are fixed, and the fix carries a negative
+control: with the restore removed the proof now fails, naming that exact column.
+
+**Gate tooling.** §12.2 corrections 1 and 2 landed with this phase; see that section.
+
+#### 8.1a.1 Owner rulings closing Phase 1 (2026-09-07)
+
+**Ruling 1 — `OFFER_DECLINED` IS included in the one-open-per-buyer predicate.** RULED AND
+IMPLEMENTED; the DDL and `preflight.sql` carry the identical ten-status list, verified literal by
+literal (they differ only in the statement terminator). The reasoning is the mirror of §13-D5:
+`DEAL_CREATED` was EXCLUDED because no writer moves a request out of it, so including it meant a
+permanent lockout with no operator escape. `OFFER_DECLINED` has an explicit exit —
+`REOPEN_SOURCING` at `frontend/app/api/admin/requests/[requestId]/route.ts:40-44` maps
+`from: [OFFER_DECLINED, CLOSED_NO_MATCH] → ACTIVE_SOURCING` — so no buyer is stranded. The semantics
+agree too: the status is set when a buyer declines
+(`app/api/buyer/requests/[requestId]/offer/respond/route.ts:45`), and §26's buyer-does-not-select
+path is "remind before expiry; revalidate or close" — a pending decision, not a terminal state. A
+request there still holds offers that may be revalidated, so a second request against it is exactly
+the duplicate the index exists to prevent, and would spend a second $99 on work the first may still
+deliver. **Production holds 0 rows in `OFFER_DECLINED`** (read from the committed baseline), so the
+index creates cleanly either way.
+
+Consequence to carry forward, unchanged by the ruling: the three `vehicleRequest.create` call sites
+have no pre-check and `hasActiveRequest()` (`lib/services/vehicle-request/vehicle-request.service.ts:21`)
+has zero callers, so a buyer who declines and resubmits gets a raw 23505 until a service-side guard
+and a buyer-facing "you already have an open request" path land. **That guard is Phase 2 work**
+(the unified intake service owns every creation path); it is a known consequence of a ruled decision,
+not an open defect in this wave.
+
+**Ruling 2 — deploy order is CODIFIED, not advisory.** See §8.1a.2.
+
+**`shortlist_items.inventory_item_id ON DELETE RESTRICT` — sweep interaction CHECKED AND CLEAR.**
+The daily stale sweep **soft-deletes**: `lib/services/inventory/stale-sweep.service.ts:236-238` is
+`updateMany({ where: { id: { in: ids } }, data: { isActive: false } })`. It flips a flag and deletes
+no row, so RESTRICT can never fail a sweep. The only hard deletes of an `inventory_item` anywhere in
+the application are `app/api/admin/inventory/[id]/route.ts:137` — which this wave gives an explicit
+409 naming the blocking shortlists rather than an opaque 500 — and `prisma/seed-inventory.ts:238`,
+which is scoped to `sourceAdapter: "seed_v1"` and never runs against production. No change to the
+key; CASCADE was not considered and is not needed.
+
+#### 8.1a.2 Phase 1 DEPLOY RUNBOOK — the order is a requirement, not a preference
+
+Run in this order. Steps 1-3 are read-only or owner-run reconciliation; nothing is applied until 4.
+
+1. **`preflight.sql`**, read-only against production, inside the maintenance window. Must return
+   **no `BLOCK` row**. It asserts 7 preconditions: the `assigned_admin_id → admins(id)` key, the
+   one-open-per-buyer index, orphan checks for the four guarded keys added to live tables
+   (`vehicle_requests.buyer_opportunity_id`, `external_pre_approval_documents.pre_approval_id`,
+   `deal_status_history.deal_id`, `shortlist_items.inventory_item_id`), and the R30 `deals` lineage
+   CHECK.
+2. **The six §13-D1 resolve commands.**
+3. **§13-D2's buyer reconciliation** — audited cancellation of the superseded open requests for the
+   three buyers holding 2-5. Re-run step 1 until the `one_open_per_buyer` row clears.
+4. **`prisma migrate deploy`.**
+5. **Post-deploy verification, BOTH halves**: the physical schema (`information_schema`,
+   `pg_indexes`, `pg_trigger`, and `pg_constraint.confdelsetcols` for the two composite keys) **and**
+   the `_prisma_migrations` ledger showing both directories applied.
+
+**STEP 4 MUST PRECEDE THE APPLICATION DEPLOY.** This is the ordering requirement, stated as a rule:
+`schema.prisma` on this branch declares **264 columns production does not have until step 4 runs**,
+and Prisma's default read selects every scalar a model declares. An application deployed before the
+migration gives **`42703 undefined_column`** on every affected surface across 25 tables. The Vercel
+build command is `prisma generate && next build` (`vercel.json`) — it does **not** migrate, so no
+deploy applies this wave implicitly; the ordering is entirely the operator's to hold.
+
+**The window this opens, so nobody diagnoses it twice.** Between the merge to `main` and step 4,
+`main`'s preview and any environment built from `main` will raise **`42703 undefined_column`** on
+surfaces reading the affected tables. That is the expected consequence of the merge, not a
+regression: **step 4 clears it**, immediately and completely. The same is already true of this
+branch's own preview, which shares the production Supabase project. Declaring the columns is what
+makes `pnpm db:check-drift` report zero functional drift; leaving them undeclared fails that gate
+instead — the two are not independently satisfiable, which is why this is a runbook step rather than
+a code fix.
+
+**Rollback:** `docs/transaction-flow/phase-1-proof/rollback.sql`, proven by round trip (4,729
+catalogue objects identical to the untouched baseline). It is NOT a complete reversal: the 41 enum
+labels added to pre-existing types survive, because PostgreSQL has no `ALTER TYPE ... DROP VALUE`.
+
+**Not applicable to this phase, stated rather than skipped.** Playwright, visual regression and any
+browser or UI check: the phase changes no route, component or rendered surface. Impeccable's UI
+review likewise has no surface to review.
+
 ### 8.2 Phase scopes
 
 #### Phase 0 — Pre-schema security correction: shut down the authenticated SSN intake
@@ -1033,9 +1203,20 @@ Zero route reads or writes a new field.
   rollback that "drops what the wave created" must not touch them. The file names them in a comment and
   the Phase 1 test asserts `rollback.sql` contains no `DROP TABLE` for any of the four. Enum values are
   append-only and stay; the columns added to adopted tables are dropped individually by name.
-  **Nothing needs a restore statement, because the wave replaces nothing.** The earlier draft needed one
-  for the e-sign constraint swap; that swap is now Phase 8, so a guarded "drop what we created" is a
-  complete rollback.
+  **AUTHORED 2026-09-07 and proven by round trip** (`phase-1-proof/rollback.sql`): the wave is applied
+  to a second restore of the baseline, the rollback is run, and the resulting catalogue must be
+  byte-identical to the untouched baseline — **4,729 objects, identical** (`run-proof.sh` step 7).
+  The file drops 10 tables, 9 enum types, 3 triggers, 3 functions, 49 constraints and 20 indexes on
+  pre-existing tables, and 281 columns across 27 tables; it names the four adopted tables as an
+  explicit deny-list and re-asserts at run time that all four survived.
+
+  **CORRECTION to this row's own wording:** "nothing needs a restore statement, because the wave
+  replaces nothing" is true of every object EXCEPT two. The wave widens `comms_outbox_channel_check`
+  and `comms_outbox_status_check`, which is a replacement, so `rollback.sql` restores both to
+  production's exact definitions first. (`lifecycle_touch_sequence_allowed` is restated verbatim by
+  the wave and genuinely needs nothing — verified by comparing `pg_get_constraintdef` either side.)
+  Restoring a narrower CHECK fails if a row already carries a widened value, which is correct: it
+  means the rollback is no longer safe and the data must be reconciled first.
 - **Behaviour rollback: NOT APPLICABLE — this phase changes no behaviour.** The 410 handler moved to
   Phase 0, which reverts by reverting its own commit. Phase 1's only non-SQL artefact is
   `credit-applications-frozen.test.ts`, a test; reverting it removes a guard, never a behaviour.
@@ -4022,7 +4203,18 @@ phase (`autolenis-code-verification`).
    §13-D51.
 4. Two Playwright roots (`frontend/e2e`, `frontend/tests/e2e`) are consolidated before the §34 form-walk
    suite is written; CI runs only `dealer-outreach.spec.ts` today (`ci.yml:300`).
-Until (1)–(3) land, every "PASS" reported by the hook is re-checked by reading the suite-by-suite output.
+**(1) and (2) LANDED 2026-09-07 with the Phase 1 wave.** Correction 1: `classifyOutcome` now reads
+EVERY `# fail N` summary rather than the first, treats `ELIFECYCLE` / a non-zero exit as a failure
+that outranks any clean summary printed before it, and returns `unknown` (not-run) for a `test:all`
+that produced no summary at all; the hook's self-test carries the multi-suite fixture. This was not
+theoretical — the first full `test:all` run of this very phase failed in ONE suite out of 67, at line
+20,715 of the log, behind many `# fail 0` summaries. The old parser would have reported that run as a
+PASS. Correction 2: `check-test-coverage.ts` now parses the `test:all` chain and fails on any
+un-chained `test:*` script that is not on a declared exempt list; the list carries eight entries, each
+with its reason. It immediately found two genuinely un-chained scripts — `test:concurrency`
+(deliberately excluded per correction 3 / §13-D51, run in the E2E job at `ci.yml:445`) and
+`test:matrix` (the runner itself, `ci.yml:106`) — both now recorded as exemptions with their reasons.
+(4) remains open and belongs to the phase that writes the §34 form-walk suite.
 
 ### 12.3 Preview isolation preflight (master §8) — asserted at the start of every phase, before any Playwright run
 
@@ -4109,7 +4301,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D10 | Backfill the 10 NULL-location buyers | ACTION | Phase 3 (before any of them can pass eligibility) | Per `docs/plans/BUYER-LOCATION-BACKFILL.md` (owner-run script, city+state+ZIP, never ZIP alone). Verify: `SELECT count(*) FROM buyers WHERE city IS NULL OR state IS NULL OR zip IS NULL` falls to the guest-only residue. | BLOCKING A NAMED LATER PHASE (Phase 3) |
 | D11 | `QueueItemType` extension approach and `queue_items` shape | DECISION | Phase 1 | **RULED 2026-09-05: option A — keep the 8 existing labels, add broad category labels, carry the §26 row identity in TEXT `exception_code`.** One-label-per-row (48+) is rejected: the register is demonstrably unsettled (MD §26 48 rows, HTML EXC 49, parity 54 identifiers), the repo reserves enums for closed vocabularies and uses free text with an inline comment for open ones (`AdminAuditLog.action`, `PlatformAlert.source`), and `FinancingReviewTask` — the shape this table reuses — already made exactly this choice. Reversal is asymmetric in A's favour: `ADD VALUE IF NOT EXISTS` is one idempotent line, while an unwanted label can never be dropped (repo doctrine leaves it inert, `20261001000000_pickup_confirm_roundtrip/migration.sql:23-24`), so B's real cost is ~50 dead labels pinned permanently by the hard-zero functional drift gate. **SHAPE SENT BACK FOR CORRECTION — ALL SIX CORRECTIONS APPLIED TO THE PROOF DDL 2026-09-06.** Each is recorded below as *finding → resolution*, and each resolution is asserted by `phase-1-proof/verify.sql`, so a later edit that undoes one fails the `phase1-proof` CI job rather than reaching production. (1) **`assigned_admin_id` FK target was wrong.** D11's prose and the proof DDL named `users`, but the admin actor id everywhere is `Admin.id` (`lib/auth/admin-session.ts:18-19`, `lib/auth/admin-api.ts:23`, both resolving the JWT's `adminId` through `prisma.admin.findUnique({ where: { id } })`), and `Admin.id` ≠ `Admin.userId` (`schema.prisma:270-271`). **RESOLVED:** both `queue_items.assigned_admin_id` and `vehicle_requests.assigned_admin_id` now key to `admins(id)` `ON DELETE SET NULL`; `verify.sql` asserts the FK *target*, not merely the constraint name, because a key onto `users` carries the same name and would otherwise pass. This is a **correctness defect rather than a data backlog** — `vehicle_requests.assigned_admin_id` held **0 non-NULL rows** when read on 2026-09-05 (§5.7, read directly from `aieybibvewmvrubcpthm` by read-only query in the review session), so nothing has yet been written against the wrong parent; left uncorrected it would have rejected every future assignment at runtime with a 23503. **That zero is not the deploy-safety argument, and an earlier draft of this row wrongly used it as one.** It is a point-in-time measurement, the deploy is later, and `ADD CONSTRAINT` validates existing data: a single admin assignment in between makes the statement fail, and Prisma runs the file in one transaction, so the whole wave rolls back. Safety comes from a deploy-time assertion instead — `docs/transaction-flow/phase-1-proof/preflight.sql`, in the same pattern §13-D2 already uses for the unique index, returns one `BLOCK` row per `vehicle_requests` row whose non-NULL `assigned_admin_id` does not resolve in `admins(id)`, and a non-zero result stops the deploy for owner-run reconciliation. `queue_items` needs no such assertion: the table does not exist in production (§5.2), so the wave creates it empty and its FK validates an empty set by construction. (2) `owner_role` was `TEXT` in the proof DDL but an enum in D11's prose. **RESOLVED: enum**, because §26 is a closed vocabulary — the register names an owner for every one of its 48 rows and no row invents one. (3) The proposed `QueueOwnerRole` members could not express the register: `SUPPORT` and `CONCIERGE` appeared in **zero** §26 Owner cells, while Buyer (7), Buyer/Operations (4), System (4) and Buyer/Dealer (1) — 16 rows — had no member. **RESOLVED** by a membership rule rather than a list: exactly one member per **distinct** §26 Owner cell, and no member without a cell — `OPERATIONS` (23), `BUYER` (7), `FINANCE` (6), `SYSTEM` (4), `BUYER_OPERATIONS` (4), `COMPLIANCE` (2), `OPERATIONS_FINANCE` (1), `BUYER_DEALER` (1), summing to the register's 48. `SUPPORT` and `CONCIERGE` are dropped and `verify.sql` fails if either reappears (an enum label cannot be dropped once shipped). The three composite cells keep their own members rather than collapsing to a first-named owner, because the register means **shared** ownership there and resolving it to one side would discard the fact the column exists to record. This duplicates no part of `AdminRole` (`schema.prisma:1466-1472`), which is RBAC over admin *accounts* and cannot express `BUYER`, `SYSTEM` or a shared owner at all — the two vocabularies share no member, so golden rule 1 is satisfied. (4) `buyer_visible_status` could not be "taken verbatim from the §26 column" — §26 is three columns (`Exception` / `Owner` / `Required result`) and none of them is a buyer-facing string; 48+ such strings must be **authored**, which is unbudgeted work on the Phase 1 critical path. **RESOLVED with a defined source:** a catalogue keyed by `exception_code`, authored and owned by `lib/services/operations/queue-item.service.ts` in **Phase 2** — the phase that owns every writer of this table (C14, L3-01) — and stamped onto the row at raise time. Phase 1 lands the column nullable with **no** CHECK; a CHECK here would pin a vocabulary Phase 2 has not written. (5) The additive label count is **12, not 11**: `LINEAGE_ORPHAN` is required by L3-01 and appeared in neither the §8.2 list nor the proof DDL. **RESOLVED:** the label is in directory 1 and `QueueItemType` now holds **20** (8 + 12), which is what R36 asserts. (6) `owner_role` had no index though the table's entire premise is per-owner queues. **RESOLVED:** `queue_items_owner_role_status_idx` on `(owner_role, status)`, following the `@@index([status, taskType])` precedent on `FinancingReviewTask`, the shape this table reuses. **Still owner-gated:** the corrections settle the shape; authorising Phase 1 to begin, and promoting these directories into `frontend/prisma/migrations/`, remains the owner's (§13-D13). | BLOCKING PHASE 1 |
 | D12 | Enable the Stripe payment settlement reconciler in production | ACTION (money path) | Phase 3 acceptance | `DEPOSIT_SETTLEMENT_RECONCILE_ENABLED="true"` (default off; `lib/services/payment/deposit-settlement.service.ts:74-76`); the reconciler also carries a hard-coded excluded production deposit id (`:69-71`) that Phase 3 removes. Enable only after the recovered-gap alert is verified in preview, after the excluded deposit `77934f10-…` is resolved by hand, and after choosing **one** alert rail: Phase 3 folds the duplicate read-only detector (`health.service.checkDepositProviderEvidence` via `sla-check`) into `raiseException` (recommended) rather than keeping two rails. | BLOCKING A NAMED LATER PHASE (Phase 3) |
-| D13 | Production deploy of the Phase 1 migration wave | ACTION | end of Phase 1 | Order: D1 (**all six rows** — ruled 2026-09-05, §13-D1) → D2 → **`preflight.sql` read-only against production, in the same maintenance window, returning no `BLOCK` row** → `prisma migrate deploy` → verify physical schema (information_schema/pg_indexes/pg_trigger) **and** ledger. The preflight step is not optional and is not satisfied by §5's readings: those are point-in-time, and two statements in the wave validate against DATA rather than schema — the `vehicle_requests_one_open_per_buyer_key` unique index and the `assigned_admin_id → admins(id)` foreign key. Both are inside `prisma migrate deploy`'s single transaction, so either one failing rolls the entire wave back. The order is forced, not preferred: the wave creates `vehicle_requests_one_open_per_buyer_key` and the deploy does not run until §5.6's violator query returns zero. **Precondition the order does not state:** the wave does not yet exist in the chain — `frontend/prisma/migrations/` ends at `20261105000000` and there is no `20261106*` directory; both files live under `docs/transaction-flow/phase-1-proof/` and say so in their own headers. Authoring and promoting those two directories is Phase 1 implementation work and is gated on §13-D5, §13-D11 (including its six shape corrections) and §13-D24 being answered first; until then `prisma migrate deploy` would apply nothing. **Reversal:** enum labels cannot be dropped, so no wave that adds one is fully reversible (§8.2); `rollback.sql` is specified but **not yet authored** — it does not exist under `phase-1-proof/`. | BLOCKING PHASE 1 |
+| D13 | Production deploy of the Phase 1 migration wave | ACTION | end of Phase 1 | Order: D1 (**all six rows** — ruled 2026-09-05, §13-D1) → D2 → **`preflight.sql` read-only against production, in the same maintenance window, returning no `BLOCK` row** → `prisma migrate deploy` → verify physical schema (information_schema/pg_indexes/pg_trigger) **and** ledger. The preflight step is not optional and is not satisfied by §5's readings: those are point-in-time, and two statements in the wave validate against DATA rather than schema — the `vehicle_requests_one_open_per_buyer_key` unique index and the `assigned_admin_id → admins(id)` foreign key. Both are inside `prisma migrate deploy`'s single transaction, so either one failing rolls the entire wave back. The order is forced, not preferred: the wave creates `vehicle_requests_one_open_per_buyer_key` and the deploy does not run until §5.6's violator query returns zero. **Precondition the order does not state:** the wave does not yet exist in the chain — `frontend/prisma/migrations/` ends at `20261105000000` and there is no `20261106*` directory; both files live under `docs/transaction-flow/phase-1-proof/` and say so in their own headers. Authoring and promoting those two directories is Phase 1 implementation work and is gated on §13-D5, §13-D11 (including its six shape corrections) and §13-D24 being answered first; until then `prisma migrate deploy` would apply nothing. **RULED 2026-09-07 and codified as a runbook at §8.1a.2, which is authoritative for the order — including the requirement that step 4 precede the application deploy, and the `42703` window between merge and step 4.** **Reversal:** enum labels cannot be dropped, so no wave that adds one is fully reversible (§8.2); `rollback.sql` is now **AUTHORED and proven by round trip** (4,729 objects identical to the untouched baseline; only the 41 enum labels remain, as PostgreSQL has no DROP VALUE). **STATUS 2026-09-07: both directories are PROMOTED** — `frontend/prisma/migrations/` now carries `20261106000000_transaction_spine_enums` and `20261106000100_transaction_spine_foundation`, so `prisma migrate deploy` has something to apply. The preflight now asserts **7** preconditions, not 2: the original two plus orphan checks for the four guarded keys added to live tables (`buyer_opportunity_id`, `external_pre_approval_documents.pre_approval_id`, `deal_status_history.deal_id`, `shortlist_items.inventory_item_id`) and the R30 `deals` lineage CHECK. | BLOCKING PHASE 1 |
 | D14 | Legacy path physical removal (`§8.4`) | ACTION | after 30 days of zero `LEGACY_PATH_WRITE` rows in production | Each path listed with its counter; preview traffic never counts. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — gated on 30 days of production evidence, not on an answer; no phase waits for it |
 | D15 | Real provider delivery verification (Resend, Twilio, Stripe settlement, MicroBilt returns, e-sign evidence storage, MarketCheck live queries) | ACTION | Phase 11 | Live-only; remains UNVERIFIED until run under owner authorisation. | BLOCKING A NAMED LATER PHASE (Phase 11) |
 | D16 | Approved-amount filtering on the buyer search | DECISION | Phase 4 | Today `/api/buyer/search` hard-filters listings to `price ≤ approved amount` and the detail page disables shortlisting above budget (§10 area *inventory*). §22a says filter generously and enforce the ceiling only at offer validation, selection and contract request. Proposed: follow §22a (headroom filter, no hard cut) — this is a case where existing code is stricter than the spec but contradicts a stated rule, so the spec wins unless the owner overrides. | BLOCKING A NAMED LATER PHASE (Phase 4) |

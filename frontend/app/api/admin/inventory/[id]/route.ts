@@ -120,6 +120,20 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   const existing = await prisma.inventoryItem.findUnique({ where: { id } });
   if (!existing) return adminError("NOT_FOUND", "Vehicle not found", 404);
 
+  // R43a gives `shortlist_items.inventory_item_id` an ON DELETE RESTRICT key, so a listing that sits
+  // on any buyer's shortlist can no longer be deleted. That rule is deliberate — a shortlisted
+  // vehicle must not vanish from under a buyer — but without this branch the constraint surfaces as
+  // an opaque 500 AFTER the admin has already typed the DELETE confirmation. Say what is blocking it.
+  const shortlistedBy = await prisma.shortlistItem.count({ where: { inventoryItemId: id } });
+  if (shortlistedBy > 0) {
+    return adminError(
+      "VEHICLE_SHORTLISTED",
+      `This vehicle is on ${shortlistedBy} buyer shortlist${shortlistedBy === 1 ? "" : "s"} and cannot be deleted. ` +
+        "Remove it from those shortlists first, or mark the listing unavailable instead of deleting it.",
+      409,
+    );
+  }
+
   await prisma.inventoryItem.delete({ where: { id } });
 
   await prisma.adminAuditLog.create({

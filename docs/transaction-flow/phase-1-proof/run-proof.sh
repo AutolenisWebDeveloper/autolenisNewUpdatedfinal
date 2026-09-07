@@ -76,6 +76,10 @@ v1=$(psql "$URL" -v ON_ERROR_STOP=1 -At -F'|' -f "$HERE/verify.sql")
 echo "$v1"
 if echo "$v1" | grep -q '^MISSING|'; then echo "FAIL: expected objects missing after first apply" >&2; exit 1; fi
 echo "$v1" | grep -q '^TOTAL|' || { echo "FAIL: verifier produced no TOTAL row — it did not run" >&2; exit 1; }
+# A FLOOR, not merely a presence check. `verify.sql` could lose half its expectation lists and still
+# print a TOTAL and pass — the same silent-shrinkage the CHECK captures above are floored against.
+v1n=$(echo "$v1" | grep '^TOTAL|' | cut -d'|' -f3)
+[ "${v1n:-0}" -ge 399 ] || { echo "FAIL: verifier checked $v1n objects, expected >= 399" >&2; exit 1; }
 psql "$URL" -At -f "$HERE/production-baseline/census.sql" > /tmp/proof-census-after1.txt
 psql "$URL" -At -f "$HERE/production-baseline/digests.sql" > /tmp/proof-dig-after1.txt
 
@@ -148,6 +152,20 @@ pf=$(psql "$URL" -v ON_ERROR_STOP=1 -At -F'|' -f "$HERE/preflight.sql")
 echo "$pf"
 echo "$pf" | grep -q '^CHECKED|' || { echo "FAIL: preflight.sql produced no CHECKED row — it did not run" >&2; exit 1; }
 
+echo "== 4d. the enforcement objects BEHAVE, not merely exist =="
+# `verify.sql` is structurally blind to this class. Two defects in an earlier draft of this wave
+# passed all of its assertions and were found only by executing a DELETE: a bare `ON DELETE SET NULL`
+# on a COMPOSITE key nulled the parent's PRIMARY KEY, and the append-only trigger caught the
+# referential SET NULL a parent's deletion issues, making every request and deal holding a snapshot
+# undeletable. `behaviour.sql` exercises both paths and the rest of the enforcement objects, inside a
+# transaction this script ROLLBACKs, so the proof database is unchanged by it.
+bh=$({ echo "BEGIN;"; cat "$HERE/behaviour.sql"; echo "ROLLBACK;"; } | psql "$URL" -v ON_ERROR_STOP=1 -At -F"|")
+echo "$bh"
+if echo "$bh" | grep -q "^FAILED|"; then echo "FAIL: an enforcement object does not behave as specified" >&2; exit 1; fi
+echo "$bh" | grep -q "^CHECKED|" || { echo "FAIL: behaviour.sql produced no CHECKED row - it did not run" >&2; exit 1; }
+bhn=$(echo "$bh" | grep '^CHECKED|' | cut -d'|' -f3)
+[ "${bhn:-0}" -ge 11 ] || { echo "FAIL: behaviour.sql exercised $bhn behaviours, expected >= 11" >&2; exit 1; }
+
 echo "== 5. apply both directories AGAIN (idempotency) =="
 for d in 20261106000000_transaction_spine_enums 20261106000100_transaction_spine_foundation; do
   { echo "BEGIN;"; cat "$HERE/$d/migration.sql"; echo "COMMIT;"; } | psql "$URL" -v ON_ERROR_STOP=1 -q
@@ -164,7 +182,49 @@ psql "$URL" -At -f "$HERE/production-baseline/digests.sql" > /tmp/proof-dig-afte
 diff /tmp/proof-census-after1.txt /tmp/proof-census-after2.txt || { echo "FAIL: census drifted on re-apply" >&2; exit 1; }
 diff /tmp/proof-dig-after1.txt   /tmp/proof-dig-after2.txt   || { echo "FAIL: object definitions changed on re-apply" >&2; exit 1; }
 
+echo "== 7. rollback.sql returns the schema to production's exact shape =="
+# The reversal half of the wave, proven the same way the wave itself is: by running it. A rollback
+# file that has never been executed is a comment. This restores a SECOND copy of the baseline, applies
+# both directories, runs `rollback.sql`, and requires the resulting catalogue to be byte-identical to
+# the untouched baseline - every table, column and its type, index definition, constraint definition,
+# trigger, function, RLS flag and enum TYPE.
+#
+# The one documented exception is enum LABELS: PostgreSQL has no `ALTER TYPE ... DROP VALUE`, so the
+# labels directory 1 adds to pre-existing types survive the rollback. That is a property of the wave
+# (section 8.2), and it is reported rather than asserted away.
+RBDB="${DB}_rb"
+case "$RBDB" in autolenis_prodbase_rb|autolenis_e2e*) ;; *) echo "REFUSED: rollback db name '$RBDB'" >&2; exit 2 ;; esac
+psql "$ADMIN" -q -c "DROP DATABASE IF EXISTS \"$RBDB\";" -c "CREATE DATABASE \"$RBDB\";"
+RBURL="postgresql://${PGUSER_}@${PGHOST_}:${PGPORT_}/${RBDB}"
+for f in "$HERE"/production-baseline/[0-9]*.sql; do psql "$RBURL" -v ON_ERROR_STOP=1 -q -f "$f"; done
+census_all() {
+  psql "$1" -v ON_ERROR_STOP=1 -At -c "
+select 'T:'||tablename from pg_tables where schemaname='public'
+union all select 'C:'||table_name||'.'||column_name||':'||data_type||':'||is_nullable||':'||coalesce(column_default,'-') from information_schema.columns where table_schema='public'
+union all select 'I:'||indexdef from pg_indexes where schemaname='public'
+union all select 'K:'||c.conname||' '||pg_get_constraintdef(c.oid) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='public'
+union all select 'G:'||tgname from pg_trigger where not tgisinternal
+union all select 'F:'||p.proname from pg_proc p join pg_namespace n2 on n2.oid=p.pronamespace where n2.nspname='public'
+union all select 'R:'||c2.relname from pg_class c2 join pg_namespace n3 on n3.oid=c2.relnamespace where n3.nspname='public' and c2.relrowsecurity
+union all select 'Y:'||t.typname from pg_type t join pg_namespace n4 on n4.oid=t.typnamespace where n4.nspname='public' and t.typtype='e'" | sort
+}
+census_all "$RBURL" > /tmp/proof-rb-baseline.txt
+rb_n=$(wc -l < /tmp/proof-rb-baseline.txt)
+# A capture that comes back short has not measured the schema it claims to have measured - the same
+# silent-empty failure the CHECK captures above are guarded against.
+[ "$rb_n" -ge 4000 ] || { echo "FAIL: rollback baseline census returned $rb_n rows, expected >= 4000" >&2; exit 1; }
+for d in 20261106000000_transaction_spine_enums 20261106000100_transaction_spine_foundation; do
+  { echo "BEGIN;"; cat "$HERE/$d/migration.sql"; echo "COMMIT;"; } | psql "$RBURL" -v ON_ERROR_STOP=1 -q
+done
+psql "$RBURL" -v ON_ERROR_STOP=1 -q -f "$HERE/rollback.sql"
+census_all "$RBURL" > /tmp/proof-rb-after.txt
+if ! diff /tmp/proof-rb-baseline.txt /tmp/proof-rb-after.txt; then
+  echo "FAIL: rollback.sql did not return the schema to production's shape." >&2; exit 1
+fi
+echo "  rollback verified: $rb_n objects identical to the untouched baseline"
+echo "  enum labels remaining after rollback: $(psql "$RBURL" -At -c "select count(*) from pg_enum") (labels cannot be dropped)"
+
 echo
-echo "PROOF PASSED — applied twice from production's physical schema, all expected objects present,"
+echo "PROOF PASSED - applied twice from production's physical schema, all expected objects present,"
 echo "no CHECK narrowed against production, census and object definitions identical across both"
 echo "applications."

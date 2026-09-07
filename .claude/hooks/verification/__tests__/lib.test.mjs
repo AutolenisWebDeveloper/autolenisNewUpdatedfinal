@@ -123,6 +123,23 @@ test('direct tool invocations count', () => {
 test('node:test summary decides pass or fail', () => {
   assert.equal(classifyOutcome('test', '# pass 12\n# fail 0\n'), 'pass');
   assert.equal(classifyOutcome('test', '# pass 10\n# fail 2\n'), 'fail');
+
+  // §12.2 correction 1 — the multi-suite fixture. `pnpm test:all` chains 65 suites and
+  // prints a summary per suite; the parser used to take the FIRST one, so a later red
+  // suite was reported as a pass. Each of these fails only if that regression returns.
+  const chained =
+    '# pass 12\n# fail 0\n# duration_ms 10\n' +
+    '# pass 4\n# fail 3\n# duration_ms 20\n' +
+    '# pass 7\n# fail 0\n# duration_ms 30\n';
+  assert.equal(classifyOutcome('test:all', chained), 'fail');
+  assert.equal(
+    classifyOutcome('test:all', '# pass 12\n# fail 0\n# pass 9\n# fail 0\n'),
+    'pass',
+  );
+  // A non-zero exit reported by pnpm outranks a clean summary printed before it.
+  assert.equal(classifyOutcome('test:all', '# pass 12\n# fail 0\n ELIFECYCLE  Command failed with exit code 1.'), 'fail');
+  // No summary at all means the run did not complete — never a pass.
+  assert.equal(classifyOutcome('test:all', 'bash: tsx: command not found'), 'unknown');
 });
 
 test('typecheck and lint failures are detected', () => {

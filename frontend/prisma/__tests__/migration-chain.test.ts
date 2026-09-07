@@ -127,14 +127,38 @@ describe("migration chain — column types match the schema", () => {
   // Postgres refuses the foreign key with 42804 "cannot be implemented". That
   // migration could never have applied to ANY database.
   //
-  // schema.prisma contains zero @db.Uuid, so no model wants a postgres uuid
-  // column and any UUID declaration in SQL is unambiguously a mistake.
-  test("no migration declares a postgres UUID column", () => {
+  // RE-SCOPED 2026-09-06 (Phase 1). The original premise — "schema.prisma contains
+  // zero @db.Uuid, so any UUID in SQL is unambiguously a mistake" — stopped being
+  // true, and the guard itself said to re-scope rather than delete when it did.
+  //
+  // THREE tables in PRODUCTION genuinely have a `uuid` primary key:
+  // comms_outbox, lifecycle_touch_schedule and jobs_dead_letter. That was read off
+  // the committed production baseline, not assumed. They were created outside the
+  // migration chain and were never declared in schema.prisma; the Phase 1 wave
+  // adopts them with CREATE TABLE IF NOT EXISTS, which must mirror the shape
+  // production actually has, and declares them as models with @db.Uuid.
+  //
+  // So the blanket ban is replaced by the invariant it was a proxy for: a UUID
+  // column is allowed ONLY on those three adopted tables, and — the part that
+  // actually matters — no foreign key may cross the uuid/text boundary. The
+  // exemption is a fixed, named list with a reason, not a loophole: any OTHER
+  // UUID declaration still fails, and adding to the list is a reviewable diff.
+  const ADOPTED_UUID_TABLES = ["comms_outbox", "lifecycle_touch_schedule", "jobs_dead_letter"];
+
+  test("no migration declares a postgres UUID column outside the adopted tables", () => {
     const schema = readFileSync(SCHEMA_PATH, "utf8");
-    assert.equal(
-      (schema.match(/@db\.Uuid/g) ?? []).length,
-      0,
-      "schema.prisma now uses @db.Uuid — this guard's premise no longer holds and must be re-scoped",
+    // @db.Uuid may appear ONLY on models mapping to the three adopted tables.
+    const uuidModels: string[] = [];
+    for (const m of schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)) {
+      if (!/@db\.Uuid/.test(m[2])) continue;
+      const mapped = /@@map\("([^"]+)"\)/.exec(m[2]);
+      uuidModels.push(mapped ? mapped[1] : m[1]);
+    }
+    assert.deepEqual(
+      uuidModels.filter((t) => !ADOPTED_UUID_TABLES.includes(t)),
+      [],
+      "a model outside the three adopted tables declares @db.Uuid; every other id in " +
+        "schema.prisma is String/TEXT and a foreign key across that boundary cannot be created",
     );
 
     const offenders: string[] = [];
@@ -145,9 +169,18 @@ describe("migration chain — column types match the schema", () => {
       // `"id" UUID PRIMARY KEY DEFAULT gen_random_uuid()` — half of the very
       // defect it exists to catch. Comments are stripped first so the prose in a
       // migration header cannot trip it.
+      // Track which CREATE TABLE block each line sits in, so the exemption applies
+      // to the three adopted tables and to nothing else in the same file.
+      let currentTable: string | null = null;
       for (const line of sqlOf(d).split("\n")) {
         const code = line.replace(/--.*$/, "");
-        if (/\bUUID\b/.test(code)) {
+        const create = /CREATE TABLE (?:IF NOT EXISTS )?"?(\w+)"?/i.exec(code);
+        if (create) currentTable = create[1];
+        // Reset on ANY statement terminator, not only a bare `);` on its own line. A single-line
+        // `CREATE TABLE ... ( ... );` would otherwise leave currentTable set for the rest of the
+        // file and silently exempt every later UUID declaration in it.
+        if (/;\s*$/.test(code)) currentTable = null;
+        if (/\bUUID\b/.test(code) && !(currentTable && ADOPTED_UUID_TABLES.includes(currentTable))) {
           offenders.push(`${d}: ${line.trim()}`);
         }
       }
@@ -155,9 +188,37 @@ describe("migration chain — column types match the schema", () => {
     assert.deepEqual(
       offenders,
       [],
-      "these declare a postgres UUID column while every id in schema.prisma is String/TEXT; " +
-        "a foreign key across that type boundary cannot be created:\n  " +
+      "these declare a postgres UUID column outside the three adopted tables, while every other " +
+        "id in schema.prisma is String/TEXT; a foreign key across that type boundary cannot be " +
+        "created:\n  " +
         offenders.join("\n  "),
+    );
+  });
+
+  // The invariant the ban was standing in for. The three adopted tables carry uuid
+  // ids, so a foreign key with one of them on either end would join uuid to text
+  // and be refused with 42804. Today none exists — comms_outbox's three reference
+  // columns are deliberately keyless correlation keys (owner-confirmed 2026-09-06)
+  // — and this keeps it that way as later phases add keys around them.
+  test("no foreign key crosses the uuid/text boundary", () => {
+    const offenders: string[] = [];
+    for (const d of migrationDirs()) {
+      const sql = sqlOf(d).replace(/--.*$/gm, "");
+      for (const t of ADOPTED_UUID_TABLES) {
+        // a key whose PARENT is an adopted uuid table
+        const asParent = new RegExp(`REFERENCES\\s+"?${t}"?\\s*\\(`, "i");
+        if (asParent.test(sql)) offenders.push(`${d}: a foreign key REFERENCES ${t}`);
+        // a key declared ON an adopted uuid table
+        const asChild = new RegExp(
+          `ALTER TABLE\\s+"?${t}"?[^;]*?(?:ADD CONSTRAINT[^;]*?)?FOREIGN KEY`, "is");
+        if (asChild.test(sql)) offenders.push(`${d}: a foreign key is declared ON ${t}`);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "a foreign key joins one of the uuid-keyed adopted tables to a TEXT id; postgres refuses " +
+        "that with 42804:\n  " + offenders.join("\n  "),
     );
   });
 });

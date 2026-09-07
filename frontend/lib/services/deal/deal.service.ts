@@ -31,6 +31,18 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   COMPLETED: [],
   CANCELLED: ["REFUNDED"],
   REFUNDED: [],
+  // Phase 1 transaction spine (20261106000000). These seven states exist in the enum but
+  // nothing in Phase 1 writes them and no transition INTO them is defined, so no transition
+  // OUT of them is defined either. An empty list is fail-closed: canTransition() refuses to
+  // leave a state whose exits have not been designed. The phases that own each state (the
+  // deal-lifecycle waves) replace these with the real edges.
+  DEALER_CONFIRMATION: [],
+  RECAP_PENDING: [],
+  DEALER_EXECUTED: [],
+  FUNDING_PENDING: [],
+  PICKUP_READINESS: [],
+  HANDOVER_PENDING: [],
+  FROZEN_PENDING_RELEASE: [],
 };
 
 const TERMINAL: DealStatus[] = [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED];
