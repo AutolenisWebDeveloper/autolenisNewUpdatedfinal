@@ -36,6 +36,11 @@ legitimately, report the behavior as **NOT VERIFIED**. Fabricating a verificatio
 worst possible outcome here — worse than an unfinished batch, and worse than saying "I could not
 check this."
 
+**The one sanctioned exception** is the owner-ruled per-run protocol in *Production database
+access* below. It authorizes exactly three operation classes against the production database, each
+approved individually in chat, and relaxes nothing in the list above: it creates no accounts,
+mutates no business record, and never weakens authentication.
+
 ## Working method — phased batches with a hard owner gate
 
 Work arrives as batches:
@@ -73,8 +78,10 @@ Established Content IA: Growth → `/admin/content` (primary rail destination),
 **Also enforced mechanically** — see `.claude/OPERATING_SYSTEM.md` for what each layer does and
 what it cannot do.
 
-- **Branch only.** No merging, deploying, production changes, migrations, or server-authorization
-  changes without separate explicit authorization.
+- **Branch only.** No merging, deploying, production changes, or server-authorization changes
+  without separate explicit authorization. Applying a migration to production is authorized only
+  through the per-run protocol in *Production database access* below — never implicitly, never
+  because a branch merged.
 - **Never edit an existing file** in `frontend/prisma/migrations/**` or `frontend/migrations/**`
   (and `supabase/migrations/**` if one is ever added) — it may already be applied to production,
   and CI replays the whole chain against an empty database. Adding a **new** migration is normal
@@ -82,10 +89,111 @@ what it cannot do.
 - **Never read or edit `.env*`.** Environment values are owner-managed in Vercel. The variable
   *names* the build needs are listed in `.github/workflows/ci.yml`.
 - **Never run:** `rm -rf`, `drop database`, `git push --force`, `git reset --hard`, `git merge`,
-  `supabase db push` / `db reset`, `prisma migrate deploy` / `reset` / `db push`, `vercel deploy`
-  or anything `--prod`.
+  `supabase db push` / `db reset` / `migration up` / `migration repair`, `prisma migrate reset` /
+  `migrate dev` / `db push` / `db execute` / `db seed`, `vercel deploy` or anything `--prod`, and
+  any `UPDATE` / `INSERT` / `DELETE` / DDL against production outside a Prisma migration — through
+  `psql`, the Supabase MCP (`execute_sql`, `apply_migration`), or anything else.
+  `prisma migrate deploy`, `prisma migrate resolve` and read-only verification queries are **not**
+  in this list: they are governed by the per-run protocol in the next section.
 - Anything that looks obsolete, duplicated, unfinished, misleading, or dead gets **REPORTED for an
   owner decision — never deleted.**
+
+## Production database access — the per-run protocol
+
+**Owner ruling, 2026-09-07, in chat.** Until then no session held a production credential and every
+production step was SQL handed to the owner to paste. That round-trip is replaced by exactly three
+operation classes, each approved **per run**, and nothing else:
+
+| # | Operation | Shape (from `frontend/`) |
+| --- | --- | --- |
+| 1 | Apply pending migrations | `pnpm exec prisma migrate deploy` |
+| 2 | Record / unrecord one migration in the ledger, without running its SQL | `pnpm exec prisma migrate resolve --applied <name>` · `pnpm exec prisma migrate resolve --rolled-back <name>` |
+| 3 | Read-only verification | `docs/transaction-flow/phase-1-proof/preflight.sql`, `verify.sql`, `production-baseline/census.sql` / `digests.sql`, `pnpm exec prisma migrate status`, and ad-hoc `SELECT`s over `_prisma_migrations` and the catalogs — always inside a server-enforced read-only transaction |
+
+**How permission works — per run, in chat, naming the exact command.**
+
+1. **State** what you are about to execute (the literal command) and the **sanitized target**:
+   host, database name and project reference as printed by `pnpm db:report-target DATABASE_URL`
+   and `pnpm db:report-target DIRECT_URL` (`frontend/scripts/report-database-target.ts`, which
+   never prints the DSN). Never the connection string.
+2. **Wait** for the owner to approve that specific run. A prior approval never carries to a later
+   run, and approval of one command is not approval of the next. The `ask` permission prompt is the
+   mechanical half of the same gate — answer it for this run only, never "don't ask again".
+3. **Fail closed on the target.** Refuse, and say so, unless BOTH reports read
+   `classification: PRODUCTION` **and** `project ref: aieybibvewmvrubcpthm`. Unset, unparseable, a
+   different reference, or `PRODUCTION` inferred from a database name alone is a refusal. This is
+   the allowlist pattern of `frontend/lib/testing/isolated-database.ts` (the guard on the
+   destructive concurrency suite) turned around: the target must positively identify itself as the
+   production project, or nothing runs.
+
+**Before any `migrate deploy`:** run `preflight.sql` (operation 3) and show the **complete** result
+in chat. A `BLOCK` row stops the run. No `CHECKED` row means the query did not run — also a stop.
+Then `prisma migrate status` to show exactly what will apply. The order in
+`docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` §8.1a.2 is binding, including "step 4 precedes
+the application deploy".
+
+**After any `migrate deploy`:** verify and report **both halves** — the physical schema
+(`verify.sql` for the Phase 1 wave; otherwise `information_schema` / `pg_indexes` / `pg_constraint`
+queries naming each expected object) **and** `_prisma_migrations`
+(`SELECT migration_name, started_at, finished_at, rolled_back_at, applied_steps_count FROM
+_prisma_migrations WHERE migration_name IN (…)`). Neither alone is sufficient. A `MISSING` row or an
+absent ledger row is **reported**, never repaired with DDL: the repair is a new forward migration or
+an owner-approved `migrate resolve`.
+
+**Read-only means server-enforced.** The only accepted shapes (the guard rejects any other):
+
+```
+psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction -c "SET TRANSACTION READ ONLY" -f <file.sql>
+psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction -c "SET TRANSACTION READ ONLY" -c "<one SELECT>"
+```
+
+Any write inside that transaction fails with `25006 read_only_sql_transaction`, so "read-only" is a
+property of the connection, not a promise about the SQL.
+
+**A session that carries the credential is a deploy session.** When `DATABASE_URL`, `DIRECT_URL` or
+`PROD_READONLY_URL` is present in the environment and does not resolve to loopback, the guard
+refuses everything that could open a database client — `node` / `tsx` / `bun` / `deno`, `python`,
+`pnpm` / `npm` / `npx` scripts (`pnpm test*`, `pnpm build`, `pnpm dev`, `pnpm exec tsx …`), shells
+running scripts, `curl` / `wget`, the Supabase and Vercel CLIs — and leaves runnable only the three
+operations, `pnpm db:report-target`, `pnpm typecheck` / `pnpm lint`, `prisma generate` /
+`validate`, `git`, and read-only file tools. Nineteen files under `frontend/scripts/` instantiate a
+database client and `pnpm test:all` would run with the credential; none of that belongs in a session
+that can reach production. Development, tests and builds happen in a session without the credential.
+
+**Everything else against production stays prohibited, explicitly:**
+
+- **No raw DDL outside a Prisma migration** — not through `psql`, `prisma db execute`, the Supabase
+  SQL editor, `supabase migration up` / `repair`, or the Supabase MCP (`execute_sql`,
+  `apply_migration`, `deploy_edge_function`). Every schema change goes through
+  `frontend/prisma/migrations/**` so `_prisma_migrations` stays truthful. Out-of-band DDL is how six
+  migrations went unrecorded and how enum labels came to exist with no ledger row.
+- **No `UPDATE`, `DELETE` or `INSERT` against business tables.** The §13-D2 buyer cancellations and
+  anything touching deposits are the owner's — `70568e7b…` holds three deposits against five open
+  requests, and §23.1 makes refunds manual review. `preflight.sql` reports a precondition; it never
+  repairs one.
+- **`prisma migrate reset` / `migrate dev` / `db push` / `db seed`** stay forbidden outright, and
+  `--schema` on any `prisma migrate` command must name `frontend/prisma/schema.prisma` — another
+  schema or migrations directory is DDL outside the chain.
+- **No production access over HTTP.** The Supabase REST surface with a service key, and the
+  management API, are write paths outside every control here; `curl` / `wget` at the project is
+  refused.
+- **No credential ever printed, logged, echoed, or written to a file.** Read it from the
+  environment at runtime. `[ -n "$DATABASE_URL" ]` is the only sanctioned presence check;
+  `pnpm db:report-target <VAR>` is the only sanctioned description. Never type a DSN or password
+  into a command line — provisioning the variable is the owner's, in the environment.
+- **The Supabase MCP is not a production path.** It is bound to the organization that holds
+  `aieybibvewmvrubcpthm`; its write tools are denied in `.claude/settings.json`, and its read-only
+  metadata and log tools are for investigation only — they never substitute for operation 3.
+
+**Enforcement** (`.claude/OPERATING_SYSTEM.md`): `settings.json` moves the three operations from
+`deny` to `ask`; `hooks/guard-destructive.sh` turns `prisma migrate deploy`,
+`prisma migrate resolve --applied|--rolled-back`, `prisma migrate status` and production `psql`
+into an explicit prompt carrying this protocol, and **denies** DML/DDL, production `psql` outside a
+read-only transaction, dumps, and every credential-disclosure form it can see;
+`hooks/__tests__/guards.test.sh` proves all three directions.
+
+**Report every run** with: the command as executed, the sanitized target, the full output, both
+verification halves for a deploy, and the next step. Anything not run is **NOT VERIFIED**.
 
 ## Known security finding — report, do not remediate here
 
@@ -406,6 +514,12 @@ sessions include GitHub, Supabase, Vercel, Twilio, DocuSign, Gmail, Google Calen
 `.claude/MCP_INVENTORY.md` for the full inventory, provenance, and least-privilege rules
 (production DB / payments / messaging default to read-only or explicit approval).
 
+**The Supabase connector reaches production.** Verified 2026-09-07 via `list_projects`: it is bound
+to the organization holding `aieybibvewmvrubcpthm` (plus two unrelated projects). Its write tools —
+`execute_sql`, `apply_migration`, `deploy_edge_function`, branch and project lifecycle — are denied
+in `.claude/settings.json` and are never a production path (*Production database access* above).
+Its read-only metadata and log tools remain available for investigation.
+
 ## Source-of-truth hierarchy
 
 When two artifacts disagree, the higher rank wins:
@@ -431,6 +545,10 @@ When two artifacts disagree, the higher rank wins:
 - Treat the absence of a test environment as licence to provision one, seed users, or weaken
   authentication — report **NOT VERIFIED** instead.
 - Begin implementation because a surface was criticised. Phase 2 approval is the gate.
+- Execute anything against production outside the per-run protocol in *Production database
+  access* — no unapproved run, no `UPDATE`/`INSERT`/`DELETE` on business tables, no DDL outside a
+  Prisma migration, no Supabase MCP write tool, and never a credential printed, logged, or written
+  to a file.
 - Edit an existing migration, read or edit `.env*`, or "fix in passing" the
   `content/attribution/export` authorization.
 - Declare work complete, working, or production ready after a single review pass — the second,
