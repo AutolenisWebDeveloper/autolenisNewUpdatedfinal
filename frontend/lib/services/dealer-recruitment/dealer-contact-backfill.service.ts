@@ -18,6 +18,21 @@
 //     waterfall uses (revealRooftopContact), tagged consumer="backfill" so it can
 //     only draw against the leftover budget above the live reserve floor.
 //
+//     Rooftops with NO website_host are excluded, and the number excluded is
+//     reported as noWebsiteHostSkipped. Measured against production: of the
+//     apollo_reveals rows carrying a diagnostic stage, every single attempt on a
+//     host-less rooftop stopped at stage 1 with empty_stage="no_org" (461 of 461)
+//     — organizations/lookup has never resolved one. Iterating them consumes the
+//     per-run `limit` and starves rooftops that could resolve. This is a
+//     PRIORITISATION change, not a capability removal: a rooftop that later gains
+//     a website_host re-enters the queue on the next run with no further change.
+//
+//     NOTE for whoever reads this next: the same production data shows hosted
+//     rooftops failing identically (39 of 39 staged attempts also "no_org"), so
+//     this filter removes provably futile work but does NOT by itself make Phase 1
+//     productive. The org-resolution failure is upstream in the adapter and is
+//     reported for a separate, authorized batch rather than changed here.
+//
 // Why rooftop-keyed: the reveal, the reveal-cache, and DealerContactProfile are all
 // keyed to the canonical A2 DealerRooftop, so filling a rooftop's contact benefits
 // both its registered Dealer and its prospect twin at once and can never create a
@@ -97,6 +112,13 @@ export interface BackfillResult {
   attempted: number;
   revealed: number;
   skipped: number;
+  /**
+   * Gap rooftops excluded from Phase 1 because they carry no website_host, so
+   * Apollo's organizations/lookup cannot resolve them. Reported rather than
+   * silently dropped: this is the count an owner needs to see the shape of the
+   * population the paid path can actually reach.
+   */
+  noWebsiteHostSkipped: number;
   stoppedForBudget: boolean;
 }
 
@@ -250,6 +272,7 @@ export async function runDealerContactBackfill(
     attempted: 0,
     revealed: 0,
     skipped: 0,
+    noWebsiteHostSkipped: 0,
     stoppedForBudget: false,
   };
 
@@ -274,16 +297,30 @@ export async function runDealerContactBackfill(
 
   // Candidates = rooftops with NO send-safe contact (email present + send-safe
   // status). `none` returns rooftops with zero matching contacts, i.e. a real gap.
-  const candidates = (await prisma.dealerRooftop.findMany({
-    where: {
-      contacts: {
-        none: { email: { not: null }, emailVerificationStatus: { in: [...SEND_SAFE_STATUSES] } },
-      },
+  // One predicate object, used by both the scan and the skip count, so the two can
+  // never describe different populations.
+  const contactGap = {
+    contacts: {
+      none: { email: { not: null }, emailVerificationStatus: { in: [...SEND_SAFE_STATUSES] } },
     },
-    select: { id: true, displayName: true, websiteHost: true, city: true, state: true, makes: true, createdAt: true },
-    orderBy: { createdAt: "asc" }, // deterministic scan window; priority re-sorts within it
-    take: MAX_CANDIDATE_SCAN,
-  })) as CandidateRooftop[];
+  };
+
+  // The host filter is pushed into the QUERY, not applied after the scan: with 74
+  // of 1,422 rooftops carrying a host, an in-memory filter would spend the whole
+  // MAX_CANDIDATE_SCAN window on rows it then discards and surface almost nothing.
+  const [candidates, hostlessGap] = await Promise.all([
+    prisma.dealerRooftop.findMany({
+      where: { ...contactGap, websiteHost: { not: null } },
+      select: { id: true, displayName: true, websiteHost: true, city: true, state: true, makes: true, createdAt: true },
+      orderBy: { createdAt: "asc" }, // deterministic scan window; priority re-sorts within it
+      take: MAX_CANDIDATE_SCAN,
+    }) as Promise<CandidateRooftop[]>,
+    prisma.dealerRooftop.count({ where: { ...contactGap, websiteHost: null } }),
+  ]);
+
+  // Counted before any early return: "nothing to do" and "everything was skipped
+  // for want of a domain" are different findings and must not read alike.
+  result.noWebsiteHostSkipped = hostlessGap;
   if (candidates.length === 0) return result;
 
   const cycleKey = cycleKeyFor(now);
@@ -374,7 +411,8 @@ export async function runDealerContactBackfill(
       `resolved(dealers=${result.dealersResolved} prospects=${result.prospectsResolved} ` +
       `reconciled=${result.contactsReconciled} failed=${result.resolveFailed}) ` +
       `candidates=${result.candidates} attempted=${result.attempted} revealed=${result.revealed} ` +
-      `skipped=${result.skipped} budgetStop=${result.stoppedForBudget}`,
+      `skipped=${result.skipped} noHostSkipped=${result.noWebsiteHostSkipped} ` +
+      `budgetStop=${result.stoppedForBudget}`,
   );
   return result;
 }

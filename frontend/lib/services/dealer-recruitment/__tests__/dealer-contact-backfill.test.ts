@@ -37,9 +37,9 @@ function fakePrisma(
   population: PopulationSeed = {},
 ): {
   prisma: PrismaClient;
-  calls: { findMany: number; dealerFindMany: number; prospectFindMany: number };
+  calls: { findMany: number; count: number; dealerFindMany: number; prospectFindMany: number };
 } {
-  const calls = { findMany: 0, dealerFindMany: 0, prospectFindMany: 0 };
+  const calls = { findMany: 0, count: 0, dealerFindMany: 0, prospectFindMany: 0 };
   const prisma = {
     dealer: {
       findMany: async ({ take }: { take?: number } = {}) => {
@@ -64,9 +64,19 @@ function fakePrisma(
       },
     },
     dealerRooftop: {
-      findMany: async () => {
+      // The fake HONORS the website_host filter rather than ignoring it, so the
+      // suite exercises the real Phase 1 predicate: a rooftop with no domain must
+      // not reach the paid reveal, whatever else is true of it.
+      findMany: async ({ where }: { where?: { websiteHost?: unknown } } = {}) => {
         calls.findMany++;
-        return rooftops.map((r) => ({ ...r }));
+        const hostRequired = where?.websiteHost !== undefined;
+        return rooftops.filter((r) => !hostRequired || r.websiteHost !== null).map((r) => ({ ...r }));
+      },
+      count: async ({ where }: { where?: { websiteHost?: unknown } } = {}) => {
+        calls.count++;
+        // The service counts the complement: gap rooftops with websiteHost null.
+        if (where?.websiteHost === null) return rooftops.filter((r) => r.websiteHost === null).length;
+        return rooftops.length;
       },
     },
     apolloReveal: {
@@ -438,4 +448,56 @@ test("a resolution failure is fail-open (counted, run continues to the reveal ph
   assert.deepEqual(ran, ["p2"], "failed prospect is not reconciled");
   assert.equal(r.revealed, 1, "Phase 1 still runs after Phase 0 failures");
   assert.deepEqual(revealOrder, ["a"]);
+});
+
+test("a rooftop with no website_host is never revealed, and the skip is COUNTED", async () => {
+  // Production evidence for this filter: of the apollo_reveals rows carrying a
+  // diagnostic stage, all 461 attempts on host-less rooftops stopped at
+  // empty_stage="no_org" — organizations/lookup has never resolved one. Spending
+  // the per-run limit on them starves rooftops that could resolve.
+  const { prisma } = fakePrisma([
+    rt("hosted"),
+    rt("bare", { websiteHost: null }),
+    rt("bare2", { websiteHost: null }),
+  ]);
+  const order: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true,
+      reveal: revealFake(new Set(["hosted", "bare", "bare2"]), order),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+
+  assert.deepEqual(order, ["hosted"], "only the rooftop with a domain may reach the paid reveal");
+  assert.equal(r.candidates, 1);
+  assert.equal(r.attempted, 1);
+  assert.equal(r.revealed, 1);
+  assert.equal(r.noWebsiteHostSkipped, 2, "both host-less gap rooftops are reported, not dropped");
+});
+
+test("skipped-for-no-host is reported even when nothing is left to attempt", async () => {
+  // "Nothing to do" and "the whole gap is unreachable without a domain" are
+  // different findings and must not read alike.
+  const { prisma } = fakePrisma([rt("bare", { websiteHost: null })]);
+  const order: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true,
+      reveal: revealFake(new Set(["bare"]), order),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+
+  assert.equal(order.length, 0, "no reveal may be attempted");
+  assert.equal(r.candidates, 0);
+  assert.equal(r.noWebsiteHostSkipped, 1);
 });
