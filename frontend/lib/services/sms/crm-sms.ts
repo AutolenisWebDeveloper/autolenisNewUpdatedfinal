@@ -7,6 +7,7 @@ import { SuppressionService } from '@/lib/services/suppression.service';
 import { isRecipientInQuietHours } from '@/lib/crm/recipient-timezone';
 import { evaluateConsentBasis, crmContactConsentBasis } from './consent-basis';
 import type { Contact } from '@/lib/types/crm';
+import { recordLegacyPathWrite } from '@/lib/services/comms/legacy-path-write';
 
 // ---------------------------------------------------------------------------
 // HARDENED CRM SMS PATH (Step 4 — /api/crm/dispatch/sms)
@@ -68,6 +69,10 @@ export async function sendCrmSms(params: {
   // dispatch-auth layer already enforces idempotency at the request boundary.
   idempotencyKey: string;
 }): Promise<CrmSmsResult> {
+  // LEGACY_PATH_WRITE — §8.4's counter for sends outside the §27 dispatcher.
+  // Best-effort; never fails the send.
+  void recordLegacyPathWrite({ kind: 'DIRECT_TRANSACTIONAL_SEND', detail: 'sms:crm-sms', removalPhase: 10 });
+
   const { supabase, contact, body, fromPool, state, zip } = params;
 
   const phone = normalizePhone(contact.phone ?? '');

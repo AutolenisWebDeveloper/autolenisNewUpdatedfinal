@@ -27,7 +27,13 @@
 // whereas a fallback dispatch after a partial enqueue could double-send.
 
 import { logger } from "@/lib/logger";
-import { isEnabled, FLAGS } from "@/lib/services/system/feature-flags.service";
+// `FLAGS` is no longer imported: every workload is internal-by-default as of
+// Phase 2, so no plan names a flag. The flag BRANCH is kept — `plan.flag` is still
+// `string | null` and `internalEnabled` still reads it — because §8.4 keeps the
+// compatibility window open until Phase 10, and re-flagging a workload must stay a
+// one-line data change rather than a re-plumbing. It is unreachable today by data,
+// not by deletion.
+import { isEnabled } from "@/lib/services/system/feature-flags.service";
 import type { LifecycleSequence } from "@/lib/services/crm/lifecycle-touch-drain.service";
 
 const SECONDS = 1000;
@@ -108,7 +114,15 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
       };
     case "auction_active":
       return {
-        flag: FLAGS.LIFECYCLE_INTERNAL_AUCTION,
+        // INTERNAL BY DEFAULT (no flag) — Phase 2, §8.2 "QStash neutralisation
+        // (no replacement vendor)". The vendor is decommissioned (§13-D23), so the
+        // flag-gated fallback enqueues into a service that no longer answers:
+        // dispatch throws, the error is swallowed into a `jobs_dead_letter` row
+        // that terminalises as "TERMINAL — no internal owner", and the touch is
+        // never delivered. `internalEnabled` fails SAFE to QStash by design, which
+        // means a flag-store hiccup silently routed this workload into nothing.
+        // Delivery must not hinge on a DB row nobody set.
+        flag: null,
         sequence: "auction_active",
         entityId: input.buyerId,
         baseKey: `auction:${input.auctionId}`,
@@ -126,7 +140,15 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
       };
     case "dealer_invited":
       return {
-        flag: FLAGS.LIFECYCLE_INTERNAL_DEALER_INVITED,
+        // INTERNAL BY DEFAULT (no flag) — Phase 2, §8.2 "QStash neutralisation
+        // (no replacement vendor)". The vendor is decommissioned (§13-D23), so the
+        // flag-gated fallback enqueues into a service that no longer answers:
+        // dispatch throws, the error is swallowed into a `jobs_dead_letter` row
+        // that terminalises as "TERMINAL — no internal owner", and the touch is
+        // never delivered. `internalEnabled` fails SAFE to QStash by design, which
+        // means a flag-store hiccup silently routed this workload into nothing.
+        // Delivery must not hinge on a DB row nobody set.
+        flag: null,
         sequence: "dealer_invited",
         entityId: input.dealerId,
         baseKey: `dealer-invited:${input.auctionId}:${input.dealerId}`,
@@ -145,7 +167,15 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
       };
     case "offer_received":
       return {
-        flag: FLAGS.LIFECYCLE_INTERNAL_OFFER,
+        // INTERNAL BY DEFAULT (no flag) — Phase 2, §8.2 "QStash neutralisation
+        // (no replacement vendor)". The vendor is decommissioned (§13-D23), so the
+        // flag-gated fallback enqueues into a service that no longer answers:
+        // dispatch throws, the error is swallowed into a `jobs_dead_letter` row
+        // that terminalises as "TERMINAL — no internal owner", and the touch is
+        // never delivered. `internalEnabled` fails SAFE to QStash by design, which
+        // means a flag-store hiccup silently routed this workload into nothing.
+        // Delivery must not hinge on a DB row nobody set.
+        flag: null,
         sequence: "offer_received",
         entityId: input.buyerId,
         // Keyed per-auction: one "an offer arrived" enrollment per auction (the
@@ -166,7 +196,15 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
       };
     case "deal_complete":
       return {
-        flag: FLAGS.LIFECYCLE_INTERNAL_DEAL_COMPLETE,
+        // INTERNAL BY DEFAULT (no flag) — Phase 2, §8.2 "QStash neutralisation
+        // (no replacement vendor)". The vendor is decommissioned (§13-D23), so the
+        // flag-gated fallback enqueues into a service that no longer answers:
+        // dispatch throws, the error is swallowed into a `jobs_dead_letter` row
+        // that terminalises as "TERMINAL — no internal owner", and the touch is
+        // never delivered. `internalEnabled` fails SAFE to QStash by design, which
+        // means a flag-store hiccup silently routed this workload into nothing.
+        // Delivery must not hinge on a DB row nobody set.
+        flag: null,
         sequence: "deal_complete",
         entityId: input.buyerId,
         baseKey: `deal-complete:${input.dealId}`,
@@ -184,7 +222,15 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
       };
     case "form_submitted":
       return {
-        flag: FLAGS.LIFECYCLE_INTERNAL_FORM_SUBMITTED,
+        // INTERNAL BY DEFAULT (no flag) — Phase 2, §8.2 "QStash neutralisation
+        // (no replacement vendor)". The vendor is decommissioned (§13-D23), so the
+        // flag-gated fallback enqueues into a service that no longer answers:
+        // dispatch throws, the error is swallowed into a `jobs_dead_letter` row
+        // that terminalises as "TERMINAL — no internal owner", and the touch is
+        // never delivered. `internalEnabled` fails SAFE to QStash by design, which
+        // means a flag-store hiccup silently routed this workload into nothing.
+        // Delivery must not hinge on a DB row nobody set.
+        flag: null,
         sequence: "form_submitted",
         // A buyerId is required for the internal path (entity_id NOT NULL and the
         // chained check-form-completion resolves the contact by entity). Voice

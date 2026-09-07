@@ -12,10 +12,19 @@
 // the QStash routes used, then chains the next touch. Message bodies are ported
 // verbatim from the QStash routes so cutover is behaviour-neutral.
 //
-// DORMANT until the owner-gated atomic cutover: nothing calls
-// `enqueueLifecycleTouch` yet — every lifecycle touch is still dispatched to
-// QStash from its existing producer. While the table is empty/absent the drain
-// no-ops (NO_DUE / NO_TABLE), so deploying this code before cutover is safe.
+// LIVE AS OF PHASE 2 — this comment used to say DORMANT, and had been wrong since
+// commit f23b361 flipped `deposit_reminder` to internal-by-default. Phase 2
+// completes the cutover: all six lifecycle workloads now carry `flag: null` in
+// `lifecycle-scheduler.ts`, so every one of them enqueues here and NONE dispatches
+// to QStash. The vendor is decommissioned (§13-D23) and the flag path failed SAFE
+// to it, which meant a flag-store hiccup routed a touch into nothing at all.
+//
+// Three behaviour deltas at cutover, stated rather than assumed to be neutral:
+//   • `offer_received` is keyed per-AUCTION, not per-offer, so a buyer is told
+//     "an offer arrived" once per auction instead of once per submission;
+//   • `auction_closing` gains the `hasSelectedOffer` guard the QStash job lacked;
+//   • `dealer_bid_reminder` is not ported — the endsAt-driven idempotent
+//     `cron/dealer-invitation-reminder` owns that chase.
 //
 // Parity + improvements vs the QStash jobs:
 //   • Conversion guards (hasPaidDeposit / hasSelectedOffer) are re-checked at

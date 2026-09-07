@@ -85,6 +85,7 @@ import { DEALER_STALE_LISTING_REMOVAL_SUBJECT, renderDealerStaleListingRemovalEm
 import { DEALER_COMPLIANCE_NOTICE_SUBJECT, renderDealerComplianceNoticeEmail } from "./templates/dealer-compliance-notice";
 import { DEALER_PASSWORD_RESET_SUBJECT, renderDealerPasswordResetEmail } from "./templates/dealer-password-reset";
 import { DEALER_NEW_BUYER_OPPORTUNITY_SUBJECT, renderDealerNewBuyerOpportunityEmail } from "./templates/dealer-new-buyer-opportunity";
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 import {
   DEPOSIT_PAYMENT_LINK_SUBJECT,
   CONCIERGE_FEE_PAYMENT_LINK_SUBJECT,
@@ -140,6 +141,18 @@ async function sendIdempotent(params: {
   html: string;
   templateId: string;
 }): Promise<EmailSendOutcome> {
+  // LEGACY_PATH_WRITE — §8.4's counter. Every one of the 70 direct email senders
+  // funnels through here, so one recorder covers the whole allowlist and
+  // `new Error().stack` still names the caller. Best-effort: instrumentation must
+  // never fail the send it measures.
+  void recordLegacyPathWrite({
+    kind: "DIRECT_TRANSACTIONAL_SEND",
+    detail: params.templateId,
+    entityType: "EmailSendLog",
+    entityId: params.idempotencyKey,
+    removalPhase: 10,
+  });
+
   // HARD suppression. A transactional email deliberately bypasses MARKETING
   // suppression — a buyer who unsubscribed from marketing must still receive their
   // own deal emails — but a hard bounce or a spam complaint is not a preference,
