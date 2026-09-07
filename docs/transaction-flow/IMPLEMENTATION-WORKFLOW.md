@@ -687,9 +687,58 @@ have no pre-check and `hasActiveRequest()` (`lib/services/vehicle-request/vehicl
 has zero callers, so a buyer who declines and resubmits gets a raw 23505 until a service-side guard
 and a buyer-facing "you already have an open request" path land. **That guard is Phase 2 work**
 (the unified intake service owns every creation path); it is a known consequence of a ruled decision,
-not an open defect in this wave.
+not an open defect in this wave. **Phase 2 also carries the admin cancel action** — a `CANCEL`
+transition on `app/api/admin/requests/[requestId]/route.ts` from every open status, writing
+`cancelled_at` and a required `cancel_reason`, with the same `vehicle_request_events` +
+`admin_audit_logs` trail the route's other actions leave. It belongs with the resubmission guard:
+both are the buyer-request lifecycle lacking an admin-side terminal action, and §13-D2 is the first
+operational need for one.
 
 **Ruling 2 — deploy order is CODIFIED, not advisory.** See §8.1a.2.
+
+**§13-D2 — deploy-time findings (2026-09-07), recorded before any row is touched.**
+
+1. **The "existing cancel path" §13-D2 relies on does not exist.** The admin request route
+   (`app/api/admin/requests/[requestId]/route.ts`) has five actions — INTAKE, ACTIVATE_SOURCING,
+   CLOSE_NO_MATCH, REOPEN_SOURCING, CREATE_DEAL — none reaching `CANCELLED`, and accepts only
+   `{ action, assignedAdminId }`. The only writer of `VehicleRequest.status = CANCELLED` is the
+   **buyer** route (`app/api/buyer/requests/[requestId]/cancel/route.ts:28`): buyer-authenticated,
+   accepts only SUBMITTED | INTAKE | ACTIVE_SOURCING, and never sets `cancel_reason`.
+   `vehicle_requests.cancel_reason` (`schema.prisma:1274`) has **zero writers** in the codebase. The
+   end state §13-D2 specifies — `CANCELLED` with `cancel_reason = 'superseded-duplicate-request'` —
+   is therefore reachable by no code path. **This is a documentation defect in §13-D2**, not a data
+   problem: the remedy is an owner-run, audited SQL change outside the migration (UPDATE +
+   `vehicle_request_events` row + `admin_audit_logs` row per request, the original status captured
+   BEFORE the update), which is what "not by migration SQL" always permitted. `CLOSE_NO_MATCH` is
+   NOT a substitute: it writes a buyer-visible "No match found — you can request a refund" update
+   that would be false for these buyers.
+2. **The count is eleven open requests, not "three buyers holding 2–5" as a rough figure.**
+   Read from production 2026-09-07: buyer `053d546b` 4 open + 1 CLOSED_NO_MATCH (29 May–3 Jun,
+   1 deposit); `70568e7b` 5 open (13 May–3 Jun, **3 deposits**); `dd2411be` 2 open (27 May–2 Jun,
+   0 deposits). Every one has zero auctions. §5.6's "three buyers" is correct; the per-buyer counts
+   are 4 / 5 / 2.
+3. **One buyer holds paid deposits against the duplicates, so §23.1 governs.** Cancelling a request
+   for a buyer who paid is not neutral. Today's `deposits` carries **no request reference** —
+   `deposits.vehicle_request_id` is created by THIS wave and does not exist until step 4 — and the
+   standard checkout puts only `{ buyerId, type: "deposit" }` into Stripe metadata
+   (`app/api/buyer/deposit/create-intent/route.ts:212-218`). Deposit → request mapping before
+   deploy is therefore by evidence, not by key: creation-time correlation, `admin_audit_logs`, and
+   whether `stripe_payment_intent_id` is NULL (admin override / journey-complete fabricated `PAID`
+   rows — `deposit/override/route.ts:64-69`, `journey/complete-all/route.ts:103` — versus a real
+   Stripe charge). Refund review under §23.1 must precede any cancellation of a request that a real
+   charge can be attributed to.
+4. **A sub-second bulk touch of seven of the eleven rows at 01:30:42–43 UTC on 2026-09-07** is under
+   investigation and is NOT attributable from the codebase alone. Candidates that run at :30 and
+   write `vehicle_requests`: `coverage-hold-reconcile` (`*/15`), whose progression half advances
+   SUBMITTED/INTAKE → ACTIVE_SOURCING and writes `AUTO_INTAKE`/`AUTO_SOURCING` events, and whose
+   hold half **writes unconditionally every tick** on a thin-coverage held request
+   (`request-coverage-gate.service.ts:162-167`) without writing an event. The progression
+   reconciler has run every 15 minutes since 2026-08-26 (PR #335), so a first-time sweep of May/June
+   rows tonight is implausible for that half. `intake-reconcile` is excluded by its 48-hour
+   eligibility window. `cron_job_logs` (which stamps `result.build.commitSha`), `vehicle_request_events`
+   and `admin_audit_logs` for 01:25–01:50 UTC decide it; the reconciliation must not proceed until
+   they have, because if the seven were moved into an open status tonight the duplicate set is an
+   artefact and the reconciliation target changes.
 
 **`shortlist_items.inventory_item_id ON DELETE RESTRICT` — sweep interaction CHECKED AND CLEAR.**
 The daily stale sweep **soft-deletes**: `lib/services/inventory/stale-sweep.service.ts:236-238` is
@@ -4290,7 +4339,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | # | Item | Type | Needed before | Detail | Triage |
 | --- | --- | --- | --- | --- | --- |
 | D1 | Reconcile the six class-(b) ledger rows (`§6.2`) | ACTION | Phase 1 production deploy | **RULED 2026-09-05: resolve ALL SIX.** The three e-sign/AI rows are included — the env flag (`ESIGN_EXECUTED_ARTIFACT_ENABLED`, default off) is the enforcement, not the ledger, and Phase 1's deploy runbook excludes nothing. Grounded on the owner's read-only probe of 2026-09-05: `e_sign_envelopes` 35 columns, `e_sign_envelope_history` present (32 columns), `contract_scans` version columns present — no row is resolved against an absent object. Take a `_prisma_migrations` snapshot; run the six `prisma migrate resolve --applied …` commands from `frontend/` against production; verify with `SELECT migration_name FROM _prisma_migrations WHERE migration_name IN (…six…)` (6 rows) and re-probe one object per migration. | BLOCKING PHASE 1 |
-| D2 | Clean the three buyers holding multiple open Vehicle Requests (`§5.6`) | ACTION | Phase 1 index creation | Audited status change of superseded rows (`CANCELLED`, `cancel_reason = 'superseded-duplicate-request'`) run by an admin through the existing cancel path, not by migration SQL. Verify: `docs/transaction-flow/phase-1-proof/preflight.sql` returns no `BLOCK` row for `index:vehicle_requests_one_open_per_buyer_key`. That file is the §5.6 query made executable and committed, so the check is run rather than described; it carries the §13-D11 foreign-key precondition in the same run, and its contract is `PASS ⇔ no BLOCK row` with exactly one `CHECKED` row proving it executed. | BLOCKING PHASE 1 |
+| D2 | Clean the three buyers holding multiple open Vehicle Requests (`§5.6`) | ACTION | Phase 1 index creation | **CORRECTED 2026-09-07 (§8.1a.1): there is no admin cancel path and `cancel_reason` has no writer, so "through the existing cancel path" cannot be executed as written.** Audited status change of superseded rows (`CANCELLED`, `cancel_reason = 'superseded-duplicate-request'`) run by the owner as audited SQL outside the migration — UPDATE plus a `vehicle_request_events` row and an `admin_audit_logs` row per request, original status captured before the update — not by migration SQL. Eleven open rows across the three buyers (4 / 5 / 2); one buyer holds three paid deposits, so §23.1 refund review precedes any cancellation attributable to a real charge. Verify: `docs/transaction-flow/phase-1-proof/preflight.sql` returns no `BLOCK` row for `index:vehicle_requests_one_open_per_buyer_key`. That file is the §5.6 query made executable and committed, so the check is run rather than described; it carries the §13-D11 foreign-key precondition in the same run, and its contract is `PASS ⇔ no BLOCK row` with exactly one `CHECKED` row proving it executed. | BLOCKING PHASE 1 |
 | D3 | Confirm the duplicate-buyer pair (`§7.2`) | DECISION | Phase 2 regression tests | Confirm `6cc7bfa6…` / `64479e6c…` is the §9C duplicate, and whether the second email was intentional. Confirm the rule-16-compliant remedy: flag + human merge on phone collision, never auto-merge. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D4 | E-sign evidence activation (`ESIGN_EXECUTED_ARTIFACT_ENABLED=true`) | ACTION (compliance-gated) | Phase 8 acceptance in production | Schema is present (§5.2); the env flag is the runtime gate. Requires the attorney/compliance sign-off the runbook records as pending. Verify after: signing route returns 200 in preview with flag on; production flag flipped only after sign-off. | BLOCKING A NAMED LATER PHASE (Phase 8) |
 | D5 | Open-status set for the one-open-request index (`§8.2 Phase 1`) | DECISION | Phase 1 | **RULED 2026-09-05: option A — exclude `DEAL_CREATED` and the three terminals.** Open set = `DRAFT, SUBMITTED, INTAKE, PAYMENT_REQUIRED, ACTIVE_SOURCING, RADIUS_AUTHORIZATION_REQUIRED, OFFER_READY, OFFER_SENT, OFFER_ACCEPTED, OFFER_DECLINED` (10 of 14), as `§8.2` already spells out. The alternative (include `DEAL_CREATED`) is rejected: no writer moves a request out of `DEAL_CREATED` at deal completion or cancellation (`lib/services/deal/deal.service.ts:202-203`, `:377-401`), no admin transition has it in a `from:` list (`app/api/admin/requests/[requestId]/route.ts:19-50`) and buyer cancel refuses it (`cancel/route.ts:19-24`) — so it would wedge the buyer permanently. Its stated benefit is also illusory: buyer acceptance creates the Deal while leaving the request at `OFFER_ACCEPTED` (already in the set), and admin `CREATE_DEAL` sets `DEAL_CREATED` while creating no Deal. **Reversal note:** narrowing later is free; widening later to include `DEAL_CREATED` raises 23505 against any buyer holding `DEAL_CREATED` plus another open row and needs a D2-class audited cleanup, a first-in-repo live `DROP INDEX`, and a `prisma/drift-baseline.json` edit — take it together with building the completion writer, never as a cheap tweak. | BLOCKING PHASE 1 |
