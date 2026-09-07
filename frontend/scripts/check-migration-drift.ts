@@ -68,11 +68,41 @@ const functional = {
   ),
 };
 
-const structuralCount = sql.split("\n").filter((l) => /^(CREATE|ALTER|DROP)\b/.test(l)).length;
+const structuralLines = sql.split("\n").filter((l) => /^(CREATE|ALTER|DROP)\b/.test(l));
 
-const baseline: { structuralStatements: number; note?: string } = existsSync(BASELINE_PATH)
+type Deferred = { contains: string; reason: string; closesIn: string; expectedMatches?: number };
+const baseline: {
+  structuralStatements: number;
+  note?: string;
+  deferredStatements?: Deferred[];
+} = existsSync(BASELINE_PATH)
   ? JSON.parse(readFileSync(BASELINE_PATH, "utf8"))
   : { structuralStatements: Number.MAX_SAFE_INTEGER };
+
+// An ENUMERATED exception, not a raised ceiling. A statement is excused only if it
+// contains one of the exact strings declared in drift-baseline.json, each of which
+// names why it is deferred and the phase that closes it. Every other statement is
+// still gated by `structuralStatements`, so this cannot become a general loophole.
+//
+// A deferred entry that matches NOTHING is itself a failure: the deferral has been
+// closed (or was never real) and the entry must be deleted, so the list cannot rot
+// into a permanent excuse for drift that no longer exists.
+const deferred = baseline.deferredStatements ?? [];
+const deferredHits = new Map<string, number>();
+const structural = structuralLines.filter((line) => {
+  const hit = deferred.find((d) => line.includes(d.contains));
+  if (!hit) return true;
+  deferredHits.set(hit.contains, (deferredHits.get(hit.contains) ?? 0) + 1);
+  return false;
+});
+const structuralCount = structural.length;
+
+const staleDeferrals = deferred.filter((d) => !deferredHits.has(d.contains));
+// A deferral that matches MORE often than declared has silently widened to cover a statement it was
+// never written for — the failure mode of a `contains` string that cannot be anchored to its table.
+const widenedDeferrals = deferred.filter(
+  (d) => (deferredHits.get(d.contains) ?? 0) > (d.expectedMatches ?? 1),
+);
 
 let failed = false;
 
@@ -91,6 +121,32 @@ for (const [label, items] of Object.entries(functional)) {
 console.log(
   `\n  structural statements: ${structuralCount} (baseline ${baseline.structuralStatements})`,
 );
+if (deferred.length > 0) {
+  const n = [...deferredHits.values()].reduce((a, b) => a + b, 0);
+  console.log(`  deferred by explicit exception: ${n} statement(s) across ${deferredHits.size} entr(ies)`);
+  for (const d of deferred) {
+    const c = deferredHits.get(d.contains) ?? 0;
+    console.log(`    ${c > 0 ? "-" : "!"} [${d.closesIn}] ${d.contains}${c > 0 ? "" : "  (MATCHES NOTHING)"}`);
+  }
+}
+if (widenedDeferrals.length > 0) {
+  failed = true;
+  for (const d of widenedDeferrals) {
+    console.error(
+      `\nFAIL: deferred exception "${d.contains}" matched ${deferredHits.get(d.contains)} statements ` +
+        `but declares expectedMatches ${d.expectedMatches ?? 1}. It has widened beyond what it was ` +
+        `written for — narrow the string or raise the count deliberately.`,
+    );
+  }
+}
+if (staleDeferrals.length > 0) {
+  failed = true;
+  console.error(
+    `\nFAIL: ${staleDeferrals.length} deferred drift exception(s) match nothing. The deferral is ` +
+      `closed — delete the entry from prisma/drift-baseline.json so the list cannot rot into a ` +
+      `standing excuse.`,
+  );
+}
 
 if (structuralCount > baseline.structuralStatements) {
   failed = true;

@@ -164,9 +164,20 @@ export function classifyOutcome(checkId, output) {
   const text = String(output || '');
   if (!text.trim()) return 'unknown';
 
+  // A package-manager failure is authoritative and outranks any summary line in the
+  // text: pnpm prints ELIFECYCLE when a chained script exits non-zero, and that can
+  // appear AFTER a run whose own summary said `# fail 0`.
+  if (/\bELIFECYCLE\b|Command failed with exit code [1-9]/.test(text)) return 'fail';
+
   // node:test summary line — authoritative for every `test*` script.
-  const nodeFail = text.match(/^# fail (\d+)$/m);
-  if (nodeFail) return Number(nodeFail[1]) > 0 ? 'fail' : 'pass';
+  //
+  // §12.2 correction 1. This used to be `text.match(/^# fail (\d+)$/m)`, which takes
+  // the FIRST summary in the output. `pnpm test:all` chains 65 suites and prints one
+  // summary each, so suite 1's `# fail 0` classified the whole run as a pass while a
+  // later suite was red — the run that matters most was the one least able to fail.
+  // Every summary is now read, and any non-zero fails the run.
+  const summaries = [...text.matchAll(/^# fail (\d+)$/gm)].map((m) => Number(m[1]));
+  if (summaries.length > 0) return summaries.some((n) => n > 0) ? 'fail' : 'pass';
 
   if (checkId === 'typecheck') {
     return /error TS\d+/.test(text) ? 'fail' : 'unknown';
@@ -181,6 +192,10 @@ export function classifyOutcome(checkId, output) {
     if (/Compiled successfully|✓ Generating static pages/i.test(text)) return 'pass';
     return 'unknown';
   }
+  // A `test:all` run that produced no summary at all did not run to completion — a
+  // crash, a missing binary, a killed process. `unknown` is the correct answer and
+  // the gate treats it as not-run; what must never happen is it being read as a pass.
+  if (checkId === 'test:all') return 'unknown';
   if (checkId === 'test:visual') {
     const failed = text.match(/(\d+)\s+failed/);
     if (failed) return Number(failed[1]) > 0 ? 'fail' : 'pass';

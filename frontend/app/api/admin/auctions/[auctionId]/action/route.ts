@@ -71,10 +71,16 @@ export async function POST(request: NextRequest, { params }: Props) {
 
       // Notify every invited dealer that the deadline moved — they have more time to bid.
       const invitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });
-      if (invitations.length > 0) {
+      // `dealer_id` is nullable from the Phase 1 wave on (S7-18). A notification row with a NULL
+      // dealer is addressed to nobody and is unreachable from every dealer inbox query, which
+      // filters on `dealerId` — so invitations without a dealer are dropped, not written blank.
+      const invitationsWithDealer = invitations
+        .map((inv) => inv.dealerId)
+        .filter((id): id is string => id !== null);
+      if (invitationsWithDealer.length > 0) {
         await prisma.notification.createMany({
-          data: invitations.map(inv => ({
-            dealerId: inv.dealerId,
+          data: invitationsWithDealer.map(dealerId => ({
+            dealerId,
             type: "AUCTION_STARTED" as const,
             channel: "IN_APP" as const,
             title: "Auction deadline extended",
@@ -190,10 +196,16 @@ export async function POST(request: NextRequest, { params }: Props) {
 
       // Notify every invited dealer the auction was cancelled.
       const cancelInvitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });
-      if (cancelInvitations.length > 0) {
+      // `dealer_id` is nullable from the Phase 1 wave on (S7-18). A notification row with a NULL
+      // dealer is addressed to nobody and is unreachable from every dealer inbox query, which
+      // filters on `dealerId` — so invitations without a dealer are dropped, not written blank.
+      const cancelInvitationsWithDealer = cancelInvitations
+        .map((inv) => inv.dealerId)
+        .filter((id): id is string => id !== null);
+      if (cancelInvitationsWithDealer.length > 0) {
         await prisma.notification.createMany({
-          data: cancelInvitations.map(inv => ({
-            dealerId: inv.dealerId,
+          data: cancelInvitationsWithDealer.map(dealerId => ({
+            dealerId,
             type: "AUCTION_STARTED" as const,
             channel: "IN_APP" as const,
             title: "Auction cancelled",

@@ -24,8 +24,7 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   -- §13-D11 correction 3: one member per distinct §26 Owner cell, and no member without a cell.
   ('QueueOwnerRole','OPERATIONS'),('QueueOwnerRole','BUYER'),('QueueOwnerRole','FINANCE'),
   ('QueueOwnerRole','SYSTEM'),('QueueOwnerRole','BUYER_OPERATIONS'),('QueueOwnerRole','COMPLIANCE'),
-  ('QueueOwnerRole','OPERATIONS_FINANCE'),('QueueOwnerRole','BUYER_DEALER'),
-  ('OfferStatus','NOT_SELECTED')
+  ('QueueOwnerRole','OPERATIONS_FINANCE'),('QueueOwnerRole','BUYER_DEALER')
 ), expected_types(name) AS (VALUES
   ('VehicleRequestEntryType'),('DeliveryPreference'),('AuctionInvitationStatus'),('DealerReaffirmationStatus'),
   ('PostCompletionObligationStatus'),('AuctionVehicleCandidateStatus'),('ESignSignerKind'),('SourcingCandidateSource'),
@@ -42,6 +41,12 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('vehicle_requests','acquisition_channel'),('vehicle_requests','utm_content'),('vehicle_requests','affiliate_id'),
   ('vehicle_requests','consent_version'),('vehicle_requests','stated_budget_cents'),('vehicle_requests','co_buyer_elected'),
   ('deposits','vehicle_request_id'),('deposits','disputed_at'),('deposits','refund_reason'),
+  -- PAY-38a's hold triple and PAY-D's disclosure pair.
+  ('deposits','hold_reason'),('deposits','hold_released_at'),
+  ('deposits','disclosures_accepted_at'),('deposits','disclosures_version'),
+  ('vehicle_requests','disclosures_accepted_at'),('vehicle_requests','disclosures_version'),
+  ('deals','fee_refund_reason'),('offers','availability_confirmed_at'),
+  ('shortlist_items','distance_miles'),('refinance_applications','consent_ip_unavailable_reason'),
   ('deals','vehicle_request_id'),('deals','auction_id'),('deals','deposit_id'),('deals','dealer_id'),('deals','rooftop_id'),
   ('deals','vin'),('deals','odometer_at_offer'),('deals','co_buyer_id'),('deals','otd_cents_confirmed'),
   ('deals','current_plan_snapshot_id'),('deals','recap_confirmed_by_buyer_at'),('deals','vehicle_hold_until'),
@@ -98,7 +103,8 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('idx_idempotency_created'),('idx_dlq_event'),('idx_dlq_failed_at'),
   ('deposits_vehicle_request_id_idx'),('deals_current_plan_snapshot_idx'),
   ('vehicle_requests_current_plan_snapshot_idx'),
-  ('plan_snapshots_vehicle_request_id_id_key'),('plan_snapshots_deal_id_id_key')
+  ('plan_snapshots_vehicle_request_id_id_key'),('plan_snapshots_deal_id_id_key'),
+  ('deals_id_current_plan_snapshot_id_key'),('vehicle_requests_id_current_plan_snapshot_id_key')
 ), expected_fks(name) AS (VALUES
   ('vehicle_requests_inventory_item_id_fkey'),('vehicle_requests_pre_qualification_id_fkey'),
   ('vehicle_requests_current_plan_snapshot_fkey'),('vehicle_requests_affiliate_id_fkey'),
@@ -117,7 +123,11 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('trade_in_submissions_vehicle_request_id_fkey'),('trade_in_submissions_deal_id_fkey'),
   ('queue_items_assigned_admin_id_fkey'),('queue_items_vehicle_request_id_fkey'),('queue_items_deal_id_fkey'),
   ('queue_items_auction_id_fkey'),('queue_items_deposit_id_fkey'),('queue_items_buyer_id_fkey'),('queue_items_dealer_id_fkey'),
-  ('circumvention_attempts_dealer_id_fkey'),('buyer_opportunities_affiliate_id_fkey'),('inventory_query_cache_buyer_id_fkey')
+  ('circumvention_attempts_dealer_id_fkey'),('buyer_opportunities_affiliate_id_fkey'),('inventory_query_cache_buyer_id_fkey'),
+  -- R3, R45/R70/U3, R59/U3 and R43a — the four guarded keys five Phase-1 parity rows assign to this
+  -- wave and an earlier draft omitted.
+  ('vehicle_requests_buyer_opportunity_id_fkey'),('external_pre_approval_documents_pre_approval_id_fkey'),
+  ('deal_status_history_deal_id_fkey'),('shortlist_items_inventory_item_id_fkey')
 ), expected_checks(name) AS (VALUES
   ('vehicle_requests_ip_unavailable_reason_check'),('vehicle_requests_ip_unavailable_reason_exclusive'),
   ('vehicle_requests_consent_ip_unavailable_reason_check'),('vehicle_requests_consent_ip_unavailable_reason_exclusive'),
@@ -126,7 +136,12 @@ WITH expected_enum_labels(typname, label) AS (VALUES
   ('dealer_applications_ip_unavailable_reason_check'),('dealer_applications_ip_unavailable_reason_exclusive'),
   ('dealer_applications_consent_ip_unavailable_reason_check'),('dealer_applications_consent_ip_unavailable_reason_exclusive'),
   ('affiliates_ip_unavailable_reason_check'),('affiliates_ip_unavailable_reason_exclusive'),
-  ('affiliates_consent_ip_unavailable_reason_check'),('affiliates_consent_ip_unavailable_reason_exclusive')
+  ('affiliates_consent_ip_unavailable_reason_check'),('affiliates_consent_ip_unavailable_reason_exclusive'),
+  -- §7 applies to every captured address; `refinance_applications.consent_ip` is one.
+  ('refinance_applications_consent_ip_unavailable_reason_check'),
+  ('refinance_applications_consent_ip_unavailable_reason_exclusive'),
+  -- R30 (WF:1574).
+  ('deals_offer_lineage_check')
 ), expected_triggers(name) AS (VALUES
   ('shortlist_items_enforce_cap_trg'),('auction_vehicles_enforce_cap_trg'),('plan_snapshots_append_only_trg')
 ), expected_rls(name) AS (VALUES
@@ -178,13 +193,46 @@ WITH expected_enum_labels(typname, label) AS (VALUES
 
 -- §13-D11 correction 3. Both had zero §26 Owner cells; neither may come back.
 ), forbidden_enum_labels(typname, label) AS (VALUES
-  ('QueueOwnerRole','SUPPORT'),('QueueOwnerRole','CONCIERGE')
+  ('QueueOwnerRole','SUPPORT'),('QueueOwnerRole','CONCIERGE'),
+  -- §13-D39 is unruled and an enum label cannot be dropped once shipped, so the wave withholds
+  -- `OfferStatus.NOT_SELECTED` rather than foreclosing the decision. Asserting it ABSENT is what
+  -- keeps the omission a decision: a later edit that quietly re-adds it fails the proof here.
+  ('OfferStatus','NOT_SELECTED')
 
 -- §13-D11 correction 2. Asserting that the TYPE exists is not the same as asserting the COLUMN uses
 -- it: a DDL edit that declared `QueueOwnerRole` and left `owner_role` as TEXT would satisfy every
 -- other assertion here.
 ), expected_column_types(tbl, col, udt) AS (VALUES
   ('queue_items','owner_role','QueueOwnerRole')
+
+-- R36 states the QueueItemType cardinality as a TEST, and README cites it as evidence; naming the
+-- twelve new labels does not assert it. A thirteenth label added by a later edit would satisfy every
+-- label check above and silently break the one-type-per-§26-row tabulation the exception register is
+-- derived from. Same for QueueOwnerRole's one-member-per-Owner-cell rule.
+), expected_enum_cardinality(typname, n) AS (VALUES
+  ('QueueItemType', 20), ('QueueOwnerRole', 8)
+
+-- The referential ACTIONS, not just the keys. `confdeltype`/`confupdtype` are single chars:
+-- a=NO ACTION, r=RESTRICT, c=CASCADE, n=SET NULL. An existence-only FK census cannot tell
+-- `ON DELETE SET NULL` from `ON DELETE CASCADE`, and on the two composite plan-snapshot keys the
+-- difference between a bare SET NULL and a column-list SET NULL is the difference between a
+-- deletable row and a 23502 on the parent's primary key.
+), expected_fk_actions(conname, del, upd) AS (VALUES
+  ('vehicle_requests_current_plan_snapshot_fkey','n','a'),
+  ('deals_current_plan_snapshot_fkey','n','a'),
+  -- These three are created by the section 6 helper, which uses ON UPDATE CASCADE uniformly for
+  -- every key it writes (migration.sql:1035). The assertion records the convention rather than
+  -- silently diverging from it; only the two composite keys above are written by hand, and they are
+  -- the two that must NOT cascade, because their referencing column list includes a primary key.
+  ('shortlist_items_inventory_item_id_fkey','r','c'),
+  ('deal_status_history_deal_id_fkey','r','c'),
+  ('external_pre_approval_documents_pre_approval_id_fkey','c','c')
+
+-- And the SET NULL column list itself: exactly one column, and it must be the pointer, never the
+-- primary key. `confdelsetcols` is NULL for a bare SET NULL, which is precisely the defect.
+), expected_fk_setcols(conname, col) AS (VALUES
+  ('vehicle_requests_current_plan_snapshot_fkey','current_plan_snapshot_id'),
+  ('deals_current_plan_snapshot_fkey','current_plan_snapshot_id')
 )
 SELECT 'MISSING' AS status, 'enum_label' AS kind, typname || '.' || label AS object FROM expected_enum_labels e
   WHERE NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_enum v ON v.enumtypid=t.oid
@@ -245,6 +293,26 @@ UNION ALL SELECT 'MISSING', 'forbidden_enum_label_present', e.typname || '.' || 
   WHERE EXISTS (
     SELECT 1 FROM pg_type t JOIN pg_enum v ON v.enumtypid = t.oid
      WHERE t.typname = e.typname AND v.enumlabel = e.label)
+UNION ALL SELECT 'MISSING', 'enum_cardinality',
+       c.typname || ' expected ' || c.n || ' labels, found ' ||
+       (SELECT count(*) FROM pg_enum v JOIN pg_type t ON t.oid = v.enumtypid WHERE t.typname = c.typname)
+  FROM expected_enum_cardinality c
+  WHERE (SELECT count(*) FROM pg_enum v JOIN pg_type t ON t.oid = v.enumtypid
+          WHERE t.typname = c.typname) <> c.n
+UNION ALL SELECT 'MISSING', 'fk_action', a.conname || ' del/upd'
+  FROM expected_fk_actions a
+  WHERE NOT EXISTS (SELECT 1 FROM pg_constraint k
+                     WHERE k.conname = a.conname AND k.contype = 'f'
+                       AND k.confdeltype = a.del AND k.confupdtype = a.upd)
+UNION ALL SELECT 'MISSING', 'fk_set_null_column', c.conname || '.' || c.col
+  FROM expected_fk_setcols c
+  WHERE NOT EXISTS (
+    SELECT 1 FROM pg_constraint k
+     WHERE k.conname = c.conname AND k.contype = 'f'
+       AND k.confdelsetcols IS NOT NULL
+       AND array_length(k.confdelsetcols, 1) = 1
+       AND (SELECT attname FROM pg_attribute
+             WHERE attrelid = k.conrelid AND attnum = k.confdelsetcols[1]) = c.col)
 -- Positive evidence: what this run actually checked. Always exactly one row.
 UNION ALL SELECT 'TOTAL', 'expected_objects_checked',
   ((SELECT count(*) FROM expected_enum_labels) + (SELECT count(*) FROM expected_types)
@@ -254,5 +322,7 @@ UNION ALL SELECT 'TOTAL', 'expected_objects_checked',
    + (SELECT count(*) FROM expected_rls) * 2
    + (SELECT count(*) FROM expected_check_values) + (SELECT count(*) FROM expected_fk_targets)
    + (SELECT count(*) FROM forbidden_enum_labels) + (SELECT count(*) FROM expected_column_types)
+   + (SELECT count(*) FROM expected_enum_cardinality) + (SELECT count(*) FROM expected_fk_actions)
+   + (SELECT count(*) FROM expected_fk_setcols)
    + 1)::text
 ORDER BY 1 DESC, 2, 3;

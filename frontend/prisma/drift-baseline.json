@@ -1,6 +1,33 @@
 {
-  "structuralStatements": 345,
+  "structuralStatements": 344,
   "note": "Statements `prisma migrate diff` proposes to turn a chain-built database into schema.prisma, EXCLUDING functional gaps (which are gated at hard zero by scripts/check-migration-drift.ts). These are index renames and reshapes, foreign-key re-creation, column type normalisation, and one table the chain creates that the schema no longer declares. Closing them needs DROP statements aimed at a production database whose real state is not inspectable from CI, so they are pinned rather than fixed. This number may only go down; the checker fails if it grows AND if it shrinks without this file being updated.",
-  "measuredOn": "CI (postgres 16.4) reported 345 on PR #362 after the production-state reconciliation (dropping the stray affiliate_documents.file_size column closed one more structural statement; 346 was CI's number one commit earlier)",
-  "ifCiDisagrees": "CI is authoritative. The count compares catalog objects (tables, columns, indexes, foreign keys, enums), which do not vary by postgres patch version, so the two should agree \u2014 but this baseline was measured locally and the first CI run is what confirms it. If CI reports a different number, set structuralStatements to CI's number rather than arguing with it."
+  "measuredOn": "CI (postgres 16.4) reported 345 on PR #362 after the production-state reconciliation (dropping the stray affiliate_documents.file_size column closed one more structural statement; 346 was CI's number one commit earlier) | 2026-09-07 (Phase 1): lowered 345 -> 344. The wave declares all 264 of its new columns on pre-existing models, its 41 enum labels, 24 foreign keys, 12 indexes and 14 new models, so it adds no drift of its own; and R3's `vehicle_requests.buyer_opportunity_id` foreign key CLOSED one pre-existing structural statement that schema.prisma already declared and the chain lacked. Measured locally on PostgreSQL 17.6 (server_version_num 170006, production's own patch level); the pre-change chain reproduced the recorded 345 exactly on the same setup, so the delta is the wave's, not the environment's. CI remains authoritative per ifCiDisagrees.",
+  "ifCiDisagrees": "CI is authoritative. The count compares catalog objects (tables, columns, indexes, foreign keys, enums), which do not vary by postgres patch version, so the two should agree \u2014 but this baseline was measured locally and the first CI run is what confirms it. If CI reports a different number, set structuralStatements to CI's number rather than arguing with it.",
+  "deferredStatements": [
+    {
+      "contains": "\"e_sign_envelopes\" DROP COLUMN \"co_buyer_id\"",
+      "reason": "The Phase 1 wave creates e_sign_envelopes.co_buyer_id and its foreign key, but schema.prisma deliberately does not declare them. lib/services/esign/esign-schema-gate.ts projects an explicit list of only the columns production has today, and its schema-gate test requires every ESignEnvelope scalar to be classified as present-in-production or added-by-the-two-unapplied-migrations. This column is neither. Declaring it would let an ungated read expand the full scalar list and ask for a column production does not have until this wave deploys.",
+      "closesIn": "Phase 8 (owns e-sign; lands the Prisma relation with the uniqueness cutover)",
+      "expectedMatches": 1
+    },
+    {
+      "contains": "DROP CONSTRAINT \"e_sign_envelopes_co_buyer_id_fkey\"",
+      "reason": "The foreign key belonging to the column above.",
+      "closesIn": "Phase 8",
+      "expectedMatches": 1
+    },
+    {
+      "contains": "DROP COLUMN \"signer_kind\"",
+      "reason": "The expand half of the Phase 8 e-sign expand-and-contract. The column exists in the chain; the contract step and its Prisma declaration are Phase 8's. NOTE: this string cannot be anchored to its table \u2014 `prisma migrate diff` emits it as a continuation line of the multi-column `ALTER TABLE \"e_sign_envelopes\"` above it, so the table name is not on the same line. `expectedMatches` is what bounds it instead: a `signer_kind` column appearing on any OTHER table would make this match twice and fail the gate.",
+      "closesIn": "Phase 8",
+      "expectedMatches": 1
+    },
+    {
+      "contains": "DROP INDEX \"e_sign_envelopes_deal_id_signer_kind_key\"",
+      "reason": "The composite unique index over signer_kind, same expand-and-contract.",
+      "closesIn": "Phase 8",
+      "expectedMatches": 1
+    }
+  ],
+  "deferredNote": "An ENUMERATED exception, not a raised ceiling. `structuralStatements` stays at its measured value (344) and every other statement is still gated by it: a statement is excused ONLY if it contains one of the exact `contains` strings above, and each entry names why it is deferred and the phase that closes it. Any OTHER growth still fails the build. Adding an entry here is a reviewable diff, which is the property the ratchet is protecting. When Phase 8 lands, delete these entries \u2014 the checker fails if a deferred entry no longer matches anything, and fails if it matches more often than its declared `expectedMatches`, so an entry can neither rot into a standing excuse nor silently widen to cover a statement it was never written for."
 }

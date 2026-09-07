@@ -70,12 +70,17 @@ export async function GET(request: NextRequest) {
 
     // Reminders for invited dealers who have not submitted yet.
     for (const inv of auction.invitations) {
-      if (dealersWithOffers.has(inv.dealerId)) continue;
-      const email = inv.dealer?.user?.email;
+      // The Phase 1 wave makes `auction_invitations.dealer_id` nullable so a rooftop that is not a
+      // registered dealer can be invited (S7-18). An invitation without a dealer has no mailbox and
+      // never took a dealer's auction slot, so it is skipped rather than addressed to no one.
+      const dealer = inv.dealer;
+      if (!dealer) continue;
+      if (inv.dealerId !== null && dealersWithOffers.has(inv.dealerId)) continue;
+      const email = dealer.user?.email;
       if (!email) continue;
       await sendDealerAuctionReminderEmail({
         to: email,
-        contactName: inv.dealer.dealershipName,
+        contactName: dealer.dealershipName,
         vehicleMake: "",
         vehicleModel: "",
         vehicleYear: 0,

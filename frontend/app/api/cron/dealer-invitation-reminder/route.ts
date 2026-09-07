@@ -74,7 +74,12 @@ export async function GET(request: NextRequest) {
     const vehicleModel = vehicle?.model ?? "Requested";
 
     // Find dealers on this auction who have NOT submitted a SUBMITTED offer.
-    const dealerIds = auction.invitations.map((i) => i.dealerId);
+    // `dealer_id` is nullable from the Phase 1 wave on (S7-18): an invitation to a rooftop that is
+    // not a registered dealer has none. Those cannot have submitted a dealer-keyed offer, so they are
+    // filtered out of the lookup rather than widening it with a null.
+    const dealerIds = auction.invitations
+      .map((i) => i.dealerId)
+      .filter((id): id is string => id !== null);
     const submittedOffers = await prisma.offer.findMany({
       where: {
         auctionId: auction.id,
@@ -86,7 +91,7 @@ export async function GET(request: NextRequest) {
     const submittedDealerIds = new Set(submittedOffers.map((o) => o.dealerId));
 
     for (const inv of auction.invitations) {
-      if (submittedDealerIds.has(inv.dealerId)) {
+      if (inv.dealerId !== null && submittedDealerIds.has(inv.dealerId)) {
         remindersSkipped++;
         continue;
       }

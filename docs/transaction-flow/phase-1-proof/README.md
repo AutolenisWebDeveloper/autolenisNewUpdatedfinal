@@ -46,7 +46,7 @@ Only the production baseline exercises that path.
 ## What this proves, and what it does not
 
 **PROVES.** Both directories apply, in order, each inside a single transaction (the way Prisma runs
-them), against production's physical schema; all **371 assertions pass, 0 fail** — the count is
+them), against production's physical schema; all **399 assertions pass, 0 fail** — the count is
 assertions rather than objects, because 2 of them require a label to be ABSENT and 14 require a
 table to carry NO RLS policy; **no CHECK
 constraint stopped admitting a value production admits**; a second application of both directories
@@ -156,7 +156,8 @@ policies=23     rls_enabled=249
 Running against the production baseline with the §13-D11 / §13-D24 corrections applied (2026-09-06)
 confirmed each of them in the database rather than only in the DDL: both `assigned_admin_id` foreign
 keys resolve to `admins(id) ON DELETE SET NULL`; `queue_items.owner_role` is `QueueOwnerRole` with
-its 8 members and neither `SUPPORT` nor `CONCIERGE`; `QueueItemType` holds 20 labels including
+its 8 members and neither `SUPPORT` nor `CONCIERGE`; `QueueItemType` holds 20 labels — asserted as a CARDINALITY, not merely as the presence of the
+twelve named ones, so a thirteenth added later cannot pass — including
 `LINEAGE_ORPHAN`; `queue_items_owner_role_status_idx` exists; `comms_outbox` carries `delivered_at`
 and a `status` CHECK admitting eight values. Run against the *pre*-correction database the same
 `verify.sql` reports 20 `MISSING` rows naming exactly those objects — the assertions fail first, so
@@ -331,7 +332,7 @@ each, then rolled back.
 
 ## Phase 1 is additive
 
-`verify.sql` asserts, among its 371 assertions, that `e_sign_envelopes_deal_id_key` is **still
+`verify.sql` asserts, among its 399 assertions, that `e_sign_envelopes_deal_id_key` is **still
 present** after the wave. Replacing that live constraint is the signatures-phase
 expand/backfill/verify/cutover/contract sequence, not this one. If a future edit to Phase 1 drops it,
 the verifier fails.
@@ -347,3 +348,60 @@ PASS  <=>  no row has status = 'MISSING'
 
 A silent zero-row result is **not** a pass — it means the query did not run. `run-proof.sh` enforces
 both halves.
+
+## What changed in this wave, and what the proof now covers
+
+Implemented 2026-09-06/07 under the Phase 1 authorisation. Beyond the objects §8.2 already named,
+this wave carries the corrections below. Each was found by review and every one is proven by
+execution on a **PostgreSQL 17.6** restore of the committed baseline — the version production runs.
+
+**Two defects that passed every existence check and were found only by running a DELETE.** Both were
+latent: they apply cleanly and fail later, and CLAUDE.md forbids editing an applied migration.
+
+1. Both composite plan-snapshot foreign keys used a bare `ON DELETE SET NULL`. On a COMPOSITE key
+   that nulls EVERY referencing column, and the first one is the table's own PRIMARY KEY, so
+   deleting any governing snapshot raised 23502. Now `ON DELETE SET NULL ("current_plan_snapshot_id")`
+   (PostgreSQL 15+; production is 17.6), and `ON UPDATE NO ACTION` rather than CASCADE, because a
+   cascade on this key would rewrite `vehicle_requests.id` / `deals.id`.
+2. `plan_snapshots_append_only_trg` was an unconditional `BEFORE UPDATE` RAISE. PostgreSQL implements
+   `ON DELETE SET NULL` as an UPDATE on the child, so the trigger caught the referential nulling and
+   made every `vehicle_request` and `deal` holding a snapshot permanently undeletable — taking the
+   live buyer account-deletion route with it (`app/api/buyer/account/route.ts:63` runs
+   `vehicleRequest.deleteMany` unconditionally inside a transaction). The trigger now permits exactly
+   one update — the lineage columns going to NULL — and refuses everything else, including an edit
+   smuggled alongside a lineage null.
+
+**Coverage gaps against the §10 parity tables**, each traced to the row that assigns it to Phase 1:
+
+- `deposits.hold_reason`, `hold_released_at` (PAY-38a), `disclosures_accepted_at`,
+  `disclosures_version` (PAY-D) and the `vehicle_requests` mirror of the disclosure pair
+- `deals.fee_refund_reason` (PAY-46a) — the deal-side half of `deposits.refund_reason`
+- `offers.availability_confirmed_at` (A4a) — only the boolean half had landed
+- `shortlist_items.distance_miles` and its `inventory_item_id` key (R43a)
+- four guarded foreign keys five Phase-1 rows assign to this wave and an earlier draft omitted:
+  `vehicle_requests.buyer_opportunity_id` (R3), `external_pre_approval_documents.pre_approval_id`
+  (R45/R70/U3), `deal_status_history.deal_id` (R59/U3), `shortlist_items.inventory_item_id` (R43a)
+- `refinance_applications.consent_ip_unavailable_reason` and its two CHECKs — it was the only one of
+  the five consent-bearing rows to get `consent_ip` without its controlled companion
+- the `deals` lineage CHECK `(offer_id IS NOT NULL OR vehicle_request_offer_id IS NOT NULL)` (R30)
+
+**`OfferStatus.NOT_SELECTED` is withheld.** §13-D39 is unruled and a label cannot be dropped once
+shipped, so the wave does not foreclose the decision. `verify.sql` asserts it ABSENT, which is what
+keeps the omission a decision rather than an oversight.
+
+**Two new proof steps.** `verify.sql` is structurally blind to the class of defect above, so:
+
+- **`behaviour.sql`** (step 4d) exercises 11 behaviours — both delete paths, the account-deletion
+  path, the append-only boundary in three directions, the R30 CHECK, the R43a RESTRICT, and both
+  enforcement objects — inside a transaction the script rolls back.
+- **`rollback.sql`** (step 7), specified at IMPLEMENTATION-WORKFLOW.md:1028 and previously not
+  authored. It drops only what the wave creates, carries the four adopted tables as an explicit
+  deny-list and re-asserts at run time that they survived, and restores the two `comms_outbox`
+  CHECKs the wave widens — the §Rollback claim that the wave "replaces nothing" is true of every
+  other object but not of those two. Proven by round trip: apply the wave to a second restore, run
+  the rollback, and require the catalogue to be byte-identical to the untouched baseline. It is:
+  **4,729 objects identical**. The documented exception is enum LABELS, which PostgreSQL cannot drop.
+
+`verify.sql` also now asserts the referential ACTIONS (`confdeltype`/`confupdtype`) and the SET NULL
+column list itself — an existence-only FK census cannot tell `SET NULL` from `CASCADE`, and on the
+two composite keys that difference was defect 1.

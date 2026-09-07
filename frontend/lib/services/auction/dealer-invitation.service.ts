@@ -435,9 +435,16 @@ export async function releaseAuctionLoad(auctionId: string): Promise<void> {
     select: { dealerId: true },
   });
 
-  if (invitations.length) {
+  // Only invitations that name a dealer ever incremented a dealer's load, so only those may
+  // decrement one. `dealer_id` is nullable from the Phase 1 wave on (S7-18), and passing a null
+  // into `id: { in: [...] }` would widen the update rather than narrow it.
+  const dealerIds = invitations
+    .map((i) => i.dealerId)
+    .filter((id): id is string => id !== null);
+
+  if (dealerIds.length) {
     await prisma.dealer.updateMany({
-      where: { id: { in: invitations.map(i => i.dealerId) } },
+      where: { id: { in: dealerIds } },
       data: { currentAuctionLoad: { decrement: 1 } },
     });
   }
