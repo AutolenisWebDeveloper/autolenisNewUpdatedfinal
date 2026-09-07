@@ -11,7 +11,7 @@ import {
   runDealerContactBackfill,
   type BackfillDeps,
 } from "../dealer-contact-backfill.service";
-import { REVEAL_COST_CREDITS } from "../apollo-reveal.service";
+import { REVEAL_TOTAL_COST_CREDITS } from "../apollo-reveal.service";
 
 const NOW = new Date("2026-08-10T12:00:00Z");
 
@@ -216,8 +216,9 @@ test("stops the run when backfill budget is exhausted", async () => {
       now: NOW,
       enabled: () => true,
       reveal: revealFake(new Set(["a", "b", "c"]), order),
-      // budget for exactly one reveal: first check ok, second below cost.
-      remaining: (async () => (call++ === 0 ? REVEAL_COST_CREDITS : REVEAL_COST_CREDITS - 1)) as BackfillDeps["remaining"],
+      // budget for exactly one attempt (org resolution + match): first check ok,
+      // second below the full attempt cost.
+      remaining: (async () => (call++ === 0 ? REVEAL_TOTAL_COST_CREDITS : REVEAL_TOTAL_COST_CREDITS - 1)) as BackfillDeps["remaining"],
       upsert: (async (id: string) => ({ id })) as BackfillDeps["upsert"],
     },
   );

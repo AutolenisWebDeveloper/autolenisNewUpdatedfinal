@@ -22,7 +22,7 @@
 //     reported as noWebsiteHostSkipped. Measured against production: of the
 //     apollo_reveals rows carrying a diagnostic stage, every single attempt on a
 //     host-less rooftop stopped at stage 1 with empty_stage="no_org" (461 of 461)
-//     — organizations/lookup has never resolved one. Iterating them consumes the
+//     — organization resolution has never resolved one. Iterating them consumes the
 //     per-run `limit` and starves rooftops that could resolve. This is a
 //     PRIORITISATION change, not a capability removal: a rooftop that later gains
 //     a website_host re-enters the queue on the next run with no further change.
@@ -30,8 +30,9 @@
 //     NOTE for whoever reads this next: the same production data shows hosted
 //     rooftops failing identically (39 of 39 staged attempts also "no_org"), so
 //     this filter removes provably futile work but does NOT by itself make Phase 1
-//     productive. The org-resolution failure is upstream in the adapter and is
-//     reported for a separate, authorized batch rather than changed here.
+//     productive on its own. The org-resolution failure was upstream in the
+//     adapter (an undocumented endpoint) and is corrected in the API-contract
+//     batch; the live probe route proves the corrected contract.
 //
 // Why rooftop-keyed: the reveal, the reveal-cache, and DealerContactProfile are all
 // keyed to the canonical A2 DealerRooftop, so filling a rooftop's contact benefits
@@ -53,7 +54,7 @@ import { logger } from "@/lib/logger";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { SEND_SAFE_STATUSES } from "./contact-resolution.service";
 import { apolloEnabled } from "./apollo.service";
-import { revealRooftopContact, REVEAL_COST_CREDITS } from "./apollo-reveal.service";
+import { revealRooftopContact, REVEAL_TOTAL_COST_CREDITS } from "./apollo-reveal.service";
 import { remainingCredits, cycleKeyFor } from "./apollo-credit-ledger.service";
 import { upsertContactProfile, reconcileProspectContact } from "@/lib/services/dealer/dealer-contact-profile.service";
 import { resolveRooftop } from "@/lib/services/dealer/dealer-rooftop.service";
@@ -114,7 +115,7 @@ export interface BackfillResult {
   skipped: number;
   /**
    * Gap rooftops excluded from Phase 1 because they carry no website_host, so
-   * Apollo's organizations/lookup cannot resolve them. Reported rather than
+   * Apollo's organization resolution cannot resolve them. Reported rather than
    * silently dropped: this is the count an owner needs to see the shape of the
    * population the paid path can actually reach.
    */
@@ -361,8 +362,10 @@ export async function runDealerContactBackfill(
     // futile reveal call per remaining rooftop. This is an optimization — the
     // reveal service remains the authoritative fail-closed guard against overspend
     // (its atomic draw releases the claim if a concurrent live draw beat us here).
+    // An attempt is worth the organization resolution PLUS the match since the
+    // API-contract batch — both stages bill — so it is not started on less.
     const budget = await remaining(cycleKey, "backfill", now, { prisma });
-    if (budget < REVEAL_COST_CREDITS) {
+    if (budget < REVEAL_TOTAL_COST_CREDITS) {
       result.stoppedForBudget = true;
       break;
     }

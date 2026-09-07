@@ -10,7 +10,7 @@
 // mocked so that EVERY export throws while `forbidLedger` is set. A search that
 // reached a draw, a refund, or even a remaining-balance read would therefore
 // return 500 instead of 200. The Apollo transport is mocked too, so the test can
-// name every endpoint the route touched: /mixed_people/search (free) and never
+// name every endpoint the route touched: /mixed_people/api_search (free) and never
 // /people/match (the billable reveal). A future edit that routes discovery
 // through a paid call fails here rather than on an invoice.
 //
@@ -79,7 +79,7 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   if (!href.includes("apollo.io")) return realFetch(url as RequestInfo, init);
   const path = new URL(href).pathname;
   apolloPaths.push(path);
-  if (path.endsWith("/mixed_people/search")) {
+  if (path.endsWith("/mixed_people/api_search")) {
     return new Response(
       JSON.stringify({ people: searchPeople, pagination: { total_pages: 1, total_entries: searchPeople.length } }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -295,7 +295,7 @@ test("search reaches ONLY the free endpoint and NO ledger call is reachable from
   assert.deepEqual(ledgerCalls, [], "the free discovery path must not reach the credit ledger at all");
   assert.deepEqual(
     [...new Set(apolloPaths)],
-    ["/api/v1/mixed_people/search"],
+    ["/api/v1/mixed_people/api_search"],
     "people/match is the billable call and must never be reached by discovery",
   );
 });

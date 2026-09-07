@@ -12,7 +12,7 @@
 //     NO send-safe contact profile).
 //   rooftops.contactGapReachable        → exactly Phase 1's candidate predicate:
 //     the same gap AND a website_host, which the paid path now requires because
-//     organizations/lookup has never resolved a host-less rooftop in production.
+//     organization resolution has never resolved a host-less rooftop in production.
 //     Neither figure is one run's workload: a run additionally skips rooftops
 //     already attempted this cycle and stops at the budget/iteration cap.
 //     The difference between them is what the backfill reports as
