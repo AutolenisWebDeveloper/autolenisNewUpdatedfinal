@@ -10,6 +10,12 @@ import { ErrorState } from "@/components/ui/kit";
 import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 
 const QUEUE_TABS = [
+  // The §26 exception register itself — `queue_items`, written by the single
+  // raiseException writer. It leads because it is the canonical store; the tabs
+  // below it are DERIVED views that re-query a domain table for a condition
+  // nobody has raised an exception for yet, and "System Alerts" is now a
+  // read-only mirror of the retiring SYSTEM_ALERT rail (§8.4).
+  { id: "transaction",    label: "Transaction Exceptions", priority: "P0" as const },
   { id: "ofac",           label: "OFAC Escalations",       priority: "P0" as const },
   { id: "contract-fail",  label: "Contract Failures",       priority: "P1" as const },
   { id: "insurance",      label: "Insurance Exceptions",    priority: "P1" as const },
@@ -17,11 +23,12 @@ const QUEUE_TABS = [
   { id: "pickup",         label: "Pickup Exceptions",       priority: "P2" as const },
   { id: "prequal",        label: "Prequal Manual Review",   priority: "P1" as const },
   { id: "support",        label: "Support Tickets",         priority: "P2" as const },
-  { id: "system",         label: "System Alerts",           priority: "P0" as const },
+  { id: "system",         label: "System Alerts (mirror)",  priority: "P0" as const },
 ];
 
 // Map UI tab id → API queueType param
 const QUEUE_TYPE_MAP: Record<string, string> = {
+  "transaction":   "TRANSACTION_EXCEPTION",
   "ofac":          "OFAC_ALERT",
   "contract-fail": "CONTRACT_FAIL",
   "insurance":     "INSURANCE_EXCEPTION",
