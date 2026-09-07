@@ -18,6 +18,7 @@ import HeroLiveSignal from "@/components/public/HeroLiveSignal";
 import ChatWidget from "@/components/public/ChatWidget";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, localBusinessSchema } from "@/lib/seo/jsonld";
+import HeroIntakeForm from "@/components/public/HeroIntakeForm";
 
 const HOMEPAGE_BASE_METADATA = buildPageMetadata(PAGE_METADATA.home);
 const HOMEPAGE_OG_TITLE = "AutoLenis — Where Dealers Compete for You";
@@ -115,6 +116,12 @@ function HomePageBody() {
               <p className="text-lg text-[#4B5563] max-w-xl mb-10 leading-relaxed">
                 AutoLenis helps you buy with leverage. Verified dealers compete for your business, you compare real offers side by side, and you choose the deal that works best for you.
               </p>
+              {/* §6.1's first Lane 1 surface. The two links below remain — a
+                  visitor who would rather create an account still can — but the
+                  hero now CAPTURES, which it did not before. */}
+              <div className="mb-8 max-w-md">
+                <HeroIntakeForm />
+              </div>
               <div className="flex flex-wrap gap-4">
                 <Link
                   href="/auth/signup"

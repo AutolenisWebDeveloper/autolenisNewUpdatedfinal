@@ -135,6 +135,24 @@ export interface UnifiedIntakeInput {
   draft?: boolean;
   /** The host of this deployment, so a self-referral is not counted as an acquisition. */
   appHost?: string | null;
+  /**
+   * Capture the LEAD only — no Vehicle Request.
+   *
+   * The four side captures (lead magnet, fee calculator, LP step 1, exit intent)
+   * collect an email and nothing a request could be sourced from. `intake/R1`
+   * proposes turning them into DRAFT Vehicle Requests and marks that an OWNER
+   * DECISION (map Q1), so this phase does not make it: they are repointed at this
+   * one handler — gaining attribution, consent and the identity rules they had
+   * none of — while producing exactly what they produce today. Flipping the
+   * decision later is removing this flag at four call sites.
+   */
+  leadOnly?: boolean;
+  /** Pre-computed lead temperature, for the surfaces that segment before capture. */
+  leadTemperature?: string | null;
+  /** Human-readable reason for that temperature. */
+  scoringReason?: string | null;
+  /** Override the synthesized session id, where a surface already minted one. */
+  sessionId?: string | null;
 }
 
 export interface UnifiedIntakeResult {
@@ -259,8 +277,10 @@ export async function intakeBuyerRequest(
     //    no chat session.
     const opportunity = await tx.buyerOpportunity.create({
       data: {
-        sessionId: crypto.randomUUID(),
+        sessionId: input.sessionId ?? crypto.randomUUID(),
         source,
+        leadTemperature: input.leadTemperature ?? null,
+        scoringReason: input.scoringReason ?? null,
         buyerId: input.authenticatedBuyerId ?? input.buyerId ?? null,
         phone: input.phone ?? null,
         firstName: input.firstName ?? null,
@@ -305,7 +325,16 @@ export async function intakeBuyerRequest(
       },
     });
 
-    // 2. The identity, then the request.
+    // 2. The identity, then the request — unless this is a lead-only capture.
+    if (input.leadOnly) {
+      return {
+        opportunityId: opportunity.id,
+        vehicleRequestId: null,
+        identityTier: "UNRESOLVED" as const,
+        requiresClaim: false,
+        attachOutcome: null,
+      };
+    }
     const promoted = await promoteOpportunityInTx(tx, opportunity.id, input, attribution, consent);
     return { opportunityId: opportunity.id, ...promoted };
   });
