@@ -400,3 +400,35 @@ never executes. Import-time coupling is coupling.
 **Suggested improvement:** In the lane-model section, state that LANE_1 is a *two-part* claim and that any query using lane as a stand-in for dealer ownership must assert `dealerId` explicitly. Add to rule 5 that a freshness predicate over a nullable timestamp needs an explicit NULL branch (`{ OR: [{ lastSeenAt: { lt } }, { AND: [{ lastSeenAt: null }, { createdAt: { lt } }] }] }`), and that exclusion lists over nullable columns must be written as `{ OR: [{ col: null }, { col: { notIn } }] }` — never a bare `NOT ... in`, because SQL `NULL NOT IN (...)` is NULL and silently re-protects every row it was meant to catch.
 
 **Principle:** When a guard clause encodes a business invariant, it must test the invariant, not a label that usually correlates with it — and a cron that reports zero work done is evidence about the predicate, not proof that there is no work to do. In three-valued logic, every predicate over a nullable column needs its NULL branch written out, or the rows most likely to be broken are exactly the rows it cannot see.
+
+## 2026-09-07
+
+### Observation 25: Policy-only production boundaries drift from the connectors actually attached
+
+**Status:** OPEN
+**Date:** 2026-09-07
+**Session context:** Owner-directed batch changing Claude's own production-database authorization (CLAUDE.md, .claude/settings.json, the PreToolUse guard) and identifying every existing production writer before a second one was added.
+**Skill:** autolenis-auth-security-privacy (and .claude/MCP_INVENTORY.md, which it should point at)
+**Type:** open-source
+**Phase/Area:** Secrets / least-privilege — "MCP inventory" section
+
+**Issue:** The repository stated in three places that no session held a production credential and that the Supabase connector was "read-only for prod". Inspection showed the hosted Supabase MCP bound to the organization holding the production project, with execute_sql, apply_migration and deploy_edge_function exposed and no permission rule denying them. The policy sentence was true of the shell and false of the connector, and nothing in the pipeline re-checked it. The fix was a permissions.deny list of the write tools plus an inventory rule that policy is not enforcement.
+
+**Suggested improvement:** In autolenis-auth-security-privacy, add a "production reach audit" step to the acceptance criteria for any authorization change: enumerate every channel that can reach production (shell clients, ORM CLI, connectors/MCP tools, scripts under scripts/ that instantiate a client), and record for each whether a mechanical control (permission rule, hook, server-side read-only) or only prose governs it. Cross-link .claude/MCP_INVENTORY.md rule 6.
+
+**Principle:** A least-privilege statement about a system is only as true as the mechanical control behind it; when a new capability provider is attached, re-derive the reach from what the tools can do, not from what the inventory says they may do.
+
+### Observation 26: A guard that gains bare-word rules needs quote-aware segmentation
+
+**Status:** OPEN
+**Date:** 2026-09-07
+**Session context:** Extending .claude/hooks/guard-destructive.sh with an ask tier for prisma migrate deploy / resolve / read-only psql and deny rules for credential disclosure (echo of secrets, bare env/printenv/set, inline DSNs).
+**Skill:** New skill candidate: hook-guard-authoring (or a section in .claude/OPERATING_SYSTEM.md → "Changing the rules")
+**Type:** open-source
+**Phase/Area:** PreToolUse guard design
+
+**Issue:** The existing guard split commands on every shell separator without regard to quoting, which was harmless while every rule matched a multi-word phrase (git reset --hard, rm -rf). Adding a bare-word rule (printenv) immediately produced a false positive on the author's own verification command, grep -E "prisma|printenv|mcp__", because the quoted alternation was split into a segment that read as the command printenv. A second latent hole surfaced at the same time: psql -c "select 1; update …" was split at the quoted semicolon, hiding the UPDATE from the SQL scan. Both were fixed by tracking each segment's offset in its line (separator kept on the segment), deciding whether a segment begins inside an open quote, gating only the bare-word rules on that, and shell-tokenising psql lines with shlex so quoted arguments stay whole.
+
+**Suggested improvement:** Document in the guard-authoring notes: (1) any single-word or prefix-only rule must be gated on "segment begins outside quotes"; (2) any rule that inspects an argument's content (SQL, script text) must reconstruct the argument with a real tokenizer rather than from the naive split; (3) every new deny rule ships with an allow case for the same word appearing inside a quoted regex or string. Keep the naive split for multi-word destructive phrases, where over-matching inside quotes is the intended behaviour (bash -c "git reset --hard" must still deny).
+
+**Principle:** Splitting on separators without parsing quotes is safe for rules that over-match harmless text, and unsafe the moment a rule can match a common word or must read an argument's body; pair every such rule with a quote-aware position check and a real tokenizer.
