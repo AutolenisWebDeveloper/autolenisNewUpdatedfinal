@@ -8,6 +8,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { getContactCoverage } from "@/lib/services/dealer-recruitment/contact-coverage.service";
+import { getApolloPipelineCounters } from "@/lib/services/dealer-recruitment/apollo-orchestration.service";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,13 @@ export async function GET(request: NextRequest) {
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   try {
-    return adminSuccess(await getContactCoverage());
+    // Both are pure counts. Read together so the HTTP readout carries the same
+    // figures the coverage page shows.
+    const [coverage, apolloPipeline] = await Promise.all([
+      getContactCoverage(),
+      getApolloPipelineCounters(),
+    ]);
+    return adminSuccess({ ...coverage, apolloPipeline });
   } catch (err) {
     return adminError(
       "FETCH_FAILED",

@@ -23,6 +23,7 @@ interface Counts {
   rooftopsTotal: number;
   rooftopsWithContact: number;
   rooftopsGap: number;
+  rooftopsGapReachable: number;
   profilesTotal: number;
   profilesSendSafe: number;
 }
@@ -31,6 +32,7 @@ interface Recorded {
   sendSafeStatuses: string[][];
   prospectExcluded: string[][];
   revealCycleKeys: string[];
+  gapHostFilters: unknown[];
 }
 
 function fakePrisma(
@@ -40,7 +42,7 @@ function fakePrisma(
     reveals?: Array<{ status: string; count: number }>;
   } = {},
 ): { prisma: PrismaClient; rec: Recorded } {
-  const rec: Recorded = { sendSafeStatuses: [], prospectExcluded: [], revealCycleKeys: [] };
+  const rec: Recorded = { sendSafeStatuses: [], prospectExcluded: [], revealCycleKeys: [], gapHostFilters: [] };
   type W = Record<string, unknown> | undefined;
   const has = (w: W, k: string) => w != null && Object.prototype.hasOwnProperty.call(w, k);
 
@@ -74,6 +76,12 @@ function fakePrisma(
         }
         if (contacts?.none) {
           rec.sendSafeStatuses.push(contacts.none.emailVerificationStatus?.in ?? []);
+          // The gap is counted twice: once whole, once narrowed to rooftops
+          // carrying a website_host — which is the predicate Phase 1 now uses.
+          if (has(where, "websiteHost")) {
+            rec.gapHostFilters.push(where!.websiteHost);
+            return c.rooftopsGapReachable;
+          }
           return c.rooftopsGap;
         }
         return c.rooftopsTotal;
@@ -112,6 +120,7 @@ const COUNTS: Counts = {
   rooftopsTotal: 300,
   rooftopsWithContact: 120,
   rooftopsGap: 180,
+  rooftopsGapReachable: 45,
   profilesTotal: 140,
   profilesSendSafe: 120,
 };
@@ -133,7 +142,12 @@ test("reports the full population census with derived coverage figures", async (
 
   assert.deepEqual(r.dealers, { total: 10, withRooftop: 4, pendingResolution: 6 });
   assert.deepEqual(r.prospects, { total: 1532, withRooftop: 500, pendingResolution: 1000 });
-  assert.deepEqual(r.rooftops, { total: 300, withSendSafeContact: 120, contactGap: 180 });
+  assert.deepEqual(r.rooftops, {
+    total: 300,
+    withSendSafeContact: 120,
+    contactGap: 180,
+    contactGapReachable: 45,
+  });
   assert.deepEqual(r.contactProfiles, { total: 140, sendSafe: 120 });
 
   assert.equal(r.apollo.enabled, true);
@@ -187,11 +201,25 @@ test("empty database reports zeros rather than throwing", async () => {
   const zero: Counts = {
     dealersTotal: 0, dealersWithRooftop: 0, dealersPending: 0,
     prospectsTotal: 0, prospectsWithRooftop: 0, prospectsPending: 0,
-    rooftopsTotal: 0, rooftopsWithContact: 0, rooftopsGap: 0,
+    rooftopsTotal: 0, rooftopsWithContact: 0, rooftopsGap: 0, rooftopsGapReachable: 0,
     profilesTotal: 0, profilesSendSafe: 0,
   };
   const { prisma } = fakePrisma(zero, { ledger: null, reveals: [] });
   const r = await getContactCoverage(deps(prisma, { remaining: (async () => 0) as CoverageDeps["remaining"] }));
   assert.equal(r.rooftops.total, 0);
   assert.equal(r.apollo.revealsThisCycle, 0);
+});
+
+test("the reachable gap is counted with the SAME website_host filter Phase 1 applies", async () => {
+  // If this count ever stopped filtering on website_host it would silently claim
+  // the backfill will attempt rooftops it now skips — the exact drift this
+  // census exists to prevent.
+  const { prisma, rec } = fakePrisma(COUNTS);
+  const r = await getContactCoverage(deps(prisma));
+  assert.deepEqual(rec.gapHostFilters, [{ not: null }], "gap-reachable must require a website_host");
+  assert.equal(r.rooftops.contactGapReachable, 45);
+  assert.ok(
+    r.rooftops.contactGapReachable <= r.rooftops.contactGap,
+    "the reachable gap is a subset of the gap",
+  );
 });

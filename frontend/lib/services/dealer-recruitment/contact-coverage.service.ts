@@ -8,10 +8,15 @@
 //
 //   dealers/prospects.pendingResolution → exactly Phase 0's resolution queue
 //     (registered dealers and non-DEAD/ONBOARDED prospects with no rooftop yet).
-//   rooftops.contactGap                 → exactly Phase 1's candidate predicate
-//     (rooftops with NO send-safe contact profile). This is the standing pool,
-//     not one run's workload: a run additionally skips rooftops already
-//     attempted this cycle and stops at the budget/iteration cap.
+//   rooftops.contactGap                 → the standing contact gap (rooftops with
+//     NO send-safe contact profile).
+//   rooftops.contactGapReachable        → exactly Phase 1's candidate predicate:
+//     the same gap AND a website_host, which the paid path now requires because
+//     organization resolution has never resolved a host-less rooftop in production.
+//     Neither figure is one run's workload: a run additionally skips rooftops
+//     already attempted this cycle and stops at the budget/iteration cap.
+//     The difference between them is what the backfill reports as
+//     noWebsiteHostSkipped.
 //
 // Send-safe is the shared SEND_SAFE_STATUSES ({VERIFIED, ROLE_DERIVED}) — the
 // same constant the contact waterfall gates sending on, imported rather than
@@ -38,9 +43,12 @@ export interface PopulationCoverage {
 export interface RooftopCoverage {
   total: number;
   withSendSafeContact: number;
-  /** Standing paid-reveal candidate pool (no send-safe contact). Not one run's
-   *  workload — a run also skips this cycle's attempts and respects the cap. */
+  /** Standing contact gap (no send-safe contact). Not one run's workload — a run
+   *  also skips this cycle's attempts and respects the cap. */
   contactGap: number;
+  /** The share of that gap Phase 1 will actually attempt: gap AND a website_host.
+   *  contactGap − contactGapReachable is the backfill's noWebsiteHostSkipped. */
+  contactGapReachable: number;
 }
 
 export interface ApolloCoverage {
@@ -97,6 +105,7 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
     rooftopsTotal,
     rooftopsWithContact,
     rooftopsGap,
+    rooftopsGapReachable,
     profilesTotal,
     profilesSendSafe,
     ledger,
@@ -118,6 +127,11 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
     prisma.dealerRooftop.count(),
     prisma.dealerRooftop.count({ where: { contacts: { some: sendSafeContact() } } }),
     prisma.dealerRooftop.count({ where: { contacts: { none: sendSafeContact() } } }),
+    // Phase 1's real predicate since the host filter landed — the gap the paid
+    // path can actually attempt.
+    prisma.dealerRooftop.count({
+      where: { contacts: { none: sendSafeContact() }, websiteHost: { not: null } },
+    }),
 
     prisma.dealerContactProfile.count(),
     prisma.dealerContactProfile.count({ where: sendSafeContact() }),
@@ -140,7 +154,12 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
   return {
     dealers: { total: dealersTotal, withRooftop: dealersWithRooftop, pendingResolution: dealersPending },
     prospects: { total: prospectsTotal, withRooftop: prospectsWithRooftop, pendingResolution: prospectsPending },
-    rooftops: { total: rooftopsTotal, withSendSafeContact: rooftopsWithContact, contactGap: rooftopsGap },
+    rooftops: {
+      total: rooftopsTotal,
+      withSendSafeContact: rooftopsWithContact,
+      contactGap: rooftopsGap,
+      contactGapReachable: rooftopsGapReachable,
+    },
     contactProfiles: { total: profilesTotal, sendSafe: profilesSendSafe },
     apollo: {
       enabled: enabled(),

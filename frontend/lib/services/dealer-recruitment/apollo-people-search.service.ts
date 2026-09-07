@@ -1,11 +1,12 @@
 // Phase 1.2 — Apollo People Search: the 0-credit acquisition path.
 //
 // WHY THIS IS THE PRIMARY ROUTE. The existing paid path
-// (apolloResolveAndReveal) starts at organizations/lookup, which needs the
-// dealer's website host. Website coverage across dealer_prospects is 133/1,532,
-// so org resolution fails for roughly 91% of the list before a person is ever
-// considered. People Search keys on SIC code + decision-maker title + location
-// and needs no domain, so it can reach rooftops the domain path cannot.
+// (apolloResolveAndReveal) starts at a PAID organization resolution
+// (organizations/enrich by domain, else mixed_companies/search by name and
+// city/state). Website coverage across dealer_prospects is 133/1,532, so the
+// precise domain resolver cannot even attempt roughly 91% of the list. People
+// Search keys on SIC code + decision-maker title + location, needs no domain,
+// and is not on Apollo's list of credit-consuming endpoints.
 //
 // COST. Searching is free; only reveal/enrichment draws a credit. Nothing here
 // touches the credit ledger, and the unit tests assert that a ledger draw is
