@@ -129,6 +129,7 @@ const deps = (prisma: PrismaClient, over: Partial<CoverageDeps> = {}): Partial<C
   prisma,
   now: NOW,
   enabled: () => true,
+  spendEnabled: () => false,
   remaining: (async () => 750) as CoverageDeps["remaining"],
   ...over,
 });
@@ -222,4 +223,15 @@ test("the reachable gap is counted with the SAME website_host filter Phase 1 app
     r.rooftops.contactGapReachable <= r.rooftops.contactGap,
     "the reachable gap is a subset of the gap",
   );
+});
+
+test("the unattended-spend switch is reported beside the budget, independently of the paid tier", async () => {
+  // The paid tier being on says nothing about whether the cron may bill; the
+  // page has to show the switch that actually arms unattended spend.
+  const { prisma } = fakePrisma(COUNTS, { ledger: { capCredits: 2000, spentCredits: 0 } });
+  const off = await getContactCoverage(deps(prisma, { enabled: () => true, spendEnabled: () => false }));
+  assert.equal(off.apollo.enabled, true);
+  assert.equal(off.apollo.backfillSpendEnabled, false);
+  const on = await getContactCoverage(deps(prisma, { enabled: () => true, spendEnabled: () => true }));
+  assert.equal(on.apollo.backfillSpendEnabled, true);
 });

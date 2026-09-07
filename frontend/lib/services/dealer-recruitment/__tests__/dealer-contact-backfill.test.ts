@@ -12,8 +12,15 @@ import {
   type BackfillDeps,
 } from "../dealer-contact-backfill.service";
 import { REVEAL_TOTAL_COST_CREDITS } from "../apollo-reveal.service";
+import { backfillSpendEnabled } from "../dealer-contact-backfill.service";
 
 const NOW = new Date("2026-08-10T12:00:00Z");
+
+// The existing suite exercises Phase 1, so it runs with the unattended-spend
+// switch ARMED — exactly the state the owner reaches by setting the flag. The
+// gate tests at the bottom turn it off explicitly through the dep.
+process.env.APOLLO_API_KEY = "test-key";
+process.env.APOLLO_BACKFILL_ENABLED = "true";
 
 interface Rooftop {
   id: string;
@@ -501,4 +508,111 @@ test("skipped-for-no-host is reported even when nothing is left to attempt", asy
   assert.equal(order.length, 0, "no reveal may be attempted");
   assert.equal(r.candidates, 0);
   assert.equal(r.noWebsiteHostSkipped, 1);
+});
+
+
+// ─── the unattended-spend gate ───────────────────────────────────────────────
+
+test("backfillSpendEnabled() is OFF by default, OFF without a key, ON only for the exact string \"true\"", () => {
+  const prev = { key: process.env.APOLLO_API_KEY, flag: process.env.APOLLO_BACKFILL_ENABLED };
+  try {
+    delete process.env.APOLLO_BACKFILL_ENABLED;
+    process.env.APOLLO_API_KEY = "k";
+    assert.equal(backfillSpendEnabled(), false, "unset → off");
+    process.env.APOLLO_BACKFILL_ENABLED = "1";
+    assert.equal(backfillSpendEnabled(), false, "\"1\" is not \"true\"");
+    process.env.APOLLO_BACKFILL_ENABLED = "TRUE";
+    assert.equal(backfillSpendEnabled(), false, "case matters — the reveal flag is read the same way");
+    process.env.APOLLO_BACKFILL_ENABLED = "true";
+    assert.equal(backfillSpendEnabled(), true);
+    delete process.env.APOLLO_API_KEY;
+    assert.equal(backfillSpendEnabled(), false, "no key → off, whatever the flag says");
+  } finally {
+    if (prev.key === undefined) delete process.env.APOLLO_API_KEY; else process.env.APOLLO_API_KEY = prev.key;
+    if (prev.flag === undefined) delete process.env.APOLLO_BACKFILL_ENABLED; else process.env.APOLLO_BACKFILL_ENABLED = prev.flag;
+  }
+});
+
+test("flag OFF: Phase 0 still resolves, Phase 1 makes NO reveal call and reads NO budget — reported as gated, not failed", async () => {
+  const { prisma, calls } = fakePrisma(
+    [rt("a"), rt("b")],
+    [],
+    { dealers: [{ id: "d1", dealershipName: "Metro Ford" }], prospects: [{ id: "p1", name: "Round Rock Toyota" }] },
+  );
+  const resolveOrder: Array<{ kind: string; id: string }> = [];
+  const reconciled: string[] = [];
+  const revealOrder: string[] = [];
+  let remainingCalls = 0;
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true, // the paid tier IS on — as it is in production
+      spendEnabled: () => false, // …but unattended spend is not armed
+      reveal: revealFake(new Set(["a", "b"]), revealOrder),
+      remaining: (async () => { remainingCalls++; return 9999; }) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+      resolveRooftop: resolveRooftopFake(resolveOrder),
+      reconcile: reconcileFake(reconciled),
+    },
+  );
+
+  // Phase 0 ran to completion.
+  assert.equal(r.enabled, true, "the paid tier being on is still reported truthfully");
+  assert.deepEqual(resolveOrder.map((o) => o.id), ["d1", "p1"], "free rooftop resolution is not gated");
+  assert.equal(r.dealersResolved, 1);
+  assert.equal(r.prospectsResolved, 1);
+  assert.deepEqual(reconciled, ["p1"]);
+
+  // Phase 1 never started.
+  assert.equal(r.phase1Gated, true);
+  assert.equal(revealOrder.length, 0, "no reveal may be attempted");
+  assert.equal(remainingCalls, 0, "not even the budget is read — nothing can be drawn");
+  assert.equal(calls.findMany, 0, "the gap rooftops are never scanned");
+  assert.equal(calls.count, 0);
+  assert.equal(r.candidates, 0);
+  assert.equal(r.attempted, 0);
+  assert.equal(r.stoppedForBudget, false, "gated is not a budget stop");
+});
+
+test("flag ON: Phase 1 runs exactly as before, and the result says it was not gated", async () => {
+  const { prisma } = fakePrisma([rt("a")]);
+  const revealOrder: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true,
+      spendEnabled: () => true,
+      reveal: revealFake(new Set(["a"]), revealOrder),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+  assert.equal(r.phase1Gated, false);
+  assert.deepEqual(revealOrder, ["a"]);
+  assert.equal(r.revealed, 1);
+});
+
+test("the paid tier OFF still short-circuits everything, before the spend gate is even consulted", async () => {
+  const { prisma, calls } = fakePrisma([rt("a")]);
+  let spendChecks = 0;
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => false,
+      spendEnabled: () => { spendChecks++; return true; },
+      reveal: revealFake(new Set(), []),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+  assert.equal(r.enabled, false);
+  assert.equal(r.phase1Gated, false, "not gated — the whole job was off");
+  assert.equal(spendChecks, 0, "the first gate decides alone");
+  assert.equal(calls.dealerFindMany, 0, "Phase 0 does not run when the tier is off (unchanged)");
 });
