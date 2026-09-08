@@ -1479,6 +1479,40 @@ written and never shown.
 declared, and `lib/__tests__/scope-guard.test.ts` failed the build on it. The guard was right: one
 helper is not a new layer, so it sits beside the client it wraps as `lib/prisma-savepoint.ts`.
 
+**§13-D45 — the OFAC attestation, kept and now asserted.** The owner ruled the human attestation on
+the external pre-approval approve route IS the sanctions control, deliberately, and that automated
+screening is a vendor decision rather than an intake-phase change. The attestation itself needed no
+change — `ofacAttested: z.literal(true)` was already there, and the route already wrote an
+`EXTERNAL_PREQUAL_OFAC_ATTESTED` ComplianceEvent before the approval took effect. What was missing was
+the ruling's second half: nothing asserted that the route *cannot* write `APPROVED` without it, so a
+schema edit making the field optional would have removed a sanctions gate and left the route looking
+identical. `app/api/admin/__tests__/d45-ofac-attestation.test.ts` drives the real route module and
+pins three things — a missing attestation refuses with no `APPROVED` write and no buyer email, an
+attestation of `false` refuses too (the literal is the control, not the key's presence), and on the
+success path the attestation is durable BEFORE the approval, so a crash between them cannot leave an
+approval with no screening record. Proved failing-first: relaxing the literal to
+`z.boolean().optional()` fails two of the three. The existing
+`high-risk-route-enforcement.test.ts` already covered this route's ROLE gate and is untouched; this is
+the orthogonal control.
+
+**Found while ruling D45, reported and NOT fixed here.** Tracing every writer of
+`decision: APPROVED` to place the D45 assertion turned up six paths. Five are credit decisions with a
+control on them. The sixth is not:
+`app/api/admin/buyers/[buyerId]/journey/complete/route.ts` (and its `complete-all` sibling) upserts a
+`PreQualification` with `decision: APPROVED`, `tier: GOOD`, a **$50,000** default ceiling and
+`checkOfacAlert: false` — no application, no FCRA consent, no bureau call, and neither of the two
+sanctions controls this phase just pinned. It is gated by `getAdminFromRequest` alone: **any**
+authenticated admin, with no `requirePermissionStrict` and no role check, unlike the external
+pre-approval route beside it which requires `finance.preapproval.decide`.
+
+It is reported rather than fixed for two reasons that both hold: adding a permission gate is a
+**server-authorization change**, which CLAUDE.md reserves for a separately authorized batch; and this
+route's behavioural split is already assigned to **Phase 9**. The D45 ruling scoped its verify-after
+to the external pre-approval route, and widening it here would be this phase deciding an
+authorization question the owner has not been asked. What this phase did do to that route is
+unchanged and stands: its audit row is now awaited rather than `.catch(() => {})`, so the write can no
+longer succeed silently.
+
 **Three cutover behaviour changes, stated rather than assumed neutral** (QStash neutralisation):
 `offer_received` becomes per-AUCTION rather than per-offer; `auction_closing` gains the
 `hasSelectedOffer` guard the QStash job lacked; `dealer_bid_reminder` is **MOVED** to
@@ -4537,8 +4571,8 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | Category | Decisions |
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
-| BLOCKING A NAMED LATER PHASE | **38** |
-| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **7** |
+| BLOCKING A NAMED LATER PHASE | **37** |
+| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **8** |
 | **Total** | **51** |
 
 Decisions in the table: **51**. Categories sum to **51**. Unclassified: **0**.
@@ -4603,7 +4637,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D42 | Dealer termination criteria | DECISION | Phase 5 | §25.2 requires consequences for repeat circumvention. Proposed: first attempt warns and records; a second within 90 days suspends invitations pending review; termination is always a human decision. | BLOCKING A NAMED LATER PHASE (Phase 5) |
 | D43 | RLS coverage for the invitation and messaging tables | DECISION | Phase 1 | No migration enables RLS on `auction_invitations`, `outside_auction_invites`, `messages`, `circumvention_attempts`, `identity_firewall_entries` (production probe: the core Prisma tables are reached only through the service role). Proposed: enable RLS with zero policies (deny-all except service role) on the new tables this wave creates, and leave existing tables unchanged in this phase. Adding a policy OPENS access, so none is added. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — §5.4 evidence: the app connects as table owner, so a policy would OPEN access; new tables ship RLS-on/zero-policies matching every existing transaction table |
 | D44 | Untargeted dealer broadcast | DECISION | Phase 5 | `notifyActiveDealersOfOpportunity` emails the first 20 ACTIVE dealers with no radius and no invitation, from the public request route. Proposed: retire it — §7 invitations are the only dealer fan-out. | BLOCKING A NAMED LATER PHASE (Phase 5) |
-| D45 | OFAC screening control on the external pre-approval approve route | DECISION | Phase 2 | The approve route today requires a human OFAC attestation (`z.literal(true)`) rather than an automated screen. Proposed: keep the attestation as the control and record it as a deliberate choice; alternative: add automated screening and demote the attestation to a second check. Verify after: the approve route cannot write `APPROVED` without whichever control is chosen. Raised by §10 *stages1-3*; §13 had no OFAC row before this review. | BLOCKING A NAMED LATER PHASE (Phase 2) |
+| D45 | OFAC screening control on the external pre-approval approve route | DECISION | Phase 2 | **RULED 2026-09-08: the attestation IS the control, deliberately.** The human OFAC attestation (`ofacAttested: z.literal(true)`, `app/api/admin/external-preapprovals/[id]/approve/route.ts:24-26`) stays as the sanctions gate; automated screening is a vendor decision, not an intake-phase change. Recorded here as a deliberate choice rather than an accident of the original implementation. **The verify-after is now a test**, not a promise: `app/api/admin/__tests__/d45-ofac-attestation.test.ts` drives the real route and asserts a missing attestation and an attestation of `false` each refuse with no `APPROVED` status, no `APPROVED` decision and no buyer email, and that on the success path the `EXTERNAL_PREQUAL_OFAC_ATTESTED` ComplianceEvent is durable BEFORE the approval takes effect. Proved failing-first: relaxing the literal to `z.boolean().optional()` fails two of its three cases. Why it is load-bearing: every iPredict approval runs a MicroBilt OFAC screen and this path skips it, so the attestation is the ONLY sanctions gate on it. | DEFAULT AND PROCEED UNLESS OVERRIDDEN |
 | D46 | SMS and email consent capture on every Lane 1 surface | DECISION | Phase 2 | Consent is captured inconsistently today: the onboarding wizard gates a button on an SMS checkbox it never transmits, the SEO form hard-codes `consent_sms = true`, and Google-OAuth signups store a NULL terms version. Proposed: one consent record per surface (version, text hash, IP, surface, timestamp), no pre-checked boxes, and no send without a matching record. Verify after: a send attempt for a buyer with no consent record is refused by the dispatcher and raises an exception. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D47 | PII already stored in `notifications.metadata` | ACTION (privacy) | Phase 2 | The public wizard spreads the whole form into `notifications.metadata`, so income, employer and credit-band answers sit in a notification row. Proposed: stop writing it in Phase 2, then an owner-run purge or redaction of the existing rows under the retention policy. Verify after: the metadata column holds no field outside an allowlist, and the purge query returns zero. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D48 | Refund-policy copy shown to the buyer | DECISION (legal) | Phase 3 | §22.1 requires the buyer to see the refund rules before paying; the current deposit-confirmation email says the $99 "is credited toward your concierge fee when your deal closes", which contradicts both "Standard plan paid in full" and the $400-until-funding-clears rule. Proposed: legal-approved copy for the checkout disclosure and the receipt, written once and reused. Verify after: both surfaces render the approved text and a test pins it. | BLOCKING A NAMED LATER PHASE (Phase 3) |
