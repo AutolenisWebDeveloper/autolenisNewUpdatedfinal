@@ -1540,7 +1540,22 @@ Two gates did **not** come back clean, and neither failure belongs to this phase
   rather than from its prose) takes the seed path, renders on `ubuntu-24.04`, re-runs `test:visual` as
   a two-pass determinism check, and commits the CI-rendered baseline back to the branch only if that
   second pass passes. `test:visual:update` rewrites the `.txt` and metadata baselines in the same
-  step, so the copy freeze is re-established on the runner too rather than hand-written here. Separately, that band's gate is an OR over four counters while
+  step, so the copy freeze is re-established on the runner too rather than hand-written here.
+
+  **It did.** `Visual regression` run 38 on `c2650a5` concluded **success**, and the runner committed
+  `2a0b151` — all ten PNGs re-rendered, and **only two other files changed: the two
+  `marketing-home-*.txt` copy baselines.** Every other page's copy and all ten metadata baselines came
+  back byte-identical, which is the same evidence the earlier compare gave from the other direction:
+  this phase's rendered change is confined to `/`. The committed copy contains the hero form's text
+  (`Start in 30 seconds`, the ZIP field, the consent line) and does **not** contain the `StatsStrip`
+  band — confirming that the local capture was contaminated by the journeys' own buyer rows and that
+  restoring it rather than committing it was right.
+
+**The complete gate set, green on `c2650a5`.** `CI` run 1030 — Typecheck/Lint/Tests & Build, Migration
+chain, E2E (dealer outreach), Phase 1 proof, Dependency audit — concluded **success**; `Visual
+regression` run 38 concluded **success**. `2a0b151` is the runner's baseline commit on top of it and
+changes no application code; GitHub does not re-trigger workflows for a `GITHUB_TOKEN` push, which
+`visual.yml` states, so that commit carries no run of its own. Separately, that band's gate is an OR over four counters while
   its own comment says the point is to hide "0 Deals Completed · $0 Avg Savings · 0 Verified Dealers"
   — one buyer row defeats it. **Reported for an owner decision**; it is public marketing copy and
   outside this phase.
