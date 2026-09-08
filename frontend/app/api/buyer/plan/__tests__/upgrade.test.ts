@@ -24,6 +24,7 @@ let activityEvents: Array<Record<string, unknown>> = [];
 // stays empty. (The route imports no payment module; this canary catches a
 // future regression that wires one in through prisma payment tables.)
 let paymentWrites: string[] = [];
+let planSnapshots: Array<Record<string, unknown>> = [];
 
 const paymentCanary = (table: string) =>
   new Proxy({}, { get: () => async () => { paymentWrites.push(table); return {}; } });
@@ -52,6 +53,18 @@ const prismaMock = {
     },
   },
   notification: { create: async () => ({ id: "notif_1" }) },
+  // Phase 2 — the election is now also recorded as a `plan_snapshots` row.
+  // `Buyer.plan` answers "what plan now" and destroys "what plan when"; §23's
+  // upgrade window and post-settlement downgrade review are adjudicated from the
+  // history, not the flag. The flag write above is unchanged, which is what the
+  // no-charge assertions below still pin.
+  planSnapshot: {
+    findFirst: async () => planSnapshots[planSnapshots.length - 1] ?? null,
+    create: async (args: { data: Record<string, unknown> }) => {
+      planSnapshots.push(args.data);
+      return args.data;
+    },
+  },
   deposit: paymentCanary("deposit"),
   dealerPayment: paymentCanary("dealerPayment"),
   paymentProviderEvent: paymentCanary("paymentProviderEvent"),
@@ -85,6 +98,7 @@ beforeEach(() => {
   auditLogs = [];
   activityEvents = [];
   paymentWrites = [];
+  planSnapshots = [];
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

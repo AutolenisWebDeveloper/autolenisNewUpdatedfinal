@@ -27,6 +27,10 @@ import {
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
+import { PHASE_2_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
+import { renderPrequalAdminReceipt } from "@/lib/services/comms/phase2-email-content";
 
 // ── Provider-failure observability ──────────────────────────────────────────
 // A MicroBilt failure and a risk-triggered compliance hold both land as
@@ -645,7 +649,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     // ambiguous (DUPLICATE / FAILED / DEV_SKIPPED). Mislabeling a Resend
     // outage as SUPPRESSED_DUPLICATE would leave a false FCRA § 615 audit
     // trail.
-    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let outcome: AdverseActionDelivery = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
       const result = await sendAdverseActionEmail({
@@ -664,12 +668,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     }
 
     try {
-      const eventType =
-        outcome === "SENT"
-          ? "ADVERSE_ACTION_NOTICE_SENT"
-          : outcome === "DUPLICATE"
-            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
-            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      const eventType = classifyAdverseActionDelivery(outcome);
       await prisma.complianceEvent.create({
         data: {
           eventType,
@@ -689,6 +688,10 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     } catch (logErr) {
       logger.error("[prequal] Failed to log adverse action compliance event:", logErr);
     }
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: buyer.id, prequalApplicationId: prequal.id });
   }
 
   // OFAC-silent buyer notice + ops alert when the decision needs manual
@@ -742,8 +745,57 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     });
   }
 
-  // Admin ops alert: needs-review OR upstream provider error. Failure to send
-  // must never block the buyer response.
+  // STAGE 3 — AN ADMINISTRATIVE RECEIPT FOR EVERY SUBMITTED APPLICATION.
+  //
+  // Stage 3 requires "an administrative receipt for EVERY submitted application —
+  // reference, summary, submission time, current outcome, and an authenticated
+  // admin link — excluding SSN, raw bureau data, raw OFAC data, and raw provider
+  // responses", and marks it NEW because it was "currently sent only on manual
+  // review or provider error". That is exactly what this condition was: APPROVED
+  // and DECLINED — the two outcomes with money and FCRA consequences — produced no
+  // admin record at all.
+  //
+  // It goes through the §27 dispatcher rather than a direct send, so a receipt
+  // cannot be lost with the request that triggered it. The old direct call is kept
+  // for the two urgent cases: a review or a provider error needs a human NOW, and
+  // the dispatcher's next drain tick is a minute away.
+  //
+  // WHAT IS IN IT. Reference, decision, submission time and an admin link. No SSN
+  // is collectable anywhere in this flow, and raw bureau, OFAC and provider
+  // payloads are deliberately absent — the admin link is how a reviewer reaches
+  // the record under their own authorisation.
+  try {
+    await enqueueTransactional({
+      triggerEvent: "prequal_application_submitted",
+      templateKey: PHASE_2_TEMPLATES.APPLICATION_SUBMITTED_ADMIN,
+      channel: "email",
+      recipientKind: "operations",
+      to: process.env.ADMIN_NOTIFICATION_EMAIL ?? "",
+      recipientId: null,
+      idempotencyKey: `prequal_receipt:${prequal.id}`,
+      // RENDERED CONTENT, not a template id: `templateId` is looked up against
+      // `email_templates.id` (a UUID column), so a key there never renders.
+      payload: {
+        email: process.env.ADMIN_NOTIFICATION_EMAIL ?? "",
+        type: "transactional",
+        idempotencyKey: `prequal_receipt:${prequal.id}`,
+        ...renderPrequalAdminReceipt({
+          prequalId: prequal.id,
+          buyerId: buyer.id,
+          decision: finalDecision,
+          submittedAt: prequal.createdAt?.toISOString() ?? new Date().toISOString(),
+          adminUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/admin/buyers/${buyer.id}`,
+        }),
+      },
+    });
+  } catch (err) {
+    // A receipt that could not be enqueued must not fail the buyer's application.
+    logger.error("[prequal] admin receipt enqueue failed (application stands):", err);
+  }
+
+  // Urgent path, unchanged: needs-review or an upstream provider error needs a
+  // human immediately rather than on the next drain tick. Failure to send must
+  // never block the buyer response.
   if (needsReview || isProviderError) {
     try {
       await sendAdminPrequalAlertEmail({

@@ -27,7 +27,7 @@ import assert from "node:assert/strict";
 const buyerCreates: Array<Record<string, unknown>> = [];
 const buyerUpdates: Array<Record<string, unknown>> = [];
 
-let existingUser: { id: string; buyer: { id: string } | null } | null = null;
+let existingUser: { id: string; supabaseId?: string; buyer: { id: string } | null } | null = null;
 
 const prismaMock = {
   buyer: {
@@ -41,6 +41,11 @@ const prismaMock = {
     },
     updateMany: async () => ({ count: 1 }),
     findUnique: async () => null,
+    // Phase 2: the identity resolver reads back after a lost create race, and the
+    // phone-collision flag scans for other buyers holding the same normalised
+    // number (§7.2 (iv) — a flag, never a merge). Both are reads.
+    findFirst: async () => null,
+    findMany: async () => [],
   },
   user: {
     findUnique: async () => existingUser,
@@ -172,8 +177,18 @@ test("PATCH /api/buyer/profile leaves phone untouched when the caller omits it",
 
 // ─── Writers 2 & 3: unified buyer intake (user-without-buyer, and guest) ─────
 
-test("unified intake normalises the phone when creating a Buyer for an existing User", async () => {
-  existingUser = { id: "user_1", buyer: null }; // Case 2 — user exists, no buyer
+test("unified intake normalises the phone when creating a Buyer for an existing guest User", async () => {
+  // PHASE 2 FIXTURE CHANGE, and the reason matters. This case used to be "user
+  // exists, no buyer" with no supabaseId at all, and the service created a buyer
+  // under it. Rule 16 no longer allows that for a REGISTERED identity: an
+  // anonymous caller supplying an address that belongs to a verified account gets
+  // REGISTERED_REQUIRES_CLAIM and nothing is written (§7.2's live violation).
+  //
+  // The path that still creates a buyer — and therefore still has a phone to
+  // normalise, which is what this test is about — is the GUEST one: a `guest_`
+  // supabaseId is an unverified public capture, and a repeat submission from the
+  // same address reuses it rather than duplicating.
+  existingUser = { id: "user_1", supabaseId: "guest_abc", buyer: null };
   const { promoteOpportunity } = await import("@/lib/services/acquisition/unified-buyer-intake.service");
 
   await promoteOpportunity("opp_1", {

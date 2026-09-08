@@ -267,7 +267,10 @@ export async function POST(request: NextRequest, { params }: Props) {
       reason,
       metadata: { stageId, dealId: activeDeal?.id ?? null },
     },
-  }).catch(() => {});
+  });
+  // NOT best-effort — see the note in journey/complete-all. With stageId "pickup"
+  // this route performs the same Pickup COMPLETED + Deal COMPLETED write, so the
+  // same rule applies: no unrecorded AutoLenis-actored release.
 
   return adminSuccess({ stageId, action, completed: true });
   } catch (err) {

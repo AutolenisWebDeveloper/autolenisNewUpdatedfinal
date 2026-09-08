@@ -6,15 +6,29 @@
 // (lib/services/dealer-recruitment/account-claim.service.ts): 256-bit random,
 // hashed at rest, expiring, single-use via a race-safe conditional update.
 //
-// SECURITY POSTURE — the token is a DEEP-LINK, not a credential. The resume route
-// validates+consumes it and 302-redirects to the auth-gated /buyer/deposit; it
-// grants NO authenticated capability on its own. The clicker's own Supabase
-// session (and the existing guest-request email transfer at signup) remain the
-// real access boundary. So even a stolen/guessed token cannot view or claim
-// another buyer's request — it only reaches the shared, auth-gated checkout.
+// SECURITY POSTURE — the token is a DEEP-LINK with ONE bounded write.
+//
+// Originally it granted nothing: the resume route validated and consumed it and
+// 302-redirected to the auth-gated /buyer/deposit, so the clicker's own Supabase
+// session was the whole access boundary.
+//
+// Phase 2 made it rule 16's tier 2, which widens it: presenting the token to
+// POST /api/public/request-vehicle/complete supplies vehicle detail on the ONE
+// request the token names, with no session. That is the point — the emailed
+// "finish your request" link has to work for someone who has not registered — but
+// it means the token is a capability now, so it is bounded on three sides:
+//
+//   • it names its own `vehicleRequestId`, and the route re-reads that row scoped
+//     to the token's buyer, so it can never reach a different request;
+//   • it is CONSUMED by that route on success, so a forwarded link works once;
+//   • it still grants no session and reaches no auth-gated page.
+//
+// It remains 256-bit random and hashed at rest, so a database leak cannot
+// reconstruct an emailed link.
 
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import type { PrismaClient, Prisma } from "@prisma/client";
 
 // The pre-checkout conversion window is a few days; 5d comfortably covers the
 // latency between a reminder send and a click. A fresh token is minted per send,
@@ -35,15 +49,21 @@ export interface IssuedResumeToken {
  * Mint a resume token for a buyer's saved competitive request. Returns the raw
  * token (for the link) + expiry; persists only the hash.
  */
-export async function issueResumeToken(params: {
-  buyerId: string;
-  vehicleRequestId?: string | null;
-}): Promise<IssuedResumeToken> {
+export async function issueResumeToken(
+  params: {
+    buyerId: string;
+    vehicleRequestId?: string | null;
+  },
+  // Accepts a transaction handle so a token can be minted in the same transaction
+  // as the capture that needs it — the message and the state it refers to commit
+  // together, or neither does (§27).
+  db: PrismaClient | Prisma.TransactionClient = prisma,
+): Promise<IssuedResumeToken> {
   const rawToken = crypto.randomBytes(32).toString("hex"); // 256-bit, unguessable
   const tokenHash = hashResumeToken(rawToken);
   const expiresAt = new Date(Date.now() + RESUME_TOKEN_TTL_MS);
 
-  await prisma.buyerRequestClaimToken.create({
+  await db.buyerRequestClaimToken.create({
     data: {
       tokenHash,
       buyerId: params.buyerId,

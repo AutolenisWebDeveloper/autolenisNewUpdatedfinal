@@ -27,6 +27,7 @@ import {
   type UnifiedIntakeInput,
 } from "@/lib/services/acquisition/unified-buyer-intake.service";
 import { notifyActiveDealersOfOpportunity } from "@/lib/services/acquisition/dealer-opportunity-notification.service";
+import { captureClientIp } from "@/lib/services/acquisition/intake-attribution";
 import {
   getAttributionFromCookieHeader,
   recordContentAttribution,
@@ -73,6 +74,14 @@ const schema = z.object({
   lastName:            z.string().min(1).max(50),
   email:               z.string().email(),
   phone:               z.string().min(7).max(20),
+  /**
+   * Rule 16 tier 2. The raw token from the emailed claim link, forwarded by the
+   * page as `?claim=`. Presenting it is how an unauthenticated caller proves they
+   * control the address; without it, an address that belongs to a registered
+   * account attaches to nothing.
+   */
+  claimToken: z.string().min(8).max(200).optional(),
+
   zip:                 z.string().regex(/^\d{5}$/, "ZIP must be 5 digits"),
   // city/state become optional so LP-form submissions (which only collect ZIP)
   // can pass. The full /request-vehicle form still supplies both.
@@ -173,6 +182,95 @@ async function uploadPreApproval(file: File): Promise<string | null> {
   }
 }
 
+/** The minimum a partial capture must carry to be worth recovering. */
+const draftSchema = z.object({
+  draft: z.literal(true),
+  email: z.string().email(),
+  zip: z.string().regex(/^\d{5}$/, "ZIP must be 5 digits"),
+  firstName: z.string().max(80).optional(),
+  lastName: z.string().max(80).optional(),
+  phone: z.string().max(40).optional(),
+  /** Free-text "what are you looking for" — the hero asks one question. */
+  interest: z.string().max(200).optional(),
+  consentSms: z.boolean().optional(),
+  utm_source: z.string().max(100).optional().nullable(),
+  utm_medium: z.string().max(100).optional().nullable(),
+  utm_campaign: z.string().max(100).optional().nullable(),
+  utm_content: z.string().max(100).optional().nullable(),
+  source_url: z.string().max(500).optional().nullable(),
+  referrer: z.string().max(500).optional().nullable(),
+  source: z.string().max(100).optional().nullable(),
+  /**
+   * Rule 16 tier 2. The raw token from the emailed claim link, forwarded by the
+   * page as `?claim=`. Presenting it is how an unauthenticated caller proves they
+   * control the address; without it, an address that belongs to a registered
+   * account attaches to nothing.
+   */
+  claimToken: z.string().min(8).max(200).optional(),
+});
+
+async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<NextResponse> {
+  const parsed = draftSchema.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid input" } },
+      { status: 400 },
+    );
+  }
+  const d = parsed.data;
+  const clientIp = captureClientIp(request.headers);
+
+  const { buyerOpportunityId, vehicleRequestId, requiresClaim, identityTier } = await intakeBuyerRequest({
+    source: "lp_campaign",
+    campaign: d.source ?? "hero",
+    draft: true,
+    claimToken: d.claimToken ?? null,
+    firstName: d.firstName,
+    lastName: d.lastName,
+    email: d.email,
+    phone: d.phone,
+    zip: d.zip,
+    notes: d.interest,
+    entryType: "CUSTOM_REQUEST",
+    utmSource: d.utm_source ?? null,
+    utmMedium: d.utm_medium ?? null,
+    utmCampaign: d.utm_campaign ?? null,
+    utmContent: d.utm_content ?? null,
+    sourceUrl: d.source_url ?? null,
+    referrer: d.referrer ?? null,
+    landingSource: d.source ?? null,
+    ...clientIp,
+    consent: {
+      surface: d.source ?? "hero",
+      granted: { terms: true, email: true, sms: d.consentSms ?? false },
+      ip: clientIp.ipAddress,
+      ipUnavailableReason: clientIp.ipUnavailableReason,
+    },
+    appHost: request.headers.get("host"),
+  });
+
+  // §6.4 — the four-touch recovery sequence, enqueued on the §27 dispatcher so it
+  // survives this request. Best-effort at the CALL SITE only: a visitor's capture
+  // must not fail because a reminder could not be scheduled.
+  if (vehicleRequestId) {
+    try {
+      const { enqueueDraftRecovery } = await import("@/lib/services/acquisition/draft-recovery.service");
+      await enqueueDraftRecovery({ vehicleRequestId, email: d.email, firstName: d.firstName ?? null });
+    } catch (err) {
+      logger.error("[request-vehicle] draft recovery enqueue failed (capture stands):", err);
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    draft: true,
+    buyerOpportunityId,
+    vehicleRequestId,
+    requiresClaim,
+    identityTier,
+  });
+}
+
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -209,6 +307,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // ── DRAFT capture (§5 rule 6) ────────────────────────────────────────────
+  // "Incomplete is a draft, never a dead end. Partial submissions persist as DRAFT
+  // with whatever was captured, and enter the recovery sequence in §6.4."
+  //
+  // The homepage hero, the inventory CTA and the article CTAs collect an email, a
+  // ZIP and an interest — nowhere near enough for the full schema below, and
+  // rejecting them is exactly the dead end the rule forbids. They post here, to
+  // THE one handler (§5 rule 1), with `draft: true`, and get a DRAFT Vehicle
+  // Request and a four-touch recovery sequence.
+  //
+  // It is the same endpoint and the same service deliberately. A second "quick
+  // capture" route would be a page implementing its own capture logic, which is
+  // the thing rule 1 exists to prevent.
+  if ((raw as { draft?: unknown } | null)?.draft === true) {
+    return handleDraftCapture(request, raw);
+  }
+
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json(
@@ -226,6 +341,10 @@ export async function POST(request: NextRequest) {
   // dealer discovery, phone scripts, lead scoring, 4-channel hot-lead alerts).
   // We no longer touch prisma.vehicleRequest.create directly here.
   const custom = splitMakeModel(data.customMakeModel);
+
+  // Captured once, server-side, and used for both the request row and the consent
+  // record — the two must agree about where the submission came from.
+  const clientIp = captureClientIp(request.headers);
 
   const input: UnifiedIntakeInput = {
     // /lp/[campaign] submissions carry `campaign`; the plain wizard does not.
@@ -282,9 +401,39 @@ export async function POST(request: NextRequest) {
     // through to VehicleRequest.landingSource / referrer.
     landingSource: data.source   ?? null,
     referrer:      data.referrer ?? null,
+
+    // ── Phase 2 ─────────────────────────────────────────────────────────────
+    utmContent: data.utm_content ?? null,
+    // The address is captured SERVER-SIDE from the proxy headers, never from the
+    // body — a client-supplied address is not evidence of anything. When no
+    // forwarding header is present the column stays NULL and the REASON is
+    // recorded in `ip_unavailable_reason`, because a sentinel in an address
+    // column is a value that looks like data and is not.
+    ...clientIp,
+    // §5 rule 4 / §13-D46: one versioned consent record per surface. `granted`
+    // carries only what the visitor affirmatively ticked — the submission itself
+    // is terms acceptance on this form, and the two channel boxes are opt-in.
+    consent: {
+      surface: data.source ?? "public_request_vehicle",
+      granted: {
+        terms: true,
+        email: data.consent_email ?? true,
+        sms: data.consent_sms ?? false,
+      },
+      ip: clientIp.ipAddress,
+      ipUnavailableReason: clientIp.ipUnavailableReason,
+    },
+    // §5 rule 3 — location reaches the request and the buyer, not just the lead.
+    city: data.city || null,
+    state: data.state || null,
+    entryType: "CUSTOM_REQUEST",
+    appHost: request.headers.get("host"),
+    // Rule 16 tier 2: from the emailed claim link, never inferred from the body's
+    // email. It is what lets a registered address attach without a session.
+    claimToken: data.claimToken ?? null,
   };
 
-  const { buyerOpportunityId, vehicleRequestId } =
+  const { buyerOpportunityId, vehicleRequestId, requiresClaim, identityTier } =
     await intakeBuyerRequest(input);
 
   // ── Auto-advance the request toward ACTIVE_SOURCING (non-blocking) ─────────
@@ -600,12 +749,34 @@ export async function POST(request: NextRequest) {
         title: `Vehicle Request: ${fullName}`,
         body: `${data.vehicleType} · ${data.budget} · ${data.financingOption} · ${data.city}, ${data.state} ${data.zip}`,
         actionUrl: "/admin/vehicle-requests",
+        // §13-D47. This used to be `{ ...data }` — the WHOLE validated form,
+        // spread into a notification row: income, employment, credit-band answers,
+        // trade payoff amounts and the pre-approval file reference, all sitting in
+        // a metadata column with no retention story and no access control beyond
+        // the admin list that renders it.
+        //
+        // The allowlist below is what an admin triaging the queue actually needs:
+        // who, what vehicle, where, and the ids to open the real records. Anything
+        // financial or personal beyond a name stays in `vehicle_requests` and
+        // `pre_qualifications`, which are the records that own it.
+        //
+        // The PURGE of the rows already written is owner-run against production
+        // and is deliberately not attempted here (CLAUDE.md forbids an UPDATE or
+        // DELETE against a business table outside the per-run protocol). This
+        // change stops the bleeding; D47's second half is the owner's.
         metadata: {
-          ...data,
           fullName,
           requestStatus: "new",
           vehicleRequestId: vehicleRequestId ?? null,
-          preApprovalFileUrl,
+          buyerOpportunityId,
+          vehicleType: data.vehicleType,
+          preferredMake: data.preferredMake ?? null,
+          preferredModel: data.preferredModel ?? null,
+          city: data.city || null,
+          state: data.state || null,
+          zip: data.zip,
+          timeline: data.timeline,
+          hasPreApprovalFile: Boolean(preApprovalFileUrl),
         } as unknown as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
       },
     });
@@ -683,5 +854,22 @@ export async function POST(request: NextRequest) {
     }).catch((err) => logger.error("[request-vehicle] dealer opportunity notify failed:", err));
   }
 
-  return NextResponse.json({ success: true, buyerOpportunityId, vehicleRequestId });
+  // `requiresClaim` is the rule-16 answer the client has to act on. Two cases
+  // return it:
+  //   • the address belongs to a REGISTERED account and this caller has not proved
+  //     they control it, so nothing was attached (identityTier
+  //     REGISTERED_REQUIRES_CLAIM, vehicleRequestId null) — the visitor is told to
+  //     check their email, NOT shown someone else's request;
+  //   • an ordinary guest capture, which is claimed by the same link.
+  // The client must never render "your request is in" for the first case.
+  return NextResponse.json({
+    success: true,
+    buyerOpportunityId,
+    vehicleRequestId,
+    requiresClaim,
+    identityTier,
+    message: requiresClaim && !vehicleRequestId
+      ? "We sent a link to that email address. Open it to finish your request — for your security we do not attach a request to an existing account without it."
+      : null,
+  });
 }

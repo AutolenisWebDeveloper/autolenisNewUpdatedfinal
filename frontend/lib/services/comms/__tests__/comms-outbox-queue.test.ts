@@ -122,6 +122,12 @@ function outboxBuilder(table: string) {
     lt: (c: string, v: unknown) => { filters.push(["lt", c, v]); return api; },
     in: () => api,
     lte: () => api,
+    // PHASE 2: the CRM drain now filters `template_key IS NULL`, which partitions
+    // it from the §27 transactional rail. Both rails share comms_outbox but claim
+    // differently — PostgREST compare-and-set here, FOR UPDATE SKIP LOCKED there —
+    // and without the partition the two would race for the same rows and each
+    // would read the other's claims as lost races.
+    is: () => api,
     order: () => api,
     limit: () => api,
     maybeSingle: async () => ({ data: null }),

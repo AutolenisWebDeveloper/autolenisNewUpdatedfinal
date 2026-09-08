@@ -2,16 +2,39 @@
 //
 // Step 2 of the public buyer flow. After the landing-page form is submitted
 // (handled by ../route.ts), the buyer lands on the thank-you page and fills in
-// the "Complete Your Request" form with the remaining vehicle details. This
-// endpoint finds the buyer's most recent VehicleRequest by email, enriches it
-// with the supplied detail, marks it as detail-complete (via a
-// VehicleRequestEvent), and sends buyer + admin confirmation emails.
+// the "Complete Your Request" form with the remaining vehicle details.
+//
+// REBOUND IN PHASE 2 — THIS ROUTE NO LONGER RESOLVES A REQUEST BY EMAIL.
+//
+// It used to find "the buyer's most recent VehicleRequest by email" and write to
+// it. §7.2 names that as one of three live rule-16 violations, and it is the worst
+// of them: an unauthenticated caller who typed any registered buyer's address
+// could rewrite that buyer's live request — make, model, year range and notes —
+// with no session, no token and no verification. Rule 16 orders identity as
+// authenticated buyer id → valid claim token → normalised VERIFIED email, and an
+// address a caller merely asserts is none of those.
+//
+// It is now bound to a CAPABILITY the caller must hold:
+//   • an authenticated buyer session, or
+//   • the single-use resume/claim token minted for that specific request.
+//
+// The email is still accepted — the thank-you page has it, and the confirmation
+// mail goes to it — but it identifies NOTHING. Without a session or a token the
+// route answers 200 (the visitor filled the form in good faith) and records the
+// detail against the CRM timeline, exactly as it already did for an unknown
+// address; what it does not do is write to a request it cannot prove belongs to
+// the caller.
 //
 // All emails are best-effort and must never block the success response.
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { resolveIdentity } from "@/lib/services/acquisition/intake-identity";
+import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
+import { cancelDraftRecovery } from "@/lib/services/acquisition/draft-recovery.service";
+import { consumeResumeToken } from "@/lib/services/buyer/request-resume-token.service";
+import { getAuthenticatedBuyer } from "@/lib/auth/session";
 import {
   sendVehicleRequestCompletedConfirmation,
   sendVehicleRequestCompletedAdminNotification,
@@ -21,6 +44,11 @@ export const dynamic = "force-dynamic";
 
 const schema = z.object({
   email:            z.string().email(),
+  /**
+   * The single-use resume/claim token from the link the buyer was emailed. This
+   * is what binds the submission to a request; the email does not.
+   */
+  claimToken:       z.string().min(8).max(200).optional(),
   make:             z.string().max(50).optional(),
   model:            z.string().max(80).optional(),
   yearFrom:         z.coerce.number().int().min(1990).max(2030).optional(),
@@ -47,6 +75,26 @@ function meaningful(v?: string): string | undefined {
   if (!v) return undefined;
   const trimmed = v.trim();
   return ANY_VALUES.has(trimmed.toLowerCase()) ? undefined : trimmed;
+}
+
+/**
+ * The authenticated buyer id from the session, or null.
+ *
+ * A public route may still be called by a signed-in buyer — the thank-you page is
+ * reachable after registration — and when it is, tier 1 applies. Reading it from
+ * the SESSION and never from the body is the whole point.
+ */
+async function authenticatedBuyerIdFrom(): Promise<string | null> {
+  try {
+    // Returns the Buyer row itself, and only for a Supabase-confirmed email —
+    // which is exactly rule 16's tier 1.
+    const buyer = await getAuthenticatedBuyer();
+    return buyer?.id ?? null;
+  } catch {
+    // No session, or the cookie store is unavailable. Not an error here — it just
+    // means tier 1 does not apply and the claim token is the only way in.
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -131,21 +179,42 @@ export async function POST(request: NextRequest) {
       additionalNotes: data.additionalNotes ?? null,
     };
 
-    // ── Resolve the buyer + most recent VehicleRequest by email ──────────────
-    // A missing buyer/request must NOT fail the caller: they filled the form in
-    // good faith. We persist what we can (CRM contact timeline) and still 200.
-    const user = await prisma.user.findUnique({
-      where:   { email: data.email.toLowerCase() },
-      include: { buyer: { select: { id: true, firstName: true, lastName: true } } },
+    // ── Resolve identity in rule-16 order — NEVER by the asserted email ──────
+    // Tier 1 is the session; tier 2 is the claim token. There is no tier-3 branch
+    // here on purpose: a public caller's email is an assertion, and this route
+    // WRITES to a live request.
+    const identity = await resolveIdentity({
+      authenticatedBuyerId: await authenticatedBuyerIdFrom(),
+      claimToken: data.claimToken ?? null,
+      // Passed for normalisation and logging only. `createIfMissing` is false, so
+      // it can create nothing and — because tier 3 refuses a registered account to
+      // an anonymous caller — it can attach to nothing either.
+      email: data.email,
+      createIfMissing: false,
     });
-    const buyer = user?.buyer ?? null;
 
-    const vehicleRequest = buyer
-      ? await prisma.vehicleRequest.findFirst({
-          where:   { buyerId: buyer.id },
-          orderBy: { createdAt: "desc" },
+    const authorised = identity.tier === "AUTHENTICATED" || identity.tier === "CLAIM_TOKEN";
+    const buyer = authorised && identity.buyerId
+      ? await prisma.buyer.findUnique({
+          where: { id: identity.buyerId },
+          select: { id: true, firstName: true, lastName: true },
         })
       : null;
+
+    // A claim token names the request it was minted for; a session does not, so an
+    // authenticated buyer gets their ONE open request (§5 rule 5 guarantees there
+    // is at most one).
+    const vehicleRequest = !buyer
+      ? null
+      : identity.vehicleRequestId
+        ? await prisma.vehicleRequest.findFirst({ where: { id: identity.vehicleRequestId, buyerId: buyer.id } })
+        : await findOpenRequest(buyer.id);
+
+    if (!authorised) {
+      logger.info("[request-vehicle/complete] unauthenticated detail submission — recorded, not attached", {
+        tier: identity.tier,
+      });
+    }
 
     const firstName = buyer?.firstName || "there";
     const fullName = buyer ? `${buyer.firstName} ${buyer.lastName}`.trim() : "";
@@ -156,6 +225,13 @@ export async function POST(request: NextRequest) {
         .filter(Boolean)
         .join("\n\n");
 
+      // FORWARD ONLY, and only out of DRAFT — the same rule
+      // `attachOrCreateOpenRequest` applies. Supplying the vehicle detail is what
+      // the draft was waiting for, so a DRAFT becomes SUBMITTED here; every other
+      // status is left exactly as it is, because a buyer filling in detail on a
+      // live request must never rewind it.
+      const promotedFromDraft = vehicleRequest.status === "DRAFT";
+
       await prisma.vehicleRequest.update({
         where: { id: vehicleRequest.id },
         data: {
@@ -163,9 +239,36 @@ export async function POST(request: NextRequest) {
           ...(model ? { modelPreference: model } : {}),
           ...(data.yearFrom ? { yearMin: data.yearFrom } : {}),
           ...(data.yearTo ? { yearMax: data.yearTo } : {}),
+          ...(promotedFromDraft ? { status: "SUBMITTED" as const } : {}),
           notes: mergedNotes,
         },
       });
+
+      // SINGLE USE. The token is emailed and can be forwarded; without this it
+      // authorises the same write for its full 5-day TTL, which turns a deep-link
+      // into a reusable write credential for someone else's request. It is
+      // consumed AFTER the write it authorised, so a failed write leaves it usable.
+      if (identity.tier === "CLAIM_TOKEN" && identity.claimTokenId) {
+        await consumeResumeToken(identity.claimTokenId).catch((err) =>
+          logger.error("[request-vehicle/complete] claim-token consume failed:", err),
+        );
+      }
+
+      // §6.4's second half: the request advanced, so the four recovery touches
+      // stop. Without this the buyer who just finished keeps being told to finish.
+      //
+      // A failure here is logged and does not fail the submission, because the
+      // promotion above has already made the send-time recheck refuse these
+      // templates (`skipIfRequestNoLongerDraft` reads the status, which is now
+      // SUBMITTED). The cancel is what keeps the outbox honest about pending work;
+      // the recheck is what keeps the wrong email from being sent. Losing the
+      // first leaves four rows that will never send — losing the buyer's
+      // successfully submitted detail because of it would be the worse trade.
+      if (promotedFromDraft) {
+        await cancelDraftRecovery(vehicleRequest.id, "draft completed by the buyer detail form").catch((err) =>
+          logger.error("[request-vehicle/complete] draft-recovery cancel failed:", err),
+        );
+      }
 
       // ── Mark the request as detail-complete (event-sourced flag) ───────────
       await prisma.vehicleRequestEvent.create({

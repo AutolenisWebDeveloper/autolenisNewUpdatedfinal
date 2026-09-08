@@ -2,11 +2,12 @@ import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 
-import { prisma } from "@/lib/prisma";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { ContactService } from "@/lib/services/contact.service";
 import { sendDealerFeeCalculatorWelcomeEmail } from "@/lib/services/email/resend.service";
 import { getStateFeeRules } from "@/lib/tools/dealer-fees";
+import { intakeBuyerRequest } from "@/lib/services/acquisition/unified-buyer-intake.service";
+import { captureClientIp } from "@/lib/services/acquisition/intake-attribution";
 import {
   getAttributionFromCookieHeader,
   recordContentAttribution,
@@ -102,22 +103,41 @@ export async function POST(req: Request) {
   const sessionId = `dealer-fee-${randomUUID()}`;
 
   try {
-    // 1) BuyerOpportunity — the canonical lead record for the auction pipeline.
-    const opportunity = await prisma.buyerOpportunity.create({
-      data: {
-        sessionId,
-        source: "tool:dealer_fee_calculator",
-        firstName,
-        email: email.toLowerCase(),
-        phone: phone || null,
-        timeline: buyerTimeline,
-        make: vehicleInterest || null,
-        leadTemperature: temperature,
-        scoringReason: `Dealer Fee Calculator lead — ${TIMELINE_LABEL[buyerTimeline]}${
-          state ? ` · ${stateName}` : ""
-        }`,
+    // 1) BuyerOpportunity — through THE one Lane 1 handler (§5 rule 1). This route
+    //    wrote its own row and therefore recorded no attribution, no consent and
+    //    no acquisition channel. `leadOnly` keeps the output identical to today; a
+    //    DRAFT Vehicle Request here is `intake/R1`'s OWNER DECISION (map Q1), not
+    //    this phase's.
+    const clientIp = captureClientIp(req.headers);
+    const { buyerOpportunityId } = await intakeBuyerRequest({
+      source: "lp_campaign",
+      campaign: "tool:dealer_fee_calculator",
+      // Same reason as the lead-magnet route: these rows have always been stored
+      // as `tool:dealer_fee_calculator`, and routing through the unified handler
+      // must not quietly rewrite an existing convention in the data.
+      sourceLabel: "tool:dealer_fee_calculator",
+      sessionId,
+      leadOnly: true,
+      firstName,
+      email: email.toLowerCase(),
+      phone: phone || undefined,
+      timeline: buyerTimeline,
+      make: vehicleInterest || undefined,
+      leadTemperature: temperature,
+      scoringReason: `Dealer Fee Calculator lead — ${TIMELINE_LABEL[buyerTimeline]}${
+        state ? ` · ${stateName}` : ""
+      }`,
+      landingSource: "tool:dealer_fee_calculator",
+      ...clientIp,
+      consent: {
+        surface: "tool:dealer_fee_calculator",
+        granted: { terms: true, email: true, sms: false },
+        ip: clientIp.ipAddress,
+        ipUnavailableReason: clientIp.ipUnavailableReason,
       },
+      appHost: req.headers.get("host"),
     });
+    const opportunity = { id: buyerOpportunityId };
 
     // 1b) Phase C-Attribution — if the buyer arrived from a buying-guide
     //     article, link this lead to it. No-op when no content touch cookie.

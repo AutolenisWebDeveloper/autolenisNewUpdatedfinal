@@ -2,10 +2,11 @@ import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 
-import { prisma } from "@/lib/prisma";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { ContactService } from "@/lib/services/contact.service";
 import { sendLeadMagnetDeliveryEmail } from "@/lib/services/email/resend.service";
+import { intakeBuyerRequest } from "@/lib/services/acquisition/unified-buyer-intake.service";
+import { captureClientIp } from "@/lib/services/acquisition/intake-attribution";
 import {
   getLeadMagnet,
   isValidMagnetSlug,
@@ -94,19 +95,40 @@ export async function POST(req: Request) {
   const accessPath = `${magnet.accessPath}?m=${magnet.slug}`;
 
   try {
-    // 1) BuyerOpportunity — the canonical lead record for the auction pipeline.
-    await prisma.buyerOpportunity.create({
-      data: {
-        sessionId,
-        source: `lead_magnet:${magnet.slug}`,
-        firstName,
-        email: email.toLowerCase(),
-        phone: phone || null,
-        timeline: buyerTimeline,
-        make: vehicleInterest || null,
-        leadTemperature: temperature,
-        scoringReason: `Lead magnet — ${magnet.title} · ${TIMELINE_LABEL[buyerTimeline]}`,
+    // 1) BuyerOpportunity — through THE one Lane 1 handler (§5 rule 1: "no page
+    //    implements its own capture logic"). This route wrote its own row, so it
+    //    recorded no attribution, no consent and no acquisition channel.
+    //
+    //    `leadOnly` keeps what it produces IDENTICAL to today: a lead and no
+    //    Vehicle Request. `intake/R1` proposes turning lead-only captures into
+    //    DRAFT requests and marks that an OWNER DECISION (map Q1), so this phase
+    //    routes the capture without making it.
+    await intakeBuyerRequest({
+      source: "lp_campaign",
+      campaign: `lead_magnet:${magnet.slug}`,
+      // The persisted string stays what it has always been. `lead-magnet-sequence`
+      // filters `source startsWith "lead_magnet:"` and reads the slug from
+      // segment 1; the composed `lp_campaign:lead_magnet:<slug>` matches neither.
+      sourceLabel: `lead_magnet:${magnet.slug}`,
+      sessionId,
+      leadOnly: true,
+      firstName,
+      email: email.toLowerCase(),
+      phone: phone || undefined,
+      timeline: buyerTimeline,
+      make: vehicleInterest || undefined,
+      leadTemperature: temperature,
+      scoringReason: `Lead magnet — ${magnet.title} · ${TIMELINE_LABEL[buyerTimeline]}`,
+      utmCampaign: magnet.utmCampaign,
+      sourceUrl,
+      landingSource: `lead_magnet:${magnet.slug}`,
+      ...captureClientIp(req.headers),
+      consent: {
+        surface: `lead_magnet:${magnet.slug}`,
+        granted: { terms: true, email: true, sms: smsOptIn },
+        ...(() => { const c = captureClientIp(req.headers); return { ip: c.ipAddress, ipUnavailableReason: c.ipUnavailableReason }; })(),
       },
+      appHost: req.headers.get("host"),
     });
 
     // 2) CRM contact upsert — also where TCPA SMS consent is logged. Consent

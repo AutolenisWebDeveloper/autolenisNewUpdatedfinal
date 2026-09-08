@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger";
 import twilio from "twilio";
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 
 // Shared Twilio SMS sender for one-off transactional messages (e.g. the voice
 // receptionist's caller confirmations). Mirrors the lazy client pattern used in
@@ -23,6 +24,10 @@ export { isValidUsPhone } from "@/lib/utils/phone";
 // Send an SMS. Returns true on success. Never throws — send failures and a
 // missing Twilio config are logged and swallowed so callers can fire-and-forget.
 export async function sendSms(to: string, body: string): Promise<boolean> {
+  // LEGACY_PATH_WRITE — §8.4's counter for direct sends outside the §27
+  // dispatcher. Best-effort; never fails the send.
+  void recordLegacyPathWrite({ kind: "DIRECT_TRANSACTIONAL_SEND", detail: "sms:twilio.service", removalPhase: 10 });
+
   const from = process.env.TWILIO_FROM_NUMBER;
   const client = getTwilioClient();
   if (!client || !from) {

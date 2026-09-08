@@ -8,6 +8,7 @@
 
 import { Resend } from "resend";
 import twilio from "twilio";
+import { isCaptureTransport, CAPTURED_PROVIDER_ID } from "./transport-mode";
 
 let _resend: Resend | null = null;
 function getResend(): Resend {
@@ -36,6 +37,10 @@ export interface ResendSendArgs {
 }
 
 export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: string | null }> {
+  // COMMS_TRANSPORT=capture — the preview transport boundary (§12.3 step 6). The
+  // check is here, above the SDK call, so no caller can bypass it: this module is
+  // the only place this rail touches Resend.
+  if (isCaptureTransport()) return { id: CAPTURED_PROVIDER_ID };
   const out = await getResend().emails.send(
     {
       from: process.env.RESEND_FROM_EMAIL!,
@@ -52,6 +57,7 @@ export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: st
 }
 
 export async function sendSmsViaTwilio(args: { to: string; body: string }): Promise<{ sid: string }> {
+  if (isCaptureTransport()) return { sid: CAPTURED_PROVIDER_ID };
   const result = await getTwilio().messages.create({
     from: process.env.TWILIO_FROM_NUMBER!,
     to: args.to,

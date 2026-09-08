@@ -16,6 +16,7 @@ import {
   getSafeDealerRedirect,
 } from "@/lib/auth/urls";
 import { getCurrentTermsVersion } from "@/lib/auth/terms";
+import { recordPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,23 @@ async function ensurePrismaUser(
   if (role === UserRole.BUYER) {
     const newBuyerId = (user as { buyer?: { id: string } | null }).buyer?.id;
     if (newBuyerId) {
+      // STAGE 1 — the plan election, recorded as a `plan_snapshots` row rather
+      // than only as the `Buyer.plan` flag. §11.5 ruling 3: the flag "is the thing
+      // being replaced". The flag write above is untouched; this adds the history
+      // it cannot hold, which is what §23's upgrade window and post-settlement
+      // downgrade review are adjudicated from.
+      //
+      // Non-blocking: a missing snapshot must not fail a registration. It is
+      // idempotent by value, so the account-callback path re-recording the same
+      // election writes nothing.
+      recordPlanElection({
+        buyerId: newBuyerId,
+        plan,
+        touchpoint: "signup",
+        actor: newBuyerId,
+        reason: "Plan elected on the signup form.",
+      }).catch((err) => logger.error("[auth] plan snapshot failed (registration stands):", err));
+
       // Lifecycle — enter the buyer welcome + activation-recovery sequence so
       // website signups get the same automation as landing-page submissions.
       // Internal vs QStash is chosen per the form-submitted activation flag.
