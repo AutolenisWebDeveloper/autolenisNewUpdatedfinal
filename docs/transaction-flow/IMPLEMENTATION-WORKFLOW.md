@@ -1528,9 +1528,19 @@ Two gates did **not** come back clean, and neither failure belongs to this phase
   **No baseline is committed from this environment.** The regenerated copy also captured
   `0 DEALS COMPLETED $0 AVG BUYER SAVINGS 0 VERIFIED DEALERS`, because `StatsStrip` reveals itself on
   `buyersServed > 0` and the throwaway database held thirteen buyers from these journeys — so the
-  capture is contaminated and could never match the runner. `marketing-home-*` is therefore
-  **knowingly stale in both gates** and needs an intentional re-seed on the pinned runner, per that
-  README's all-or-nothing procedure. Separately, that band's gate is an OR over four counters while
+  capture is contaminated and could never match the runner, which runs with the placeholder DSN and
+  therefore never shows the band at all.
+
+  **The runner confirmed both halves of that reading.** On `acfaa14` the guardrail reported **2
+  failed, 8 passed**: only `marketing:home`, on both viewports. The other four pages match the
+  committed baseline byte-for-byte on the pinned image, so there is no environment drift and the one
+  diff is this phase's intended §6.1 hero form. The re-seed is therefore taken the documented way —
+  all ten `__baseline__/*.png` removed so `visual.yml`'s seed gate
+  (`existing=(tests/visual/__baseline__/*.png); if [ ${#existing[@]} -eq 0 ]`, read from the workflow
+  rather than from its prose) takes the seed path, renders on `ubuntu-24.04`, re-runs `test:visual` as
+  a two-pass determinism check, and commits the CI-rendered baseline back to the branch only if that
+  second pass passes. `test:visual:update` rewrites the `.txt` and metadata baselines in the same
+  step, so the copy freeze is re-established on the runner too rather than hand-written here. Separately, that band's gate is an OR over four counters while
   its own comment says the point is to hide "0 Deals Completed · $0 Avg Savings · 0 Verified Dealers"
   — one buyer row defeats it. **Reported for an owner decision**; it is public marketing copy and
   outside this phase.
