@@ -27,6 +27,10 @@ import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
 } from "@/lib/services/email/resend.service";
+<<<<<<< HEAD
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 // 90-day validity, matching the manual-override path so both admin decision
 // rails stamp the same expiry window (the record AND the email agree).
@@ -224,7 +228,11 @@ export async function POST(request: NextRequest, { params }: Props) {
     // FCRA § 615 adverse-action notice with the record's principal-reason
     // codes, and an honest send-outcome ComplianceEvent — parity with the
     // manual-override rail (SENT / SUPPRESSED_DUPLICATE / SEND_FAILED).
+<<<<<<< HEAD
+    let outcome: AdverseActionDelivery = "THREW";
+=======
     let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     let sendErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
@@ -241,12 +249,16 @@ export async function POST(request: NextRequest, { params }: Props) {
       sendErrorMessage = err instanceof Error ? err.message : String(err);
     }
     try {
+<<<<<<< HEAD
+      const eventType = classifyAdverseActionDelivery(outcome);
+=======
       const eventType =
         outcome === "SENT"
           ? "ADVERSE_ACTION_NOTICE_SENT"
           : outcome === "DUPLICATE"
             ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
             : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       await prisma.complianceEvent.create({
         data: {
           eventType,
@@ -265,6 +277,13 @@ export async function POST(request: NextRequest, { params }: Props) {
     } catch (logErr) {
       logger.error("[admin/prequal/decide] failed to log adverse-action event:", logErr);
     }
+<<<<<<< HEAD
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: existing.buyerId, prequalApplicationId: id });
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   }
 
   return adminSuccess({

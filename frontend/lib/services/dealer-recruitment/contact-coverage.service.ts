@@ -8,10 +8,22 @@
 //
 //   dealers/prospects.pendingResolution → exactly Phase 0's resolution queue
 //     (registered dealers and non-DEAD/ONBOARDED prospects with no rooftop yet).
+<<<<<<< HEAD
+//   rooftops.contactGap                 → the standing contact gap (rooftops with
+//     NO send-safe contact profile).
+//   rooftops.contactGapReachable        → exactly Phase 1's candidate predicate:
+//     the same gap AND a website_host, which the paid path now requires because
+//     organization resolution has never resolved a host-less rooftop in production.
+//     Neither figure is one run's workload: a run additionally skips rooftops
+//     already attempted this cycle and stops at the budget/iteration cap.
+//     The difference between them is what the backfill reports as
+//     noWebsiteHostSkipped.
+=======
 //   rooftops.contactGap                 → exactly Phase 1's candidate predicate
 //     (rooftops with NO send-safe contact profile). This is the standing pool,
 //     not one run's workload: a run additionally skips rooftops already
 //     attempted this cycle and stops at the budget/iteration cap.
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 //
 // Send-safe is the shared SEND_SAFE_STATUSES ({VERIFIED, ROLE_DERIVED}) — the
 // same constant the contact waterfall gates sending on, imported rather than
@@ -24,7 +36,11 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { SEND_SAFE_STATUSES } from "./contact-resolution.service";
+<<<<<<< HEAD
+import { PROSPECT_RESOLVE_EXCLUDE, backfillSpendEnabled } from "./dealer-contact-backfill.service";
+=======
 import { PROSPECT_RESOLVE_EXCLUDE } from "./dealer-contact-backfill.service";
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 import { apolloEnabled } from "./apollo.service";
 import { remainingCredits, cycleKeyFor } from "./apollo-credit-ledger.service";
 
@@ -38,13 +54,32 @@ export interface PopulationCoverage {
 export interface RooftopCoverage {
   total: number;
   withSendSafeContact: number;
+<<<<<<< HEAD
+  /** Standing contact gap (no send-safe contact). Not one run's workload — a run
+   *  also skips this cycle's attempts and respects the cap. */
+  contactGap: number;
+  /** The share of that gap Phase 1 will actually attempt: gap AND a website_host.
+   *  contactGap − contactGapReachable is the backfill's noWebsiteHostSkipped. */
+  contactGapReachable: number;
+=======
   /** Standing paid-reveal candidate pool (no send-safe contact). Not one run's
    *  workload — a run also skips this cycle's attempts and respects the cap. */
   contactGap: number;
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 }
 
 export interface ApolloCoverage {
   enabled: boolean;
+<<<<<<< HEAD
+  /**
+   * Whether the scheduled backfill may spend (APOLLO_BACKFILL_ENABLED). Distinct
+   * from `enabled`: the paid tier can be on for supervised use while unattended
+   * cron spend stays disarmed. This is the figure that says whether credits can
+   * leave the ledger with nobody watching.
+   */
+  backfillSpendEnabled: boolean;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   cycleKey: string;
   capCredits: number;
   spentCredits: number;
@@ -68,6 +103,10 @@ export interface CoverageDeps {
   prisma: PrismaClient;
   now: Date;
   enabled: () => boolean;
+<<<<<<< HEAD
+  spendEnabled: () => boolean;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   remaining: typeof remainingCredits;
 }
 
@@ -83,6 +122,10 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
   const prisma = deps?.prisma ?? defaultPrisma;
   const now = deps?.now ?? new Date();
   const enabled = deps?.enabled ?? apolloEnabled;
+<<<<<<< HEAD
+  const spendEnabled = deps?.spendEnabled ?? backfillSpendEnabled;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const remaining = deps?.remaining ?? remainingCredits;
 
   const cycleKey = cycleKeyFor(now);
@@ -97,6 +140,10 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
     rooftopsTotal,
     rooftopsWithContact,
     rooftopsGap,
+<<<<<<< HEAD
+    rooftopsGapReachable,
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     profilesTotal,
     profilesSendSafe,
     ledger,
@@ -118,6 +165,14 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
     prisma.dealerRooftop.count(),
     prisma.dealerRooftop.count({ where: { contacts: { some: sendSafeContact() } } }),
     prisma.dealerRooftop.count({ where: { contacts: { none: sendSafeContact() } } }),
+<<<<<<< HEAD
+    // Phase 1's real predicate since the host filter landed — the gap the paid
+    // path can actually attempt.
+    prisma.dealerRooftop.count({
+      where: { contacts: { none: sendSafeContact() }, websiteHost: { not: null } },
+    }),
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
     prisma.dealerContactProfile.count(),
     prisma.dealerContactProfile.count({ where: sendSafeContact() }),
@@ -140,10 +195,23 @@ export async function getContactCoverage(deps?: Partial<CoverageDeps>): Promise<
   return {
     dealers: { total: dealersTotal, withRooftop: dealersWithRooftop, pendingResolution: dealersPending },
     prospects: { total: prospectsTotal, withRooftop: prospectsWithRooftop, pendingResolution: prospectsPending },
+<<<<<<< HEAD
+    rooftops: {
+      total: rooftopsTotal,
+      withSendSafeContact: rooftopsWithContact,
+      contactGap: rooftopsGap,
+      contactGapReachable: rooftopsGapReachable,
+    },
+    contactProfiles: { total: profilesTotal, sendSafe: profilesSendSafe },
+    apollo: {
+      enabled: enabled(),
+      backfillSpendEnabled: spendEnabled(),
+=======
     rooftops: { total: rooftopsTotal, withSendSafeContact: rooftopsWithContact, contactGap: rooftopsGap },
     contactProfiles: { total: profilesTotal, sendSafe: profilesSendSafe },
     apollo: {
       enabled: enabled(),
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       cycleKey,
       // No ledger row yet → report zeros rather than implying budget exists.
       capCredits: ledger?.capCredits ?? 0,

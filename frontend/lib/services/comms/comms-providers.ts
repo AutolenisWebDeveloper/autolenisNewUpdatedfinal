@@ -8,6 +8,10 @@
 
 import { Resend } from "resend";
 import twilio from "twilio";
+<<<<<<< HEAD
+import { isCaptureTransport, CAPTURED_PROVIDER_ID } from "./transport-mode";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 let _resend: Resend | null = null;
 function getResend(): Resend {
@@ -36,6 +40,13 @@ export interface ResendSendArgs {
 }
 
 export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: string | null }> {
+<<<<<<< HEAD
+  // COMMS_TRANSPORT=capture — the preview transport boundary (§12.3 step 6). The
+  // check is here, above the SDK call, so no caller can bypass it: this module is
+  // the only place this rail touches Resend.
+  if (isCaptureTransport()) return { id: CAPTURED_PROVIDER_ID };
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const out = await getResend().emails.send(
     {
       from: process.env.RESEND_FROM_EMAIL!,
@@ -52,6 +63,10 @@ export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: st
 }
 
 export async function sendSmsViaTwilio(args: { to: string; body: string }): Promise<{ sid: string }> {
+<<<<<<< HEAD
+  if (isCaptureTransport()) return { sid: CAPTURED_PROVIDER_ID };
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const result = await getTwilio().messages.create({
     from: process.env.TWILIO_FROM_NUMBER!,
     to: args.to,

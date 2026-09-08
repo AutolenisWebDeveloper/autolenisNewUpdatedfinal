@@ -4532,15 +4532,28 @@ model ApolloReveal {
   creditsCost  Int      @default(0) @map("credits_cost")
   consumer     String   @default("live") // "live" | "backfill"
   status       String   @default("PENDING") // PENDING | REVEALED | EMPTY
+<<<<<<< HEAD
+  /// WHICH adapter stage produced an EMPTY: disabled | no_org | org_error |
+  /// no_people | people_search_error | no_match | match_no_email | match_error
+  /// (rows from before the API-contract batch may carry the retired value
+  /// free_stage_error). Null on PENDING/REVEALED rows and on EMPTY rows written
+  /// before this column existed.
+=======
   /// WHICH adapter stage produced an EMPTY: disabled | no_org | no_people |
   /// free_stage_error | no_match | match_no_email | match_error. Null on
   /// PENDING/REVEALED rows and on EMPTY rows written before this column existed.
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   /// In practice a stored row never reads "disabled": revealRooftopContact
   /// returns before claiming a row when the tier is off, so a flag-off attempt
   /// leaves no row at all rather than an EMPTY one. The value exists because the
   /// adapter can still return it to a caller that injects a null client.
+<<<<<<< HEAD
+  /// Diagnostic only — creditsCost is decided solely by the credits the
+  /// adapter reported billed, and this field never feeds the ledger.
+=======
   /// Diagnostic only — creditsCost is still decided solely by whether Apollo
   /// billed, and this field never feeds the ledger.
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   emptyStage   String?  @map("empty_stage")
   email        String?
   emailStatus  String?  @map("email_status")
@@ -4619,6 +4632,12 @@ model ApolloEnrichmentRun {
   maxCredits     Int @map("max_credits")
   candidateCount Int @default(0) @map("candidate_count")
   estimatedCost  Int @default(0) @map("estimated_cost")
+<<<<<<< HEAD
+  /// NET credits this run drew from ApolloCreditLedger (draws minus refunds
+  /// for clean no-matches). Written from the run's own draw-by-draw tally, so
+  /// the sum over runs reconciles against the ledger's spentCredits.
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   creditsSpent   Int @default(0) @map("credits_spent")
   enrichedCount  Int @default(0) @map("enriched_count")
   emptyCount     Int @default(0) @map("empty_count")

@@ -18,6 +18,25 @@
 //     waterfall uses (revealRooftopContact), tagged consumer="backfill" so it can
 //     only draw against the leftover budget above the live reserve floor.
 //
+<<<<<<< HEAD
+//     Rooftops with NO website_host are excluded, and the number excluded is
+//     reported as noWebsiteHostSkipped. Measured against production: of the
+//     apollo_reveals rows carrying a diagnostic stage, every single attempt on a
+//     host-less rooftop stopped at stage 1 with empty_stage="no_org" (461 of 461)
+//     — organization resolution has never resolved one. Iterating them consumes the
+//     per-run `limit` and starves rooftops that could resolve. This is a
+//     PRIORITISATION change, not a capability removal: a rooftop that later gains
+//     a website_host re-enters the queue on the next run with no further change.
+//
+//     NOTE for whoever reads this next: the same production data shows hosted
+//     rooftops failing identically (39 of 39 staged attempts also "no_org"), so
+//     this filter removes provably futile work but does NOT by itself make Phase 1
+//     productive on its own. The org-resolution failure was upstream in the
+//     adapter (an undocumented endpoint) and is corrected in the API-contract
+//     batch; the live probe route proves the corrected contract.
+//
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 // Why rooftop-keyed: the reveal, the reveal-cache, and DealerContactProfile are all
 // keyed to the canonical A2 DealerRooftop, so filling a rooftop's contact benefits
 // both its registered Dealer and its prospect twin at once and can never create a
@@ -32,17 +51,48 @@
 // (CONTACT_STALE_MONTHS) is likewise owned by the live waterfall. OFF until Apollo
 // is enabled + the probe cap is set — when off it neither queries nor spends nor
 // resolves.
+<<<<<<< HEAD
+//
+// TWO GATES, ON PURPOSE. apolloEnabled() (APOLLO_REVEAL_ENABLED) turns the paid
+// tier on for everything that reveals — the live waterfall, the contract probe,
+// and this job. It is ALREADY "true" in production. Since the API-contract batch
+// an attempt bills for the organization resolution as well as the match, so the
+// daily cron would spend ~2 credits per rooftop unattended the moment that
+// change deploys. backfillSpendEnabled() (APOLLO_BACKFILL_ENABLED) is therefore
+// a SECOND, separate switch on Phase 1 alone: it lets the owner keep the paid
+// tier on for supervised, one-shot use (the probe, a live reveal) while the
+// unattended scheduled spend stays off until deliberately armed. Phase 0 is
+// free and keeps running under the first gate only. Default OFF.
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 import type { PrismaClient } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { SEND_SAFE_STATUSES } from "./contact-resolution.service";
 import { apolloEnabled } from "./apollo.service";
+<<<<<<< HEAD
+import { revealRooftopContact, REVEAL_TOTAL_COST_CREDITS } from "./apollo-reveal.service";
+=======
 import { revealRooftopContact, REVEAL_COST_CREDITS } from "./apollo-reveal.service";
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 import { remainingCredits, cycleKeyFor } from "./apollo-credit-ledger.service";
 import { upsertContactProfile, reconcileProspectContact } from "@/lib/services/dealer/dealer-contact-profile.service";
 import { resolveRooftop } from "@/lib/services/dealer/dealer-rooftop.service";
 
+<<<<<<< HEAD
+/**
+ * The unattended-spend switch for Phase 1. True only when the key is present AND
+ * APOLLO_BACKFILL_ENABLED is exactly "true". Deliberately independent of
+ * apolloEnabled(): that flag is already on in production, and this one exists so
+ * the scheduled cron cannot start billing just because the paid tier is.
+ */
+export function backfillSpendEnabled(): boolean {
+  return !!process.env.APOLLO_API_KEY && process.env.APOLLO_BACKFILL_ENABLED === "true";
+}
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 // Iteration safety cap (independent of the budget cap) so a single run can never
 // churn the whole rooftop table. The real spend ceiling is the ledger budget.
 export const DEFAULT_BACKFILL_LIMIT = 100;
@@ -77,6 +127,11 @@ export interface BackfillDeps {
   prisma: PrismaClient;
   now: Date;
   enabled: () => boolean;
+<<<<<<< HEAD
+  /** Phase 1's own gate (APOLLO_BACKFILL_ENABLED). Phase 0 never consults it. */
+  spendEnabled: () => boolean;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   reveal: typeof revealRooftopContact;
   upsert: typeof upsertContactProfile;
   remaining: typeof remainingCredits;
@@ -87,6 +142,16 @@ export interface BackfillDeps {
 
 export interface BackfillResult {
   enabled: boolean;
+<<<<<<< HEAD
+  /**
+   * True when Phase 1 was skipped because APOLLO_BACKFILL_ENABLED is not "true".
+   * Phase 0 still ran. A gated run is a HEALTHY run — the cron completed and
+   * did what it was allowed to — so this is a field on the result, never an
+   * error, and the dead-cron monitor never reads it as OVERDUE.
+   */
+  phase1Gated: boolean;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   // Phase 0 — canonical rooftop resolution.
   dealersResolved: number;
   prospectsResolved: number;
@@ -97,6 +162,16 @@ export interface BackfillResult {
   attempted: number;
   revealed: number;
   skipped: number;
+<<<<<<< HEAD
+  /**
+   * Gap rooftops excluded from Phase 1 because they carry no website_host, so
+   * Apollo's organization resolution cannot resolve them. Reported rather than
+   * silently dropped: this is the count an owner needs to see the shape of the
+   * population the paid path can actually reach.
+   */
+  noWebsiteHostSkipped: number;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   stoppedForBudget: boolean;
 }
 
@@ -229,6 +304,10 @@ export async function runDealerContactBackfill(
   const prisma = deps?.prisma ?? defaultPrisma;
   const now = deps?.now ?? new Date();
   const enabled = deps?.enabled ?? apolloEnabled;
+<<<<<<< HEAD
+  const spendEnabled = deps?.spendEnabled ?? backfillSpendEnabled;
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const reveal = deps?.reveal ?? revealRooftopContact;
   const upsert = deps?.upsert ?? upsertContactProfile;
   const remaining = deps?.remaining ?? remainingCredits;
@@ -242,6 +321,10 @@ export async function runDealerContactBackfill(
 
   const result: BackfillResult = {
     enabled: false,
+<<<<<<< HEAD
+    phase1Gated: false,
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     dealersResolved: 0,
     prospectsResolved: 0,
     contactsReconciled: 0,
@@ -250,6 +333,10 @@ export async function runDealerContactBackfill(
     attempted: 0,
     revealed: 0,
     skipped: 0,
+<<<<<<< HEAD
+    noWebsiteHostSkipped: 0,
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     stoppedForBudget: false,
   };
 
@@ -272,6 +359,47 @@ export async function runDealerContactBackfill(
     logger.warn("[dealer-contact-backfill] Phase 0 rooftop resolution failed — continuing to gap-fill:", err);
   }
 
+<<<<<<< HEAD
+  // Phase 1 gate — the unattended-spend switch. Checked AFTER Phase 0 (free,
+  // always allowed) and BEFORE the first Phase 1 query or budget read, so a gated
+  // run touches neither the ledger nor Apollo. INFO, not warn: gated is the
+  // configured state, not a fault.
+  if (!spendEnabled()) {
+    result.phase1Gated = true;
+    logger.info(
+      "[dealer-contact-backfill] Phase 1 gated — APOLLO_BACKFILL_ENABLED is not \"true\"; " +
+        `Phase 0 ran (dealers=${result.dealersResolved} prospects=${result.prospectsResolved}), no reveal attempted, nothing drawn`,
+    );
+    return result;
+  }
+
+  // Candidates = rooftops with NO send-safe contact (email present + send-safe
+  // status). `none` returns rooftops with zero matching contacts, i.e. a real gap.
+  // One predicate object, used by both the scan and the skip count, so the two can
+  // never describe different populations.
+  const contactGap = {
+    contacts: {
+      none: { email: { not: null }, emailVerificationStatus: { in: [...SEND_SAFE_STATUSES] } },
+    },
+  };
+
+  // The host filter is pushed into the QUERY, not applied after the scan: with 74
+  // of 1,422 rooftops carrying a host, an in-memory filter would spend the whole
+  // MAX_CANDIDATE_SCAN window on rows it then discards and surface almost nothing.
+  const [candidates, hostlessGap] = await Promise.all([
+    prisma.dealerRooftop.findMany({
+      where: { ...contactGap, websiteHost: { not: null } },
+      select: { id: true, displayName: true, websiteHost: true, city: true, state: true, makes: true, createdAt: true },
+      orderBy: { createdAt: "asc" }, // deterministic scan window; priority re-sorts within it
+      take: MAX_CANDIDATE_SCAN,
+    }) as Promise<CandidateRooftop[]>,
+    prisma.dealerRooftop.count({ where: { ...contactGap, websiteHost: null } }),
+  ]);
+
+  // Counted before any early return: "nothing to do" and "everything was skipped
+  // for want of a domain" are different findings and must not read alike.
+  result.noWebsiteHostSkipped = hostlessGap;
+=======
   // Candidates = rooftops with NO send-safe contact (email present + send-safe
   // status). `none` returns rooftops with zero matching contacts, i.e. a real gap.
   const candidates = (await prisma.dealerRooftop.findMany({
@@ -284,6 +412,7 @@ export async function runDealerContactBackfill(
     orderBy: { createdAt: "asc" }, // deterministic scan window; priority re-sorts within it
     take: MAX_CANDIDATE_SCAN,
   })) as CandidateRooftop[];
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   if (candidates.length === 0) return result;
 
   const cycleKey = cycleKeyFor(now);
@@ -324,8 +453,15 @@ export async function runDealerContactBackfill(
     // futile reveal call per remaining rooftop. This is an optimization — the
     // reveal service remains the authoritative fail-closed guard against overspend
     // (its atomic draw releases the claim if a concurrent live draw beat us here).
+<<<<<<< HEAD
+    // An attempt is worth the organization resolution PLUS the match since the
+    // API-contract batch — both stages bill — so it is not started on less.
+    const budget = await remaining(cycleKey, "backfill", now, { prisma });
+    if (budget < REVEAL_TOTAL_COST_CREDITS) {
+=======
     const budget = await remaining(cycleKey, "backfill", now, { prisma });
     if (budget < REVEAL_COST_CREDITS) {
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       result.stoppedForBudget = true;
       break;
     }
@@ -374,7 +510,12 @@ export async function runDealerContactBackfill(
       `resolved(dealers=${result.dealersResolved} prospects=${result.prospectsResolved} ` +
       `reconciled=${result.contactsReconciled} failed=${result.resolveFailed}) ` +
       `candidates=${result.candidates} attempted=${result.attempted} revealed=${result.revealed} ` +
+<<<<<<< HEAD
+      `skipped=${result.skipped} noHostSkipped=${result.noWebsiteHostSkipped} ` +
+      `budgetStop=${result.stoppedForBudget}`,
+=======
       `skipped=${result.skipped} budgetStop=${result.stoppedForBudget}`,
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   );
   return result;
 }

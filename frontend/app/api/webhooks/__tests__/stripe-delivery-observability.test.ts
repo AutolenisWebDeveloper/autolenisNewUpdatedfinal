@@ -25,6 +25,17 @@ const state = {
   stripeThrows: false,
   events: [] as Array<{ eventId: string; eventType: string; processed: boolean }>,
   notifications: [] as Array<Record<string, unknown>>,
+<<<<<<< HEAD
+  /**
+   * Phase 2: the unroutable-payment exception is written to `queue_items` through
+   * the single §26 writer, not to `notifications`. The old rail is kept in the
+   * fake so a regression that goes back to it shows up as a Notification write
+   * rather than as a silent pass.
+   */
+  queueItems: [] as Array<Record<string, unknown>>,
+  queueKeysTaken: new Set<string>(),
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   errors: [] as string[],
   existingAlertTitles: new Set<string>(),
   /** PaymentIntent id → the Deposit row the money-cluster should resolve, if any. */
@@ -76,6 +87,29 @@ mock.module("@/lib/prisma", {
           return { id: "n1" };
         },
       },
+<<<<<<< HEAD
+      queueItem: {
+        // The real partial unique index on idempotency_key, as P2002.
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          const key = data.idempotencyKey as string | null;
+          if (key && state.queueKeysTaken.has(key)) {
+            const err = new Error("Unique constraint failed") as Error & { code?: string };
+            err.code = "P2002";
+            throw err;
+          }
+          if (key) state.queueKeysTaken.add(key);
+          state.queueItems.push(data);
+          return data;
+        },
+        findFirst: async ({ where }: { where: { idempotencyKey?: string } }) =>
+          state.queueItems.find((q) => q.idempotencyKey === where.idempotencyKey) ?? null,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          state.queueItems.find((q) => q.id === where.id) ?? null,
+        findMany: async () => state.queueItems,
+        updateMany: async () => ({ count: 1 }),
+      },
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       webhookEvent: {
         findFirst: async () => null, // never throttled within a single test
         create: async ({ data }: { data: { source: string; eventType: string; payload: Record<string, unknown> } }) => {
@@ -167,6 +201,11 @@ beforeEach(() => {
   state.stripeThrows = false;
   state.events = [];
   state.notifications = [];
+<<<<<<< HEAD
+  state.queueItems = [];
+  state.queueKeysTaken = new Set<string>();
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   state.errors = [];
   state.existingAlertTitles = new Set<string>();
   state.depositsByPi = {};
@@ -203,10 +242,23 @@ test("payment_intent.succeeded with no recognised metadata type raises an operat
   });
   assert.equal(res.status, 200, "Stripe is still acknowledged — retrying cannot fix bad metadata");
 
+<<<<<<< HEAD
+  // Phase 2: written to queue_items through raiseException, with an owner. The
+  // old rail wrote a Notification with no owner and an actionUrl pointing at a
+  // page that renders none of them.
+  const item = state.queueItems.find((q) => q.exceptionCode === "PAYMENT_UNROUTABLE");
+  assert.ok(item, "an unroutable payment must surface as an operational exception");
+  assert.equal(item!.ownerRole, "FINANCE", "§26 assigns this exception to Finance");
+  assert.equal(item!.type, "PAYMENT_EXCEPTION");
+  assert.equal(item!.idempotencyKey, "PAYMENT_UNROUTABLE:pi_orphan");
+  assert.match(String(item!.requiredAction), /pi_orphan/);
+  assert.equal(state.notifications.length, 0, "the SYSTEM_ALERT rail is no longer the exception store");
+=======
   const alert = state.notifications.find((n) => n.type === "SYSTEM_ALERT");
   assert.ok(alert, "an unroutable payment must surface as an operational exception");
   assert.equal(alert!.buyerId, undefined, "ops-only");
   assert.match(String(alert!.title), /pi_orphan/);
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   assert.ok(
     state.errors.some((e) => /pi_orphan/.test(e)),
     "and must be logged, not swallowed",
@@ -219,6 +271,19 @@ test("an unknown metadata type is treated the same as an absent one", async () =
     amount: 9900,
     metadata: { type: "not_a_real_type", buyerId: "b1" },
   });
+<<<<<<< HEAD
+  assert.ok(state.queueItems.some((q) => q.exceptionCode === "PAYMENT_UNROUTABLE"));
+});
+
+test("the unroutable-payment exception is deduped per payment intent", async () => {
+  // Dedup is now a real unique index on idempotency_key, not a read-then-write on
+  // a title string: two concurrent deliveries of the same intent used to produce
+  // two alerts because both read "not found" before either inserted.
+  state.queueKeysTaken.add("PAYMENT_UNROUTABLE:pi_dup");
+  await deliver("evt_dup", "payment_intent.succeeded", { id: "pi_dup", amount: 9900, metadata: {} });
+  assert.equal(state.queueItems.length, 0, "no duplicate exception for a payment already surfaced");
+  assert.equal(state.notifications.length, 0);
+=======
   assert.ok(state.notifications.some((n) => n.type === "SYSTEM_ALERT"));
 });
 
@@ -228,6 +293,7 @@ test("the unroutable-payment exception is deduped per payment intent", async () 
   ]);
   await deliver("evt_dup", "payment_intent.succeeded", { id: "pi_dup", amount: 9900, metadata: {} });
   assert.equal(state.notifications.length, 0, "no duplicate alert for a payment already surfaced");
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 test("a recognised deposit payment raises no unroutable exception", async () => {
@@ -242,10 +308,14 @@ test("a recognised deposit payment raises no unroutable exception", async () => 
     amount: 9900,
     metadata: { type: "deposit", buyerId: "b1" },
   });
+<<<<<<< HEAD
+  assert.equal(state.queueItems.filter((q) => q.exceptionCode === "PAYMENT_UNROUTABLE").length, 0);
+=======
   assert.equal(
     state.notifications.filter((n) => String(n.title ?? "").startsWith("Unroutable")).length,
     0,
   );
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 test("a recognised type whose target record is missing is ALSO surfaced, not acked into silence", async () => {
@@ -258,19 +328,31 @@ test("a recognised type whose target record is missing is ALSO surfaced, not ack
     metadata: { type: "deposit", buyerId: "b1" },
   });
   assert.equal(res.status, 200);
+<<<<<<< HEAD
+  const item = state.queueItems.find((q) => q.exceptionCode === "PAYMENT_UNROUTABLE");
+  assert.ok(item, "a real charge with no matching deposit must surface");
+  assert.equal(item!.idempotencyKey, "PAYMENT_UNROUTABLE:pi_nodeposit");
+  assert.match(String(item!.requiredAction), /no matching record was found/);
+  assert.equal(item!.buyerId, "b1", "the buyer reference from the intent metadata is carried onto the exception");
+=======
   const alert = state.notifications.find((n) => n.type === "SYSTEM_ALERT");
   assert.ok(alert, "a real charge with no matching deposit must surface");
   assert.match(String(alert!.title), /pi_nodeposit/);
   assert.match(String(alert!.body), /no matching record was found/);
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 test("non-payment_intent event types are unaffected by the unroutable check", async () => {
   const res = await deliver("evt_refund", "charge.refunded", { id: "ch_1", payment_intent: "pi_r", amount_refunded: 9900 });
   assert.equal(res.status, 200);
+<<<<<<< HEAD
+  assert.equal(state.queueItems.filter((q) => q.exceptionCode === "PAYMENT_UNROUTABLE").length, 0);
+=======
   assert.equal(
     state.notifications.filter((n) => String(n.title ?? "").startsWith("Unroutable")).length,
     0,
   );
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 // ── 3. A REJECTED delivery is persisted, not just logged ─────────────────────

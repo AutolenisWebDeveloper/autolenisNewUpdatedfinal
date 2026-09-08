@@ -185,7 +185,18 @@ export async function POST(request: NextRequest, { params }: Props) {
       reason: note,
       metadata: { results, succeeded: results.filter(r => r.success).length },
     },
+<<<<<<< HEAD
+  });
+  // NOT best-effort. This route can drive a deal to COMPLETED — which includes the
+  // pickup stage, i.e. a release — and §2 puts release on the dealership, never on
+  // AutoLenis. An AutoLenis-actored release that is not recorded is exactly the
+  // unaudited path `lib/__tests__/role-boundary-frozen.test.ts` pins against, so a
+  // failed audit write must fail the request rather than let the action stand with
+  // no trace. (The behavioural split — release evidence writable only by a
+  // dealer-authenticated action — is control/B2-03, Phase 9.)
+=======
   }).catch(() => {});
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
   return adminSuccess({
     results,

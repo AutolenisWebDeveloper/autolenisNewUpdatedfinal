@@ -22,6 +22,10 @@ import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-schedule
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 import { allowedPredecessors } from "@/lib/payments/deposit-state";
 import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
+<<<<<<< HEAD
+import { raiseException } from "@/lib/services/operations/queue-item.service";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 // PaymentIntent metadata types this endpoint can actually fulfil. A
 // signature-valid payment whose type is not in this set is a real charge the
@@ -30,6 +34,49 @@ import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delive
 // money path stays invisible.
 const ROUTABLE_PI_TYPES = new Set(["deposit", "concierge_deposit", "concierge_fee", "service_fee"]);
 
+<<<<<<< HEAD
+// The payment half of §3's orphan rule, and §26's "Payment unroutable to an
+// obligation — Finance — Immediate exception; never absorbed".
+//
+// MIGRATED ONTO THE SINGLE EXCEPTION WRITER (Phase 2). Three defects went with the
+// old implementation, and each mattered:
+//
+//   1. Dedup was a read-then-write on an exact TITLE string — two concurrent
+//      webhook deliveries for the same intent both read "not found" and both
+//      inserted. `raiseException` dedups on a real unique index instead, and the
+//      key here is the PaymentIntent id, so a Stripe redelivery collapses.
+//   2. It wrote a `Notification` with `actionUrl: "/admin/operations"` — a page
+//      that renders NO notifications (verified: zero references in
+//      `app/admin/operations/page.tsx`). The alert was reachable only through the
+//      `/admin/queues` "system" tab, so the instruction pointed at a dead end.
+//      A `queue_items` row is read by the operations queue by construction.
+//   3. It carried no owner. §26 assigns this exception to FINANCE, and
+//      `Notification` has no column to say so. `queue_items.owner_role` does.
+//
+// Still best-effort at the CALL SITE, deliberately: alerting must never fail an
+// already-acknowledged webhook, or Stripe retries a delivery that did have an
+// effect. The writer itself throws — the swallow is here, where the trade-off is
+// visible, rather than hidden inside the writer.
+async function raiseUnroutablePaymentException(pi: Stripe.PaymentIntent, reason: string) {
+  try {
+    await raiseException({
+      code: "PAYMENT_UNROUTABLE",
+      // Located by stored reference, never by name/email/phone (§3). The deposit
+      // this intent should have belonged to is exactly what could not be found, so
+      // the buyer reference is resolved from the intent's own metadata when Stripe
+      // carried one, and the exception is keyed on the intent either way.
+      buyerId: typeof pi.metadata?.buyerId === "string" ? pi.metadata.buyerId : null,
+      depositId: typeof pi.metadata?.depositId === "string" ? pi.metadata.depositId : null,
+      idempotencyKey: `PAYMENT_UNROUTABLE:${pi.id}`,
+      detail:
+        `Stripe reported payment_intent.succeeded for ${pi.id} (${pi.amount ?? "unknown"} minor units), but ${reason}. ` +
+        `NOTHING ran: no deposit was flipped, no auction created, no deal advanced. Money moved at Stripe with no ` +
+        `corresponding platform state. Identify the intent in the Stripe Dashboard, then converge it by hand through ` +
+        `the owning admin path — do NOT fabricate a provider event.`,
+    });
+  } catch (err) {
+    logger.error(`[stripe/webhook] unroutable-payment exception failed for ${pi.id} (best-effort):`, err);
+=======
 // Ops-only SYSTEM_ALERT for a payment this endpoint accepted but could not
 // route. Reuses the existing alert rail (surfaced on /admin/operations), deduped
 // per PaymentIntent, and best-effort — alerting must never fail an
@@ -52,6 +99,7 @@ async function raiseUnroutablePaymentException(pi: Stripe.PaymentIntent, reason:
     });
   } catch (err) {
     logger.error(`[stripe/webhook] unroutable-payment alert failed for ${pi.id} (best-effort):`, err);
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   }
 }
 

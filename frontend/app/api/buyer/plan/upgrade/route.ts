@@ -4,6 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { NotificationType, NotificationChannel } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { limitGeneral } from "@/lib/security/rate-limit";
+<<<<<<< HEAD
+import { recordPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 // POST /api/buyer/plan/upgrade
 // Upgrades an authenticated Standard buyer to Premium.
@@ -43,6 +47,24 @@ export async function POST(request: NextRequest) {
     select: { plan: true, planUpgradedAt: true },
   });
 
+<<<<<<< HEAD
+  // STAGE 1 — the plan election as a `plan_snapshots` row, not only as a flag.
+  // `Buyer.plan` answers "what plan now" and destroys "what plan when"; §23's
+  // upgrade window, Premium-balance reversion and post-settlement downgrade review
+  // all turn on the second question. The flag write above is untouched.
+  //
+  // Awaited, unlike the audit row below: the snapshot IS the record of the
+  // election, and an election with no record is the thing this replaces.
+  await recordPlanElection({
+    buyerId: buyer.id,
+    plan: "PREMIUM",
+    touchpoint: "buyer_dashboard_upgrade",
+    actor: buyer.id,
+    reason: "Self-service upgrade STANDARD → PREMIUM (no charge at this stage; fee collected at deal payment).",
+  });
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   // Audit the self-service plan change (non-blocking).
   await Promise.all([
     prisma.auditLog.create({

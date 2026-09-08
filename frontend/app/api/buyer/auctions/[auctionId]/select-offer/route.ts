@@ -7,6 +7,10 @@ import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { commitOfferSelection, OfferSelectionRaceLostError } from "@/lib/services/deal/select-offer.service";
+<<<<<<< HEAD
+import { recheckApproval } from "@/lib/services/prequal/approval-recheck";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 interface Props { params: Promise<{ auctionId: string }> }
 
@@ -69,6 +73,29 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
   if (!offer) return errorResponse("NOT_FOUND", "Offer not found", 404);
 
+<<<<<<< HEAD
+  // STAGE 3 — APPROVAL RECHECK AT OFFER SELECTION.
+  //
+  // "Approval is rechecked — not merely at the payment gate, but at OFFER
+  // SELECTION and again at contract request. An approval that expires
+  // mid-transaction pauses the Deal and asks the buyer to renew rather than
+  // silently proceeding on a stale ceiling."
+  //
+  // This route had zero prequal references. A buyer whose approval expired between
+  // paying the $99 and choosing an offer could accept one above a ceiling that no
+  // longer applied, and the first anyone would know is at contract review — with a
+  // Deal created and a dealership already committed. Refusing here costs the buyer
+  // a renewal; not refusing costs a dealer a reaffirmation.
+  const approval = await recheckApproval(buyer.id, "offer_selection", {
+    raiseOnFailure: true,
+    vehicleRequestId: auction.vehicleRequestId ?? null,
+  });
+  if (!approval.ok) {
+    return errorResponse("APPROVAL_REQUIRED", approval.message, 409);
+  }
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   // Commit the selection atomically. The concurrency invariant (Phase 1 E-1) —
   // at most one accepted offer / one Deal per auction — is enforced inside
   // commitOfferSelection by locking the auction row and re-checking under the

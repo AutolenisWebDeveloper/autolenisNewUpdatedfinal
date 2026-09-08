@@ -7,6 +7,10 @@ import { SuppressionService } from '@/lib/services/suppression.service';
 import { isRecipientInQuietHours } from '@/lib/crm/recipient-timezone';
 import { evaluateConsentBasis, crmContactConsentBasis } from './consent-basis';
 import type { Contact } from '@/lib/types/crm';
+<<<<<<< HEAD
+import { recordLegacyPathWrite } from '@/lib/services/comms/legacy-path-write';
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 // ---------------------------------------------------------------------------
 // HARDENED CRM SMS PATH (Step 4 — /api/crm/dispatch/sms)
@@ -68,6 +72,13 @@ export async function sendCrmSms(params: {
   // dispatch-auth layer already enforces idempotency at the request boundary.
   idempotencyKey: string;
 }): Promise<CrmSmsResult> {
+<<<<<<< HEAD
+  // LEGACY_PATH_WRITE — §8.4's counter for sends outside the §27 dispatcher.
+  // Best-effort; never fails the send.
+  void recordLegacyPathWrite({ kind: 'DIRECT_TRANSACTIONAL_SEND', detail: 'sms:crm-sms', removalPhase: 10 });
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const { supabase, contact, body, fromPool, state, zip } = params;
 
   const phone = normalizePhone(contact.phone ?? '');

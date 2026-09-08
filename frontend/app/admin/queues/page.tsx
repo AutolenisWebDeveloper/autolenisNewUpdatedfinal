@@ -10,6 +10,15 @@ import { ErrorState } from "@/components/ui/kit";
 import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 
 const QUEUE_TABS = [
+<<<<<<< HEAD
+  // The §26 exception register itself — `queue_items`, written by the single
+  // raiseException writer. It leads because it is the canonical store; the tabs
+  // below it are DERIVED views that re-query a domain table for a condition
+  // nobody has raised an exception for yet, and "System Alerts" is now a
+  // read-only mirror of the retiring SYSTEM_ALERT rail (§8.4).
+  { id: "transaction",    label: "Transaction Exceptions", priority: "P0" as const },
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   { id: "ofac",           label: "OFAC Escalations",       priority: "P0" as const },
   { id: "contract-fail",  label: "Contract Failures",       priority: "P1" as const },
   { id: "insurance",      label: "Insurance Exceptions",    priority: "P1" as const },
@@ -17,11 +26,19 @@ const QUEUE_TABS = [
   { id: "pickup",         label: "Pickup Exceptions",       priority: "P2" as const },
   { id: "prequal",        label: "Prequal Manual Review",   priority: "P1" as const },
   { id: "support",        label: "Support Tickets",         priority: "P2" as const },
+<<<<<<< HEAD
+  { id: "system",         label: "System Alerts (mirror)",  priority: "P0" as const },
+=======
   { id: "system",         label: "System Alerts",           priority: "P0" as const },
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 ];
 
 // Map UI tab id → API queueType param
 const QUEUE_TYPE_MAP: Record<string, string> = {
+<<<<<<< HEAD
+  "transaction":   "TRANSACTION_EXCEPTION",
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   "ofac":          "OFAC_ALERT",
   "contract-fail": "CONTRACT_FAIL",
   "insurance":     "INSURANCE_EXCEPTION",
@@ -34,6 +51,33 @@ const QUEUE_TYPE_MAP: Record<string, string> = {
 
 interface QueueItem { id: string; [key: string]: unknown }
 
+<<<<<<< HEAD
+/**
+ * The §26 fields a `queue_items` row carries. Present only on the Transaction
+ * Exceptions tab; the eight derived tabs return domain rows and have none of them.
+ *
+ * They are rendered because the register was WRITTEN and not READ: an operator saw
+ * eight hex characters and a Resolve button, and the owner, the required action,
+ * the deadline and the return point — the whole reason the row exists — were
+ * stored and never shown.
+ */
+function exceptionFields(item: QueueItem) {
+  const str = (k: string) => (typeof item[k] === "string" ? (item[k] as string) : null);
+  const deadlineRaw = item.deadlineAt;
+  const deadline =
+    typeof deadlineRaw === "string" || deadlineRaw instanceof Date ? new Date(deadlineRaw as string) : null;
+  return {
+    code: str("exceptionCode"),
+    owner: str("ownerRole"),
+    action: str("requiredAction"),
+    returnPoint: str("returnPoint"),
+    status: str("status"),
+    deadline: deadline && !Number.isNaN(deadline.getTime()) ? deadline : null,
+  };
+}
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 export default function AdminQueuesPage() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [resolving, setResolving] = useState<Record<string, boolean>>({});
@@ -169,6 +213,48 @@ export default function AdminQueuesPage() {
                     const key = `${queue.id}-${item.id}`;
                     const isResolved = resolved[key];
                     const isResolving = resolving[key];
+<<<<<<< HEAD
+                    const ex = exceptionFields(item);
+                    return (
+                      <div key={item.id} data-testid={`queue-item-${queue.id}-${item.id}`}
+                        className="bg-slate-50 rounded-lg px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-slate-600 font-mono truncate max-w-[140px]">
+                            {ex.code ?? item.id.slice(-8)}
+                          </span>
+                          {isResolved ? (
+                            <span className="flex items-center gap-1 text-green-600 text-xs font-medium" data-testid={`queue-resolved-${key}`}>
+                              <CheckCircle2 size={12} /> Resolved
+                            </span>
+                          ) : (
+                            <Button size="sm" variant="secondary" disabled={isResolving}
+                              data-testid={`queue-resolve-${queue.id}-${item.id}`}
+                              onClick={() => resolve(queue.id, item.id)}
+                              className="h-6 text-xs px-2">
+                              {isResolving ? <Loader2 size={10} className="animate-spin" /> : "Resolve"}
+                            </Button>
+                          )}
+                        </div>
+                        {ex.action && (
+                          <p className="mt-1.5 text-slate-700 leading-snug" data-testid={`queue-action-${key}`}>
+                            {ex.action}
+                          </p>
+                        )}
+                        {(ex.owner || ex.deadline || ex.returnPoint) && (
+                          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                            {ex.owner && <span data-testid={`queue-owner-${key}`}>Owner: {ex.owner}</span>}
+                            {ex.deadline && (
+                              <span
+                                data-testid={`queue-deadline-${key}`}
+                                className={ex.deadline.getTime() < Date.now() ? "font-semibold text-red-600" : undefined}
+                              >
+                                Due {ex.deadline.toLocaleString()}
+                                {ex.deadline.getTime() < Date.now() ? " — OVERDUE" : ""}
+                              </span>
+                            )}
+                            {ex.returnPoint && <span>Returns to: {ex.returnPoint}</span>}
+                          </p>
+=======
                     return (
                       <div key={item.id} data-testid={`queue-item-${queue.id}-${item.id}`}
                         className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-xs">
@@ -184,6 +270,7 @@ export default function AdminQueuesPage() {
                             className="h-6 text-xs px-2">
                             {isResolving ? <Loader2 size={10} className="animate-spin" /> : "Resolve"}
                           </Button>
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
                         )}
                       </div>
                     );

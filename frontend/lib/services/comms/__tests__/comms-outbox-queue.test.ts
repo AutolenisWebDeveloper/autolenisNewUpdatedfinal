@@ -122,6 +122,15 @@ function outboxBuilder(table: string) {
     lt: (c: string, v: unknown) => { filters.push(["lt", c, v]); return api; },
     in: () => api,
     lte: () => api,
+<<<<<<< HEAD
+    // PHASE 2: the CRM drain now filters `template_key IS NULL`, which partitions
+    // it from the §27 transactional rail. Both rails share comms_outbox but claim
+    // differently — PostgREST compare-and-set here, FOR UPDATE SKIP LOCKED there —
+    // and without the partition the two would race for the same rows and each
+    // would read the other's claims as lost races.
+    is: () => api,
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     order: () => api,
     limit: () => api,
     maybeSingle: async () => ({ data: null }),

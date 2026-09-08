@@ -1,5 +1,9 @@
 import { logger } from "@/lib/logger";
 import { getQstash, QSTASH_BASE_URL } from "./client";
+<<<<<<< HEAD
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 interface DispatchOptions {
   path: string;
@@ -16,6 +20,25 @@ export async function dispatch({
   delaySeconds = 0,
   retries = 3,
 }: DispatchOptions): Promise<void> {
+<<<<<<< HEAD
+  // PHASE 2: THE VENDOR IS DEAD AND THIS PATH IS COUNTED, NOT DELETED. The
+  // repository's own history declares QStash removed, yet the dependency, this
+  // module and 16 `app/api/jobs/*` consumers are still in the tree — so every
+  // producer that still reaches here dispatches into nothing and terminalises in
+  // `jobs_dead_letter` as "TERMINAL — no internal owner". §8.4 keeps the code
+  // until Phase 10 and requires the uses be COUNTED meanwhile; §13-D23 confirms
+  // the decommission. Every call writes a LEGACY_PATH_WRITE row naming its
+  // caller, so "has anything still gone through the dead vendor?" is a query
+  // rather than an inspection.
+  void recordLegacyPathWrite({
+    kind: "QSTASH_PRODUCER",
+    detail: path,
+    entityType: "QStashJob",
+    entityId: path,
+    removalPhase: 10,
+  });
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   try {
     await getQstash().publishJSON({
       url: `${QSTASH_BASE_URL}${path}`,

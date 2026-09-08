@@ -31,6 +31,10 @@ import {
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
+<<<<<<< HEAD
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 // Expiry durations — iPredict results expire after 30 days (same as buyer path).
 const IPREDICT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
@@ -641,7 +645,11 @@ export async function runAdminIPredictPrequalForBuyer(
 
     // See prequal.service.ts for the SENT/DUPLICATE/FAILED/DEV_SKIPPED contract —
     // we map on the discriminated outcome, not on the boolean `sent`.
+<<<<<<< HEAD
+    let outcome: AdverseActionDelivery = "THREW";
+=======
     let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     let adverseActionErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
@@ -660,12 +668,16 @@ export async function runAdminIPredictPrequalForBuyer(
     }
 
     try {
+<<<<<<< HEAD
+      const eventType = classifyAdverseActionDelivery(outcome);
+=======
       const eventType =
         outcome === "SENT"
           ? "ADVERSE_ACTION_NOTICE_SENT"
           : outcome === "DUPLICATE"
             ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
             : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       await prisma.complianceEvent.create({
         data: {
           eventType,
@@ -688,6 +700,13 @@ export async function runAdminIPredictPrequalForBuyer(
     } catch (err) {
       logger.error("[admin-prequal] Failed to log adverse action compliance event:", err);
     }
+<<<<<<< HEAD
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: buyerId, prequalApplicationId: prequal.id });
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   }
 
   const runStatus = mapFinalDecisionToRunStatus(

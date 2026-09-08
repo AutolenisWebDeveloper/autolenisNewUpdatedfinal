@@ -474,11 +474,26 @@ export async function drainCommsOutbox(batchSize: number = DEFAULT_BATCH): Promi
   // Candidates = due, not-yet-terminal rows. A fresh 'sending' row (owned by a
   // live drain) is selected but the per-row claim CAS will skip it; only a
   // pending or stale-'sending' row is actually claimable.
+<<<<<<< HEAD
+  //
+  // `template_key IS NULL` partitions this rail from the §27 transactional rail.
+  // Both live in comms_outbox and share these delivery functions, but they claim
+  // differently — this one with a PostgREST compare-and-set, the transactional one
+  // with FOR UPDATE SKIP LOCKED (`transactional-dispatcher.service.ts`). Without
+  // the partition the two would race for the same rows and each would see the
+  // other's claims as lost races. A transactional row ALWAYS carries a
+  // template_key; a CRM row never does.
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const { data, error } = await supabase
     .from("comms_outbox")
     .select("id")
     .lte("run_at", now)
     .in("status", ["pending", "sending"])
+<<<<<<< HEAD
+    .is("template_key", null)
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     .order("created_at", { ascending: true })
     .limit(batchSize);
   if (error) throw new Error(`comms_drain_query_failed: ${error.message}`);

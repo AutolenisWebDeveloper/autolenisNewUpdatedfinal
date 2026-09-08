@@ -256,7 +256,7 @@ re-asserted at deploy time by `docs/transaction-flow/phase-1-proof/preflight.sql
 | Buyers holding more than one Vehicle Request in the proposed open-status set | **3 buyers** (`053d546b…` 4 rows; `70568e7b…` 5 rows; `dd2411be…` 2 rows — all May–June 2026, statuses `SUBMITTED`/`ACTIVE_SOURCING`) | The partial unique index cannot be created until these are reconciled by an owner-run, audited status change (e.g. superseded rows → `CANCELLED` with `cancel_reason`), never by a migration `UPDATE`. §13-D2. |
 | `vehicle_requests` status distribution | `ACTIVE_SOURCING` 12, `SUBMITTED` 6, `CLOSED_NO_MATCH` 1 | 12 requests sit in `ACTIVE_SOURCING` with no auction linked to 11 of them — the lineage gap this plan closes. |
 | Shortlists over the five-candidate cap | 0 (sizes 5, 5, 5) | The DB-level cap trigger can be created without cleanup. |
-| Buyers with more than one PAID deposit | 1 (`70568e7b…`, 3 `PAID` rows → 3 auctions; read 2026-09-07: two real Stripe charges and one admin-minted row with no payment intent — §8.1a.1 items 3 and 5) | Consistent with "plan per request"; each real deposit will attach to its own request in Phase 3 backfill (owner-run); the synthetic row needs a Phase 3 disposition first. |
+| Buyers with more than one PAID deposit | 1 (`70568e7b…`, 3 deposits → 3 auctions) | Consistent with "plan per request"; each deposit will attach to its own request in Phase 3 backfill (owner-run). |
 | Non-NULL `vehicle_requests.assigned_admin_id` values that do not resolve in `admins(id)` (added 2026-09-06 for §13-D11 correction 1) | **0** — the column held 0 non-NULL rows at all when read 2026-09-05 (§5.7) | The FK `vehicle_requests_assigned_admin_id_fkey → admins(id)` validates existing data on `ADD CONSTRAINT`. The zero is point-in-time: one admin assignment before the deploy makes it fail, and Prisma runs the file in one transaction, so the whole wave rolls back. Asserted at deploy time by `preflight.sql`; a non-zero result stops the deploy for owner-run reconciliation. |
 
 ### 5.7 Figures the Phase 1 shape corrections rest on — provenance (VERIFIED)
@@ -665,6 +665,37 @@ control: with the restore removed the proof now fails, naming that exact column.
 
 **Gate tooling.** §12.2 corrections 1 and 2 landed with this phase; see that section.
 
+<<<<<<< HEAD
+**CORRECTION (2026-09-07, owner-ruled) — Phase 1 shipped TWO of its three enforcement objects.**
+Objects 1 (the `vehicle_requests_one_open_per_buyer_key` partial unique index) and 2 (the pair of
+`FOR UPDATE`-locking five-candidate cap triggers) landed. **Object 3 —
+`frontend/prisma/__tests__/credit-applications-frozen.test.ts` — was never written.** Verified by
+`ls` of that directory, a repository-wide `find -name "*frozen*"` returning nothing, and grep: the
+only occurrences of the filename anywhere are in this document. The section above did not record it
+as deferred, so this document asserted something that was not in the tree.
+
+**Nothing was exposed by the gap.** The route half — `POST /api/buyer/financing/apply` as a bodyless
+410 — landed in **Phase 0** and closed the SSN write path. What was missing is the control that stops
+it being reopened silently.
+
+**The object is built in Phase 2** (§8.2 Phase 2 Part A), alongside the three build-failing rules that
+already land there, and **§11.5 ruling 9's "three, exactly as C1 constrains" is satisfied at the end
+of Phase 2, not at the end of Phase 1.** C1 is not breached: the object is a build-time scan, changes
+no schema and no route, and Phase 1's wave stayed schema-only.
+
+**One correction to the object's own specification, found by building it.** The bullet above
+enumerates **twelve** files as referencing the model, "VERIFIED 2026-09-03". That list is
+GREP-derived. Under an AST walk — which this test uses, because the retired route's own header
+discusses `credit_applications` at length and a string scan would fail on that prose — exactly **four**
+files hold a real reference: `app/buyer/financing/page.tsx`,
+`lib/services/financing/credit-application.service.ts`,
+`lib/services/financing/financing-orchestrator.service.ts` and
+`lib/services/financing/review-queue.service.ts`. The other eight name it only in comments. The
+allowlist is those four. An allowlist with eight entries referencing nothing would have failed its own
+stale-entry check on the day it landed.
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 #### 8.1a.1 Owner rulings closing Phase 1 (2026-09-07)
 
 **Ruling 1 — `OFFER_DECLINED` IS included in the one-open-per-buyer predicate.** RULED AND
@@ -687,6 +718,12 @@ have no pre-check and `hasActiveRequest()` (`lib/services/vehicle-request/vehicl
 has zero callers, so a buyer who declines and resubmits gets a raw 23505 until a service-side guard
 and a buyer-facing "you already have an open request" path land. **That guard is Phase 2 work**
 (the unified intake service owns every creation path); it is a known consequence of a ruled decision,
+<<<<<<< HEAD
+not an open defect in this wave.
+
+**Ruling 2 — deploy order is CODIFIED, not advisory.** See §8.1a.2.
+
+=======
 not an open defect in this wave. **Phase 2 also carries the admin cancel action** — a `CANCEL`
 transition on `app/api/admin/requests/[requestId]/route.ts` from every open status, writing
 `cancelled_at` and a required `cancel_reason`, with the same `vehicle_request_events` +
@@ -714,119 +751,33 @@ operational need for one.
    that would be false for these buyers.
 2. **The count is eleven open requests, not "three buyers holding 2–5" as a rough figure.**
    Read from production 2026-09-07: buyer `053d546b` 4 open + 1 CLOSED_NO_MATCH (29 May–3 Jun,
-   1 deposit); `70568e7b` 5 open (13 May–3 Jun, 3 `PAID` deposit rows — item 3); `dd2411be` 2 open
-   (27 May–2 Jun, 0 deposits). Every one has zero auctions. §5.6's "three buyers" is correct; the
-   per-buyer counts are 4 / 5 / 2.
-3. **One buyer holds real charges against the duplicates, so §23.1 governs — two charges, not
-   three.** Read 2026-09-07: `70568e7b`'s three `PAID` rows are `6d940f91` (12 May 23:46 UTC,
-   payment intent present, unrefunded), `ac00344b` (13 May 23:23 UTC, **payment intent NULL** —
-   admin-minted, no money moved; item 5) and `9ce1b59c` (15 May 16:30 UTC, payment intent present,
-   unrefunded). Two charges sit under §23.1 manual refund review; the third row carries no refund
-   exposure. Cancelling a request for a buyer who paid is not neutral. Today's `deposits` carries
-   **no request reference** — `deposits.vehicle_request_id` is created by THIS wave and does not
-   exist until step 4 — and the standard checkout puts only `{ buyerId, type: "deposit" }` into
-   Stripe metadata (`app/api/buyer/deposit/create-intent/route.ts:212-218`). Deposit → request
-   attribution before deploy is therefore by evidence, in this order of strength: **(a)**
-   `admin_audit_logs` `AUCTION_LAUNCHED_BY_ADMIN` metadata, which records
-   `{ vehicleRequestId, depositId }` whenever the admin launch path minted or attached the deposit
-   (`app/api/admin/buyers/[buyerId]/launch-auction/route.ts:323-346`); **(b)** the auction each
-   deposit owns (`auctions.deposit_id` is unique; all three of this buyer's auctions carry NULL
-   `vehicle_request_id`) and its `auction_vehicles` row, which `ensureAuctionVehicleFromRequest`
-   (`lib/services/auction/dealer-invitation.service.ts:117-150`) copies from the buyer's **newest
-   non-cancelled request at invitation time** — so the make/model/year on the auction identifies
-   the request that was current when that deposit's auction was invited; **(c)** creation-time
-   proximity, noting that the first real charge (12 May 23:46 UTC) precedes the buyer's earliest
-   request (13 May), so "nearest request before" is empty for it and the pairing must read
-   forward. Two requests created the same day before a deposit are flagged as ambiguous, never
-   resolved by timing. Refund review under §23.1 precedes any cancellation of a request that a real
-   charge attributes to; the attribution result is owner-read and recorded with the D2 execution.
-4. **The sub-second bulk touch of seven of the eleven rows at 01:30:42–43 UTC on 2026-09-07 —
-   RESOLVED: the hold half of `coverage-hold-reconcile` refreshing `coverage_hold_reason`; no
-   status transition.** Forensics read 2026-09-07 (owner-run): `vehicle_request_events` 0 rows and
-   `admin_audit_logs` 0 rows for 01:00–02:00 UTC; every touched row carries
-   `coverage_hold_at = 2026-08-25 03:00:2x UTC` and `coverage_hold_reason = 'thin_coverage:2@150mi'`
-   while the four untouched rows have `coverage_hold_at IS NULL` — an exact correlation with the
-   reconciler's selection predicate (`coverage_hold_at IS NOT NULL AND status IN (SUBMITTED, INTAKE,
-   ACTIVE_SOURCING)`, `request-coverage-gate.service.ts:218-225`); no buyer row was touched (ZIPs
-   last changed 27 May, 19 Aug, 25 Aug); every cron row in 01:14–01:52 UTC is stamped
-   `commitSha 70e237b6`. The thin branch writes `coverage_hold_at` (preserved) and the refreshed
-   reason on every call (`:164-167`), and `VehicleRequest.updatedAt` is `@updatedAt`, stamped
-   client-side by Prisma on every `update` whether or not a value changed — hence seven
-   `updated_at` bumps ~90 ms apart and no event. The eleven duplicates are historical buyer
-   behaviour. **D2 proceeds on the original analysis, the original reason string and the original
-   target set.**
+   1 deposit); `70568e7b` 5 open (13 May–3 Jun, **3 deposits**); `dd2411be` 2 open (27 May–2 Jun,
+   0 deposits). Every one has zero auctions. §5.6's "three buyers" is correct; the per-buyer counts
+   are 4 / 5 / 2.
+3. **One buyer holds paid deposits against the duplicates, so §23.1 governs.** Cancelling a request
+   for a buyer who paid is not neutral. Today's `deposits` carries **no request reference** —
+   `deposits.vehicle_request_id` is created by THIS wave and does not exist until step 4 — and the
+   standard checkout puts only `{ buyerId, type: "deposit" }` into Stripe metadata
+   (`app/api/buyer/deposit/create-intent/route.ts:212-218`). Deposit → request mapping before
+   deploy is therefore by evidence, not by key: creation-time correlation, `admin_audit_logs`, and
+   whether `stripe_payment_intent_id` is NULL (admin override / journey-complete fabricated `PAID`
+   rows — `deposit/override/route.ts:64-69`, `journey/complete-all/route.ts:103` — versus a real
+   Stripe charge). Refund review under §23.1 must precede any cancellation of a request that a real
+   charge can be attributed to.
+4. **A sub-second bulk touch of seven of the eleven rows at 01:30:42–43 UTC on 2026-09-07** is under
+   investigation and is NOT attributable from the codebase alone. Candidates that run at :30 and
+   write `vehicle_requests`: `coverage-hold-reconcile` (`*/15`), whose progression half advances
+   SUBMITTED/INTAKE → ACTIVE_SOURCING and writes `AUTO_INTAKE`/`AUTO_SOURCING` events, and whose
+   hold half **writes unconditionally every tick** on a thin-coverage held request
+   (`request-coverage-gate.service.ts:162-167`) without writing an event. The progression
+   reconciler has run every 15 minutes since 2026-08-26 (PR #335), so a first-time sweep of May/June
+   rows tonight is implausible for that half. `intake-reconcile` is excluded by its 48-hour
+   eligibility window. `cron_job_logs` (which stamps `result.build.commitSha`), `vehicle_request_events`
+   and `admin_audit_logs` for 01:25–01:50 UTC decide it; the reconciliation must not proceed until
+   they have, because if the seven were moved into an open status tonight the duplicate set is an
+   artefact and the reconciliation target changes.
 
-   **Loose end, explained before closing: the 01:45 tick — and every tick since — did not re-bump
-   the seven.** Both obvious readings are refuted by the code. The write is not conditional on the
-   reason changing: the thin branch writes unconditionally and the adequate branch writes whenever
-   the row was held, so every held row that reaches the end of a gate call is written. Eligibility
-   did not change: status and hold columns are unchanged per the forensics, and `take: 50`
-   oldest-hold-first cannot exclude seven rows it selected fifteen minutes earlier. `withCronRun`
-   holds no lease and never skips a tick (`lib/services/monitoring/cron-monitor.service.ts:96-135`).
-   A silent tick therefore means one of two things: the tick never reached the hold half, or
-   `applyRequestCoverageGate` threw before its `update` on every row — the reconcile loop catches
-   per row and counts it `stillHeld` (`:235-244`), so `cron_job_logs` shows `COMPLETED` with
-   `holds.found = 7, stillHeld = 7` in **both** the writing and the throwing case; only `updated_at`
-   and the runtime log line `[coverage-gate] reconcile failed for request …` tell them apart.
-   **Leading candidate — the 42703 window §8.1a.2 was written to prevent, opened by the merge
-   itself:** PR #404 merged to `main` at 01:37:12 UTC, seven minutes after the last successful
-   write, and `vercel.json` sets no `git.deploymentEnabled`, so Vercel's default deploys every push
-   to `main` to production. A production build of `48e473f` carries the Phase 1 `schema.prisma`;
-   `prisma.vehicleRequest.update` with no `select` RETURNs every scalar column of the model,
-   including this wave's (`current_plan_snapshot_id`, `abandoned_at`, …), which production lacks
-   until directory 2 is applied → SQLSTATE 42703 → Prisma `P2022`, thrown before the write —
-   exactly this silence — and it would also mean every full-row read or write on any table this
-   wave extends has failed in production since roughly 01:45 UTC. Q1 covered 01:14–01:52 only, so
-   it cannot exclude this; Vercel deployment and runtime-error reads were refused (403) to the
-   session. **UNVERIFIED — decided by one read-only query, then closed either way:**
-
-   ```sql
-   SELECT started_at, status, result->'holds' AS holds,
-          result->'build'->>'commitSha' AS commit_sha, left(error, 200) AS error
-   FROM cron_job_logs
-   WHERE cron_name = 'coverage-hold-reconcile' AND started_at >= '2026-09-07 01:30'
-   ORDER BY started_at;
-   ```
-
-   | Rows after 01:52 UTC show | Mechanism | Action |
-   | --- | --- | --- |
-   | `commit_sha` = `48e473f…` (any post-#404 SHA), `COMPLETED`, `found = 7` | Phase 1 client ahead of the database — the 42703 window is open now | Apply directory 2 per §8.1a.2 (after the D1 resolves and D2), or roll production back to `70e237b6` until it is. Every cron and page touching the extended tables is affected meanwhile. |
-   | `commit_sha` = `70e237b6`, `COMPLETED`, `found = 7` | Gate throwing per row for another reason (connectivity, pool, geocode path) | Vercel runtime logs for `[coverage-gate] reconcile failed` name it. |
-   | No rows after 01:30 | Ticks not reaching the handler (Vercel cron state, or `authorizeCronRequest` 401) | Vercel cron dashboard; cron-secret rotation. |
-   | `FAILED` | The `error` column names it | — |
-
-5. **A synthetic `PAID` deposit exists in production — a Phase 3 money-model finding, recorded,
-   not changed.** `deposits` row `ac00344b` (buyer `70568e7b`, 13 May 2026 23:23 UTC) has
-   `status = PAID` and `stripe_payment_intent_id IS NULL`: no charge, no provider evidence, and it
-   owns an auction. It was minted by an admin path — the candidates are
-   `app/api/admin/buyers/[buyerId]/launch-auction/route.ts:136-145` (creates
-   `{ buyerId, amountCents, status: "PAID" }` when the buyer has no unattached `PAID` row, then
-   launches an auction on it), `deposit/override/route.ts:64-69`, `journey/complete-all/route.ts:103`
-   and `journey/complete/route.ts:143-145`; the 13 May `admin_audit_logs` names which. Everything
-   built on `status = PAID` reads it as settled money: the fulfilment gate unlocks paid enrichment
-   and outreach on it (`lib/services/payment/fulfillment-gate.ts:30-38`), the revenue report sums
-   its `amount_cents` (`app/admin/reports/revenue/page.tsx:29`), the analytics counters count it
-   (`lib/services/analytics/analytics.service.ts:11`, `admin-analytics.service.ts:63,332-349`), and
-   the QStash state gate passes on it (`lib/qstash/state.ts:10`). Only the refund executor
-   distinguishes — `NO_CHARGE` for a NULL or `pi_admin_` intent
-   (`lib/services/payment/refund.service.ts:26-28,50-55`) — so the row can never leave `PAID`.
-   **Phase 3, which owns the money model, must** (a) make "paid" mean provider-settled — an
-   explicit synthetic state or a settlement-evidence predicate, so the gate, reports and analytics
-   stop reading minted rows as revenue; (b) census and disposition of the existing synthetic rows —
-   owner-run, audited, never a migration `UPDATE`; (c) S7-01a: remove the minting. The row is not
-   touched by this wave or by D2.
-6. **§6c is in production data now — seven of the eleven open requests parked thirteen days on two
-   rooftops.** The seven held rows all read `thin_coverage:2@150mi`, set 2026-08-25 03:00 UTC and
-   geocoded (no `:ungeocoded` suffix): two contactable rooftops at 150 miles, the widest tier of the
-   ladder (`RADIUS_TIERS = [25, 50, 100, 150]`, `lib/services/auction/coverage.service.ts:38`;
-   `MIN_COVERAGE_DEALERS = 3`, `:33`). That is §6c's 1–2 case (S6-25: continue expansion, source
-   manually, or close after review) with no operator surface today: the hold is a flag pair, raises
-   no queue item and sends no buyer notice, and its only automatic remedy — the reconciler's
-   recruitment nudge every fifteen minutes — has not recovered coverage in thirteen days. Phase 4
-   (radius ladder and qualified results) and Phase 5 (sourcing case, §6c decision table, Ops
-   exception + buyer notice) exist to replace this. Recorded so that D2's cancellation of superseded
-   rows is not mistaken for resolving it: the surviving request per buyer inherits the same hold.
-
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 **`shortlist_items.inventory_item_id ON DELETE RESTRICT` — sweep interaction CHECKED AND CLEAR.**
 The daily stale sweep **soft-deletes**: `lib/services/inventory/stale-sweep.service.ts:236-238` is
 `updateMany({ where: { id: { in: ids } }, data: { isActive: false } })`. It flips a flag and deletes
@@ -1387,10 +1338,29 @@ Zero route reads or writes a new field.
   `app/api/cron/comms-outbox-drain` reused, schedule confirmed in `vercel.json`. `COMMS_TRANSPORT=capture`
   mode for previews (writes `provider_id='captured'`, never calls Resend/Twilio).
 - Build-failing rule `lib/services/comms/__tests__/no-direct-transactional-send.test.ts`: fails on any
+<<<<<<< HEAD
+  direct provider send outside the dispatcher, with an allowlist of the direct sends that exist today
+  (§10 area *control*, Deliverable 1), each tagged with its removal phase; stale entries fail.
+  **The scan is REPOSITORY-WIDE** — `app/**`, `lib/**`, `components/**`, `scripts/**` — the same scope
+  as Enforcement object 3, and for the same reason. *(Corrected 2026-09-07, owner-ruled. An earlier
+  draft of this bullet read "same tree list as Enforcement object 3"; object 3 has no tree list. Its
+  own bullet records that a hand-listed tree set was TRIED AND REJECTED in the second review because
+  it "could not see three of the four reference sites its own allowlist named". The cross-reference
+  was the error, not the object; the rejected design is not reintroduced.)*
+  **The token list this bullet used to name does not match the code, and was corrected with it.**
+  There is no `sendEmail` function in `lib/services` — only the workflow node-type string
+  `'action.sendEmail'` — and nothing matches `sendTransactional*`, so a rule built on those literals
+  would scan clean and enforce nothing. Worse, six of the seven senders inside the transaction trees
+  reach Resend INDIRECTLY through `resend.service`, so a scan for the literal `resend` passes all six.
+  The rule therefore CLASSIFIES `resend.service`'s exports by rail at run time — 70 land on
+  `sendIdempotent` (direct), 5 on `enqueueTransactionalEmail` (dispatcher) — so migrating one export
+  reclassifies its callers automatically and the allowlist shrinks without the rule being edited.
+=======
   import/call of Resend/Twilio/`sendEmail`/`sendSms`/`sendTransactional*` outside the dispatcher in the
   transaction trees (same tree list as Enforcement object 3), with an allowlist of the direct sends
   that exist today (§10 area *control*, Deliverable 1), each tagged with its removal phase; stale
   entries fail.
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 - Compatibility adapters: each allowlisted legacy sender is wrapped to write the `LEGACY_PATH_WRITE`
   audit row (caller from `new Error().stack`), so the counter starts at Phase 2.
 - **Two further build-failing rules land here, not in Phase 1**, so that every executable "you may not
@@ -1440,6 +1410,280 @@ Zero route reads or writes a new field.
   **§13-D47** (purge the PII already sitting in `notifications.metadata`) and **§13-D23** (QStash decommission confirmation, before the producers are cut over). **§13-D17** is an acknowledgement that four existing tests encode rules this phase and Phases 3–5 replace.
 - **Rollback:** Every deliverable is new code behind no schema change: the queue writer, the dispatcher and the three build rules revert by reverting their commits; the intake repointing reverts by restoring the previous handler import in each surface. The dispatcher is introduced alongside the existing senders (allowlisted, not deleted), so a revert leaves sending working. `COMMS_TRANSPORT=capture` is preview-only and never set in production.
 
+<<<<<<< HEAD
+#### Phase 2 — AS BUILT (2026-09-08)
+
+Implemented on `claude/txflow-02-intake-p62lkx`. This section records how the phase was actually
+implemented where that differs from how it was planned; the §10 rows above are satisfied unless
+marked otherwise. **Coverage: 268 rows** — the 266 carrying a Phase-2 cell when the phase opened,
+plus `control/B2-01` and `control/G35-01`, whose cells read Phase 1 while §11.5 rulings 9 and 10
+assigned them here. Both are reconciled above.
+
+**The three Step Zero checks, and what they found.** Three issues were real and are corrected in this
+document rather than worked around; one was in the prompt that commissioned the phase rather than in
+the plan.
+
+1. **§8.2's direct-send bullet cross-referenced a tree list that does not exist.** Corrected in place,
+   above, with the reason. The rejected hand-listed design is not reintroduced.
+2. **Phase 1 shipped two of its three enforcement objects.** §8.1a now records it, and object 3 is
+   built here. Ruling 9 is annotated accordingly.
+3. **`control/B2-01` and `control/G35-01` still read Phase 1** after §11.5 moved them. Reconciled.
+4. *(Prompt, not plan.)* The commissioning prompt described §13-D3's duplicate condition as "eleven
+   open requests across three buyers". That figure is real and correctly recalled, but it belongs to
+   **§13-D2 / §5.6** — three buyers holding 4, 5 and 2 open requests. **D3** is §7.2's *two buyer rows
+   for one person*. Neither figure was re-verified: both are point-in-time row counts and this phase
+   holds no production credential.
+
+**Rulings whose implementation differed from their wording.**
+
+- **`raiseException` does not upsert, and cannot.** §8.2 describes the raise as "idempotency key →
+  upsert". `prisma.queueItem.upsert({ where: { idempotencyKey } })` **does not typecheck**:
+  `idempotencyKey` is declared without `@unique` (`schema.prisma:6489`) and its uniqueness is a
+  **partial** index (`migration.sql:1089-1090`) that Prisma cannot see. The service uses the idiom
+  this repository already proved against the same shape of index — create, catch `P2002`, return the
+  winner (`review-queue.service.ts:50-58`). **Recorded as a schema/document divergence**, not a
+  defect: the constraint is real and enforced, only unreachable through Prisma's typed `where`.
+- **The physical index is once-EVER, not once-while-open.** A derived key of (code, subject) would
+  mean a resolved condition could never recur — the second raise would collide and silently return
+  the resolved row. A collision with an OPEN row returns it (dedup); a collision with a RESOLVED or
+  CLOSED row is suffixed `#2`, `#3`, … and retried.
+- **A raise needs a stored reference OR an explicit idempotency key, not always a reference.** §26's
+  "Payment unroutable to an obligation" is precisely the case where no platform record resolves — a
+  Stripe intent whose metadata matches nothing has no deposit, no request and often no buyer.
+  Requiring a ref would make the one exception §26 marks "never absorbed" the one exception that
+  cannot be raised.
+- **Enforcement object 3's allowlist is four files, not the twelve §8.2 enumerates.** That list is
+  grep-derived; eight of the twelve name the model only in comments. See §8.1a.
+- **`control/B2-03` names two admin release paths; three exist.**
+  `app/api/admin/buyers/[buyerId]/journey/complete/route.ts` with `stageId: "pickup"` performs the
+  same `Pickup COMPLETED` + `Deal COMPLETED` write and is unnamed in the ledger. All three are
+  pinned; a fourth fails the build. Two of the three wrote their audit row `.catch(() => {})`, so an
+  AutoLenis-actored release could succeed with no trace — which made "pinned to the audited path"
+  untrue. Both now await it. The behavioural split stays Phase 9.
+- **The §35 scope guard is a manifest, not a diff.** No test in this repository shells out to git and
+  no `actions/checkout` step sets `fetch-depth`, so `git diff <base>...HEAD` would silently degrade
+  to "no diff available, pass" on CI. A committed baseline plus a per-phase declaration of permitted
+  additions instead.
+- **`LEGACY_PATH_WRITE` wraps three choke points, not 98 call sites.** The allowlist holds 98 files;
+  editing all of them would be 98 chances to miss one, and a counter with a hole reports zero while
+  traffic continues. `sendIdempotent`, the two SMS entry points and the QStash dispatcher are what
+  every legacy send passes through, and `new Error().stack` recovers the real caller.
+- **Rule 16 tier 3 refuses an anonymous caller a registered account.** §8.2 says "normalised verified
+  email"; §7.2 shows public intake attaching to a registered buyer on an email the caller merely
+  typed. A public form verifies nothing, so the resolver returns `REGISTERED_REQUIRES_CLAIM`, writes
+  nothing under that account, and the surface emails a claim link — §6.3's guest-capture flow used as
+  the verification step it already is.
+
+**Beyond the objects §8.2 named.** Six defects were found while implementing and fixed here, each
+because the deliverable above it would otherwise have been built on top of one:
+
+1. `sendIdempotent` **failed OPEN** when the `EmailSendLog` lookup threw — a transient database error
+   could deliver a second FCRA §615 adverse-action notice. It fails closed with a retryable outcome,
+   and gained the hard-suppression gate the outbox rail always had (`control/X-02`).
+2. `resolveQueueItem` swallowed a failed write and audited "resolved" anyway; the route answered
+   `{ resolved: true }` for a resolution that never happened (`control/X-01`).
+3. The unroutable-payment alert deduped on a **read-then-write against an exact title string** — two
+   concurrent deliveries both inserted — carried no owner, and pointed at `/admin/operations`, a page
+   that renders no notifications.
+4. The adverse-action delivery mapping was copy-pasted at four sites; it is one classifier whose union
+   derives from `EmailSendOutcome`, so a new outcome is a type error rather than a silent misfiling.
+5. `createGuestCapture` could lose the `users.email` and `buyers.user_id` unique races and hand a
+   visitor a 500 for submitting a form twice. Both are compare-and-swaps now.
+6. The lifecycle drain's header asserted `DORMANT` and had been wrong since `f23b361`.
+
+**The independent review round, and the fifteen findings it returned.** The implementation was read
+from a clean context by a reviewer that did not write it (`adversarial-diff-reviewer`), against the
+code rather than against the comments. Every finding was verified before it was acted on; none was
+dismissed on the author's memory. Three were blocking, and the first two would have shipped a
+silently broken phase.
+
+1. **A caught `P2002` inside `prisma.$transaction` aborts the whole transaction — and
+   `$transaction` still RESOLVES.** Every race-recovery path this phase added has the shape
+   *create → catch P2002 → re-read the winner*, which is correct on the top-level client (each
+   statement is its own transaction) and silently wrong inside an interactive one. **Measured**
+   against PostgreSQL 16 with this schema: the re-read throws `25P02`, Prisma reports success,
+   PostgreSQL turns the `COMMIT` into a `ROLLBACK`, and the route returns a `buyerOpportunityId` and
+   a `vehicleRequestId` for rows that were never written. The unit fakes model neither the abort nor
+   the rollback, so nothing here could have caught it. Fixed with `lib/prisma-savepoint.ts`:
+   `withSavepoint` brackets each conflict-prone create, so `ROLLBACK TO SAVEPOINT` scopes the abort
+   and the caller's own `catch (P2002)` still sees exactly its own error. Applied to the guest-user
+   and guest-buyer creates, the open-request compare-and-swap, `raiseException` and
+   `enqueueTransactional`. Re-measured after the fix: two concurrent Lane 1 submissions for one new
+   address produce one user, one buyer, one request, and both calls return ids that exist.
+2. **Every §27 message was undeliverable.** The payloads passed a template KEY as
+   `payload.templateId`, and `deliverEmail` resolves that through `TemplateService.getTemplate`,
+   which filters `email_templates.id` — a `UUID PRIMARY KEY`. A key there is not a lookup miss: it is
+   a `22P02` on every attempt, so each draft-recovery touch would have retried five times and raised
+   a `COMMS_TERMINAL_FAILURE`. Fixed by rendering the content
+   (`lib/services/comms/phase2-email-content.ts`) and by refusing the mistake at the enqueue choke
+   point, where the stack still names the producer: an email row must carry either a real
+   `email_templates` UUID or a rendered subject and html.
+3. **The homepage hero told every first-time visitor their address already had an account.**
+   `requiresClaim` is true for an ordinary guest capture too — the same emailed link claims it — so
+   branching on the flag alone rendered the rule-16 "nothing was attached" message for a capture that
+   *had* just written a DRAFT request. The API already distinguished the two (`requiresClaim` with a
+   null `vehicleRequestId`); the form now reads that, and the Playwright journey asserts the COPY, not
+   just that a success element appeared.
+
+The six that followed were real and are fixed here: the rule-16 claim link was never sent although
+the response said it was (a token is now minted and dispatched, and `/request-vehicle` accepts
+`?claim=`); a post-payment gate refused a buyer with no approval at all and raised nothing, so an
+auction could close unselected with no operator visibility; a failed §615 adverse-action notice was
+written to a table with no readers and is now a `PREQUAL_DECLINE` exception; a dispatcher row whose
+recheck threw was reclaimed forever with `attempts` never incremented, so its terminal-failure alert
+could not fire; the lead-magnet capture's persisted `source` changed from `lead_magnet:<slug>` to
+`lp_campaign:lead_magnet:<slug>`, which its own nurture cron filters on; and the emailed resume token
+became a reusable write credential, so it is now consumed on use and its security-posture comment
+matches the code. Four minor findings were also fixed: the duplicate-buyer flag raised
+`LINEAGE_ORPHAN` (wrong instructions, wrong count) and carried a raw phone in a durable key; the
+re-parent guard was blind to ES6 shorthand and its "proves it can fail" test re-implemented the
+matcher instead of exercising it; the two outbox rails shared one cron name; and the plan snapshot
+deduped on `(plan, touchpoint)`, showing transitions that never happened. The §26 register is now
+also RENDERED on the operations queue — owner, required action, deadline and return point were
+written and never shown.
+
+**The scope guard refused its author.** `lib/db/` was a new top-level directory this phase had not
+declared, and `lib/__tests__/scope-guard.test.ts` failed the build on it. The guard was right: one
+helper is not a new layer, so it sits beside the client it wraps as `lib/prisma-savepoint.ts`.
+
+**§13-D45 — the OFAC attestation, kept and now asserted.** The owner ruled the human attestation on
+the external pre-approval approve route IS the sanctions control, deliberately, and that automated
+screening is a vendor decision rather than an intake-phase change. The attestation itself needed no
+change — `ofacAttested: z.literal(true)` was already there, and the route already wrote an
+`EXTERNAL_PREQUAL_OFAC_ATTESTED` ComplianceEvent before the approval took effect. What was missing was
+the ruling's second half: nothing asserted that the route *cannot* write `APPROVED` without it, so a
+schema edit making the field optional would have removed a sanctions gate and left the route looking
+identical. `app/api/admin/__tests__/d45-ofac-attestation.test.ts` drives the real route module and
+pins three things — a missing attestation refuses with no `APPROVED` write and no buyer email, an
+attestation of `false` refuses too (the literal is the control, not the key's presence), and on the
+success path the attestation is durable BEFORE the approval, so a crash between them cannot leave an
+approval with no screening record. Proved failing-first: relaxing the literal to
+`z.boolean().optional()` fails two of the three. The existing
+`high-risk-route-enforcement.test.ts` already covered this route's ROLE gate and is untouched; this is
+the orthogonal control.
+
+**Found while ruling D45, reported and NOT fixed here.** Tracing every writer of
+`decision: APPROVED` to place the D45 assertion turned up six paths. Five are credit decisions with a
+control on them. The sixth is not:
+`app/api/admin/buyers/[buyerId]/journey/complete/route.ts` (and its `complete-all` sibling) upserts a
+`PreQualification` with `decision: APPROVED`, `tier: GOOD`, a **$50,000** default ceiling and
+`checkOfacAlert: false` — no application, no FCRA consent, no bureau call, and neither of the two
+sanctions controls this phase just pinned. It is gated by `getAdminFromRequest` alone: **any**
+authenticated admin, with no `requirePermissionStrict` and no role check, unlike the external
+pre-approval route beside it which requires `finance.preapproval.decide`.
+
+It is reported rather than fixed for two reasons that both hold: adding a permission gate is a
+**server-authorization change**, which CLAUDE.md reserves for a separately authorized batch; and this
+route's behavioural split is already assigned to **Phase 9**. The D45 ruling scoped its verify-after
+to the external pre-approval route, and widening it here would be this phase deciding an
+authorization question the owner has not been asked. What this phase did do to that route is
+unchanged and stands: its audit row is now awaited rather than `.catch(() => {})`, so the write can no
+longer succeed silently.
+
+**Incident record, 2026-09-08.** Production is back on `70e237b6` as of 03:04 UTC and every cron is
+COMPLETED. The incident ran **26 hours**; nothing was lost. The §13-D2 condition that contributed to
+it was **test data in production**, not a customer duplicate — see the corrected D2 row. The standing
+rule that came out of it is in `CLAUDE.md` → *Test data belongs in the isolated environment, never in
+production*: test buyers go in the isolated preview environment once Phase 2 lands it, and until then
+they are not created at all. This cleanup cost two days.
+
+**Three cutover behaviour changes, stated rather than assumed neutral** (QStash neutralisation):
+`offer_received` becomes per-AUCTION rather than per-offer; `auction_closing` gains the
+`hasSelectedOffer` guard the QStash job lacked; `dealer_bid_reminder` is **MOVED** to
+`cron/dealer-invitation-reminder`, not ported.
+
+**Capability dispositions.** `/api/finder` — **MOVED** (anonymous conversational capture and lead
+scoring live on `/api/concierge` through the intake pipeline; asserted at the new home).
+`SYSTEM_ALERT` as the exception store — **REGROUPED** to a read-only mirror (§8.4).
+`Buyer.plan` — **KEPT**, with `plan_snapshots` added alongside. The eight derived admin queue tabs —
+**KEPT**. Nothing REMOVED.
+
+**Deferred, with the phase that carries it.**
+
+| Deferred | Why | Carried by |
+| --- | --- | --- |
+| `intake/R1` — lead-only captures become DRAFT Vehicle Requests | Owner decision (map Q1). The two captures that already create a lead are repointed at the one handler with `leadOnly`, so the output is unchanged and the decision is one flag away. `crm/partial-lead` and `crm/exit-intent` write CRM contacts only and stay pre-lane. | owner |
+| `control/L3-01` historical rows | Whether a back-sweep raises one exception per pre-existing parentless auction, or they are grandfathered, is an owner decision. The sweep ships as code and runs against tests only. | owner |
+| §13-D47 purge | An `UPDATE`/`DELETE` against a business table is outside the per-run protocol. The WRITE is stopped and the metadata allowlist is in place. | owner |
+| `deposit` and `auction` parent-required | Both legitimately carry a null parent today; making them required now would refuse writes on a path this phase does not own. The registry records the flip. | 3 |
+| Deal-level plan snapshot | §11.6 ruling 8 splits `intake/R23`: buyer-level election here, Deal-level snapshot when the Deal first exists. | 6 |
+| Approval recheck at contract request | The helper is built and called at payment and selection; the contract-request surface is Phase 8's. | 8 |
+| Remaining Lane 1 surfaces (inventory CTA, vehicle detail, AMIPS, blog, call-back, public trade-in, shortlist submit) | The homepage hero and the DRAFT capture path they all need are built; each remaining surface is a component mount on the same endpoint. | 4 (with the inventory surfaces they belong to) |
+
+**What the executable gates actually reported.** `typecheck` 0 · `lint` 0 (128 warnings, 0 errors) ·
+`test:coverage-check` 0 (382/382 reachable, 67 chained) · `test:all` 0 — 3,814 tests, 3,813 pass,
+1 skip, 0 fail · `build` 0 · the §12.3 preflight 0 (7/9 asserted, steps 4 and 9 NOT VERIFIED) · the
+three Phase 2 journeys 8 passed / 2 skipped, exit 0.
+
+Two gates did **not** come back clean, and neither failure belongs to this phase:
+
+- **`pnpm test:e2e` exits 1** on fourteen pre-existing failures in two specs this phase does not
+  touch. `dealer-funnel.spec.ts` throws `ReferenceError: seedApprovedApplicationWithClaimToken is not
+  defined` — the spec calls seed helpers that do not exist in the file, so all six cases fail before
+  reaching the app. `affiliate-portal.spec.ts` expects a redirect to `/affiliate/signin` while the app
+  sends `/auth/signin?redirect=…`. Both specs were last touched by `bc67cca` (2026-08-29); the Phase 2
+  diff touches no affiliate or dealer-funnel surface. CI runs only `dealer-outreach.spec.ts`, so
+  neither is a gate today. **Reported, not fixed** — out of scope.
+- **`pnpm test:visual` exits 1** on all ten pixel snapshots, which is what
+  `tests/visual/README.md` says to expect off the pinned `ubuntu-24.04` runner ("running
+  `pnpm test:visual` in a dev container or agent sandbox typically fails **all ten** snapshots for
+  reasons that have nothing to do with the code"). The COPY gate is environment-independent and was
+  read through the documented update-then-restore procedure: exactly two files change,
+  `marketing-home-desktop.txt` and `marketing-home-mobile.txt`, and every other page's copy and
+  **every** metadata baseline is byte-identical. The homepage change is the hero form's copy, which is
+  this phase's intended §6.1 addition.
+
+  **No baseline is committed from this environment.** The regenerated copy also captured
+  `0 DEALS COMPLETED $0 AVG BUYER SAVINGS 0 VERIFIED DEALERS`, because `StatsStrip` reveals itself on
+  `buyersServed > 0` and the throwaway database held thirteen buyers from these journeys — so the
+  capture is contaminated and could never match the runner, which runs with the placeholder DSN and
+  therefore never shows the band at all.
+
+  **The runner confirmed both halves of that reading.** On `acfaa14` the guardrail reported **2
+  failed, 8 passed**: only `marketing:home`, on both viewports. The other four pages match the
+  committed baseline byte-for-byte on the pinned image, so there is no environment drift and the one
+  diff is this phase's intended §6.1 hero form. The re-seed is therefore taken the documented way —
+  all ten `__baseline__/*.png` removed so `visual.yml`'s seed gate
+  (`existing=(tests/visual/__baseline__/*.png); if [ ${#existing[@]} -eq 0 ]`, read from the workflow
+  rather than from its prose) takes the seed path, renders on `ubuntu-24.04`, re-runs `test:visual` as
+  a two-pass determinism check, and commits the CI-rendered baseline back to the branch only if that
+  second pass passes. `test:visual:update` rewrites the `.txt` and metadata baselines in the same
+  step, so the copy freeze is re-established on the runner too rather than hand-written here.
+
+  **It did.** `Visual regression` run 38 on `c2650a5` concluded **success**, and the runner committed
+  `2a0b151` — all ten PNGs re-rendered, and **only two other files changed: the two
+  `marketing-home-*.txt` copy baselines.** Every other page's copy and all ten metadata baselines came
+  back byte-identical, which is the same evidence the earlier compare gave from the other direction:
+  this phase's rendered change is confined to `/`. The committed copy contains the hero form's text
+  (`Start in 30 seconds`, the ZIP field, the consent line) and does **not** contain the `StatsStrip`
+  band — confirming that the local capture was contaminated by the journeys' own buyer rows and that
+  restoring it rather than committing it was right.
+
+**The complete gate set, green on `c2650a5`.** `CI` run 1030 — Typecheck/Lint/Tests & Build, Migration
+chain, E2E (dealer outreach), Phase 1 proof, Dependency audit — concluded **success**; `Visual
+regression` run 38 concluded **success**. `2a0b151` is the runner's baseline commit on top of it and
+changes no application code; GitHub does not re-trigger workflows for a `GITHUB_TOKEN` push, which
+`visual.yml` states, so that commit carries no run of its own. Separately, that band's gate is an OR over four counters while
+  its own comment says the point is to hide "0 Deals Completed · $0 Avg Savings · 0 Verified Dealers"
+  — one buyer row defeats it. **Reported for an owner decision**; it is public marketing copy and
+  outside this phase.
+
+**Re-pinning this document.** The two governing files are unchanged and re-verified at the close of
+this phase: `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` is still
+`a8f68aefb1b5214f13445bb340473e42e07191d3ac08ca678e7d546d9751bf62` and
+`AutoLenis-Transaction-Flow.html` is still
+`8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89`. This document's own hash cannot
+live inside it, so it is computed over the committed file and reported in the phase report and the
+pull request — `sha256sum docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` at the phase-close commit
+is the check. Phase 3 verifies against that value before reading further.
+
+**Not applicable to this phase, stated rather than skipped.** Production migration: this phase applies
+none and requires none to be applied. Its own merge, however, **is** gated on Phase 1's wave being
+applied and verified in both halves — see §8.1a.2 for why, and the phase report for which changes
+fail without it.
+
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 #### Phase 3 — Payment gate, money model, plans, settlement opens the sourcing case
 - §5a eligibility recheck (named failure per missing item) → `PAYMENT_REQUIRED`; one PaymentIntent per
   Vehicle Request (`deposits.vehicle_request_id`), provider-side existing-obligation check before a new
@@ -1490,10 +1734,6 @@ Zero route reads or writes a new field.
   and one refund primitive (`refund.service.ts`), three implementations consolidated to one. (4) Admin
   `create-intent`/`send-link` can issue a second $99 intent to a buyer who already paid; the
   provider-side existing-obligation check covers the admin routes too.
-- **Production finding to carry (§8.1a.1 item 5):** at least one `deposits` row is `PAID` with no
-  payment intent (admin-minted), and every `status = PAID` reader treats it as settled money. The
-  money model here makes "paid" mean provider-settled, and the disposition of existing synthetic
-  rows is owner-run before any backfill attaches deposits to requests.
 - Gates: `test:payments`, `test:webhooks`, new deposit/plan suites incl. replay + concurrency on
   PaymentIntent creation, the four regression tests above; Playwright (Stripe test mode,
   `livemode=false` asserted): request → checkout → webhook → sourcing case opened, no auction row
@@ -1505,10 +1745,6 @@ Zero route reads or writes a new field.
 - **Rollback:** The settlement side-effect change is behind the legacy adapter, so the previous behaviour is restored by flipping the adapter back and reverting the commit; no deposit row is rewritten. The reconciler is env-gated (`DEPOSIT_SETTLEMENT_RECONCILE_ENABLED`), so production reverts by unsetting the flag without a deploy. Plan snapshots are append-only: a revert stops writing them and leaves history intact.
 
 #### Phase 4 — Inventory, qualified results, shortlist candidates, co-buyer, trade packet
-- **Production finding to carry (§8.1a.1 item 6):** seven open requests have sat on
-  `thin_coverage:2@150mi` since 2026-08-25 — the ladder's widest tier finding two rooftops. The
-  radius ladder and qualified-results work here is the first half of the remedy; Phase 5 owns the
-  §6c decision that today does not exist.
 - Adapter corrections from §9 (request `dealer` + `mc_dealership` + `build`; read ids from
   `mc_dealership`; keep `dealer.website`; reject `dist > radius`; classify 422 by message; read
   `Retry-After`/`Quota-*`), sweep market configuration on the served markets, run-size anomaly → Ops
@@ -1532,9 +1768,6 @@ Zero route reads or writes a new field.
 - **Rollback:** The adapter changes are additive fields and stricter parsing; reverting the commit restores the previous adapter. The cache table, if D8 permits it, is a pure read-through — dropping it degrades to live queries. No inventory row is deleted; the qualified-results service is new and unreferenced until its surface ships.
 
 #### Phase 5 — Dealer sourcing, invitations, launch readiness, identity firewall
-- **Production finding to carry (§8.1a.1 item 6):** the §6c 1–2 case is live in production data —
-  seven requests, two rooftops at 150 miles, thirteen days, no queue item, no buyer notice. The
-  sourcing case, the §6c decision table and the Ops exception + buyer notice below are the remedy.
 - Sourcing case service (server-side 100→150→250 ladder; band-by-band expansion; buyer authorisation
   beyond 250 with `RADIUS_AUTHORIZATION_REQUIRED`, 24h/72h reminders, 14-day close preserving history);
   candidate → holding rooftop + comparable rooftops, unioned and deduped per rooftop with served-candidate
@@ -3713,7 +3946,11 @@ Nineteen requirements the completeness critic found uncovered. Same 13 columns a
 
 | Ref | Document & section | Requirement | Current route / service / model / component / email / cron / queue / admin action | Status | Stronger safeguard to preserve | Exact required change | Phase | Test level | Acceptance evidence | Owner-gated dependency | Legacy path affected | Final disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+<<<<<<< HEAD
+| B2-01 | MD §2 "AutoLenis never" bullet 1 (L82) | AutoLenis never sells or takes title to a vehicle — the dealership is always the seller of record | Only a marketing-copy guard exists: rule `buyer_misrepresentation` `lib/content/compliance.ts:104-116` with `lib/content/__tests__/compliance.test.ts:81,88`, reached only from `lib/content/generator.ts`, `lib/content/quality.ts`, `lib/services/content/content-validation.service.ts` (AMIPS content) — never from a transaction surface. No seller-of-record or title field anywhere (`rg seller\|sellerOfRecord\|purchaseFrom\|takeTitle` over `app/**` + `lib/services/**` + `prisma/schema.prisma` → only buyer-education copy and MarketCheck `seller_email` `lib/services/inventory/adapters/marketcheck.adapter.ts:84,411`). Money model is already one-sided in code: buyer→AutoLenis only (`lib/services/deal/service-fee.service.ts:19-43`; `lib/constants.ts:6-9`), no buyer↔dealer rail | PARTIAL | The `buyer_misrepresentation` pattern list and its two tests; the absence of any buyer↔dealer money rail (deposit + fee are the only Stripe intents) — keep both untouched | **Phase 2** build-failing rule — §11.5 ruling 9 moved it out of Phase 1, where it would have been a fourth enforcement object in a wave C1 constrains to three: `lib/__tests__/role-boundary-frozen.test.ts` scanning `app/**`, `lib/services/**`, `prisma/schema.prisma` for seller-of-record / title-taking constructs and for AutoLenis-as-payee-to-a-dealer, with an explicit allowlist that is empty on HEAD; it imports the existing `buyer_misrepresentation` patterns rather than restating them and applies them to transaction-facing copy (recap, receipt, contract-request and completion emails), not just AMIPS content. Zero runtime behaviour change Lifecycle: §8.2a is canonical. AS BUILT: THREE AutoLenis-actored paths can complete a pickup, not the two control/B2-03 names — `app/api/admin/buyers/[buyerId]/journey/complete/route.ts` with `stageId: "pickup"` performs the same writes and is unnamed there. All three are pinned, and a fourth fails the build.| 2 | unit | New test fails on an introduced `sellerOfRecord`/`titleHolder` field or an "AutoLenis sells/finances" string in a transaction template; passes on HEAD with an empty allowlist; `pnpm test:all` green | none | `backend/server.py` proxy surface is out of the scan root (see G35-01) | TO IMPLEMENT  |
+=======
 | B2-01 | MD §2 "AutoLenis never" bullet 1 (L82) | AutoLenis never sells or takes title to a vehicle — the dealership is always the seller of record | Only a marketing-copy guard exists: rule `buyer_misrepresentation` `lib/content/compliance.ts:104-116` with `lib/content/__tests__/compliance.test.ts:81,88`, reached only from `lib/content/generator.ts`, `lib/content/quality.ts`, `lib/services/content/content-validation.service.ts` (AMIPS content) — never from a transaction surface. No seller-of-record or title field anywhere (`rg seller\|sellerOfRecord\|purchaseFrom\|takeTitle` over `app/**` + `lib/services/**` + `prisma/schema.prisma` → only buyer-education copy and MarketCheck `seller_email` `lib/services/inventory/adapters/marketcheck.adapter.ts:84,411`). Money model is already one-sided in code: buyer→AutoLenis only (`lib/services/deal/service-fee.service.ts:19-43`; `lib/constants.ts:6-9`), no buyer↔dealer rail | PARTIAL | The `buyer_misrepresentation` pattern list and its two tests; the absence of any buyer↔dealer money rail (deposit + fee are the only Stripe intents) — keep both untouched | Phase 1 enforcement object (4th, alongside the `credit_applications` freeze S14a): `lib/__tests__/role-boundary-frozen.test.ts` scanning `app/**`, `lib/services/**`, `prisma/schema.prisma` for seller-of-record / title-taking constructs and for AutoLenis-as-payee-to-a-dealer, with an explicit allowlist that is empty on HEAD; it imports the existing `buyer_misrepresentation` patterns rather than restating them and applies them to transaction-facing copy (recap, receipt, contract-request and completion emails), not just AMIPS content. Zero runtime behaviour change Lifecycle: §8.2a is canonical. | 1 | unit | New test fails on an introduced `sellerOfRecord`/`titleHolder` field or an "AutoLenis sells/finances" string in a transaction template; passes on HEAD with an empty allowlist; `pnpm test:all` green | none | `backend/server.py` proxy surface is out of the scan root (see G35-01) | TO IMPLEMENT  |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | B2-02 | MD §2 "AutoLenis never" bullet 7 (L88) | AutoLenis never issues titles, registrations, or temporary tags | No issuance path exists and no assertion that none may be added: `rg` for title/registration/temp-tag issuance across `app/**` + `lib/**` returns buyer-education copy only (`lib/tools/dealer-fees.ts:81-88`, `lib/leads/honest-guide-content.ts:44`, `app/(public)/buying-guide/dealer-fees-complete-guide/page.tsx:32,86`, `lib/services/email/resend.service.ts:294`). The Stage 21 record that would carry the dealership's title/registration/temp-tag duty does not exist — `post_completion_obligations` absent (`rg post_completion` → 0; pickup map R21.1a, Phase 1 wave) | MISSING | Existing education copy already names title and registration as state-set fees paid to the DMV and not to AutoLenis — keep that wording as the buyer-facing statement of the boundary | On the Phase 1 `post_completion_obligations` table, constrain `owner_role` for the `TITLE_REGISTRATION_DELIVERY` and `TEMP_TAG_EXPIRY` types to `DEALERSHIP` at the single writer (never `AUTOLENIS`/`SYSTEM`), render "the dealership delivers, AutoLenis tracks" in the buyer and dealer surfaces, and extend `role-boundary-frozen.test.ts` (B2-01) with the negative case that no route creates, renders or emits a title, registration, plate or temporary-tag artifact | 9 | unit, integration | New `lib/services/deal/__tests__/post-completion-obligations.test.ts` case "title/registration obligation is dealership-owned; `owner_role=AUTOLENIS` is rejected"; role-boundary test extended and green | none | none | TO IMPLEMENT |
 | B2-03 | MD §2 "AutoLenis never" bullet 8 (L89); MD Stage 19 L975 | AutoLenis never releases a vehicle or substitutes for the dealership's delivery obligations | Two AutoLenis-actored release paths exist. `app/api/admin/deals/[dealId]/pickup/complete/route.ts:53-74` upserts `Pickup.status=COMPLETED` and calls `advanceDealStatus(dealId,"COMPLETED",{force:true})`, explicitly bypassing the insurance gate on an admin reason string; `app/api/admin/buyers/[buyerId]/journey/complete-all/route.ts:17-20,26-28` walks `ALL_STAGES` including `pickup`. The dealer path is correctly dealer-actored (`app/api/dealer/pickup/scan/route.ts:36-62,87`) but completes the Deal on the dealer's word alone — no buyer possession confirmation exists, contradicting "the Deal never completes automatically on the dealer's word alone" | BROKEN | Insurance hard gate re-checked inside the seam and mapped to a truthful 409 (`app/api/dealer/pickup/scan/route.ts:73-81,95-101`); SUPER/OPERATIONS-only plus mandatory non-empty reason on the override (`pickup/complete/route.ts:31-33,48-50`); token ownership + expiry checks (`scan/route.ts:53-67`) — keep all | Split release from completion: dealer release evidence writable only by a dealer-authenticated action, buyer possession confirmation only by the buyer; the admin route stops writing release/possession and becomes a recorded discrepancy resolution that names the releasing dealership and never `force`-bypasses insurance; drop `pickup` from `ALL_STAGES` in `complete-all`; extend `role-boundary-frozen.test.ts` so no AutoLenis-actored path may set `dealer_released_at` or `possession_confirmed_at` | 9 | unit, integration, state-machine, playwright | New `lib/services/pickup/__tests__/handover.test.ts`: admin cannot set release or possession; dealer release alone does not complete the Deal; Playwright dealer scan → buyer confirms → completed exactly once | none | admin pickup force-complete override; `journey/complete-all` pickup stage; dealer-scan auto-completion (E26-41, K27-1371, T28-10d) | TO IMPLEMENT |
 | S12D-01 | HTML `S[11].dealer[0]` `AutoLenis-Transaction-Flow.html:629` (cited L637); MD §12 L735 | Dealership arranges financing where the path is dealer-arranged | Surface exists but is read-only: `app/dealer/financing/page.tsx:20-45` lists `Financing` rows with `path:"DEALER"` scoped to this dealer's deals and renders APR / term / monthly / approved / status with no action. No dealer write route (`rg financing app/api/dealer` → only `offers/[offerId]/revise/route.ts`). `Financing` is written only by the buyer (`app/api/buyer/financing/route.ts:64`) and by the frozen in-house orchestrator (`lib/services/financing/financing-orchestrator.service.ts:107`). `app/dealer/deals/[dealId]/page.tsx:45-63` returns no next action for `FINANCING_PENDING`, so the dealership is never told it owns the stage | PARTIAL | Dealer isolation on the page — rows scoped to `offer.dealerId === dealer.id` and CANCELLED/REFUNDED excluded (`app/dealer/financing/page.tsx:25-30`); the no-in-house-financing spine test (`lib/services/auction/__tests__/no-inhouse-financing-on-auction-spine.test.ts`) | Add a dealer-actored terms attestation on the existing page — `POST /api/dealer/deals/[dealId]/financing/terms` writing lender name, approved amount, down payment, APR, term, payment and expiry onto `Financing`, guarded by the deal's financing path and left unverified until staff verification (§30 row 12 "verify and record"); add the `FINANCING_PENDING` next-action to the dealer switch. Never a credit application, never an SSN field Lifecycle: §8.2a is canonical. | 7 | unit, integration | New `app/api/dealer/deals/__tests__/financing-terms-route.test.ts`: another dealer → 403, non-DEALER path → 422, submitted terms land unverified and cannot reach terms-locked without a staff action | `FinancingStatus` needs `TERMS_LOCKED`/`VERIFIED` (Phase 1 wave; `prisma/schema.prisma:1711-1716` has PENDING, SELECTED, APPROVED, DECLINED only) | frozen in-house `credit_applications` orchestrator and lender services (§8.4) | TO IMPLEMENT  |
@@ -3730,7 +3967,11 @@ Nineteen requirements the completeness critic found uncovered. Same 13 columns a
 | W30-10 | MD §30 rows 12–13 (L1478-1479); HTML `S[12..13]` | Stages 13–14 responsibility split: staff review contract holds, escalate overdue uploads, and record financing completion and funding clearance | Contract-hold review exists as a derived list only: `lib/services/admin/admin-queue.service.ts:11` (`CONTRACT_FAIL` from `ContractScan.status=FAIL`) and `:20-25` (`ESIGN_EXCEPTION` derived from a deal sitting 48h in `SIGNING_PENDING`) — no owner, no deadline, no recovery action, and resolve swallows DB errors while still auditing (`:41-107,89-94`). Overdue-upload escalation has no timer (`document_requests.dueAt` unenforced — row K27 contract set). Funding clearance does not exist in any form (`rg funding_cleared\|fundingCleared` → 0; `DealStatus` `prisma/schema.prisma:1513-1530` has no funding state), so the bolded staff duty "record completion and clearance" has no object | MISSING | Explicit decision-word resolve on the derived queue (`admin-queue.service.ts:44-83`); Contract Shield fail-closed and bind-to-reviewed-version guarantees (§29) — keep | Extend the registry with Stages 13–14: `owner_role=Dealership` for package upload and execution, `Buyer` for signing, `Ops` for a held contract, an overdue upload and the funding-clearance record. Each becomes a `queue_items` row with owner, deadline and recovery; the funding-clearance record names the Ops actor and blocks release until present, and the derived contract queues become mirrors | 8 | unit, integration, state-machine | `stage-responsibility.test.ts` Stages 13–14 cases; funding-clearance test asserts only an Ops actor may record clearance, the actor is stored, and release stays blocked without it | none | derived `CONTRACT_FAIL`/`ESIGN_EXCEPTION` queues; admin CONTRACT_FAIL resolve mutating scans (E26-33) | TO IMPLEMENT |
 | W30-11 | MD §30 row 14 (L1480); HTML `S[14]` | Stage 15 responsibility split: buyer provides proof; staff verify; system tracks status and expiry | Partly present and mis-attributed. Staff verification exists (`app/api/admin/insurance-requests/respond/route.ts`), and the release gate reads `INSURANCE_SATISFIED` (`app/api/dealer/pickup/scan/route.ts:73-81`), but `Deal.insuranceStatus` has direct writers outside the verification path and `EXTERNAL_UPLOADED` currently counts as satisfied without a staff verification step (rows E26-31, T28-10c). The staff duty is bolded in §30 row 14 precisely because it is the gate, yet a buyer upload can satisfy it unverified. Expiry tracking does not exist (`rg insuranceExpiresAt` → none). The derived `INSURANCE_EXCEPTION` queue fires on a 72h-old `INSURANCE_PENDING` deal with no owner (`admin-queue.service.ts:13-18`) | BROKEN | The insurance hard gate at release, re-checked inside the seam (`scan/route.ts:73-81,95-101`) — keep and strengthen; never widen `INSURANCE_SATISFIED` to reach green | Extend the registry with Stage 15: `owner_role=Buyer` until proof is uploaded, `Ops` from upload to verification, `System` for expiry tracking. `EXTERNAL_UPLOADED` stops satisfying the gate on its own; verification is the single writer of the satisfied state and records the verifying actor; expiry before release raises a Buyer-owned row | 8 | unit, integration, state-machine | `stage-responsibility.test.ts` Stage 15 case; insurance test asserts an unverified external upload does not satisfy release and that verification stores the Ops actor | none | `Deal.insuranceStatus` direct writers; `EXTERNAL_UPLOADED` counted as satisfied | TO IMPLEMENT |
 | W30-12 | MD §30 rows 15–18 (L1481-1484); HTML `S[15..20]` | Stages 16–21 responsibility split: staff schedule after two counters, resolve handover blocks and delivery discrepancies, and escalate overdue post-completion obligations | Only the two-counter rule exists: `lib/services/pickup/pickup-coordination.service.ts:70,88,204,212` tracks `counterCount` and the `DEALER_COUNTERED` state, and `app/dealer/pickups/page.tsx:71,109-115` groups "waiting on the buyer" — the one place in the platform that names a responsible party, and it is a hardcoded page-local filter. Nothing schedules after the second counter, no handover-block object exists, no delivery-discrepancy object exists, and no post-completion obligation record exists (`rg post_completion` → 0), so the last three staff duties have nothing to own. The derived `PICKUP_EXCEPTION` queue fires after 7 days with no owner (`admin-queue.service.ts:26-31`) | PARTIAL | Strict turn-taking, proposal-time compare-and-swap and the two-counter cap in pickup negotiation (§29; `pickup-coordination.service.ts`); round-specific idempotency keys on pickup emails — keep intact | Extend the registry with Stages 16–21: `owner_role` alternates Buyer and Dealership through scheduling per the turn-taking state, becomes `Ops` on the second counter (Ops schedules), on any handover block, on a delivery discrepancy, and on an overdue post-completion obligation. Each raises one `queue_items` row with owner, deadline and recovery; the `dealer/pickups` page-local "waiting on" filter is replaced by the registry so all three portals agree | 9 | unit, integration, state-machine, playwright | `stage-responsibility.test.ts` Stages 16–21 cases; pickup test asserts the second counter transfers ownership to Ops and raises one row; Playwright shows the same owner and deadline in buyer, dealer and Ops surfaces | none | page-local "waiting on the buyer" derivation in `app/dealer/pickups/page.tsx`; derived `PICKUP_EXCEPTION` queue | TO IMPLEMENT |
+<<<<<<< HEAD
+| G35-01 | MD §35 L1586 | "This document authorizes no parallel website, no replacement architecture, and no unrelated code changes" — the governing scope constraint needs a row, a gate and an acceptance check | No gate exists. Every CI job is scoped to the app root (`.github/workflows/ci.yml:16,100,214,317` all set `working-directory: frontend`), so a second HTTP surface is invisible to it — and one exists: `backend/server.py:1-97` is a FastAPI proxy that forwards `/api/*` from port 8001 to Next.js, plus unrun root Python suites `tests/test_autolenis.py`, `tests/test_autolenis_v2.py`, `tests/test_autolenis_v3.py` and an `automation/` tree. The verification hook counts changed `frontend/` files only (`.claude/hooks/verification/`, CLAUDE.md L220-226), and `pnpm test:coverage-check` guards unreachable tests, not out-of-scope code. Nothing in IMPLEMENTATION-WORKFLOW §8 or §12 fails a phase for a change outside its scope | MISSING | The `test:coverage-check` reachability guard and the per-phase "no future-phase absorption" close step — reuse their shape rather than inventing a new mechanism | **Phase 2** build-failing rule — §11.5 ruling 10 ("Phase 2 gate, Phase 11 acceptance"; a new gate in Phase 1 would itself be a Phase-1 capability, which C1 forbids): `lib/__tests__/scope-guard.test.ts` plus a CI step run **outside** `working-directory: frontend`, asserting exactly one Next.js app root and one API surface, listing `backend/`, `automation/` and root `tests/` as frozen legacy that may gain no new files, and failing when a phase diff touches a path outside that phase's §8.2 scope list; add the matching gate line to §12 and an `ACCEPTANCE-REPORT.md` check line "no parallel website, no replacement architecture, no unrelated change" AS BUILT: a committed baseline plus a per-phase scope manifest, NOT a git diff — no test in this repository shells out to git and no `actions/checkout` step sets `fetch-depth`, so a diff-based guard would silently degrade to "pass" on CI.| 2 | unit, integration | Guard fails on an added second `next.config.*`, a new `backend/` route or a new root test file; CI step runs at the repository root; the acceptance-report line exists and is checked in Phase 11 | retirement of `backend/server.py` (an Emergent preview-ingress dependency) — freeze now, remove only on an owner decision | `backend/server.py` FastAPI proxy; root `tests/test_autolenis*.py`; `automation/` | TO IMPLEMENT |
+=======
 | G35-01 | MD §35 L1586 | "This document authorizes no parallel website, no replacement architecture, and no unrelated code changes" — the governing scope constraint needs a row, a gate and an acceptance check | No gate exists. Every CI job is scoped to the app root (`.github/workflows/ci.yml:16,100,214,317` all set `working-directory: frontend`), so a second HTTP surface is invisible to it — and one exists: `backend/server.py:1-97` is a FastAPI proxy that forwards `/api/*` from port 8001 to Next.js, plus unrun root Python suites `tests/test_autolenis.py`, `tests/test_autolenis_v2.py`, `tests/test_autolenis_v3.py` and an `automation/` tree. The verification hook counts changed `frontend/` files only (`.claude/hooks/verification/`, CLAUDE.md L220-226), and `pnpm test:coverage-check` guards unreachable tests, not out-of-scope code. Nothing in IMPLEMENTATION-WORKFLOW §8 or §12 fails a phase for a change outside its scope | MISSING | The `test:coverage-check` reachability guard and the per-phase "no future-phase absorption" close step — reuse their shape rather than inventing a new mechanism | Phase 1 enforcement object: `lib/__tests__/scope-guard.test.ts` plus a CI step run **outside** `working-directory: frontend`, asserting exactly one Next.js app root and one API surface, listing `backend/`, `automation/` and root `tests/` as frozen legacy that may gain no new files, and failing when a phase diff touches a path outside that phase's §8.2 scope list; add the matching gate line to §12 and an `ACCEPTANCE-REPORT.md` check line "no parallel website, no replacement architecture, no unrelated change" | 1 | unit, integration | Guard fails on an added second `next.config.*`, a new `backend/` route or a new root test file; CI step runs at the repository root; the acceptance-report line exists and is checked in Phase 11 | retirement of `backend/server.py` (an Emergent preview-ingress dependency) — freeze now, remove only on an owner decision | `backend/server.py` FastAPI proxy; root `tests/test_autolenis*.py`; `automation/` | TO IMPLEMENT |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | P23-01 | HTML `S[4].buyer[2]` `AutoLenis-Transaction-Flow.html:539` (cited L644); MD §23.2 L1139-1148; IMPLEMENTATION-WORKFLOW §2 D6 (L87) | The HTML Stage 5 statement "Optionally add the $400 Premium balance now, or any time before accepting an offer" must be reconciled with §23.2 (the window closes at funding clearance) and implemented as a window with a real open and close | The divergence is already adjudicated in the workflow (`IMPLEMENTATION-WORKFLOW.md:87` D6 — Markdown governs, the HTML line is presentational shorthand and the Stage 5 screen must state the Markdown rule), but no window exists in code at all. `app/api/buyer/plan/upgrade/route.ts:11-17,31-38` flips `Buyer.plan` to PREMIUM free of charge, with no $99-settled precondition, no close condition, no per-request scoping (plan lives on `Buyer`, `prisma/schema.prisma:47`) and no $400 charge; `components/buyer/PlanUpgradeCard.tsx:19-42` offers the upgrade unconditionally; the $400 is modelled only at fee collection (`lib/services/deal/service-fee.service.ts:19-43`, `lib/constants.ts:7-8`); no plan-snapshot table exists; funding clearance does not exist (row E26-43b) so the close condition has nothing to fire on | BROKEN | Race-safe `updateMany` plan flip with the `plan != PREMIUM` guard, the rate limit, and the audit plus activity rows (`upgrade/route.ts:31-38,45-79`); the recorded owner decision comment at `:11-17` — keep the CAS, the audit trail and the decision record | Make the window explicit and Markdown-governed: it opens when the $99 settles (Phase 3) and CLOSES at funding clearance, which does not exist until Phase 8 — the close predicate lands there, never at offer acceptance; the Stage 5 buyer copy states the funding-clearance rule (§2 D6, §11.6 ruling 11). | 8 | unit, integration, state-machine | Extend `app/api/buyer/plan/__tests__/upgrade.test.ts`: upgrade before the $99 settles → refused; after funding clearance → refused except on an audited admin approval; Stage 5 copy assertion reads "before funding clears"; one plan snapshot appended per change | charging the $400 balance — the free upgrade is a recorded owner decision (`upgrade/route.ts:11-17`); money-path activation | free no-charge self-service upgrade; `Buyer.plan` as the single per-buyer plan flag | TO IMPLEMENT |
 
 ## Gap-fill rows (round 2)
@@ -4094,8 +4335,13 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 
 | Phase | Rows |
 | --- | --- |
+<<<<<<< HEAD
+| 1 | 261 |
+| 2 | 268 |
+=======
 | 1 | 263 |
 | 2 | 266 |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | 3 | 173 |
 | 4 | 89 |
 | 5 | 117 |
@@ -4147,8 +4393,13 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
     "UNVERIFIED": 37
   },
   "by_phase": {
+<<<<<<< HEAD
+    "1": 261,
+    "2": 268,
+=======
     "1": 263,
     "2": 266,
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
     "3": 173,
     "4": 89,
     "5": 117,
@@ -4226,7 +4477,11 @@ its responsible party from the §30 table; without it the §34 assertion is unim
 
 | # | Capability | Ruling |
 | --- | --- | --- |
+<<<<<<< HEAD
+| 9 | How many Phase-1 enforcement objects there are | **Three, exactly as the master prompt constrains (C1)** — **satisfied at the end of PHASE 2, not Phase 1** (owner-ruled 2026-09-07): Phase 1 shipped objects 1 and 2, and object 3 (`credit-applications-frozen.test.ts`) was never written; it is built in Phase 2 with the other build-failing rules. C1 is not breached — the object is a build-time scan that changes no schema and no route. See §8.1a. The gap-fill rows proposed a fourth (role-boundary guard) and a fifth (§35 scope guard); both are useful but neither is one of the three mandated objects, and adding them would widen the schema-first wave. They move to **Phase 2**, where the build-failing direct-send rule already lives, so all executable "you may not write this" rules land together. §8.2 Phase 1 keeps three. |
+=======
 | 9 | How many Phase-1 enforcement objects there are | **Three, exactly as the master prompt constrains (C1).** The gap-fill rows proposed a fourth (role-boundary guard) and a fifth (§35 scope guard); both are useful but neither is one of the three mandated objects, and adding them would widen the schema-first wave. They move to **Phase 2**, where the build-failing direct-send rule already lives, so all executable "you may not write this" rules land together. §8.2 Phase 1 keeps three. |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | 10 | Where §35 is enforced | **Phase 2 gate, Phase 11 acceptance.** The scope constraint ("no parallel website, no replacement architecture, no unrelated code changes") becomes a build-failing check in Phase 2 and is re-asserted as an acceptance item in Phase 11. Landing a new gate in Phase 1 would itself be a Phase-1 capability, which C1 forbids. |
 | 11 | Whether §2, §3 and §30 are scheduled at all | They are, and §8.1's "Markdown sections" column now says so: **§2** role boundaries are asserted in Phase 1 (the `credit_applications` freeze) and Phase 9 (the release boundary); **§3** lineage lands in Phase 1 (stored references) and Phase 2 (the orphan rule); **§30** responsibility lands in Phase 2 (the `owner_role` registry) and then in each stage's own phase. |
 | 12 | Ref ids are reused across areas (173 collisions) | **Every cross-reference in this document is qualified `area/Ref`** (for example `control/E26-00b`, not `E26-00b`). Bare refs are ambiguous by construction because each area numbered its own rows. One wrong pointer produced by the collision (a gap-fill row citing `C2` for the queue writer, which resolves to a different area's payment reconciler) is corrected to `control/E26-00b`. |
@@ -4414,8 +4669,13 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | Category | Decisions |
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
+<<<<<<< HEAD
+| BLOCKING A NAMED LATER PHASE | **37** |
+| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **8** |
+=======
 | BLOCKING A NAMED LATER PHASE | **38** |
 | DEFAULT AND PROCEED UNLESS OVERRIDDEN | **7** |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | **Total** | **51** |
 
 Decisions in the table: **51**. Categories sum to **51**. Unclassified: **0**.
@@ -4437,7 +4697,11 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | # | Item | Type | Needed before | Detail | Triage |
 | --- | --- | --- | --- | --- | --- |
 | D1 | Reconcile the six class-(b) ledger rows (`§6.2`) | ACTION | Phase 1 production deploy | **RULED 2026-09-05: resolve ALL SIX.** The three e-sign/AI rows are included — the env flag (`ESIGN_EXECUTED_ARTIFACT_ENABLED`, default off) is the enforcement, not the ledger, and Phase 1's deploy runbook excludes nothing. Grounded on the owner's read-only probe of 2026-09-05: `e_sign_envelopes` 35 columns, `e_sign_envelope_history` present (32 columns), `contract_scans` version columns present — no row is resolved against an absent object. Take a `_prisma_migrations` snapshot; run the six `prisma migrate resolve --applied …` commands from `frontend/` against production; verify with `SELECT migration_name FROM _prisma_migrations WHERE migration_name IN (…six…)` (6 rows) and re-probe one object per migration. | BLOCKING PHASE 1 |
+<<<<<<< HEAD
+| D2 | Clean the three buyers holding multiple open Vehicle Requests (`§5.6`) | ACTION | Phase 1 index creation | **RULED 2026-09-08: THIS WAS TEST DATA, NOT A CUSTOMER INCIDENT.** All three buyers and all their deposits are the owner's own test records. No refunds, no §23.1 review, and no judgment about which request "should" survive — the oldest per buyer is kept purely so the rows stay coherent, and the choice is arbitrary because none represents a real buyer intent. `cancel_reason` is therefore **`'test-data-cleanup'`**, NOT `'superseded-duplicate-request'`: the earlier wording assumed real duplicates and would be read later as a customer incident. The resolution is cleanup. Counts: `053d546b` 4 open → cancel 3; `70568e7b` 5 → cancel 4; `dd2411be` 2 → cancel 1; **eight rows**. Owner-run DML — outside the three operation classes the per-run protocol authorizes for an agent session — with the statement committed for review as `docs/transaction-flow/phase-1-proof/d2-test-data-cleanup.sql` (original status captured before the update, events and audit rows written, four counts asserted before `COMMIT`). Verify: `preflight.sql` returns no `BLOCK` row for `index:vehicle_requests_one_open_per_buyer_key`. | BLOCKING PHASE 1 |
+=======
 | D2 | Clean the three buyers holding multiple open Vehicle Requests (`§5.6`) | ACTION | Phase 1 index creation | **CORRECTED 2026-09-07 (§8.1a.1): there is no admin cancel path and `cancel_reason` has no writer, so "through the existing cancel path" cannot be executed as written.** Audited status change of superseded rows (`CANCELLED`, `cancel_reason = 'superseded-duplicate-request'`) run by the owner as audited SQL outside the migration — UPDATE plus a `vehicle_request_events` row and an `admin_audit_logs` row per request, original status captured before the update — not by migration SQL. Eleven open rows across the three buyers (4 / 5 / 2); one buyer holds three paid deposits, so §23.1 refund review precedes any cancellation attributable to a real charge. Verify: `docs/transaction-flow/phase-1-proof/preflight.sql` returns no `BLOCK` row for `index:vehicle_requests_one_open_per_buyer_key`. That file is the §5.6 query made executable and committed, so the check is run rather than described; it carries the §13-D11 foreign-key precondition in the same run, and its contract is `PASS ⇔ no BLOCK row` with exactly one `CHECKED` row proving it executed. | BLOCKING PHASE 1 |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | D3 | Confirm the duplicate-buyer pair (`§7.2`) | DECISION | Phase 2 regression tests | Confirm `6cc7bfa6…` / `64479e6c…` is the §9C duplicate, and whether the second email was intentional. Confirm the rule-16-compliant remedy: flag + human merge on phone collision, never auto-merge. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D4 | E-sign evidence activation (`ESIGN_EXECUTED_ARTIFACT_ENABLED=true`) | ACTION (compliance-gated) | Phase 8 acceptance in production | Schema is present (§5.2); the env flag is the runtime gate. Requires the attorney/compliance sign-off the runbook records as pending. Verify after: signing route returns 200 in preview with flag on; production flag flipped only after sign-off. | BLOCKING A NAMED LATER PHASE (Phase 8) |
 | D5 | Open-status set for the one-open-request index (`§8.2 Phase 1`) | DECISION | Phase 1 | **RULED 2026-09-05: option A — exclude `DEAL_CREATED` and the three terminals.** Open set = `DRAFT, SUBMITTED, INTAKE, PAYMENT_REQUIRED, ACTIVE_SOURCING, RADIUS_AUTHORIZATION_REQUIRED, OFFER_READY, OFFER_SENT, OFFER_ACCEPTED, OFFER_DECLINED` (10 of 14), as `§8.2` already spells out. The alternative (include `DEAL_CREATED`) is rejected: no writer moves a request out of `DEAL_CREATED` at deal completion or cancellation (`lib/services/deal/deal.service.ts:202-203`, `:377-401`), no admin transition has it in a `from:` list (`app/api/admin/requests/[requestId]/route.ts:19-50`) and buyer cancel refuses it (`cancel/route.ts:19-24`) — so it would wedge the buyer permanently. Its stated benefit is also illusory: buyer acceptance creates the Deal while leaving the request at `OFFER_ACCEPTED` (already in the set), and admin `CREATE_DEAL` sets `DEAL_CREATED` while creating no Deal. **Reversal note:** narrowing later is free; widening later to include `DEAL_CREATED` raises 23505 against any buyer holding `DEAL_CREATED` plus another open row and needs a D2-class audited cleanup, a first-in-repo live `DROP INDEX`, and a `prisma/drift-baseline.json` edit — take it together with building the completion writer, never as a cheap tweak. | BLOCKING PHASE 1 |
@@ -4480,7 +4744,11 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D42 | Dealer termination criteria | DECISION | Phase 5 | §25.2 requires consequences for repeat circumvention. Proposed: first attempt warns and records; a second within 90 days suspends invitations pending review; termination is always a human decision. | BLOCKING A NAMED LATER PHASE (Phase 5) |
 | D43 | RLS coverage for the invitation and messaging tables | DECISION | Phase 1 | No migration enables RLS on `auction_invitations`, `outside_auction_invites`, `messages`, `circumvention_attempts`, `identity_firewall_entries` (production probe: the core Prisma tables are reached only through the service role). Proposed: enable RLS with zero policies (deny-all except service role) on the new tables this wave creates, and leave existing tables unchanged in this phase. Adding a policy OPENS access, so none is added. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — §5.4 evidence: the app connects as table owner, so a policy would OPEN access; new tables ship RLS-on/zero-policies matching every existing transaction table |
 | D44 | Untargeted dealer broadcast | DECISION | Phase 5 | `notifyActiveDealersOfOpportunity` emails the first 20 ACTIVE dealers with no radius and no invitation, from the public request route. Proposed: retire it — §7 invitations are the only dealer fan-out. | BLOCKING A NAMED LATER PHASE (Phase 5) |
+<<<<<<< HEAD
+| D45 | OFAC screening control on the external pre-approval approve route | DECISION | Phase 2 | **RULED 2026-09-08: the attestation IS the control, deliberately.** The human OFAC attestation (`ofacAttested: z.literal(true)`, `app/api/admin/external-preapprovals/[id]/approve/route.ts:24-26`) stays as the sanctions gate; automated screening is a vendor decision, not an intake-phase change. Recorded here as a deliberate choice rather than an accident of the original implementation. **The verify-after is now a test**, not a promise: `app/api/admin/__tests__/d45-ofac-attestation.test.ts` drives the real route and asserts a missing attestation and an attestation of `false` each refuse with no `APPROVED` status, no `APPROVED` decision and no buyer email, and that on the success path the `EXTERNAL_PREQUAL_OFAC_ATTESTED` ComplianceEvent is durable BEFORE the approval takes effect. Proved failing-first: relaxing the literal to `z.boolean().optional()` fails two of its three cases. Why it is load-bearing: every iPredict approval runs a MicroBilt OFAC screen and this path skips it, so the attestation is the ONLY sanctions gate on it. | DEFAULT AND PROCEED UNLESS OVERRIDDEN |
+=======
 | D45 | OFAC screening control on the external pre-approval approve route | DECISION | Phase 2 | The approve route today requires a human OFAC attestation (`z.literal(true)`) rather than an automated screen. Proposed: keep the attestation as the control and record it as a deliberate choice; alternative: add automated screening and demote the attestation to a second check. Verify after: the approve route cannot write `APPROVED` without whichever control is chosen. Raised by §10 *stages1-3*; §13 had no OFAC row before this review. | BLOCKING A NAMED LATER PHASE (Phase 2) |
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 | D46 | SMS and email consent capture on every Lane 1 surface | DECISION | Phase 2 | Consent is captured inconsistently today: the onboarding wizard gates a button on an SMS checkbox it never transmits, the SEO form hard-codes `consent_sms = true`, and Google-OAuth signups store a NULL terms version. Proposed: one consent record per surface (version, text hash, IP, surface, timestamp), no pre-checked boxes, and no send without a matching record. Verify after: a send attempt for a buyer with no consent record is refused by the dispatcher and raises an exception. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D47 | PII already stored in `notifications.metadata` | ACTION (privacy) | Phase 2 | The public wizard spreads the whole form into `notifications.metadata`, so income, employer and credit-band answers sit in a notification row. Proposed: stop writing it in Phase 2, then an owner-run purge or redaction of the existing rows under the retention policy. Verify after: the metadata column holds no field outside an allowlist, and the purge query returns zero. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D48 | Refund-policy copy shown to the buyer | DECISION (legal) | Phase 3 | §22.1 requires the buyer to see the refund rules before paying; the current deposit-confirmation email says the $99 "is credited toward your concierge fee when your deal closes", which contradicts both "Standard plan paid in full" and the $400-until-funding-clears rule. Proposed: legal-approved copy for the checkout disclosure and the receipt, written once and reused. Verify after: both surfaces render the approved text and a test pins it. | BLOCKING A NAMED LATER PHASE (Phase 3) |

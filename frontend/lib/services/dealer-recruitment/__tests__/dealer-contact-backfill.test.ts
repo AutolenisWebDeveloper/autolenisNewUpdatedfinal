@@ -11,10 +11,24 @@ import {
   runDealerContactBackfill,
   type BackfillDeps,
 } from "../dealer-contact-backfill.service";
+<<<<<<< HEAD
+import { REVEAL_TOTAL_COST_CREDITS } from "../apollo-reveal.service";
+import { backfillSpendEnabled } from "../dealer-contact-backfill.service";
+
+const NOW = new Date("2026-08-10T12:00:00Z");
+
+// The existing suite exercises Phase 1, so it runs with the unattended-spend
+// switch ARMED — exactly the state the owner reaches by setting the flag. The
+// gate tests at the bottom turn it off explicitly through the dep.
+process.env.APOLLO_API_KEY = "test-key";
+process.env.APOLLO_BACKFILL_ENABLED = "true";
+
+=======
 import { REVEAL_COST_CREDITS } from "../apollo-reveal.service";
 
 const NOW = new Date("2026-08-10T12:00:00Z");
 
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 interface Rooftop {
   id: string;
   displayName: string;
@@ -37,9 +51,15 @@ function fakePrisma(
   population: PopulationSeed = {},
 ): {
   prisma: PrismaClient;
+<<<<<<< HEAD
+  calls: { findMany: number; count: number; dealerFindMany: number; prospectFindMany: number };
+} {
+  const calls = { findMany: 0, count: 0, dealerFindMany: 0, prospectFindMany: 0 };
+=======
   calls: { findMany: number; dealerFindMany: number; prospectFindMany: number };
 } {
   const calls = { findMany: 0, dealerFindMany: 0, prospectFindMany: 0 };
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const prisma = {
     dealer: {
       findMany: async ({ take }: { take?: number } = {}) => {
@@ -64,9 +84,25 @@ function fakePrisma(
       },
     },
     dealerRooftop: {
+<<<<<<< HEAD
+      // The fake HONORS the website_host filter rather than ignoring it, so the
+      // suite exercises the real Phase 1 predicate: a rooftop with no domain must
+      // not reach the paid reveal, whatever else is true of it.
+      findMany: async ({ where }: { where?: { websiteHost?: unknown } } = {}) => {
+        calls.findMany++;
+        const hostRequired = where?.websiteHost !== undefined;
+        return rooftops.filter((r) => !hostRequired || r.websiteHost !== null).map((r) => ({ ...r }));
+      },
+      count: async ({ where }: { where?: { websiteHost?: unknown } } = {}) => {
+        calls.count++;
+        // The service counts the complement: gap rooftops with websiteHost null.
+        if (where?.websiteHost === null) return rooftops.filter((r) => r.websiteHost === null).length;
+        return rooftops.length;
+=======
       findMany: async () => {
         calls.findMany++;
         return rooftops.map((r) => ({ ...r }));
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       },
     },
     apolloReveal: {
@@ -206,8 +242,14 @@ test("stops the run when backfill budget is exhausted", async () => {
       now: NOW,
       enabled: () => true,
       reveal: revealFake(new Set(["a", "b", "c"]), order),
+<<<<<<< HEAD
+      // budget for exactly one attempt (org resolution + match): first check ok,
+      // second below the full attempt cost.
+      remaining: (async () => (call++ === 0 ? REVEAL_TOTAL_COST_CREDITS : REVEAL_TOTAL_COST_CREDITS - 1)) as BackfillDeps["remaining"],
+=======
       // budget for exactly one reveal: first check ok, second below cost.
       remaining: (async () => (call++ === 0 ? REVEAL_COST_CREDITS : REVEAL_COST_CREDITS - 1)) as BackfillDeps["remaining"],
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
       upsert: (async (id: string) => ({ id })) as BackfillDeps["upsert"],
     },
   );
@@ -439,3 +481,165 @@ test("a resolution failure is fail-open (counted, run continues to the reveal ph
   assert.equal(r.revealed, 1, "Phase 1 still runs after Phase 0 failures");
   assert.deepEqual(revealOrder, ["a"]);
 });
+<<<<<<< HEAD
+
+test("a rooftop with no website_host is never revealed, and the skip is COUNTED", async () => {
+  // Production evidence for this filter: of the apollo_reveals rows carrying a
+  // diagnostic stage, all 461 attempts on host-less rooftops stopped at
+  // empty_stage="no_org" — organizations/lookup has never resolved one. Spending
+  // the per-run limit on them starves rooftops that could resolve.
+  const { prisma } = fakePrisma([
+    rt("hosted"),
+    rt("bare", { websiteHost: null }),
+    rt("bare2", { websiteHost: null }),
+  ]);
+  const order: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true,
+      reveal: revealFake(new Set(["hosted", "bare", "bare2"]), order),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+
+  assert.deepEqual(order, ["hosted"], "only the rooftop with a domain may reach the paid reveal");
+  assert.equal(r.candidates, 1);
+  assert.equal(r.attempted, 1);
+  assert.equal(r.revealed, 1);
+  assert.equal(r.noWebsiteHostSkipped, 2, "both host-less gap rooftops are reported, not dropped");
+});
+
+test("skipped-for-no-host is reported even when nothing is left to attempt", async () => {
+  // "Nothing to do" and "the whole gap is unreachable without a domain" are
+  // different findings and must not read alike.
+  const { prisma } = fakePrisma([rt("bare", { websiteHost: null })]);
+  const order: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true,
+      reveal: revealFake(new Set(["bare"]), order),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+
+  assert.equal(order.length, 0, "no reveal may be attempted");
+  assert.equal(r.candidates, 0);
+  assert.equal(r.noWebsiteHostSkipped, 1);
+});
+
+
+// ─── the unattended-spend gate ───────────────────────────────────────────────
+
+test("backfillSpendEnabled() is OFF by default, OFF without a key, ON only for the exact string \"true\"", () => {
+  const prev = { key: process.env.APOLLO_API_KEY, flag: process.env.APOLLO_BACKFILL_ENABLED };
+  try {
+    delete process.env.APOLLO_BACKFILL_ENABLED;
+    process.env.APOLLO_API_KEY = "k";
+    assert.equal(backfillSpendEnabled(), false, "unset → off");
+    process.env.APOLLO_BACKFILL_ENABLED = "1";
+    assert.equal(backfillSpendEnabled(), false, "\"1\" is not \"true\"");
+    process.env.APOLLO_BACKFILL_ENABLED = "TRUE";
+    assert.equal(backfillSpendEnabled(), false, "case matters — the reveal flag is read the same way");
+    process.env.APOLLO_BACKFILL_ENABLED = "true";
+    assert.equal(backfillSpendEnabled(), true);
+    delete process.env.APOLLO_API_KEY;
+    assert.equal(backfillSpendEnabled(), false, "no key → off, whatever the flag says");
+  } finally {
+    if (prev.key === undefined) delete process.env.APOLLO_API_KEY; else process.env.APOLLO_API_KEY = prev.key;
+    if (prev.flag === undefined) delete process.env.APOLLO_BACKFILL_ENABLED; else process.env.APOLLO_BACKFILL_ENABLED = prev.flag;
+  }
+});
+
+test("flag OFF: Phase 0 still resolves, Phase 1 makes NO reveal call and reads NO budget — reported as gated, not failed", async () => {
+  const { prisma, calls } = fakePrisma(
+    [rt("a"), rt("b")],
+    [],
+    { dealers: [{ id: "d1", dealershipName: "Metro Ford" }], prospects: [{ id: "p1", name: "Round Rock Toyota" }] },
+  );
+  const resolveOrder: Array<{ kind: string; id: string }> = [];
+  const reconciled: string[] = [];
+  const revealOrder: string[] = [];
+  let remainingCalls = 0;
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true, // the paid tier IS on — as it is in production
+      spendEnabled: () => false, // …but unattended spend is not armed
+      reveal: revealFake(new Set(["a", "b"]), revealOrder),
+      remaining: (async () => { remainingCalls++; return 9999; }) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+      resolveRooftop: resolveRooftopFake(resolveOrder),
+      reconcile: reconcileFake(reconciled),
+    },
+  );
+
+  // Phase 0 ran to completion.
+  assert.equal(r.enabled, true, "the paid tier being on is still reported truthfully");
+  assert.deepEqual(resolveOrder.map((o) => o.id), ["d1", "p1"], "free rooftop resolution is not gated");
+  assert.equal(r.dealersResolved, 1);
+  assert.equal(r.prospectsResolved, 1);
+  assert.deepEqual(reconciled, ["p1"]);
+
+  // Phase 1 never started.
+  assert.equal(r.phase1Gated, true);
+  assert.equal(revealOrder.length, 0, "no reveal may be attempted");
+  assert.equal(remainingCalls, 0, "not even the budget is read — nothing can be drawn");
+  assert.equal(calls.findMany, 0, "the gap rooftops are never scanned");
+  assert.equal(calls.count, 0);
+  assert.equal(r.candidates, 0);
+  assert.equal(r.attempted, 0);
+  assert.equal(r.stoppedForBudget, false, "gated is not a budget stop");
+});
+
+test("flag ON: Phase 1 runs exactly as before, and the result says it was not gated", async () => {
+  const { prisma } = fakePrisma([rt("a")]);
+  const revealOrder: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => true,
+      spendEnabled: () => true,
+      reveal: revealFake(new Set(["a"]), revealOrder),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+  assert.equal(r.phase1Gated, false);
+  assert.deepEqual(revealOrder, ["a"]);
+  assert.equal(r.revealed, 1);
+});
+
+test("the paid tier OFF still short-circuits everything, before the spend gate is even consulted", async () => {
+  const { prisma, calls } = fakePrisma([rt("a")]);
+  let spendChecks = 0;
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma,
+      now: NOW,
+      enabled: () => false,
+      spendEnabled: () => { spendChecks++; return true; },
+      reveal: revealFake(new Set(), []),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+  assert.equal(r.enabled, false);
+  assert.equal(r.phase1Gated, false, "not gated — the whole job was off");
+  assert.equal(spendChecks, 0, "the first gate decides alone");
+  assert.equal(calls.dealerFindMany, 0, "Phase 0 does not run when the tier is off (unchanged)");
+});
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)

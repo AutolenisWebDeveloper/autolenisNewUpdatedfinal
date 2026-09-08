@@ -8,6 +8,10 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { getContactCoverage } from "@/lib/services/dealer-recruitment/contact-coverage.service";
+<<<<<<< HEAD
+import { getApolloPipelineCounters } from "@/lib/services/dealer-recruitment/apollo-orchestration.service";
+=======
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +20,17 @@ export async function GET(request: NextRequest) {
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   try {
+<<<<<<< HEAD
+    // Both are pure counts. Read together so the HTTP readout carries the same
+    // figures the coverage page shows.
+    const [coverage, apolloPipeline] = await Promise.all([
+      getContactCoverage(),
+      getApolloPipelineCounters(),
+    ]);
+    return adminSuccess({ ...coverage, apolloPipeline });
+=======
     return adminSuccess(await getContactCoverage());
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   } catch (err) {
     return adminError(
       "FETCH_FAILED",

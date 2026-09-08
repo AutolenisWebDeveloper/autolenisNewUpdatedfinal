@@ -267,7 +267,14 @@ export async function POST(request: NextRequest, { params }: Props) {
       reason,
       metadata: { stageId, dealId: activeDeal?.id ?? null },
     },
+<<<<<<< HEAD
+  });
+  // NOT best-effort — see the note in journey/complete-all. With stageId "pickup"
+  // this route performs the same Pickup COMPLETED + Deal COMPLETED write, so the
+  // same rule applies: no unrecorded AutoLenis-actored release.
+=======
   }).catch(() => {});
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 
   return adminSuccess({ stageId, action, completed: true });
   } catch (err) {

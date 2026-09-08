@@ -1,5 +1,29 @@
 // Unit tests for the Program 2 lifecycle producer activation-control router.
 //
+<<<<<<< HEAD
+// PHASE 2 REWRITE — the rule changed, so the assertions did. §8.2 "QStash
+// neutralisation (no replacement vendor)" makes every lifecycle workload
+// internal-by-default (`flag: null`); the flag is no longer read for any of them.
+// §13-D17 is the acknowledgement pattern for exactly this: a test that encodes a
+// rule the spec replaces is REWRITTEN in the phase that changes the rule, never
+// weakened, and the rewrite is called out in that phase's report.
+//
+// What still holds, and is still pinned here:
+//   • never BOTH dispatch and enqueue on one call (no dual authority);
+//   • form_submitted without a buyerId cannot use the internal path — there is no
+//     entity to key on, so it remains a LEGACY_PATH_WRITE-counted producer;
+//   • the function never throws into the caller, and does NOT fall back to QStash
+//     after an internal-enqueue error (which could double-send).
+//
+// What is inverted:
+//   • flag OFF used to mean "dispatch to QStash". There is no OFF any more — the
+//     vendor is decommissioned (§13-D23), `dispatch` throws into a dead endpoint,
+//     the error is swallowed into `jobs_dead_letter`, and the drain terminalises
+//     any `qstash:%` event as "TERMINAL — no internal owner". A flag-store hiccup
+//     used to route a buyer's touch into that. Delivery must not hinge on a DB row
+//     nobody set.
+//
+=======
 // Pins the single-authority-by-construction contract:
 //   • flag OFF (default) → the EXISTING QStash dispatch is called with the exact
 //     path/body/delay the site used before (behaviour-neutral deploy);
@@ -12,6 +36,7 @@
 //   • the function never throws into the caller, and does NOT fall back to QStash
 //     after an internal-enqueue error (which could double-send).
 //
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
 //     "lib/services/crm/__tests__/lifecycle-scheduler.test.ts"
@@ -113,7 +138,11 @@ test("deposit_reminder with the flag OFF still goes INTERNAL — QStash is never
   assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
 });
 
+<<<<<<< HEAD
+test("auction_active enqueues INTERNALLY, whatever the flag store says", async () => {
+=======
 test("auction_active OFF → QStash dispatch, immediate", async () => {
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "auction_active",
@@ -122,6 +151,16 @@ test("auction_active OFF → QStash dispatch, immediate", async () => {
     firstName: "there",
     email: "b@x.com",
   });
+<<<<<<< HEAD
+  assert.deepEqual(ctrl.dispatches, [], "nothing may reach the decommissioned vendor");
+  assert.equal(ctrl.enqueues.length, 1);
+  assert.equal(ctrl.enqueues[0].sequence, "auction_active");
+  assert.equal(ctrl.enqueues[0].entityId, "b1");
+  assert.equal(ctrl.enqueues[0].baseKey, "auction:a1");
+});
+
+test("dealer_invited enqueues internally, keyed on the dealer and the auction", async () => {
+=======
   assert.equal(ctrl.dispatches.length, 1);
   assert.equal(ctrl.dispatches[0].path, "/api/jobs/auction-active");
   assert.equal(ctrl.dispatches[0].delaySeconds, 0);
@@ -134,6 +173,7 @@ test("auction_active OFF → QStash dispatch, immediate", async () => {
 });
 
 test("dealer_invited OFF → QStash dispatch with expiresAt passthrough", async () => {
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "dealer_invited",
@@ -143,6 +183,20 @@ test("dealer_invited OFF → QStash dispatch with expiresAt passthrough", async 
     email: "d@x.com",
     expiresAt: "2026-01-01T00:00:00.000Z",
   });
+<<<<<<< HEAD
+  assert.deepEqual(ctrl.dispatches, []);
+  assert.equal(ctrl.enqueues.length, 1);
+  assert.equal(ctrl.enqueues[0].sequence, "dealer_invited");
+  assert.equal(ctrl.enqueues[0].entityId, "d1");
+  assert.equal(ctrl.enqueues[0].baseKey, "dealer-invited:a1:d1");
+  // BEHAVIOUR DELTA, declared rather than assumed neutral: the internal
+  // `dealer_invited` does NOT chain a bid reminder. The endsAt-driven idempotent
+  // `cron/dealer-invitation-reminder` owns that chase, so QStash's
+  // `dealer-bid-reminder` is retired, not ported (§8.2 Phase 2 AS BUILT).
+});
+
+test("deal_complete enqueues internally, keyed on the deal", async () => {
+=======
   assert.equal(ctrl.dispatches.length, 1);
   assert.deepEqual(ctrl.dispatches[0].body, {
     dealerId: "d1",
@@ -154,6 +208,7 @@ test("dealer_invited OFF → QStash dispatch with expiresAt passthrough", async 
 });
 
 test("deal_complete OFF → QStash dispatch with dealId", async () => {
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "deal_complete",
@@ -162,8 +217,15 @@ test("deal_complete OFF → QStash dispatch with dealId", async () => {
     firstName: "Sam",
     email: "b@x.com",
   });
+<<<<<<< HEAD
+  assert.deepEqual(ctrl.dispatches, []);
+  assert.equal(ctrl.enqueues.length, 1);
+  assert.equal(ctrl.enqueues[0].sequence, "deal_complete");
+  assert.equal(ctrl.enqueues[0].baseKey, "deal-complete:deal1");
+=======
   assert.equal(ctrl.dispatches.length, 1);
   assert.deepEqual(ctrl.dispatches[0].body, { buyerId: "b1", firstName: "Sam", email: "b@x.com", dealId: "deal1" });
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 // ── flag ON → internal enqueue, correct mapping ─────────────────────────────
@@ -276,9 +338,19 @@ test("form_submitted ON but NO buyerId → stays on QStash (cannot key the inter
   assert.equal(ctrl.dispatches[0].path, "/api/jobs/form-submitted");
 });
 
+<<<<<<< HEAD
+test("a flag-store OUTAGE cannot route a touch into the dead vendor", async () => {
+  // This is the reason the flags were flipped. `internalEnabled` fails SAFE to
+  // QStash by design — a sound rule while QStash was the authority, and a silent
+  // drop once it was decommissioned. The flag is no longer consulted, so a
+  // flag-store outage is not a routing decision at all.
+  ctrl.flagThrows = true;
+  ctrl.enabled[MOCK_FLAGS.LIFECYCLE_INTERNAL_AUCTION] = true;
+=======
 test("flag-store error fails SAFE to QStash (current authority)", async () => {
   ctrl.flagThrows = true;
   ctrl.enabled[MOCK_FLAGS.LIFECYCLE_INTERNAL_AUCTION] = true; // would be ON, but read throws
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "auction_active",
@@ -287,8 +359,13 @@ test("flag-store error fails SAFE to QStash (current authority)", async () => {
     firstName: "there",
     email: "b@x.com",
   });
+<<<<<<< HEAD
+  assert.equal(ctrl.enqueues.length, 1, "the touch is still delivered");
+  assert.deepEqual(ctrl.dispatches, [], "and never to a vendor that no longer answers");
+=======
   assert.equal(ctrl.enqueues.length, 0);
   assert.equal(ctrl.dispatches.length, 1);
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 test("SINGLE AUTHORITY: exactly one of {dispatch, enqueue} fires per call (ON)", async () => {

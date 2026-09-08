@@ -67,6 +67,31 @@ test("/api/finder never links its anonymous conversation or scores to a buyer", 
   );
 });
 
+<<<<<<< HEAD
+test("the anonymous lead capture still exists — MOVED, not removed", () => {
+  // PHASE 2 CAPABILITY DISPOSITION: MOVED.
+  //
+  // /api/finder is a bodyless 410 (intake/D2 — a dead conversational finder with
+  // no UI caller, neutralised in Phase 2, deletion owner-gated). §5 rule 1 says
+  // every Lane 1 form posts to ONE handler, and the finder implemented its own
+  // capture that produced no lead and no request — anything it caught was
+  // invisible to the transaction.
+  //
+  // The capability it did have — anonymous conversational capture with lead
+  // scoring — is not lost. It lives on the live path: /api/concierge writes a
+  // BuyerOpportunity through the unified intake service, and the intake pipeline
+  // scores it and records the LeadScore row. This asserts it AT ITS NEW HOME, so
+  // "we moved it" stays a checkable claim rather than a note in a commit message.
+  const pipeline = source("lib/services/acquisition/intake-pipeline.service.ts");
+  assert.ok(/scoreLeadFromConversation/.test(pipeline), "lead scoring must remain, at its new home");
+  assert.ok(/leadScore\s*\.\s*create/.test(pipeline), "the LeadScore row must still be written");
+
+  // And the retired route must be inert: no body parsed, nothing written.
+  const finder = source(FINDER_ROUTE);
+  assert.ok(/status:\s*410/.test(finder), "/api/finder answers 410");
+  assert.ok(!/request\.json\(/.test(finder), "the retired route parses no body");
+  assert.ok(!/prisma\./.test(finder), "the retired route writes nothing");
+=======
 test("the anonymous lead capture itself still works", async () => {
   const src = source(FINDER_ROUTE);
 
@@ -76,6 +101,7 @@ test("the anonymous lead capture itself still works", async () => {
   assert.ok(/leadScore\s*\.\s*create/.test(src), "anonymous LeadScore capture must remain");
   assert.ok(/scoreLeadFromConversation/.test(src), "lead scoring must remain");
   assert.ok(/buyerId:\s*null/.test(src), "the LeadScore row stays explicitly unattributed");
+>>>>>>> 92c9fdf4 (Phase 1 (§13-D2): record that the cancel path does not exist, and carry the admin cancel action into Phase 2)
 });
 
 test("no other unauthenticated acquisition route selects a Buyer by phone", async () => {
