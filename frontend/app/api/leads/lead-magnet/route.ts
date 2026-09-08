@@ -106,6 +106,10 @@ export async function POST(req: Request) {
     await intakeBuyerRequest({
       source: "lp_campaign",
       campaign: `lead_magnet:${magnet.slug}`,
+      // The persisted string stays what it has always been. `lead-magnet-sequence`
+      // filters `source startsWith "lead_magnet:"` and reads the slug from
+      // segment 1; the composed `lp_campaign:lead_magnet:<slug>` matches neither.
+      sourceLabel: `lead_magnet:${magnet.slug}`,
       sessionId,
       leadOnly: true,
       firstName,

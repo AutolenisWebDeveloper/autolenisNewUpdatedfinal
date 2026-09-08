@@ -27,9 +27,10 @@ import {
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
-import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_2_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
+import { renderPrequalAdminReceipt } from "@/lib/services/comms/phase2-email-content";
 
 // ── Provider-failure observability ──────────────────────────────────────────
 // A MicroBilt failure and a risk-triggered compliance hold both land as
@@ -687,6 +688,10 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     } catch (logErr) {
       logger.error("[prequal] Failed to log adverse action compliance event:", logErr);
     }
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: buyer.id, prequalApplicationId: prequal.id });
   }
 
   // OFAC-silent buyer notice + ops alert when the decision needs manual
@@ -768,16 +773,19 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       to: process.env.ADMIN_NOTIFICATION_EMAIL ?? "",
       recipientId: null,
       idempotencyKey: `prequal_receipt:${prequal.id}`,
+      // RENDERED CONTENT, not a template id: `templateId` is looked up against
+      // `email_templates.id` (a UUID column), so a key there never renders.
       payload: {
         email: process.env.ADMIN_NOTIFICATION_EMAIL ?? "",
         type: "transactional",
-        templateId: PHASE_2_TEMPLATES.APPLICATION_SUBMITTED_ADMIN,
         idempotencyKey: `prequal_receipt:${prequal.id}`,
-        prequalApplicationId: prequal.id,
-        buyerId: buyer.id,
-        decision: finalDecision,
-        submittedAt: prequal.createdAt?.toISOString() ?? new Date().toISOString(),
-        adminUrl: `/admin/buyers/${buyer.id}`,
+        ...renderPrequalAdminReceipt({
+          prequalId: prequal.id,
+          buyerId: buyer.id,
+          decision: finalDecision,
+          submittedAt: prequal.createdAt?.toISOString() ?? new Date().toISOString(),
+          adminUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/admin/buyers/${buyer.id}`,
+        }),
       },
     });
   } catch (err) {

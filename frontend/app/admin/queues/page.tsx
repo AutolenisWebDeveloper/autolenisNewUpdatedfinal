@@ -41,6 +41,30 @@ const QUEUE_TYPE_MAP: Record<string, string> = {
 
 interface QueueItem { id: string; [key: string]: unknown }
 
+/**
+ * The §26 fields a `queue_items` row carries. Present only on the Transaction
+ * Exceptions tab; the eight derived tabs return domain rows and have none of them.
+ *
+ * They are rendered because the register was WRITTEN and not READ: an operator saw
+ * eight hex characters and a Resolve button, and the owner, the required action,
+ * the deadline and the return point — the whole reason the row exists — were
+ * stored and never shown.
+ */
+function exceptionFields(item: QueueItem) {
+  const str = (k: string) => (typeof item[k] === "string" ? (item[k] as string) : null);
+  const deadlineRaw = item.deadlineAt;
+  const deadline =
+    typeof deadlineRaw === "string" || deadlineRaw instanceof Date ? new Date(deadlineRaw as string) : null;
+  return {
+    code: str("exceptionCode"),
+    owner: str("ownerRole"),
+    action: str("requiredAction"),
+    returnPoint: str("returnPoint"),
+    status: str("status"),
+    deadline: deadline && !Number.isNaN(deadline.getTime()) ? deadline : null,
+  };
+}
+
 export default function AdminQueuesPage() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [resolving, setResolving] = useState<Record<string, boolean>>({});
@@ -176,21 +200,46 @@ export default function AdminQueuesPage() {
                     const key = `${queue.id}-${item.id}`;
                     const isResolved = resolved[key];
                     const isResolving = resolving[key];
+                    const ex = exceptionFields(item);
                     return (
                       <div key={item.id} data-testid={`queue-item-${queue.id}-${item.id}`}
-                        className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-xs">
-                        <span className="text-slate-600 font-mono truncate max-w-[140px]">{item.id.slice(-8)}</span>
-                        {isResolved ? (
-                          <span className="flex items-center gap-1 text-green-600 text-xs font-medium" data-testid={`queue-resolved-${key}`}>
-                            <CheckCircle2 size={12} /> Resolved
+                        className="bg-slate-50 rounded-lg px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-slate-600 font-mono truncate max-w-[140px]">
+                            {ex.code ?? item.id.slice(-8)}
                           </span>
-                        ) : (
-                          <Button size="sm" variant="secondary" disabled={isResolving}
-                            data-testid={`queue-resolve-${queue.id}-${item.id}`}
-                            onClick={() => resolve(queue.id, item.id)}
-                            className="h-6 text-xs px-2">
-                            {isResolving ? <Loader2 size={10} className="animate-spin" /> : "Resolve"}
-                          </Button>
+                          {isResolved ? (
+                            <span className="flex items-center gap-1 text-green-600 text-xs font-medium" data-testid={`queue-resolved-${key}`}>
+                              <CheckCircle2 size={12} /> Resolved
+                            </span>
+                          ) : (
+                            <Button size="sm" variant="secondary" disabled={isResolving}
+                              data-testid={`queue-resolve-${queue.id}-${item.id}`}
+                              onClick={() => resolve(queue.id, item.id)}
+                              className="h-6 text-xs px-2">
+                              {isResolving ? <Loader2 size={10} className="animate-spin" /> : "Resolve"}
+                            </Button>
+                          )}
+                        </div>
+                        {ex.action && (
+                          <p className="mt-1.5 text-slate-700 leading-snug" data-testid={`queue-action-${key}`}>
+                            {ex.action}
+                          </p>
+                        )}
+                        {(ex.owner || ex.deadline || ex.returnPoint) && (
+                          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                            {ex.owner && <span data-testid={`queue-owner-${key}`}>Owner: {ex.owner}</span>}
+                            {ex.deadline && (
+                              <span
+                                data-testid={`queue-deadline-${key}`}
+                                className={ex.deadline.getTime() < Date.now() ? "font-semibold text-red-600" : undefined}
+                              >
+                                Due {ex.deadline.toLocaleString()}
+                                {ex.deadline.getTime() < Date.now() ? " — OVERDUE" : ""}
+                              </span>
+                            )}
+                            {ex.returnPoint && <span>Returns to: {ex.returnPoint}</span>}
+                          </p>
                         )}
                       </div>
                     );

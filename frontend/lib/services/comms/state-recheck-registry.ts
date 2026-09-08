@@ -55,15 +55,29 @@ const REGISTRY = new Map<string, Registration>();
 /**
  * A recheck for a template whose trigger cannot become false. The reason is
  * mandatory and is the whole point of the helper: it is what a reviewer reads.
+ *
+ * The reason is CARRIED on the returned function rather than validated and thrown
+ * away, so `registerStateRecheck` records it whether or not the caller remembers
+ * to pass a third argument. It was only half-implemented before: six of eight
+ * registrations passed one, two did not, and the reason those two gave existed
+ * nowhere the registry could show it.
  */
 export function alwaysSend(reason: string): StateRecheckFn {
   if (!reason.trim()) throw new Error("alwaysSend() requires a reason");
-  return async () => ({ proceed: true });
+  const fn: StateRecheckFn = async () => ({ proceed: true });
+  (fn as StateRecheckFn & { alwaysSendReason?: string }).alwaysSendReason = reason;
+  return fn;
 }
 
 /** Register the recheck for one template key. Re-registration replaces. */
 export function registerStateRecheck(templateKey: string, fn: StateRecheckFn, alwaysSendReason?: string): void {
-  REGISTRY.set(templateKey, { fn, alwaysSendReason });
+  const carried = (fn as StateRecheckFn & { alwaysSendReason?: string }).alwaysSendReason;
+  REGISTRY.set(templateKey, { fn, alwaysSendReason: alwaysSendReason ?? carried });
+}
+
+/** The declared reason a template needs no live read, when it declared one. */
+export function alwaysSendReasonFor(templateKey: string): string | null {
+  return REGISTRY.get(templateKey)?.alwaysSendReason ?? null;
 }
 
 /** Is this template dispatchable? `enqueueTransactional` refuses when it is not. */
@@ -103,6 +117,14 @@ export const PHASE_2_TEMPLATES = {
   VERIFICATION_COMPLETED: "verification_completed",
   ONBOARDING_INCOMPLETE: "onboarding_incomplete",
   GUEST_CAPTURE_CLAIM: "guest_capture_claim",
+  /**
+   * A visitor submitted a Lane 1 form using an address that belongs to a
+   * REGISTERED account, without a session. Rule 16 attaches nothing; this is the
+   * link the surface tells them it sent. Distinct from GUEST_CAPTURE_CLAIM, whose
+   * recheck skips a buyer who is no longer a guest — which is every recipient of
+   * THIS message.
+   */
+  REGISTERED_CLAIM_PROMPT: "registered_claim_prompt",
   DRAFT_RECOVERY_1: "draft_recovery_1",
   DRAFT_RECOVERY_2: "draft_recovery_2",
   DRAFT_RECOVERY_3: "draft_recovery_3",
@@ -197,6 +219,13 @@ registerStateRecheck(PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED, alwaysSend("the v
 registerStateRecheck(PHASE_2_TEMPLATES.VERIFICATION_COMPLETED, alwaysSend("a completed verification cannot un-complete"), "sent on verification");
 registerStateRecheck(PHASE_2_TEMPLATES.ONBOARDING_INCOMPLETE, skipIfOnboardingComplete);
 registerStateRecheck(PHASE_2_TEMPLATES.GUEST_CAPTURE_CLAIM, skipIfAlreadyClaimed);
+registerStateRecheck(
+  PHASE_2_TEMPLATES.REGISTERED_CLAIM_PROMPT,
+  alwaysSend(
+    "the account existing is the REASON for this message, not a reason to withhold it; the visitor has already been told a link was sent"
+  ),
+  "rule-16 claim link"
+);
 registerStateRecheck(PHASE_2_TEMPLATES.DRAFT_RECOVERY_1, skipIfRequestNoLongerDraft);
 registerStateRecheck(PHASE_2_TEMPLATES.DRAFT_RECOVERY_2, skipIfRequestNoLongerDraft);
 registerStateRecheck(PHASE_2_TEMPLATES.DRAFT_RECOVERY_3, skipIfRequestNoLongerDraft);

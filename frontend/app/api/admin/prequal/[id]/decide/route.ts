@@ -27,7 +27,7 @@ import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
 } from "@/lib/services/email/resend.service";
-import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 
 // 90-day validity, matching the manual-override path so both admin decision
 // rails stamp the same expiry window (the record AND the email agree).
@@ -261,6 +261,10 @@ export async function POST(request: NextRequest, { params }: Props) {
     } catch (logErr) {
       logger.error("[admin/prequal/decide] failed to log adverse-action event:", logErr);
     }
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: existing.buyerId, prequalApplicationId: id });
   }
 
   return adminSuccess({

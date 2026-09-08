@@ -74,6 +74,14 @@ const schema = z.object({
   lastName:            z.string().min(1).max(50),
   email:               z.string().email(),
   phone:               z.string().min(7).max(20),
+  /**
+   * Rule 16 tier 2. The raw token from the emailed claim link, forwarded by the
+   * page as `?claim=`. Presenting it is how an unauthenticated caller proves they
+   * control the address; without it, an address that belongs to a registered
+   * account attaches to nothing.
+   */
+  claimToken: z.string().min(8).max(200).optional(),
+
   zip:                 z.string().regex(/^\d{5}$/, "ZIP must be 5 digits"),
   // city/state become optional so LP-form submissions (which only collect ZIP)
   // can pass. The full /request-vehicle form still supplies both.
@@ -192,6 +200,13 @@ const draftSchema = z.object({
   source_url: z.string().max(500).optional().nullable(),
   referrer: z.string().max(500).optional().nullable(),
   source: z.string().max(100).optional().nullable(),
+  /**
+   * Rule 16 tier 2. The raw token from the emailed claim link, forwarded by the
+   * page as `?claim=`. Presenting it is how an unauthenticated caller proves they
+   * control the address; without it, an address that belongs to a registered
+   * account attaches to nothing.
+   */
+  claimToken: z.string().min(8).max(200).optional(),
 });
 
 async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<NextResponse> {
@@ -209,6 +224,7 @@ async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<N
     source: "lp_campaign",
     campaign: d.source ?? "hero",
     draft: true,
+    claimToken: d.claimToken ?? null,
     firstName: d.firstName,
     lastName: d.lastName,
     email: d.email,
@@ -412,6 +428,9 @@ export async function POST(request: NextRequest) {
     state: data.state || null,
     entryType: "CUSTOM_REQUEST",
     appHost: request.headers.get("host"),
+    // Rule 16 tier 2: from the emailed claim link, never inferred from the body's
+    // email. It is what lets a registered address attach without a session.
+    claimToken: data.claimToken ?? null,
   };
 
   const { buyerOpportunityId, vehicleRequestId, requiresClaim, identityTier } =

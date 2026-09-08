@@ -44,6 +44,7 @@ import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { enqueueTransactional, cancelByKey } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_2_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
+import { renderDraftRecovery } from "@/lib/services/comms/phase2-email-content";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -51,10 +52,10 @@ const HOUR = 3_600_000;
 
 /** §6.4's four touches, with their delays. */
 export const DRAFT_RECOVERY_TOUCHES = [
-  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1, delayMs: 0, trigger: "draft_abandoned_recovery_1" },
-  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_2, delayMs: 1 * HOUR, trigger: "draft_abandoned_recovery_2" },
-  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_3, delayMs: 24 * HOUR, trigger: "draft_abandoned_recovery_3" },
-  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_4, delayMs: 72 * HOUR, trigger: "draft_abandoned_recovery_4" },
+  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1, index: 1, delayMs: 0, trigger: "draft_abandoned_recovery_1" },
+  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_2, index: 2, delayMs: 1 * HOUR, trigger: "draft_abandoned_recovery_2" },
+  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_3, index: 3, delayMs: 24 * HOUR, trigger: "draft_abandoned_recovery_3" },
+  { template: PHASE_2_TEMPLATES.DRAFT_RECOVERY_4, index: 4, delayMs: 72 * HOUR, trigger: "draft_abandoned_recovery_4" },
 ] as const;
 
 /** §6.4: "Mark the draft abandoned after 14 calendar days." */
@@ -85,6 +86,10 @@ export async function enqueueDraftRecovery(
 ): Promise<EnqueueDraftRecoveryResult> {
   const base = (input.from ?? new Date()).getTime();
   const cancelKey = draftRecoveryCancelKey(input.vehicleRequestId);
+  // The link back. `/request-vehicle` is the Lane 1 form; the request is found by
+  // the buyer's own session or by the resume token the lifecycle drain mints, so
+  // no identifier is put in this URL.
+  const resumeUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/request-vehicle`;
   let enqueued = 0;
 
   for (const touch of DRAFT_RECOVERY_TOUCHES) {
@@ -102,12 +107,17 @@ export async function enqueueDraftRecovery(
         idempotencyKey: `${touch.template}:${input.vehicleRequestId}`,
         cancelKey,
         runAt: new Date(base + touch.delayMs),
+        // RENDERED CONTENT, not a template id. `deliverEmail` resolves
+        // `templateId` against `email_templates.id`, a UUID column, so a template
+        // KEY there is a 22P02 on every attempt — four undeliverable touches and
+        // four Operations exceptions per capture. The key stays on the row, in
+        // `template_key`, where the recheck reads it.
         payload: {
           email: input.email,
           firstName: input.firstName ?? null,
           type: "transactional",
-          templateId: touch.template,
           idempotencyKey: `${touch.template}:${input.vehicleRequestId}`,
+          ...renderDraftRecovery(touch.index, { firstName: input.firstName ?? null, resumeUrl }),
         },
       },
       db

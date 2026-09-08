@@ -43,6 +43,7 @@
 
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { withSavepoint } from "@/lib/prisma-savepoint";
 import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
@@ -105,6 +106,48 @@ export interface EnqueueTransactionalInput {
   maxAttempts?: number;
 }
 
+
+/** `email_templates.id` is a UUID column; anything else makes the lookup a 22P02. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * An email row must carry content the drain can actually render.
+ *
+ * `deliverEmail` resolves `payload.templateId` through
+ * `TemplateService.getTemplate`, which filters `email_templates.id` — a UUID
+ * PRIMARY KEY. A template KEY there (`"draft_recovery_1"`) is not a lookup miss:
+ * PostgreSQL rejects the comparison with 22P02, the render throws, and the row
+ * retries five times and terminal-fails. The message is undeliverable and nothing
+ * says so until an Operations exception appears hours later.
+ *
+ * The key belongs in `template_key` on the ROW, where the state recheck and the
+ * §27 completeness assertion read it. The PAYLOAD carries the content. This
+ * refuses at enqueue, where the stack trace still names the producer.
+ */
+function assertRenderableEmail(input: EnqueueTransactionalInput): void {
+  if (input.channel !== "email") return;
+  const payload = input.payload as { templateId?: unknown; subject?: unknown; html?: unknown };
+
+  if (payload.templateId !== undefined && payload.templateId !== null) {
+    if (typeof payload.templateId !== "string" || !UUID_RE.test(payload.templateId)) {
+      throw new Error(
+        `enqueueTransactional("${input.templateKey}"): payload.templateId must be an email_templates UUID, got ` +
+          `"${String(payload.templateId)}". The template KEY goes in templateKey (the row column); the payload ` +
+          `carries either a real template UUID or a rendered subject + html.`
+      );
+    }
+    return;
+  }
+
+  if (!payload.subject || !payload.html) {
+    throw new Error(
+      `enqueueTransactional("${input.templateKey}"): an email payload needs a rendered subject and html ` +
+        `(or an email_templates UUID in templateId). Without either, deliverEmail throws EMAIL_PAYLOAD_INCOMPLETE ` +
+        `on every attempt and the row terminal-fails.`
+    );
+  }
+}
+
 export interface EnqueueResult {
   enqueued: boolean;
   id: string | null;
@@ -129,12 +172,17 @@ export async function enqueueTransactional(input: EnqueueTransactionalInput, db:
   if ((input.channel === "email" || input.channel === "sms") && !input.to) {
     throw new Error(`enqueueTransactional("${input.templateKey}"): channel ${input.channel} requires a recipient address.`);
   }
+  assertRenderableEmail(input);
 
   const dedupKey = input.idempotencyKey ?? `${input.templateKey}:${input.recipientId ?? input.to ?? "unknown"}`;
   const now = new Date();
 
   try {
-    const row = await db.commsOutbox.create({
+    // Savepointed: enqueueTransactional is designed to be called inside the
+    // caller's transaction, and its dedup key makes P2002 the EXPECTED outcome of
+    // a duplicate emit. Without a savepoint that expected conflict would abort the
+    // caller's whole transaction (lib/db/savepoint.ts).
+    const row = await withSavepoint(db, () => db.commsOutbox.create({
       data: {
         id: randomUUID(),
         channel: input.channel,
@@ -157,7 +205,7 @@ export async function enqueueTransactional(input: EnqueueTransactionalInput, db:
         updatedAt: now,
       },
       select: { id: true },
-    });
+    }));
     return { enqueued: true, id: row.id, dedupKey };
   } catch (err) {
     // ON CONFLICT (dedup_key) DO NOTHING, expressed the way Prisma can: the unique
@@ -334,26 +382,41 @@ export async function dispatchTransactionalRow(
     });
     return outcome === "SUCCESS" ? "SENT" : "GATED";
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const maxAttempts = row.max_attempts ?? DEFAULT_MAX_ATTEMPTS;
-    if (attempt >= maxAttempts) {
-      await terminalFail(db, row, "FAILED", message, attempt);
-      return "FAILED";
-    }
-    const backoff = BACKOFF_MINUTES[Math.min(attempt - 1, BACKOFF_MINUTES.length - 1)]!;
-    await db.commsOutbox.update({
-      where: { id: row.id },
-      data: {
-        status: "pending",
-        lastError: message,
-        attempts: attempt,
-        nextAttemptAt: new Date(Date.now() + backoff * 60_000),
-        updatedAt: new Date(),
-      },
-    });
-    logger.warn(`[comms-dispatcher] ${row.template_key} attempt ${attempt}/${maxAttempts} failed, retrying in ${backoff}m`, message);
-    return "RETRY";
+    return recordFailedAttempt(db, row, err);
   }
+}
+
+/**
+ * Book one failed attempt: back off, or terminal-fail once the budget is spent.
+ *
+ * Extracted so the BATCH-level catch can use it too. It could not before, and that
+ * was a hole with no bottom: `claimDueTransactional` does not increment `attempts`,
+ * so a row whose recheck or bookkeeping write threw — outside the send's own try —
+ * stayed `sending` with `attempts` unchanged, was reclaimed by the stale-claim path
+ * ten minutes later, and threw again. Forever. No retry budget was ever spent, so
+ * §27's terminal-failure Operations alert never fired for that entire failure class.
+ */
+async function recordFailedAttempt(db: Db, row: ClaimedRow, err: unknown): Promise<DispatchResult> {
+  const message = err instanceof Error ? err.message : String(err);
+  const attempt = row.attempts + 1;
+  const maxAttempts = row.max_attempts ?? DEFAULT_MAX_ATTEMPTS;
+  if (attempt >= maxAttempts) {
+    await terminalFail(db, row, "FAILED", message, attempt);
+    return "FAILED";
+  }
+  const backoff = BACKOFF_MINUTES[Math.min(attempt - 1, BACKOFF_MINUTES.length - 1)]!;
+  await db.commsOutbox.update({
+    where: { id: row.id },
+    data: {
+      status: "pending",
+      lastError: message,
+      attempts: attempt,
+      nextAttemptAt: new Date(Date.now() + backoff * 60_000),
+      updatedAt: new Date(),
+    },
+  });
+  logger.warn(`[comms-dispatcher] ${row.template_key} attempt ${attempt}/${maxAttempts} failed, retrying in ${backoff}m`, message);
+  return "RETRY";
 }
 
 /**
@@ -441,10 +504,21 @@ export async function drainTransactionalOutbox(batchSize = 100): Promise<Transac
     try {
       result = await dispatchTransactionalRow(row, supabase);
     } catch (err) {
-      // One row must not abort the batch. The row stays claimed and is reclaimed
-      // by the stale-claim path on a later tick, so nothing is lost.
+      // One row must not abort the batch — but it must still SPEND an attempt.
+      // Leaving it claimed with attempts unchanged made it immortal: reclaimed,
+      // rethrown, reclaimed, with the retry budget never consumed and the
+      // terminal-failure alert never reached.
       logger.error(`[comms-dispatcher] unexpected error on row ${row.id}`, err);
       summary.errored++;
+      try {
+        const booked = await recordFailedAttempt(prisma, row, err);
+        if (booked === "FAILED") summary.failed++;
+        else summary.retried++;
+      } catch (bookErr) {
+        // The database is the thing that is failing. The stale-claim path is the
+        // remaining safety net and it is still in place.
+        logger.error(`[comms-dispatcher] could not book the failed attempt for ${row.id}`, bookErr);
+      }
       continue;
     }
     if (result === "SENT") summary.sent++;

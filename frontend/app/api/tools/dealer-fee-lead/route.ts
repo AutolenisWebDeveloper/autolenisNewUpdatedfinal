@@ -112,6 +112,10 @@ export async function POST(req: Request) {
     const { buyerOpportunityId } = await intakeBuyerRequest({
       source: "lp_campaign",
       campaign: "tool:dealer_fee_calculator",
+      // Same reason as the lead-magnet route: these rows have always been stored
+      // as `tool:dealer_fee_calculator`, and routing through the unified handler
+      // must not quietly rewrite an existing convention in the data.
+      sourceLabel: "tool:dealer_fee_calculator",
       sessionId,
       leadOnly: true,
       firstName,

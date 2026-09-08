@@ -112,22 +112,38 @@ test.describe.serial("journey 1 — homepage capture, then claim", () => {
     expect(touches.every((t) => t.cancelledAt === null)).toBe(true);
   });
 
-  test("a claim token binds the completion to the SAME buyer and the SAME request", async ({ request }, testInfo) => {
+  test("a claim token binds the completion to the SAME buyer — the email identifies nothing", async ({ request }, testInfo) => {
     test.skip(!HAS_DB, "no autolenis_e2e database");
     const email = `j1-${ns(testInfo.project.name)}@example.invalid`;
+    // A DIFFERENT address is offered in the body on purpose. If the token were
+    // ignored and the email used instead, tier 3 would create a second guest
+    // buyer for this address — so the assertions below cannot pass vacuously.
+    const decoyEmail = `j1-decoy-${ns(testInfo.project.name)}@example.invalid`;
 
     const before = await countsFor(email);
     expect(before.buyerId, "journey 1's capture must have run first").not.toBeNull();
     const requestIdBefore = before.requests[0]!.id;
 
-    // The claim link the buyer is emailed carries a RAW token; only its hash is
-    // stored. Minting it here is exactly what the recovery email does.
-    const { issueResumeToken } = await import("../../lib/services/buyer/request-resume-token.service");
-    const { rawToken } = await issueResumeToken({ buyerId: before.buyerId!, vehicleRequestId: requestIdBefore });
+    // The emailed link carries a RAW token; only its SHA-256 is stored. Minting
+    // it here is what the recovery email does (request-resume-token.service.ts).
+    // The service is not imported: `tsconfig.json` excludes `tests/e2e/**`, so
+    // Playwright does not resolve the `@/` alias inside app modules. A hash that
+    // disagreed with the service would leave the token unresolvable and FAIL
+    // these assertions rather than quietly passing them.
+    const { randomBytes, createHash } = await import("node:crypto");
+    const rawToken = randomBytes(32).toString("hex");
+    await prisma.buyerRequestClaimToken.create({
+      data: {
+        tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+        buyerId: before.buyerId!,
+        vehicleRequestId: requestIdBefore,
+        expiresAt: new Date(Date.now() + 5 * 24 * 3600 * 1000),
+      },
+    });
 
     const res = await (request as APIRequestContext).post("/api/public/request-vehicle/complete", {
       data: {
-        email,
+        email: decoyEmail,
         claimToken: rawToken,
         make: "Toyota",
         model: "4Runner",
@@ -138,9 +154,12 @@ test.describe.serial("journey 1 — homepage capture, then claim", () => {
     expect(res.status(), await res.text()).toBe(200);
 
     const after = await countsFor(email);
-    expect(after.buyerId, "rule 16 tier 2: the token names the buyer — no second buyer is created").toBe(before.buyerId);
+    expect(after.buyerId, "rule 16 tier 2: the token names the buyer").toBe(before.buyerId);
     expect(after.requests.length, "the open request is UPDATED, never duplicated").toBe(1);
     expect(after.requests[0]!.id, "and it is the same row").toBe(requestIdBefore);
+
+    const decoy = await countsFor(decoyEmail);
+    expect(decoy.user, "the address in the body identified nobody and created nobody").toBeNull();
 
     // The four recovery touches must stop once the draft advances.
     const touches = await prisma.commsOutbox.findMany({

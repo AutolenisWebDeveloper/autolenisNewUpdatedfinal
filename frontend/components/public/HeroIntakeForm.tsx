@@ -32,7 +32,7 @@ type Status =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "captured" }
-  | { kind: "claim-sent" }
+  | { kind: "claim-sent"; message: string | null }
   | { kind: "error"; message: string };
 
 export default function HeroIntakeForm() {
@@ -71,7 +71,13 @@ export default function HeroIntakeForm() {
       // A non-2xx is a failure and is shown as one. Parsing is guarded because an
       // error page is not always JSON.
       const body = (await res.json().catch(() => null)) as
-        | { success?: boolean; requiresClaim?: boolean; error?: { message?: string } }
+        | {
+            success?: boolean;
+            requiresClaim?: boolean;
+            vehicleRequestId?: string | null;
+            message?: string | null;
+            error?: { message?: string };
+          }
         | null;
 
       if (!res.ok || !body?.success) {
@@ -82,7 +88,19 @@ export default function HeroIntakeForm() {
         return;
       }
 
-      setStatus({ kind: body.requiresClaim ? "claim-sent" : "captured" });
+      // `requiresClaim` alone is NOT the claim case. The API sets it for ordinary
+      // guest captures too — the same emailed link claims them — and those DID
+      // create a request. The case that must not be dressed up as "your request is
+      // in" is the one where NOTHING was attached, which the API reports as
+      // `requiresClaim` with a null `vehicleRequestId` (and a `message` saying so).
+      // Branching on the flag alone told every first-time visitor that their
+      // address already had an AutoLenis account.
+      const nothingAttached = Boolean(body.requiresClaim) && !body.vehicleRequestId;
+      setStatus(
+        nothingAttached
+          ? { kind: "claim-sent", message: body.message ?? null }
+          : { kind: "captured" },
+      );
     } catch {
       setStatus({ kind: "error", message: "We could not reach the server. Check your connection and try again." });
     }
@@ -109,7 +127,8 @@ export default function HeroIntakeForm() {
             <p className="mt-1 text-sm text-[#4B5563]">
               {status.kind === "captured"
                 ? "We sent you a link to finish your request. Nothing is charged until you review offers."
-                : "That address already has an AutoLenis account. For your security we sent a link there rather than adding this request to it."}
+                : (status.message ??
+                  "That address already has an AutoLenis account. For your security we sent a link there rather than adding this request to it.")}
             </p>
           </div>
         </div>

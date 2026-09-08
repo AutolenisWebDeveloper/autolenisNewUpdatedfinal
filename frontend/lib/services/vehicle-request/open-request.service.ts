@@ -39,6 +39,7 @@
 // Run: pnpm test:vehicle-request
 
 import { prisma } from "@/lib/prisma";
+import { withSavepoint } from "@/lib/prisma-savepoint";
 import type { Prisma, VehicleRequest, VehicleRequestStatus } from "@prisma/client";
 import { logger } from "@/lib/logger";
 
@@ -87,6 +88,15 @@ export interface AttachResult {
   outcome: AttachOutcome;
   /** Fields this submission actually changed. Empty on a no-op merge. */
   updatedFields: string[];
+  /**
+   * True when this submission moved an existing DRAFT to SUBMITTED.
+   *
+   * The caller needs to know because §6.4's recovery sequence has to stop the
+   * moment the request advances — the send-time recheck alone would keep the four
+   * rows claimable, and a request that is no longer a draft must not still be
+   * chased as one.
+   */
+  promotedFromDraft: boolean;
 }
 
 /** Fields a later submission may fill in or improve on an existing open request. */
@@ -180,14 +190,20 @@ export interface AttachInput {
 export async function attachOrCreateOpenRequest(input: AttachInput, db: Db = prisma): Promise<AttachResult> {
   const existing = await findOpenRequest(input.buyerId, db);
   if (existing) {
-    return mergeInto(existing, input.data, "ATTACHED", db);
+    return mergeInto(existing, input.data, "ATTACHED", input.createStatus, db);
   }
 
   try {
-    const created = await db.vehicleRequest.create({
-      data: { buyerId: input.buyerId, status: input.createStatus, ...input.data },
-    });
-    return { vehicleRequest: created, outcome: "CREATED", updatedFields: Object.keys(input.data) };
+    // The create is savepointed: a P2002 inside an interactive transaction aborts
+    // the WHOLE transaction, so the re-read below would throw and `$transaction`
+    // would still resolve — reporting success for a request that was rolled back.
+    // See lib/db/savepoint.ts; measured, not assumed.
+    const created = await withSavepoint(db, () =>
+      db.vehicleRequest.create({
+        data: { buyerId: input.buyerId, status: input.createStatus, ...input.data },
+      }),
+    );
+    return { vehicleRequest: created, outcome: "CREATED", updatedFields: Object.keys(input.data), promotedFromDraft: false };
   } catch (err) {
     if ((err as { code?: string } | null)?.code !== "P2002") throw err;
     // The partial unique index rejected this insert: a concurrent submission won.
@@ -202,7 +218,7 @@ export async function attachOrCreateOpenRequest(input: AttachInput, db: Db = pri
       buyerId: input.buyerId,
       vehicleRequestId: winner.id,
     });
-    return mergeInto(winner, input.data, "ATTACHED_AFTER_RACE", db);
+    return mergeInto(winner, input.data, "ATTACHED_AFTER_RACE", input.createStatus, db);
   }
 }
 
@@ -210,12 +226,30 @@ async function mergeInto(
   existing: VehicleRequest,
   incoming: MergeableRequestData,
   outcome: AttachOutcome,
+  createStatus: AttachInput["createStatus"],
   db: Db
 ): Promise<AttachResult> {
   const { data, fields } = computeMerge(existing, incoming);
+
+  // FORWARD ONLY, and only out of DRAFT.
+  //
+  // An existing open request keeps its own status — regressing OFFER_SENT to
+  // SUBMITTED because a buyer re-submitted a form would rewind a live auction.
+  // DRAFT is the one exception, and it is not a rewind: a buyer who captured a
+  // partial request and then submitted a complete one has finished the thing the
+  // draft stood for. Leaving it DRAFT was a defect with two visible halves — the
+  // §6.4 recovery sequence kept telling a buyer who had finished to finish, and
+  // `abandonStaleDrafts` would have stamped a completed request abandoned at 14
+  // days. Nothing else is promoted, and nothing is ever demoted.
+  const promotedFromDraft = existing.status === "DRAFT" && createStatus === "SUBMITTED";
+  if (promotedFromDraft) {
+    data.status = "SUBMITTED";
+    fields.push("status");
+  }
+
   if (fields.length === 0) {
-    return { vehicleRequest: existing, outcome, updatedFields: [] };
+    return { vehicleRequest: existing, outcome, updatedFields: [], promotedFromDraft: false };
   }
   const updated = await db.vehicleRequest.update({ where: { id: existing.id }, data });
-  return { vehicleRequest: updated, outcome, updatedFields: fields };
+  return { vehicleRequest: updated, outcome, updatedFields: fields, promotedFromDraft };
 }

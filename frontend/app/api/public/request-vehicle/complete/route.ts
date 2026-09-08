@@ -32,6 +32,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { resolveIdentity } from "@/lib/services/acquisition/intake-identity";
 import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
+import { cancelDraftRecovery } from "@/lib/services/acquisition/draft-recovery.service";
+import { consumeResumeToken } from "@/lib/services/buyer/request-resume-token.service";
 import { getAuthenticatedBuyer } from "@/lib/auth/session";
 import {
   sendVehicleRequestCompletedConfirmation,
@@ -223,6 +225,13 @@ export async function POST(request: NextRequest) {
         .filter(Boolean)
         .join("\n\n");
 
+      // FORWARD ONLY, and only out of DRAFT — the same rule
+      // `attachOrCreateOpenRequest` applies. Supplying the vehicle detail is what
+      // the draft was waiting for, so a DRAFT becomes SUBMITTED here; every other
+      // status is left exactly as it is, because a buyer filling in detail on a
+      // live request must never rewind it.
+      const promotedFromDraft = vehicleRequest.status === "DRAFT";
+
       await prisma.vehicleRequest.update({
         where: { id: vehicleRequest.id },
         data: {
@@ -230,9 +239,36 @@ export async function POST(request: NextRequest) {
           ...(model ? { modelPreference: model } : {}),
           ...(data.yearFrom ? { yearMin: data.yearFrom } : {}),
           ...(data.yearTo ? { yearMax: data.yearTo } : {}),
+          ...(promotedFromDraft ? { status: "SUBMITTED" as const } : {}),
           notes: mergedNotes,
         },
       });
+
+      // SINGLE USE. The token is emailed and can be forwarded; without this it
+      // authorises the same write for its full 5-day TTL, which turns a deep-link
+      // into a reusable write credential for someone else's request. It is
+      // consumed AFTER the write it authorised, so a failed write leaves it usable.
+      if (identity.tier === "CLAIM_TOKEN" && identity.claimTokenId) {
+        await consumeResumeToken(identity.claimTokenId).catch((err) =>
+          logger.error("[request-vehicle/complete] claim-token consume failed:", err),
+        );
+      }
+
+      // §6.4's second half: the request advanced, so the four recovery touches
+      // stop. Without this the buyer who just finished keeps being told to finish.
+      //
+      // A failure here is logged and does not fail the submission, because the
+      // promotion above has already made the send-time recheck refuse these
+      // templates (`skipIfRequestNoLongerDraft` reads the status, which is now
+      // SUBMITTED). The cancel is what keeps the outbox honest about pending work;
+      // the recheck is what keeps the wrong email from being sent. Losing the
+      // first leaves four rows that will never send — losing the buyer's
+      // successfully submitted detail because of it would be the worse trade.
+      if (promotedFromDraft) {
+        await cancelDraftRecovery(vehicleRequest.id, "draft completed by the buyer detail form").catch((err) =>
+          logger.error("[request-vehicle/complete] draft-recovery cancel failed:", err),
+        );
+      }
 
       // ── Mark the request as detail-complete (event-sourced flag) ───────────
       await prisma.vehicleRequestEvent.create({

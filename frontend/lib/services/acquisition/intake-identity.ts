@@ -39,6 +39,7 @@
 // Run: pnpm test:intake
 
 import { prisma } from "@/lib/prisma";
+import { withSavepoint } from "@/lib/prisma-savepoint";
 import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { normalizePhone } from "@/lib/utils/phone";
@@ -71,6 +72,20 @@ export interface IdentityResolution {
   buyerId: string | null;
   /** Set only for CLAIM_TOKEN — the request the token was minted for. */
   vehicleRequestId?: string | null;
+  /**
+   * Set only for CLAIM_TOKEN — the token row, so a caller that used the token to
+   * WRITE can consume it. The token is emailed and can be forwarded; leaving it
+   * live for its full TTL turns a deep-link into a reusable write credential for
+   * someone else's request.
+   */
+  claimTokenId?: string | null;
+  /**
+   * Set only for REGISTERED_REQUIRES_CLAIM — the buyer the claim link must be
+   * addressed to. NOTHING is attached to this buyer; the id exists so the surface
+   * can actually send the link it tells the visitor it sent, and never leaves the
+   * server.
+   */
+  claimTargetBuyerId?: string | null;
   /** True when the surface must email a claim link instead of attaching. */
   requiresClaim: boolean;
   /** Normalised email, when one was supplied. */
@@ -127,6 +142,7 @@ export async function resolveIdentity(input: ResolveIdentityInput, db: Db = pris
         tier: "CLAIM_TOKEN",
         buyerId: claimed.buyerId,
         vehicleRequestId: claimed.vehicleRequestId,
+        claimTokenId: claimed.tokenId,
         requiresClaim: false,
         email,
       };
@@ -150,7 +166,13 @@ export async function resolveIdentity(input: ResolveIdentityInput, db: Db = pris
     // UNAUTHENTICATED caller. Rule 16 does not let an assertion stand in for
     // verification, so nothing attaches here. The surface emails a claim link; the
     // click is tier 2.
-    return { tier: "REGISTERED_REQUIRES_CLAIM", buyerId: null, requiresClaim: true, email };
+    return {
+      tier: "REGISTERED_REQUIRES_CLAIM",
+      buyerId: null,
+      claimTargetBuyerId: user.buyer?.id ?? null,
+      requiresClaim: true,
+      email,
+    };
   }
 
   if (user?.buyer) {
@@ -170,6 +192,8 @@ export async function resolveIdentity(input: ResolveIdentityInput, db: Db = pris
 interface ClaimResolution {
   buyerId: string;
   vehicleRequestId: string | null;
+  /** The row id, so a caller that USED the token can consume it. */
+  tokenId: string;
 }
 
 /**
@@ -182,10 +206,10 @@ async function resolveClaimToken(rawToken: string, db: Db): Promise<ClaimResolut
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   const row = await db.buyerRequestClaimToken.findFirst({
     where: { tokenHash, consumedAt: null, expiresAt: { gt: new Date() } },
-    select: { buyerId: true, vehicleRequestId: true },
+    select: { id: true, buyerId: true, vehicleRequestId: true },
   });
   if (!row) return null;
-  return { buyerId: row.buyerId, vehicleRequestId: row.vehicleRequestId ?? null };
+  return { buyerId: row.buyerId, vehicleRequestId: row.vehicleRequestId ?? null, tokenId: row.id };
 }
 
 interface GuestCaptureResult {
@@ -211,11 +235,16 @@ async function createGuestCapture(
     userId = existingUser.id;
   } else {
     try {
+      // Savepointed: a P2002 inside an interactive transaction aborts the WHOLE
+      // transaction, so the re-read below would throw while `$transaction` still
+      // resolved — a capture reported as saved and rolled back (lib/db/savepoint.ts).
       userId = (
-        await db.user.create({
-          data: { supabaseId: `guest_${randomUUID()}`, email: input.email, role: "BUYER" },
-          select: { id: true },
-        })
+        await withSavepoint(db, () =>
+          db.user.create({
+            data: { supabaseId: `guest_${randomUUID()}`, email: input.email, role: "BUYER" },
+            select: { id: true },
+          }),
+        )
       ).id;
     } catch (err) {
       if ((err as { code?: string } | null)?.code !== "P2002") throw err;
@@ -237,17 +266,19 @@ async function createGuestCapture(
   if (existingBuyer) return { buyerId: existingBuyer.id, reusedExistingUser: true };
 
   try {
-    const buyer = await db.buyer.create({
-      data: {
-        userId,
-        firstName: input.firstName ?? "",
-        lastName: input.lastName ?? "",
-        phone: normalizePhone(input.phone ?? undefined) || null,
-        zip: input.zip ?? null,
-        isGuest: true,
-      },
-      select: { id: true },
-    });
+    const buyer = await withSavepoint(db, () =>
+      db.buyer.create({
+        data: {
+          userId,
+          firstName: input.firstName ?? "",
+          lastName: input.lastName ?? "",
+          phone: normalizePhone(input.phone ?? undefined) || null,
+          zip: input.zip ?? null,
+          isGuest: true,
+        },
+        select: { id: true },
+      }),
+    );
     return { buyerId: buyer.id, reusedExistingUser: Boolean(existingUser) };
   } catch (err) {
     if ((err as { code?: string } | null)?.code !== "P2002") throw err;
@@ -277,16 +308,23 @@ export async function flagPhoneCollision(buyerId: string, phone: string | null |
   });
   if (others.length === 0) return;
 
+  // The key identifies the SET of buyers, not the phone. It is durable and read by
+  // operators; a buyer's phone number does not belong in it, and the buyer ids are
+  // a stabler identifier for the same condition anyway (the phone can change).
+  const cohort = [buyerId, ...others.map((o) => o.id)].sort();
+
   try {
     await raiseException(
       {
-        // Not a lineage problem and not a payment problem: a duplicate-identity
-        // condition a human resolves. §7.2's remedy is a flag for an audited human
-        // merge, and no admin merge exists yet — so the exception IS the record.
-        code: "LINEAGE_ORPHAN",
+        // §7.2 (iv)'s own row. It used to raise LINEAGE_ORPHAN, which told the
+        // operator to re-parent a record — instructions for a different condition
+        // entirely — and inflated the outstanding-orphan count on the reparent route.
+        code: "POSSIBLE_DUPLICATE_BUYER",
         buyerId,
-        idempotencyKey: `POSSIBLE_DUPLICATE_BUYER:${normalized}:${[buyerId, ...others.map((o) => o.id)].sort().join("+")}`,
-        detail: `possible duplicate buyer — normalised phone ${normalized} is also held by ${others.map((o) => o.id).join(", ")}. Rule 16 forbids merging on a phone; review and merge only through an audited admin action.`,
+        idempotencyKey: `POSSIBLE_DUPLICATE_BUYER:${cohort.join("+")}`,
+        detail: `possible duplicate buyer — this buyer shares a normalised phone with ${others
+          .map((o) => o.id)
+          .join(", ")}. Rule 16 forbids merging on a phone; open both records and merge only through an audited admin action.`,
       },
       db
     );

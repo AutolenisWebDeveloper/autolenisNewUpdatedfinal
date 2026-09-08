@@ -71,7 +71,12 @@ export async function recordPlanElection(input: RecordPlanElectionInput, db: Db 
     orderBy: { effectiveAt: "desc" },
   });
 
-  if (latest && latest.plan === input.plan && latest.touchpoint === input.touchpoint) {
+  // Deduped on the PLAN alone, not on (plan, touchpoint). A buyer who elects
+  // PREMIUM at signup and then re-elects PREMIUM from the upgrade page has not
+  // changed plan, and writing a second row would make `planHistory` show a
+  // transition that never happened — which is the one thing this table exists to
+  // get right.
+  if (latest && latest.plan === input.plan) {
     return null;
   }
 

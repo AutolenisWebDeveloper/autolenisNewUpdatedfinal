@@ -40,6 +40,8 @@
 //     or not at all.
 
 import { logger } from "@/lib/logger";
+import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
+import { PHASE_2_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import type { Prisma, VehicleRequestEntryType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -65,6 +67,11 @@ export type IntakeSource =
 export interface UnifiedIntakeInput {
   source: IntakeSource;
   campaign?: string; // For lp_campaign, the campaign name
+  /**
+   * Overrides the persisted `source` string verbatim. Only for callers migrating
+   * onto this handler that have an existing stored convention other code reads.
+   */
+  sourceLabel?: string;
 
   // Buyer identification
   buyerId?: string; // If already resolved (dashboard flow)
@@ -264,7 +271,13 @@ export async function intakeBuyerRequest(
 ): Promise<UnifiedIntakeResult> {
   const attribution = normalizeAttribution(input as RawAttribution, input.appHost ?? null);
   const consent = consentColumns(input.consent);
-  const source = input.source + (input.campaign ? `:${input.campaign}` : "");
+  // `sourceLabel` wins when a caller has an EXISTING persisted convention to keep.
+  // The lead-magnet capture is the case: its rows have always read
+  // `lead_magnet:<slug>` and its nurture cron filters on exactly that prefix and
+  // parses the slug out of segment 1. Composing `lp_campaign:lead_magnet:<slug>`
+  // here would have matched nothing and resolved the wrong magnet — a silent
+  // regression in a sequence nobody would notice had stopped.
+  const source = input.sourceLabel ?? input.source + (input.campaign ? `:${input.campaign}` : "");
 
   // ONE TRANSACTION. This service used to make up to nine independent Prisma calls,
   // so "the BuyerOpportunity was created and the VehicleRequest failed" was a
@@ -427,6 +440,49 @@ async function promoteOpportunityInTx(
     logger.info("[unified-intake] registered address offered anonymously — capture held for claim", {
       opportunityId,
     });
+
+    // SEND THE LINK THE SURFACE SAYS IT SENT. Every email on this route is gated
+    // on a vehicleRequestId, and this branch deliberately produces none — so the
+    // response told the visitor "we sent a link to that email address" and nothing
+    // was ever sent. The token is minted in THIS transaction: the message and the
+    // held capture commit together or neither does.
+    if (identity.claimTargetBuyerId && identity.email) {
+      try {
+        const { issueResumeToken } = await import("@/lib/services/buyer/request-resume-token.service");
+        const { rawToken } = await issueResumeToken({ buyerId: identity.claimTargetBuyerId }, tx);
+        const { renderRegisteredClaimPrompt } = await import("@/lib/services/comms/phase2-email-content");
+        const claimUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/request-vehicle?claim=${encodeURIComponent(rawToken)}`;
+        await enqueueTransactional(
+          {
+            triggerEvent: "registered_address_offered_anonymously",
+            templateKey: PHASE_2_TEMPLATES.REGISTERED_CLAIM_PROMPT,
+            channel: "email",
+            recipientKind: "buyer",
+            recipientId: identity.claimTargetBuyerId,
+            to: identity.email,
+            // One live prompt per opportunity: a visitor who submits twice gets one
+            // link, and a link that has been used is consumed by the route.
+            idempotencyKey: `registered_claim_prompt:${opportunityId}`,
+            payload: {
+              email: identity.email,
+              type: "transactional",
+              idempotencyKey: `registered_claim_prompt:${opportunityId}`,
+              ...renderRegisteredClaimPrompt({ firstName: input.firstName ?? null, claimUrl }),
+            },
+          },
+          tx,
+        );
+      } catch (err) {
+        // The capture still stands, and the visitor was told to check their email.
+        // This is loud rather than silent precisely because it is the half that
+        // makes that statement true.
+        logger.error("[unified-intake] claim link could not be enqueued", {
+          opportunityId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return { vehicleRequestId: null, identityTier: identity.tier, requiresClaim: true, attachOutcome: null };
   }
 
@@ -496,6 +552,17 @@ async function promoteOpportunityInTx(
     tx,
   );
 
+  // §6.4's second half. A draft that has just been completed must stop being
+  // chased: `cancelDraftRecovery` cancels all four touches at once through their
+  // shared cancel key, inside THIS transaction, so the promotion and the
+  // cancellation commit together. The send-time recheck would also refuse to
+  // send, but it would leave four claimable rows behind and the outbox would go
+  // on reporting work that must never happen.
+  if (attached.promotedFromDraft) {
+    const { cancelDraftRecovery } = await import("@/lib/services/acquisition/draft-recovery.service");
+    await cancelDraftRecovery(attached.vehicleRequest.id, "draft completed by a full submission", tx);
+  }
+
   // Keep the two records consistent when the caller supplied no buyer id.
   if (!input.buyerId && !input.authenticatedBuyerId) {
     await tx.buyerOpportunity.update({ where: { id: opportunityId }, data: { buyerId } });
@@ -514,6 +581,7 @@ async function promoteOpportunityInTx(
     opportunityId,
     vehicleRequestId: attached.vehicleRequest.id,
     updatedFields: attached.updatedFields,
+    promotedFromDraft: attached.promotedFromDraft,
   });
 
   return {

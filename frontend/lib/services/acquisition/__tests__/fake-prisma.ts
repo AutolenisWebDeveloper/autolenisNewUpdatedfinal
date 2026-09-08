@@ -38,6 +38,7 @@ export interface FakeState {
   opportunities: Map<string, Row>;
   vehicleRequests: Map<string, Row>;
   claimTokens: Map<string, Row>;
+  commsOutbox: Map<string, Row>;
   queueItems: Map<string, Row>;
   queueKeys: Set<string>;
   seq: number;
@@ -98,6 +99,7 @@ export function makeFakePrisma(): FakeDb {
     opportunities: new Map(),
     vehicleRequests: new Map(),
     claimTokens: new Map(),
+    commsOutbox: new Map(),
     queueItems: new Map(),
     queueKeys: new Set(),
     seq: 0,
@@ -213,6 +215,39 @@ export function makeFakePrisma(): FakeDb {
     },
   };
 
+  // Enough of comms_outbox for the intake path: the §6.4 sequence is enqueued at
+  // capture and cancelled by its shared key when the draft is completed. Both are
+  // writes the intake transaction performs, so a fake without them would throw on
+  // the promotion path and hide it rather than prove it.
+  const commsOutboxModel = {
+    create: async ({ data }: { data: Row }) => {
+      if ([...state.commsOutbox.values()].some((r) => r.dedupKey === data.dedupKey)) {
+        throw p2002("comms_outbox.dedup_key");
+      }
+      const row = { id: id("outbox"), status: "pending", cancelledAt: null, ...data };
+      state.commsOutbox.set(row.id as string, row);
+      return { ...row };
+    },
+    findFirst: async ({ where }: { where: Row }) =>
+      [...state.commsOutbox.values()].find((r) => matches(r, where)) ?? null,
+    findMany: async ({ where }: { where: Row }) => [...state.commsOutbox.values()].filter((r) => matches(r, where)),
+    updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+      let count = 0;
+      for (const row of state.commsOutbox.values()) {
+        if (!matches(row, where)) continue;
+        Object.assign(row, data);
+        count++;
+      }
+      return { count };
+    },
+    update: async ({ where, data }: { where: Row; data: Row }) => {
+      const row = state.commsOutbox.get(where.id as string);
+      if (!row) throw new Error(`comms_outbox row ${String(where.id)} not found`);
+      Object.assign(row, data);
+      return { ...row };
+    },
+  };
+
   const queueItemModel = {
     create: async ({ data }: { data: Row }) => {
       const key = data.idempotencyKey as string | null;
@@ -234,6 +269,7 @@ export function makeFakePrisma(): FakeDb {
     vehicleRequest: vehicleRequestModel,
     buyerOpportunity: opportunityModel,
     buyerRequestClaimToken: claimTokenModel,
+    commsOutbox: commsOutboxModel,
     queueItem: queueItemModel,
   };
 
@@ -255,6 +291,7 @@ export function makeFakePrisma(): FakeDb {
       state.opportunities.clear();
       state.vehicleRequests.clear();
       state.claimTokens.clear();
+      state.commsOutbox.clear();
       state.queueItems.clear();
       state.queueKeys.clear();
       state.seq = 0;

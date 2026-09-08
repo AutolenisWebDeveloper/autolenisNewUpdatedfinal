@@ -101,18 +101,35 @@ async function fail(
 ): Promise<ApprovalVerdict> {
   const verdict: ApprovalVerdict = { ok: false, reason, message: MESSAGES[reason] };
 
-  // Only an EXPIRY is §26's "Approval expires mid-transaction". A buyer who never
-  // applied, or whose application is under review, is not a mid-transaction expiry
-  // and raising one would fill the queue with rows nobody can act on.
-  if (opts.raiseOnFailure && reason === "EXPIRED") {
+  // §26's "Approval expires mid-transaction" is the EXPIRED row, and it is raised
+  // wherever it is caught. The other two reasons depend on WHERE the gate is:
+  //
+  //   • at `payment`, a buyer who never applied or is still under review is the
+  //     ordinary case — they simply have not finished. Raising there would fill
+  //     the queue with rows nobody can act on, which is why it does not.
+  //   • at `offer_selection` and `contract_request` the buyer has already PAID and
+  //     an auction has already run. Arriving there with no approval at all is not
+  //     an ordinary case, it is a buyer stuck behind a gate with nothing they can
+  //     do about it — and before this, the 409 was the only trace: no queue row, no
+  //     alert, and an auction that closes unselected while everyone waits.
+  const postPaymentGate = gate === "offer_selection" || gate === "contract_request";
+  const raise = reason === "EXPIRED" || postPaymentGate;
+  if (opts.raiseOnFailure && raise) {
     try {
       await raiseException(
         {
+          // EXPIRED is §26's own row. The post-payment no-approval case is a
+          // manual prequalification condition on the same owner's desk, so it
+          // reuses that row rather than inventing a code the register does not
+          // carry; `detail` says which of the two it is.
           code: "PREQUAL_APPROVAL_EXPIRED",
           buyerId,
           vehicleRequestId: opts.vehicleRequestId ?? null,
           dealId: opts.dealId ?? null,
-          detail: `approval expired, caught at the ${gate} gate`,
+          detail:
+            reason === "EXPIRED"
+              ? `approval expired, caught at the ${gate} gate`
+              : `no usable approval (${reason}) at the ${gate} gate — this buyer has already paid and cannot proceed without one`,
         },
         db
       );

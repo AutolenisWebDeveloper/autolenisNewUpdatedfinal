@@ -156,7 +156,7 @@ test("enqueue writes the §27 columns that had no writer before this phase", asy
     to: "b@x.com",
     vehicleRequestId: "vr1",
     cancelKey: "seq:1",
-    payload: { email: "b@x.com" },
+    payload: { email: "b@x.com", subject: "S", html: "<p>H</p>" },
   });
   assert.equal(r.enqueued, true);
   const row = db.rows.get(r.id!)!;
@@ -180,7 +180,7 @@ test("a duplicate emit adds no row and does not resurrect a completed one", asyn
     recipientKind: "buyer" as const,
     recipientId: "b1",
     to: "b@x.com",
-    payload: {},
+    payload: { email: "b@x.com", subject: "S", html: "<p>H</p>" },
   };
   const a = await enqueueTransactional(input);
   const b = await enqueueTransactional(input);
@@ -202,7 +202,7 @@ test("the state recheck runs BEFORE the provider, and a `no` writes skipped", as
     recipientKind: "buyer",
     to: "b@x.com",
     vehicleRequestId: "vr1",
-    payload: {},
+    payload: { email: "b@x.com", subject: "S", html: "<p>H</p>" },
   });
 
   const result = await dispatchTransactionalRow(
@@ -211,7 +211,7 @@ test("the state recheck runs BEFORE the provider, and a `no` writes skipped", as
       channel: "email",
       attempts: 0,
       max_attempts: 5,
-      payload: {},
+      payload: { email: "b@x.com", subject: "S", html: "<p>H</p>" },
       template_key: PHASE_2_TEMPLATES.DRAFT_RECOVERY_2,
       trigger_event: "draft_abandoned_recovery_2",
       recipient_kind: "buyer",
@@ -321,7 +321,7 @@ test("cancelByKey stops every not-yet-sent row and never touches a sent one", as
       to: "b@x.com",
       vehicleRequestId: "vr1",
       cancelKey: "draft_recovery:vr1",
-      payload: {},
+      payload: { email: "b@x.com", subject: "S", html: "<p>H</p>" },
     });
   }
   // The first one already went out.
@@ -372,4 +372,93 @@ test("every Phase 2 template has a registered recheck", async () => {
   for (const key of Object.values(PHASE_2_TEMPLATES)) {
     assert.ok(hasStateRecheck(key), `${key} has no registered state recheck and cannot be enqueued`);
   }
+});
+
+// ── The renderable-email guard ──────────────────────────────────────────────
+//
+// `deliverEmail` resolves `payload.templateId` through
+// `TemplateService.getTemplate`, which filters `email_templates.id` — a UUID
+// PRIMARY KEY. A template KEY there is not a lookup miss: PostgreSQL rejects the
+// comparison with 22P02, the render throws, the row retries five times and
+// terminal-fails. Every §27 message was enqueued that way, so the whole rail was
+// undeliverable and the only symptom was an Operations exception hours later.
+//
+// The guard refuses at ENQUEUE, where the stack still names the producer.
+
+test("a template KEY in payload.templateId is refused at enqueue", async () => {
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  await assert.rejects(
+    () =>
+      enqueueTransactional({
+        triggerEvent: "t",
+        templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1,
+        channel: "email",
+        recipientKind: "buyer",
+        to: "buyer@example.invalid",
+        payload: { email: "buyer@example.invalid", templateId: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1 },
+      }),
+    /must be an email_templates UUID/,
+    "a template key is a 22P02 at send time, not a lookup miss",
+  );
+});
+
+test("an email payload with neither a template UUID nor rendered content is refused", async () => {
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  await assert.rejects(
+    () =>
+      enqueueTransactional({
+        triggerEvent: "t",
+        templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_2,
+        channel: "email",
+        recipientKind: "buyer",
+        to: "buyer@example.invalid",
+        payload: { email: "buyer@example.invalid" },
+      }),
+    /needs a rendered subject and html/,
+    "deliverEmail throws EMAIL_PAYLOAD_INCOMPLETE on every attempt otherwise",
+  );
+});
+
+test("rendered subject + html enqueues, and so does a real template UUID", async () => {
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+
+  const rendered = await enqueueTransactional({
+    triggerEvent: "t",
+    templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_3,
+    channel: "email",
+    recipientKind: "buyer",
+    to: "buyer@example.invalid",
+    idempotencyKey: "guard-rendered",
+    payload: { email: "buyer@example.invalid", subject: "S", html: "<p>H</p>" },
+  });
+  assert.equal(rendered.enqueued, true);
+
+  const byId = await enqueueTransactional({
+    triggerEvent: "t",
+    templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_4,
+    channel: "email",
+    recipientKind: "buyer",
+    to: "buyer@example.invalid",
+    idempotencyKey: "guard-uuid",
+    payload: { email: "buyer@example.invalid", templateId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301" },
+  });
+  assert.equal(byId.enqueued, true);
+});
+
+test("an SMS payload is not subject to the email content rule", async () => {
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  const res = await enqueueTransactional({
+    triggerEvent: "t",
+    templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1,
+    channel: "sms",
+    recipientKind: "buyer",
+    to: "+15555550100",
+    idempotencyKey: "guard-sms",
+    payload: { phone: "+15555550100", body: "hi" },
+  });
+  assert.equal(res.enqueued, true);
 });

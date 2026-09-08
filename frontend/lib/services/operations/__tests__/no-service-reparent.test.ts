@@ -43,6 +43,51 @@ const CLASSES: Readonly<Record<string, readonly string[]>> = {
   pickup: ["dealId"],
 };
 
+
+/**
+ * The matcher, in ONE place.
+ *
+ * It used to be written out twice — once in the rule, once in the
+ * "proves it can fail" test — so a drift in the rule's copy left the proof
+ * passing against its own private version. It also matched only `field:`, which
+ * is blind to ES6 shorthand: `data: { offerId }` is exactly the write the rule
+ * exists to stop and it sailed through.
+ *
+ * Returns one entry per parent-id write found in the `data:` (update/updateMany)
+ * or `update:` (upsert) object of a Prisma call. An upsert's `create:` block is
+ * NOT a re-parent — it gives a new row its parent, which §3 requires.
+ */
+export function findReparentWrites(
+  src: string,
+  classes: Record<string, readonly string[]>,
+): Array<{ model: string; field: string; index: number }> {
+  const found: Array<{ model: string; field: string; index: number }> = [];
+  for (const [model, fields] of Object.entries(classes)) {
+    // [\s\S] rather than the `s` flag — the repo's target predates es2018.
+    const call = new RegExp(`\\.${model}\\.(?:update|updateMany|upsert)\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`, "g");
+    for (const m of src.matchAll(call)) {
+      const blob = m[1] ?? "";
+      // Only `data:` (update/updateMany) and `update:` (the update BRANCH of an
+      // upsert) count. A `where:` clause naming the field is a read predicate. An
+      // upsert's `create:` block is not a re-parent either — it establishes the
+      // lineage of a NEW row, which is exactly what §3 asks for; three pickup
+      // upserts do precisely that and are correct.
+      const writeBlocks = blob.match(/\b(?:data|update)\s*:\s*\{[\s\S]*?\}/g) ?? [];
+      for (const block of writeBlocks) {
+        for (const field of fields) {
+          // The field must be in KEY position: preceded by `{` or `,`. That
+          // covers `offerId: x` and the ES6 shorthand `{ offerId }` alike, and
+          // excludes `note: offerId`, which READS the value rather than writing
+          // the field.
+          const written = new RegExp(`[{,]\\s*${field}\\s*(?::|,|\\}|$)`, "m");
+          if (written.test(block)) found.push({ model, field, index: m.index ?? 0 });
+        }
+      }
+    }
+  }
+  return found;
+}
+
 test("no service writes a parent id onto an existing row of a §3 record class", () => {
   const files = sourceFiles(ROOT, [...ROOTS]);
   assertScanned(files, 800, "no-service-reparent");
@@ -53,23 +98,8 @@ test("no service writes a parent id onto an existing row of a §3 record class",
   for (const file of files) {
     if (allowed.has(file)) continue;
     const src = read(ROOT, file);
-    for (const [model, fields] of Object.entries(CLASSES)) {
-      // `prisma.<model>.update(...)`, `tx.<model>.updateMany(...)`, `.upsert(...)`.
-      // [\s\S] rather than the `s` flag — the repo's target predates es2018.
-      const call = new RegExp(`\\.${model}\\.(?:update|updateMany|upsert)\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`, "g");
-      for (const m of src.matchAll(call)) {
-        const blob = m[1] ?? "";
-        // Only a `data:` / `update:` object counts. A `where:` clause naming the
-        // same field is a read predicate, not a write.
-        const writeBlocks = blob.match(/\b(?:data|update|create)\s*:\s*\{[\s\S]*?\}/g) ?? [];
-        for (const block of writeBlocks) {
-          for (const field of fields) {
-            if (new RegExp(`\\b${field}\\s*:`).test(block)) {
-              offenders.push(`${file}:${lineAt(src, m.index ?? 0)} (${model}.${field})`);
-            }
-          }
-        }
-      }
+    for (const hit of findReparentWrites(src, CLASSES)) {
+      offenders.push(`${file}:${lineAt(src, hit.index)} (${hit.model}.${hit.field})`);
     }
   }
 
@@ -106,19 +136,23 @@ test("the escape hatch audits the change and records both values", () => {
   assert.match(src, /OPERATIONS_ADMIN/, "the route must be role-gated");
 });
 
-test("the guard detects a real violation — proved against a planted sample", () => {
-  // The guard is only trustworthy if it can fail. This exercises the same matcher
-  // the test above uses, against source text that violates the rule.
-  const planted = `await prisma.auction.update({ where: { id }, data: { vehicleRequestId: vr.id } });`;
-  const call = new RegExp(`\\.auction\\.(?:update|updateMany|upsert)\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`, "g");
-  const matches = [...planted.matchAll(call)];
-  assert.equal(matches.length, 1, "the matcher must see the call");
-  const writeBlocks = (matches[0]![1] ?? "").match(/\b(?:data|update|create)\s*:\s*\{[\s\S]*?\}/g) ?? [];
-  assert.ok(writeBlocks.some((b) => /\bvehicleRequestId\s*:/.test(b)), "the matcher must see the parent-id write");
+test("the guard detects a real violation — proved against planted samples", () => {
+  // The guard is only trustworthy if it can fail, and the proof has to run THE
+  // matcher, not a copy of it.
+  const CLASSES_UNDER_TEST = { auction: ["vehicleRequestId"] as const, deal: ["offerId"] as const };
 
-  // And it must NOT fire on a where-clause read of the same field.
+  const planted = `await prisma.auction.update({ where: { id }, data: { vehicleRequestId: vr.id } });`;
+  assert.equal(findReparentWrites(planted, CLASSES_UNDER_TEST).length, 1, "an explicit parent-id write must be caught");
+
+  // ES6 shorthand. This is the form that slipped through: `data: { offerId }`.
+  const shorthand = `await prisma.deal.update({ where: { id }, data: { offerId } });`;
+  assert.equal(findReparentWrites(shorthand, CLASSES_UNDER_TEST).length, 1, "shorthand is the same write and must be caught");
+
+  // A where-clause READ of the same field is not a write.
   const innocent = `await prisma.auction.updateMany({ where: { vehicleRequestId: vr.id }, data: { status: "CLOSED" } });`;
-  const m2 = [...innocent.matchAll(new RegExp(call.source, "g"))];
-  const blocks2 = (m2[0]?.[1] ?? "").match(/\b(?:data|update|create)\s*:\s*\{[\s\S]*?\}/g) ?? [];
-  assert.ok(!blocks2.some((b) => /\bvehicleRequestId\s*:/.test(b)), "a where-clause read must not trip the rule");
+  assert.equal(findReparentWrites(innocent, CLASSES_UNDER_TEST).length, 0, "a where-clause read must not trip the rule");
+
+  // Nor is READING the value into another field.
+  const readsValue = `await prisma.deal.update({ where: { id }, data: { note: offerId } });`;
+  assert.equal(findReparentWrites(readsValue, CLASSES_UNDER_TEST).length, 0, "using the value must not trip the rule");
 });

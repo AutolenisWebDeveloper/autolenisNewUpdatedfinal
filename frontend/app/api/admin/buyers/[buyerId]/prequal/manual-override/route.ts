@@ -27,7 +27,7 @@ import {
   sendAdverseActionEmail,
 } from "@/lib/services/email/resend.service";
 import { syncBuyerLifecycleToCrm } from "@/lib/services/admin/buyer-crm-sync";
-import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 
 // Manual overrides are valid for 90 days (longer than iPredict's 30-day window).
 const MANUAL_OVERRIDE_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;
@@ -235,6 +235,10 @@ export async function POST(request: NextRequest, { params }: Props) {
     } catch (logErr) {
       logger.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
     }
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: buyer.id, prequalApplicationId: prequal.id });
   }
 
   return adminSuccess(

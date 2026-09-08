@@ -98,13 +98,20 @@ beforeEach(() => {
   state.createCalls = 0;
 });
 
-test("the catalogue covers §26's 48 rows plus the two the Markdown states elsewhere", async () => {
+test("the catalogue covers §26's 48 rows plus the three the Markdown states elsewhere", async () => {
   const { EXCEPTION_CATALOGUE } = await cat();
-  assert.equal(EXCEPTION_CATALOGUE.length, 50);
-  // §26 proper: 48 rows. Plus COMMS_TERMINAL_FAILURE (§27, rendered in the HTML
-  // register — §2 difference D2) and LINEAGE_ORPHAN (§3).
-  const extras = EXCEPTION_CATALOGUE.filter((d) => d.code === "COMMS_TERMINAL_FAILURE" || d.code === "LINEAGE_ORPHAN");
-  assert.equal(extras.length, 2);
+  assert.equal(EXCEPTION_CATALOGUE.length, 51);
+  // §26 proper: 48 rows. The three additions are each stated in the Markdown, just
+  // not as a §26 row:
+  //   • COMMS_TERMINAL_FAILURE — §27, rendered in the HTML register (§2 diff D2)
+  //   • LINEAGE_ORPHAN         — §3, the transaction spine
+  //   • POSSIBLE_DUPLICATE_BUYER — §7.2 (iv) "flag, never merge". It was being
+  //     raised as LINEAGE_ORPHAN, which told the operator to re-parent a record —
+  //     instructions for a different condition — and counted it among the orphans
+  //     the reparent route reports as outstanding.
+  const extraCodes = ["COMMS_TERMINAL_FAILURE", "LINEAGE_ORPHAN", "POSSIBLE_DUPLICATE_BUYER"];
+  const extras = EXCEPTION_CATALOGUE.filter((d) => extraCodes.includes(d.code));
+  assert.equal(extras.length, extraCodes.length, "each addition must be present exactly once");
   assert.equal(EXCEPTION_CATALOGUE.length - extras.length, 48);
 });
 

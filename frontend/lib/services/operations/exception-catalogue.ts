@@ -743,6 +743,31 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     raisedByPhase: 2,
     specSection: "§3",
   },
+  // §7.2 (iv)'s remedy, which the register does not carry as a row of its own:
+  // "flag, never merge". Two buyers sharing a normalised phone with different
+  // verified emails are TWO identities under rule 16, and the resolver will not
+  // merge them — a human decides, through an audited action. It was raised under
+  // LINEAGE_ORPHAN, which told the operator to "identify the correct parent and
+  // re-parent", instructions for a completely different condition, and counted it
+  // among the orphans the reparent route reports as outstanding.
+  //
+  // `SUPPORT_TICKET` is an EXISTING QueueItemType label. A new enum label would
+  // need a migration this phase must not add on top of an unapplied Phase 1 wave,
+  // and the condition genuinely is a human-review item.
+  {
+    code: "POSSIBLE_DUPLICATE_BUYER",
+    type: "SUPPORT_TICKET",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Possible duplicate buyer",
+    requiredResult: "A human decides whether these are one person; the system never merges on a phone",
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Open both buyer records and decide. Rule 16 forbids merging on a phone or a name — merge only through an audited admin action, and only on verified-email evidence.",
+    deadlineHours: 72,
+    returnPoint: "§5 — intake identity",
+    raisedByPhase: 2,
+    specSection: "§7.2 (iv); rule 16",
+  },
 ] as const;
 
 /** Every catalogued exception code. */

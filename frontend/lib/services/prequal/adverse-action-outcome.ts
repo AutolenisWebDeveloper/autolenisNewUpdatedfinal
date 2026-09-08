@@ -16,6 +16,8 @@
 // than a silent misfiling.
 
 import type { EmailSendOutcome } from "@/lib/services/email/resend.service";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { logger } from "@/lib/logger";
 
 /** What the caller observed. `THREW` is the sender raising, not an outcome it returned. */
 export type AdverseActionDelivery = EmailSendOutcome["outcome"] | "THREW";
@@ -60,4 +62,40 @@ export function classifyAdverseActionDelivery(outcome: AdverseActionDelivery): A
 /** True when the consumer did not receive the notice and someone must act. */
 export function adverseActionNeedsFollowUp(outcome: AdverseActionDelivery): boolean {
   return classifyAdverseActionDelivery(outcome) === "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+}
+
+/**
+ * A §615 notice that did not reach the consumer is somebody's work, not a log line.
+ *
+ * `ADVERSE_ACTION_NOTICE_SEND_FAILED` is written to `compliance_events` by every
+ * call site, and nothing reads that table — so before this, a hard-suppressed
+ * address or an idempotency-log outage discharged the obligation silently. The
+ * §26 row that already owns this work is `PREQUAL_DECLINE` ("Send the decision and
+ * the applicable adverse-action information"): a failed delivery is precisely that
+ * action still outstanding, so it is raised rather than a new code invented.
+ *
+ * No-ops on a delivered or duplicate notice. Never throws: the decision itself has
+ * already been recorded and must not be rolled back because the queue write failed.
+ */
+export async function raiseAdverseActionFollowUp(input: {
+  outcome: AdverseActionDelivery;
+  buyerId: string | null;
+  prequalApplicationId: string;
+}): Promise<void> {
+  if (!adverseActionNeedsFollowUp(input.outcome)) return;
+  try {
+    await raiseException({
+      code: "PREQUAL_DECLINE",
+      buyerId: input.buyerId,
+      idempotencyKey: `ADVERSE_ACTION_UNDELIVERED:${input.prequalApplicationId}`,
+      detail:
+        `the §615 adverse-action notice was NOT delivered (outcome ${input.outcome}). ` +
+        `The decision stands and the obligation does not: deliver the notice by another channel and record the outcome.`,
+    });
+  } catch (err) {
+    logger.error("[adverse-action] follow-up exception could not be raised", {
+      prequalApplicationId: input.prequalApplicationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

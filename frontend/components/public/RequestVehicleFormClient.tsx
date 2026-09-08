@@ -428,7 +428,16 @@ export default function RequestVehicleFormClient() {
   }
 
   function buildPayload() {
+    // Rule 16 tier 2. The emailed claim link lands here as `?claim=`; forwarding
+    // it is what lets a registered address attach without a session. Read from the
+    // URL at submit time rather than held in state so a link opened in a new tab
+    // works too. Absent for every ordinary visitor.
+    const claimToken =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("claim") || undefined
+        : undefined;
     return {
+      ...(claimToken ? { claimToken } : {}),
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim(),

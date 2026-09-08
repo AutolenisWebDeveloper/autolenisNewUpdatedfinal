@@ -31,7 +31,7 @@ import {
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
-import { classifyAdverseActionDelivery, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
+import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 
 // Expiry durations — iPredict results expire after 30 days (same as buyer path).
 const IPREDICT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
@@ -684,6 +684,10 @@ export async function runAdminIPredictPrequalForBuyer(
     } catch (err) {
       logger.error("[admin-prequal] Failed to log adverse action compliance event:", err);
     }
+
+    // A notice that did not reach the consumer leaves the §615 obligation open.
+    // The compliance event records it; this makes someone responsible for it.
+    await raiseAdverseActionFollowUp({ outcome, buyerId: buyerId, prequalApplicationId: prequal.id });
   }
 
   const runStatus = mapFinalDecisionToRunStatus(

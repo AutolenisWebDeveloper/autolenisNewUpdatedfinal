@@ -35,8 +35,11 @@ export async function GET(request: NextRequest) {
   // The transactional rail first: a buyer waiting on a verification link matters
   // more than a campaign send, and the batch caps mean the order is visible under
   // load rather than theoretical.
-  const transactional = await withCronRun("comms-outbox-drain", () => drainTransactionalOutbox());
-  const crm = await withCronRun("comms-outbox-drain", () => drainCommsOutbox());
+  // NAMED PER RAIL. Both ran under "comms-outbox-drain", so each tick wrote two
+  // cron_run rows with the same name and a dashboard reading "last successful run"
+  // showed green while the transactional rail failed every tick.
+  const transactional = await withCronRun("comms-outbox-drain:transactional", () => drainTransactionalOutbox());
+  const crm = await withCronRun("comms-outbox-drain:crm", () => drainCommsOutbox());
 
   const failures: string[] = [];
   if (!transactional.ok) failures.push("transactional");
