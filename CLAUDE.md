@@ -328,7 +328,7 @@ it does not modify existing skills automatically.
 8. Implement inside the existing architecture.
 9. `cd frontend && pnpm typecheck`
 10. `pnpm lint`
-11. `pnpm test:all` — the **full** matrix (26 suites). `pnpm test` alone covers ~a third of it.
+11. `pnpm test:all` — the **full** matrix (67 chained suite invocations). `pnpm test` alone covers ~a third of it.
 12. Browser E2E / visual tests where UI changed (`pnpm test:visual`, Playwright).
 13. Impeccable audit for UI work.
 14. `/code-review`.
@@ -363,8 +363,8 @@ contract violations, integration failures, accessibility and responsive regressi
 regressions, dead code, placeholders, TODOs, and mocks/stubs left in production paths.
 
 **STEP 3 — RUN VERIFICATION.** Run every applicable executable check: `pnpm typecheck`, `pnpm lint`,
-`pnpm test:coverage-check`, `pnpm test:all` (the full 26-suite matrix — `pnpm test` alone is ~a
-third of it), plus browser/E2E, build, and accessibility where they apply.
+`pnpm test:coverage-check`, `pnpm test:all` (the full matrix — 67 chained invocations; `pnpm test`
+alone is ~a third of it), plus browser/E2E, build, and accessibility where they apply.
 **Never claim something works because the code looks correct.**
 
 **STEP 4 — FIX ALL MATERIAL DEFECTS.** Follow `autolenis-debugging`: reproduce, trace the real
@@ -468,9 +468,9 @@ pnpm dev                  # next dev --port 3000
 pnpm typecheck            # tsc --noEmit
 pnpm lint                 # eslint . --ext .ts,.tsx
 pnpm test                 # core service unit tests — a SUBSET, not the gate
-pnpm test:all             # FULL matrix — 65 test:* invocations; THIS is the gate
+pnpm test:all             # FULL matrix — 67 chained invocations; THIS is the gate
 pnpm test:coverage-check  # fails if any *.test.ts is unreachable from a test:* script
-pnpm test:payments        # payments suite (see package.json for all 72 test:* scripts)
+pnpm test:payments        # payments suite (see package.json for all 75 test:* scripts)
 pnpm test:security        # security suite
 pnpm test:webhooks        # webhook suite
 pnpm test:visual          # Playwright visual regression
@@ -482,11 +482,17 @@ The unit harness is **`node:test` run through `tsx`** (`tsx --test`), with Playw
 visual/E2E. There is no Jest and no Vitest in this repository — confirm the harness before writing
 any test, and never invent one.
 
-CI (`.github/workflows/ci.yml`) runs four jobs: **ci** (typecheck → lint → `test:coverage-check` →
+CI (`.github/workflows/ci.yml`) runs five jobs: **ci** (typecheck → lint → `test:coverage-check` →
 `test:all` → build), **migrations** (the full Prisma chain plus the 15 numbered SQL files against
 an empty Postgres, applied twice to prove idempotency, then a drift check), **E2E (dealer
-outreach)** (Playwright against a real server and migrated database), and **dependency-audit**
-(blocks on **critical** advisories, reports **high**).
+outreach)** (Playwright against a real server and migrated database), **phase1-proof** (restore →
+apply → verify → re-apply → verify against the committed production baseline), and
+**dependency-audit** (blocks on **critical** advisories, reports **high**).
+
+*(Counts corrected 2026-09-08, measured rather than recalled: 75 `test:*` scripts plus the bare
+`test`; `test:all` is a 67-segment `&&` chain; five CI jobs. The previous figures — 26 suites, 65
+invocations, 72 scripts, four jobs — were stale, and a verification report that quoted them would
+have described a matrix that does not exist.)*
 
 ## Slash commands — the working loop
 
