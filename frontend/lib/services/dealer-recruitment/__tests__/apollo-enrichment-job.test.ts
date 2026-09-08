@@ -8,6 +8,10 @@
 //   the spend guard keys on apollo_person_id, so one person is paid for once
 //   staleness prevents re-paying for a contact we already have
 //   waterfall stays off unless explicitly enabled
+//   one credit is DRAWN from ApolloCreditLedger before every paid call, so two
+//     runs in one cycle contend for one balance instead of each seeing the
+//     full one — and only a clean no-match, the outcome Apollo documents as
+//     free, gets its credit back
 //   a weakly-matched rooftop is not enriched at all
 //
 // That last one is not hypothetical. Measured against production, an Apollo
@@ -48,10 +52,34 @@ function candidate(id: string, over: Partial<EnrichmentCandidate> = {}): Enrichm
   };
 }
 
+/**
+ * The fake ApolloCreditLedger. `cap` is the whole budget the draw can see; a
+ * draw past it is refused exactly as the real conditional updateMany refuses
+ * one. `spent` is what the ledger holds, so a test compares the run's
+ * creditsSpent against it directly — that equality is the invariant.
+ */
+interface FakeLedger {
+  cap: number;
+  spent: number;
+  draws: number;
+  refunds: number;
+  /** When set, the draw itself throws — the ledger is unreachable, not empty. */
+  drawError?: Error;
+  /** When set, the refund throws. */
+  refundError?: Error;
+}
+
+function fakeLedger(cap = 100_000): FakeLedger {
+  return { cap, spent: 0, draws: 0, refunds: 0 };
+}
+
 interface Harness {
   deps: Partial<EnrichmentDeps>;
+  ledger: FakeLedger;
   reveals: () => string[];
   revealOpts: () => { waterfall: boolean }[];
+  /** ledger.spent as the reveal fake observed it at the moment it was invoked. */
+  spentAtReveal: () => number[];
   contacts: () => Record<string, unknown>[];
   candidateWrites: () => Record<string, unknown>[];
   run: () => Record<string, unknown> | null;
@@ -64,17 +92,22 @@ function harness(opts: {
   waterfallEnabled?: boolean;
   enabled?: boolean;
   ledgerRemaining?: number;
+  ledger?: FakeLedger;
 }): Harness {
   const reveals: string[] = [];
   const revealOpts: { waterfall: boolean }[] = [];
+  const spentAtReveal: number[] = [];
   const contacts: Record<string, unknown>[] = [];
   const candidateWrites: Record<string, unknown>[] = [];
   let run: Record<string, unknown> | null = null;
   const enriched = new Set(opts.alreadyEnrichedPersonIds ?? []);
+  const ledger = opts.ledger ?? fakeLedger();
 
   return {
+    ledger,
     reveals: () => reveals,
     revealOpts: () => revealOpts,
+    spentAtReveal: () => spentAtReveal,
     contacts: () => contacts,
     candidateWrites: () => candidateWrites,
     run: () => run,
@@ -84,10 +117,27 @@ function harness(opts: {
       waterfallEnabled: () => opts.waterfallEnabled ?? false,
       selectCandidates: async () => opts.candidates ?? [candidate("p1")],
       isPersonAlreadyEnriched: async (personId: string) => enriched.has(personId),
+      // A READ, deliberately decoupled from the fake ledger below. The balance
+      // quoted at run start is an estimate; the tests that matter prove the
+      // per-candidate draw protects the budget even when that estimate is
+      // stale or plain wrong.
       ledgerRemaining: async () => opts.ledgerRemaining ?? 100_000,
+      ledgerDraw: async (cost: number) => {
+        if (ledger.drawError) throw ledger.drawError;
+        if (ledger.spent + cost > ledger.cap) return { drawn: false, reason: "insufficient" };
+        ledger.spent += cost;
+        ledger.draws += 1;
+        return { drawn: true };
+      },
+      ledgerRefund: async (cost: number) => {
+        if (ledger.refundError) throw ledger.refundError;
+        ledger.spent -= cost;
+        ledger.refunds += 1;
+      },
       reveal: async (personId: string, o: { waterfall: boolean }) => {
         reveals.push(personId);
         revealOpts.push(o);
+        spentAtReveal.push(ledger.spent);
         return opts.reveal === undefined
           ? { email: `${personId}@dealer.invalid`, phone: null, dncStatus: "not_found", phoneType: "corporate_phone" }
           : opts.reveal;
@@ -142,6 +192,7 @@ test("the run ABORTS at the cap, records why, and stops calling Apollo", async (
   assert.equal(r.creditsSpent, 5);
   assert.equal(h.reveals().length, 5, "must stop AT the cap, not after exceeding it");
   assert.match(r.abortReason ?? "", /cap/i);
+  assert.match(r.abortReason ?? "", /45 candidate\(s\) not attempted/, "the reason names exactly what was left");
 });
 
 test("the effective cap is the MINIMUM of the request, config, and ledger remaining", async () => {
@@ -321,4 +372,146 @@ test("a credit is counted for a reveal that throws — Apollo may still have bil
   local.deps.reveal = async () => { throw new Error("timeout"); };
   const r = await runEnrichment({ maxCredits: 10 }, local.deps);
   assert.equal(r.creditsSpent, 1, "never undercount spend: an errored paid call may have charged");
+});
+
+// ─── the draw precedes the call ─────────────────────────────────────────────
+//
+// Before this batch runEnrichment only TALLIED spend in memory and wrote the
+// tally to apollo_enrichment_runs; ApolloCreditLedger was never touched, so two
+// runs in one cycle each saw the full balance. Now one credit is drawn
+// atomically before every paid call, and the run's creditsSpent is the net of
+// what it drew — the number the run row records is the number the ledger moved.
+
+test("one credit is drawn from the ledger BEFORE each paid call — the adapter sees it already taken", async () => {
+  h = harness({ candidates: [candidate("a"), candidate("b"), candidate("c")] });
+  const r = await runEnrichment({ maxCredits: 10 }, h.deps);
+  assert.deepEqual(h.spentAtReveal(), [1, 2, 3], "at every reveal the ledger already holds that reveal's credit");
+  assert.equal(h.ledger.draws, 3);
+  assert.equal(r.creditsSpent, 3);
+  assert.equal(h.ledger.spent, 3);
+});
+
+test("a ledger that refuses mid-run stops the run: SKIPPED_CAP, ABORTED_CAP, the rest unattempted, no further call", async () => {
+  // The balance quoted at start says 100 000; the ledger actually has 3. The
+  // read at the top of the run is an estimate — the draw is what protects.
+  h = harness({
+    candidates: ["a", "b", "c", "d", "e"].map((id) => candidate(id)),
+    ledger: fakeLedger(3),
+  });
+  const r = await runEnrichment({ maxCredits: 10 }, h.deps);
+  assert.equal(r.status, "ABORTED_CAP");
+  assert.deepEqual(h.reveals(), ["a", "b", "c"], "the 4th candidate must never reach Apollo");
+  assert.equal(h.ledger.spent, 3);
+  assert.equal(r.creditsSpent, 3);
+  assert.match(r.abortReason ?? "", /refused/);
+  assert.match(r.abortReason ?? "", /2 candidate\(s\) not attempted/, "d and e were never attempted");
+
+  const skipped = h.candidateWrites().filter((w) => w.enrichmentStatus === "SKIPPED_CAP");
+  assert.deepEqual(skipped.map((w) => w.id), ["cand_d"], "only the candidate whose draw was refused is marked");
+  assert.equal("lastSyncedAt" in skipped[0], false, "an unattempted candidate must not look freshly synced");
+  assert.equal(h.candidateWrites().some((w) => w.id === "cand_e"), false, "candidates after the refusal are untouched");
+  assert.equal(h.run()?.status, "ABORTED_CAP");
+  assert.equal(h.run()?.creditsSpent, 3);
+});
+
+test("a ledger that THROWS aborts as an error, not as a cap, with nothing asked of Apollo", async () => {
+  h = harness({ candidates: [candidate("a"), candidate("b")] });
+  h.ledger.drawError = new Error("connection refused");
+  const r = await runEnrichment({ maxCredits: 10 }, h.deps);
+  assert.equal(r.status, "ABORTED_ERROR", "'budget exhausted' would be the wrong story for an unreachable ledger");
+  assert.match(r.abortReason ?? "", /ledger/);
+  assert.match(r.abortReason ?? "", /connection refused/);
+  assert.match(r.abortReason ?? "", /2 candidate\(s\) not attempted/);
+  assert.equal(h.reveals().length, 0);
+  assert.equal(r.creditsSpent, 0);
+  assert.equal(h.ledger.spent, 0);
+  assert.equal(h.candidateWrites().length, 0, "nothing was attempted, so nothing is marked");
+  assert.equal(h.run()?.status, "ABORTED_ERROR", "the aborted run is still recorded");
+});
+
+// ─── settlement: what stays drawn and what comes back ───────────────────────
+
+test("a reveal that THROWS keeps the credit in the ledger — Apollo may have billed", async () => {
+  const local = harness({ candidates: [candidate("bad")] });
+  local.deps.reveal = async () => { throw new Error("timeout"); };
+  const r = await runEnrichment({ maxCredits: 10 }, local.deps);
+  assert.equal(local.ledger.spent, 1);
+  assert.equal(local.ledger.refunds, 0, "an unknowable charge is never refunded");
+  assert.equal(r.creditsSpent, 1);
+  assert.equal(r.creditsRefunded, 0);
+});
+
+test("a clean no-match (null) is the documented free outcome — its credit is refunded", async () => {
+  h = harness({ candidates: [candidate("ghost")], reveal: null });
+  const r = await runEnrichment({ maxCredits: 10 }, h.deps);
+  assert.equal(h.ledger.draws, 1, "the draw still preceded the call");
+  assert.equal(h.ledger.refunds, 1);
+  assert.equal(h.ledger.spent, 0);
+  assert.equal(r.creditsSpent, 0, "net drawn is zero");
+  assert.equal(r.creditsRefunded, 1);
+  assert.equal(r.emptyCount, 1);
+  assert.equal(h.candidateWrites()[0]?.enrichmentStatus, "UNREACHABLE");
+});
+
+test("a match with no email and no phone KEEPS the credit — Apollo bills the match", async () => {
+  h = harness({ candidates: [candidate("quiet")], reveal: { email: null, phone: null, dncStatus: null, phoneType: null } });
+  const r = await runEnrichment({ maxCredits: 10 }, h.deps);
+  assert.equal(h.ledger.spent, 1);
+  assert.equal(h.ledger.refunds, 0);
+  assert.equal(r.creditsSpent, 1);
+  assert.equal(r.creditsRefunded, 0);
+  assert.equal(r.emptyCount, 1);
+});
+
+test("a refund that fails leaves the credit counted — conservative on both sides", async () => {
+  h = harness({ candidates: [candidate("ghost")], reveal: null });
+  h.ledger.refundError = new Error("ledger unavailable");
+  const r = await runEnrichment({ maxCredits: 10 }, h.deps);
+  assert.equal(r.status, "COMPLETED", "a failed refund is not a failed run");
+  assert.equal(h.ledger.spent, 1);
+  assert.equal(r.creditsSpent, 1, "the tally never claims a refund the ledger did not make");
+  assert.equal(r.creditsRefunded, 0);
+});
+
+// ─── the invariant: creditsSpent reconciles against the ledger ─────────────
+
+test("creditsSpent equals NET drawn across a mixed run, and the run record carries the same number", async () => {
+  const local = harness({ candidates: ["ok1", "ghost", "boom", "quiet", "ok2"].map((id) => candidate(id)) });
+  local.deps.reveal = async (personId: string) => {
+    if (personId === "ghost") return null; // free → refunded
+    if (personId === "boom") throw new Error("503"); // unknowable → kept
+    if (personId === "quiet") return { email: null, phone: null, dncStatus: null, phoneType: null }; // billed → kept
+    return { email: `${personId}@dealer.invalid`, phone: null, dncStatus: "not_found", phoneType: null };
+  };
+  const r = await runEnrichment({ maxCredits: 10 }, local.deps);
+  assert.equal(r.status, "COMPLETED");
+  assert.equal(local.ledger.draws, 5);
+  assert.equal(local.ledger.refunds, 1);
+  assert.equal(local.ledger.spent, 4);
+  assert.equal(r.creditsSpent, 4, "net drawn: 5 draws − 1 refund");
+  assert.equal(r.creditsRefunded, 1);
+  assert.equal(r.creditsSpent, local.ledger.spent, "the run's number IS the ledger's movement");
+  assert.equal(local.run()?.creditsSpent, 4, "apollo_enrichment_runs reconciles against ApolloCreditLedger");
+  assert.equal(r.enrichedCount, 2);
+  assert.equal(r.emptyCount, 2);
+  assert.equal(r.failedCount, 1);
+});
+
+test("two sequential runs in one cycle cannot exceed the ledger cap between them", async () => {
+  // Both runs are quoted the same stale balance (100 000) and ask for 4 each;
+  // the ledger holds 5. Before this batch each run would have spent 4.
+  const ledger = fakeLedger(5);
+  const first = harness({ candidates: ["a", "b", "c", "d"].map((id) => candidate(id)), ledger });
+  const second = harness({ candidates: ["e", "f", "g", "h"].map((id) => candidate(id)), ledger });
+
+  const r1 = await runEnrichment({ maxCredits: 4 }, first.deps);
+  assert.equal(r1.status, "COMPLETED");
+  assert.equal(r1.creditsSpent, 4);
+
+  const r2 = await runEnrichment({ maxCredits: 4 }, second.deps);
+  assert.equal(r2.status, "ABORTED_CAP");
+  assert.equal(r2.creditsSpent, 1);
+  assert.deepEqual(second.reveals(), ["e"]);
+  assert.equal(ledger.spent, 5, "the cycle cap holds across runs");
+  assert.equal(r1.creditsSpent + r2.creditsSpent, ledger.spent);
 });

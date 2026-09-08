@@ -18,14 +18,14 @@
 // that. Only executeApolloEnrichment can spend, and only when the owner has set
 // BOTH APOLLO_ENRICHMENT_ENABLED and APOLLO_REVEAL_ENABLED.
 //
-// KNOWN GAP, DELIBERATELY NOT CLOSED HERE. runEnrichment counts its own spend
-// against the cap it computed at start, but it does NOT draw from
-// ApolloCreditLedger — only revealRooftopContact does. Two enrichment runs in one
-// cycle therefore each see the full remaining balance. Closing that needs a draw
-// inside runEnrichment's loop plus a SKIPPED_CAP path for budget exhaustion
-// (which the schema already anticipates), i.e. a change to billing semantics,
-// which this batch is explicitly not authorized to make. It is reported instead,
-// as a condition on enabling enrichment.
+// THE LEDGER DRAW LIVES IN THE JOB. runEnrichment draws one credit from
+// ApolloCreditLedger before every paid call (apollo-enrichment-job.service),
+// with the consumer this module passes — "backfill", so an admin run respects
+// the live reserve floor. This module supplies no ledger dependency of its own:
+// the job's defaults bind the real drawCredits/refundCredits to the prisma and
+// clock given here. Enrichment does NOT go through revealRooftopContact —
+// ApolloReveal is one claim per rooftop per cycle, enrichment is keyed per
+// person — so the two paths share only the ledger.
 
 import { logger } from "@/lib/logger";
 import type { PrismaClient } from "@prisma/client";

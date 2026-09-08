@@ -4621,6 +4621,9 @@ model ApolloEnrichmentRun {
   maxCredits     Int @map("max_credits")
   candidateCount Int @default(0) @map("candidate_count")
   estimatedCost  Int @default(0) @map("estimated_cost")
+  /// NET credits this run drew from ApolloCreditLedger (draws minus refunds
+  /// for clean no-matches). Written from the run's own draw-by-draw tally, so
+  /// the sum over runs reconciles against the ledger's spentCredits.
   creditsSpent   Int @default(0) @map("credits_spent")
   enrichedCount  Int @default(0) @map("enriched_count")
   emptyCount     Int @default(0) @map("empty_count")
