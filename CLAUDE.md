@@ -195,6 +195,23 @@ read-only transaction, dumps, and every credential-disclosure form it can see;
 **Report every run** with: the command as executed, the sanitized target, the full output, both
 verification halves for a deploy, and the next step. Anything not run is **NOT VERIFIED**.
 
+## Test data belongs in the isolated environment, never in production
+
+**Standing rule, from the §13-D2 cleanup (2026-09-08).** Test buyers, test requests and test
+deposits are created in the isolated preview environment — never in the production project. The
+three buyers that blocked Phase 1's one-open-per-buyer index were test records living in production;
+finding that out, ruling on it, and cleaning it up safely cost two days and contributed to a
+26-hour incident.
+
+Until Phase 2's isolated environment exists, that means: **do not create test data at all.** The
+`CRITICAL ENVIRONMENT BOUNDARY` above already forbids seeding users and mutating production-backed
+records, and this is the concrete reason it is worded that way — the cost is not hypothetical. A
+throwaway loopback Postgres (as used for this phase's Playwright journeys) is the sanctioned place
+to exercise anything that writes.
+
+The rule outlives the cleanup: once the preview environment lands, test data goes there, and a test
+row found in production is an incident to report, not a row to quietly delete.
+
 ## Known security finding — report, do not remediate here
 
 `GET /api/admin/content/attribution/export`
