@@ -9,8 +9,10 @@
 //
 //   HARD CAP. The effective cap is the MINIMUM of the caller's request, the
 //   configured APOLLO_ENRICHMENT_MAX_CREDITS, and what the monthly ledger has
-//   left. The loop stops AT the cap and records ABORTED_CAP with a reason —
-//   never silently.
+//   left. It bounds credits DRAWN — paid calls made, credits put at risk —
+//   not the net that remains after refunds, so a long run of free no-matches
+//   still stops after `cap` calls. The loop stops AT the cap and records
+//   ABORTED_CAP with a reason — never silently.
 //
 //   IDEMPOTENT ON THE PERSON. The guard keys on apollo_person_id, not on the
 //   prospect or candidate row: one Apollo person can surface under two rooftops,
@@ -36,8 +38,13 @@
 //   throws KEEPS its credit: we cannot know whether Apollo billed, and
 //   undercounting spend is the failure that overruns the cap. A match with no
 //   email keeps it too — Apollo bills the match. Only a clean no-match, which
-//   Apollo documents as free, is refunded. creditsSpent is the NET of what the
-//   run drew, so apollo_enrichment_runs reconciles against the ledger.
+//   Apollo documents as free, is refunded. creditsDrawn is the gross, and
+//   creditsSpent the NET of what the run drew, so apollo_enrichment_runs
+//   reconciles against the ledger. One honest limit: the wired refundCredits
+//   swallows its own database error, so a refund the ledger rejected cannot
+//   be seen from here (reported, not fixed — the ledger's contract is out of
+//   this batch's scope). Money direction stays safe: the ledger keeps the
+//   credit; only the run row can under-report by one.
 //
 //   MATCH CONFIDENCE GATES THE SPEND. Measured against production, an Apollo
 //   People Search for SIC 5511 in Texas resolved 13 of 86 organizations (15.1%)
@@ -128,6 +135,13 @@ export interface EnrichmentRunResult {
    * charged.
    */
   creditsSpent: number;
+  /**
+   * GROSS credits drawn — the paid calls this run made. This, not the net, is
+   * what the cap bounds: maxCredits authorizes how many credits may be put at
+   * risk, and a free outcome coming back does not buy another call.
+   * creditsDrawn === creditsSpent + creditsRefunded.
+   */
+  creditsDrawn: number;
   /** Credits drawn and then returned for a clean no-match; already netted out of creditsSpent. */
   creditsRefunded: number;
   enrichedCount: number;
@@ -264,8 +278,9 @@ function defaultLedgerRefund(now: Date, prisma: PrismaClient) {
  * the admin confirms an exact number before any money moves.
  *
  * No ledgerDraw or ledgerRefund is built or read here: a preview has no
- * dependency through which it could reach a draw, and the isolation test holds
- * it to that with every ledger export throwing.
+ * dependency through which it could reach a draw or a refund. The isolation
+ * test holds it to that with every ledger export throwing, with the balance
+ * read injected exactly as the orchestration layer injects it.
  */
 export async function previewEnrichment(
   input: EnrichmentInput,
@@ -346,6 +361,7 @@ export async function runEnrichment(
     status: "COMPLETED",
     candidateCount: 0,
     creditsSpent: 0,
+    creditsDrawn: 0,
     creditsRefunded: 0,
     enrichedCount: 0,
     emptyCount: 0,
@@ -399,10 +415,15 @@ export async function runEnrichment(
     // This candidate and every one after it, should the run stop here.
     const unattempted = rows.length - i;
 
-    if (result.creditsSpent >= cap) {
+    // The cap bounds GROSS draws. A clean no-match refunds its credit, but that
+    // refund must not buy another call: gating on the net would let a long run
+    // of free outcomes make unbounded paid calls inside one request, and a
+    // function killed mid-loop never reaches finish() — spend with no run row.
+    if (result.creditsDrawn >= cap) {
       result.status = "ABORTED_CAP";
       result.abortReason =
-        `reached the credit cap of ${cap} after ${result.creditsSpent} credit(s); ` +
+        `reached the credit cap of ${cap}: ${result.creditsDrawn} credit(s) drawn ` +
+        `(${result.creditsSpent} net after ${result.creditsRefunded} refunded); ` +
         `${unattempted} candidate(s) not attempted`;
       logger.warn(`[apollo-enrich] ${result.abortReason}`);
       return finish(result);
@@ -425,7 +446,7 @@ export async function runEnrichment(
       const message = err instanceof Error ? err.message : String(err);
       result.status = "ABORTED_ERROR";
       result.abortReason =
-        `credit ledger draw failed (${message}) after ${result.creditsSpent} credit(s); ` +
+        `credit ledger draw failed (${message}) after ${result.creditsDrawn} draw(s); ` +
         `${unattempted} candidate(s) not attempted`;
       logger.error(`[apollo-enrich] ${result.abortReason}`);
       return finish(result);
@@ -441,13 +462,14 @@ export async function runEnrichment(
       result.status = "ABORTED_CAP";
       result.abortReason =
         `the credit ledger refused a ${REVEAL_COST_CREDITS}-credit draw (${draw.reason ?? "insufficient"}) ` +
-        `after ${result.creditsSpent} credit(s); ${unattempted} candidate(s) not attempted`;
+        `after ${result.creditsDrawn} draw(s); ${unattempted} candidate(s) not attempted`;
       logger.warn(`[apollo-enrich] ${result.abortReason}`);
       return finish(result);
     }
-    // INVARIANT: creditsSpent === credits DRAWN − credits REFUNDED, kept draw by
-    // draw. apollo_enrichment_runs.credits_spent is written from it, so the run
-    // rows sum to exactly what this path took from ApolloCreditLedger.
+    // INVARIANT: creditsSpent === creditsDrawn − creditsRefunded, kept draw by
+    // draw. apollo_enrichment_runs.credits_spent is written from creditsSpent,
+    // so the run rows sum to what this path took from ApolloCreditLedger.
+    result.creditsDrawn += REVEAL_COST_CREDITS;
     result.creditsSpent += REVEAL_COST_CREDITS;
 
     let revealed: EnrichmentRevealResult | null;
@@ -469,9 +491,15 @@ export async function runEnrichment(
 
     if (revealed === null) {
       // A clean no-match. people/match is documented to bill only when a
-      // person matches, so this is the ONE outcome whose credit comes back. If
-      // the refund itself fails the credit stays counted here AND in the
-      // ledger — still reconciled, just conservative.
+      // person matches, so this is the ONE outcome whose credit comes back.
+      //
+      // A refund dependency that THROWS keeps the credit counted here (the
+      // ledger still holds it). The wired refundCredits, however, catches its
+      // own database error and its guarded updateMany can match zero rows
+      // without saying so — a refund the ledger rejected is invisible from
+      // here, and the run row then under-reports the ledger by one. Reported
+      // for an owner decision; changing the ledger's refund contract is out of
+      // this batch's scope. The ledger side stays conservative either way.
       try {
         await ledgerRefund(REVEAL_COST_CREDITS);
         result.creditsSpent -= REVEAL_COST_CREDITS;
@@ -523,7 +551,7 @@ export async function runEnrichment(
   logger.info(
     `[apollo-enrich] run complete: ${result.enrichedCount} enriched, ${result.emptyCount} unreachable, ` +
       `${result.failedCount} failed, ${result.skippedWeakMatch} skipped (weak match), ` +
-      `${result.creditsSpent}/${cap} credits net (${result.creditsRefunded} refunded)`,
+      `${result.creditsDrawn}/${cap} credits drawn (${result.creditsSpent} net, ${result.creditsRefunded} refunded)`,
   );
   return finish(result);
 }

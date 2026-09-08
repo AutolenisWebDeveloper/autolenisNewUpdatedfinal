@@ -463,14 +463,39 @@ test("a match with no email and no phone KEEPS the credit — Apollo bills the m
   assert.equal(r.emptyCount, 1);
 });
 
-test("a refund that fails leaves the credit counted — conservative on both sides", async () => {
+test("a refund dependency that THROWS leaves the credit counted, and the run still completes", async () => {
+  // Contract of the injected dependency only. The wired refundCredits never
+  // throws — it swallows its own database error and its guarded updateMany can
+  // match zero rows silently — so a refund the real ledger rejected is NOT
+  // visible to the job and the run row then under-reports the ledger by one.
+  // That limit is reported on the batch, not papered over here.
   h = harness({ candidates: [candidate("ghost")], reveal: null });
   h.ledger.refundError = new Error("ledger unavailable");
   const r = await runEnrichment({ maxCredits: 10 }, h.deps);
   assert.equal(r.status, "COMPLETED", "a failed refund is not a failed run");
   assert.equal(h.ledger.spent, 1);
-  assert.equal(r.creditsSpent, 1, "the tally never claims a refund the ledger did not make");
+  assert.equal(r.creditsSpent, 1, "a refund that did not happen is not subtracted");
+  assert.equal(r.creditsDrawn, 1);
   assert.equal(r.creditsRefunded, 0);
+});
+
+// ─── the cap bounds DRAWS, not the net ──────────────────────────────────────
+
+test("a run of clean no-matches still stops AT the cap — a refund never buys another call", async () => {
+  // Found in review: gating the cap on the net would let 400 free no-matches
+  // make 400 paid calls inside one request, and a function killed mid-loop
+  // never writes its run row. maxCredits bounds credits put at risk.
+  h = harness({ candidates: ["a", "b", "c"].map((id) => candidate(id)), reveal: null });
+  const r = await runEnrichment({ maxCredits: 2 }, h.deps);
+  assert.equal(r.status, "ABORTED_CAP");
+  assert.deepEqual(h.reveals(), ["a", "b"], "exactly cap calls, even though every one was refunded");
+  assert.equal(r.creditsDrawn, 2);
+  assert.equal(r.creditsRefunded, 2);
+  assert.equal(r.creditsSpent, 0, "net is zero — nothing was ultimately billed");
+  assert.equal(h.ledger.spent, 0);
+  assert.match(r.abortReason ?? "", /2 credit\(s\) drawn/);
+  assert.match(r.abortReason ?? "", /1 candidate\(s\) not attempted/);
+  assert.equal(h.run()?.status, "ABORTED_CAP", "the run row is written — the loop did not run away");
 });
 
 // ─── the invariant: creditsSpent reconciles against the ledger ─────────────
@@ -488,8 +513,10 @@ test("creditsSpent equals NET drawn across a mixed run, and the run record carri
   assert.equal(local.ledger.draws, 5);
   assert.equal(local.ledger.refunds, 1);
   assert.equal(local.ledger.spent, 4);
+  assert.equal(r.creditsDrawn, 5, "gross: one draw per paid call");
   assert.equal(r.creditsSpent, 4, "net drawn: 5 draws − 1 refund");
   assert.equal(r.creditsRefunded, 1);
+  assert.equal(r.creditsDrawn, r.creditsSpent + r.creditsRefunded);
   assert.equal(r.creditsSpent, local.ledger.spent, "the run's number IS the ledger's movement");
   assert.equal(local.run()?.creditsSpent, 4, "apollo_enrichment_runs reconciles against ApolloCreditLedger");
   assert.equal(r.enrichedCount, 2);

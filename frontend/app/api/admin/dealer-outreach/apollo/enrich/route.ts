@@ -126,9 +126,11 @@ export async function POST(request: NextRequest) {
       metadata: {
         requestedMaxCredits: maxCredits,
         effectiveMaxCredits: run.maxCredits,
-        // creditsSpent is the NET the run drew from ApolloCreditLedger;
-        // creditsRefunded is the part of the gross that came back for clean
-        // no-matches. Both are recorded so the audit row explains the ledger.
+        // creditsDrawn is the gross the cap bounded; creditsSpent is the NET
+        // the run took from ApolloCreditLedger; creditsRefunded is what came
+        // back for clean no-matches. All three are recorded so the audit row
+        // explains the ledger without the run row.
+        creditsDrawn: run.creditsDrawn,
         creditsSpent: run.creditsSpent,
         creditsRefunded: run.creditsRefunded,
         enrichedCount: run.enrichedCount,

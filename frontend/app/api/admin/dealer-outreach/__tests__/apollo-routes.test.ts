@@ -539,8 +539,9 @@ test("execute draws a credit from the ledger BEFORE the paid call and records th
 
   const res = await post(ENRICH_ROUTE, { mode: "execute", maxCredits: 10 });
   assert.equal(res.status, 200);
-  const body = await json<{ data: { run: { status: string; creditsSpent: number; creditsRefunded: number; enrichedCount: number } } }>(res);
+  const body = await json<{ data: { run: { status: string; creditsSpent: number; creditsDrawn: number; creditsRefunded: number; enrichedCount: number } } }>(res);
   assert.equal(body.data.run.status, "COMPLETED");
+  assert.equal(body.data.run.creditsDrawn, 1);
   assert.equal(body.data.run.creditsSpent, 1);
   assert.equal(body.data.run.creditsRefunded, 0);
   assert.equal(body.data.run.enrichedCount, 1);
