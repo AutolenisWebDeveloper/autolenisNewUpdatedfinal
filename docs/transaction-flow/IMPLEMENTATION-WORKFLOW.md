@@ -339,6 +339,11 @@ pnpm exec prisma migrate resolve --applied 20261104000000_inventory_market_confi
 pnpm exec prisma migrate resolve --applied 20261105000000_inventory_dealer_provenance_and_call_accounting
 ```
 
+**Superseded 2026-09-08 — the list is now EIGHT, not six.** The Phase 1 wave itself was found applied
+to production with no ledger row (§6.5), which puts both wave directories in exactly the class-(b)
+condition the six above are in: physical contents match the migration, only the ledger row is absent,
+so the remedy is a resolve. The complete, ordered list is in §6.5.
+
 **Owner decision RESOLVED — all six (2026-09-05, see §13-D1).**
 `docs/plans/MIGRATION-LEDGER-RECONCILIATION.md` (2026-08-31) deliberately left `20261014`,
 `20261015` and `20261016_ai_action_intent_lifecycle` unrecorded to preserve a compliance paper trail
@@ -405,6 +410,138 @@ because Supabase patches on its own schedule and a patch bump is not a defect.
 | `contract_scan_version_link` | column `contract_scans.contract_version_id` used by the Contract Shield approval gate (see §10 area *contract*) | `20261016000000_contract_scan_version_link` + mirror `manual_supabase_sql/contract_scan_version_link.sql` | PRESENT | missing → resolve | **No new migration.** |
 | e-sign evidence schema | `lib/services/esign/**` incl. `esign-schema-gate.ts` and the env gate | `20261013`, `20261014`, `20261015` | PRESENT (all columns, table, indexes) | `20261013` recorded; `20261014/15` missing → resolve | **No new migration.** Activation is an owner-gated env change (§13). |
 | `comms_outbox` | `lib/services/comms/comms-outbox.service.ts`, `app/api/cron/comms-outbox-drain` | raw SQL only (`manual_supabase_sql/comms_outbox.sql`) — not a Prisma model, not in the chain | PRESENT (0 rows) | n/a | **Extend, never duplicate** — Phase 1 adds the dispatcher columns it lacks (§8) via an additive migration that also brings the table under the Prisma chain with `CREATE TABLE IF NOT EXISTS` guards. |
+
+### 6.5 INCIDENT — the Phase 1 wave was applied to production out of band (2026-09-08)
+
+**Condition (VERIFIED — owner-run read-only census, 2026-09-08 17:21 UTC).** The wave is physically
+APPLIED and the ledger does not know it:
+
+| Evidence | Reading |
+| --- | --- |
+| The ten new tables | all present with real column sets — `queue_items` 23, `dealer_reaffirmations` 23, `deal_recaps` 20, `co_buyers` 18, `sourcing_cases` 15, `plan_snapshots` 13, `post_completion_obligations` 13, `sourcing_candidates` 10, `deal_corrections` 8, `inventory_query_cache` 8 |
+| Lineage columns | all six present |
+| Wave column counts | `vehicle_requests` 62, `offers` 57, `deals` 51, `comms_outbox` 29 |
+| Cap triggers | both present |
+| `vehicle_requests_one_open_per_buyer_key` | present, with the §13-D5 ten-status predicate verbatim (incl. `DRAFT` and `OFFER_DECLINED`) |
+| `_prisma_migrations` | 97 rows, **zero** `20261106` rows, zero unfinished |
+| `buyers_with_multi_open` | 0 — the §13-D2 cleanup ran |
+
+**This cannot be Prisma. VERIFIED from source.** Neither wave file contains an explicit
+`BEGIN`/`COMMIT`, and neither uses `CONCURRENTLY` (0 occurrences on non-comment lines; the three
+textual matches in `20261106000100` are comments at lines 9, 10 and 1247 saying the opposite). Prisma
+therefore runs each file inside one transaction, Postgres DDL is transactional, and a Prisma apply is
+all-or-nothing. Prisma also writes the `_prisma_migrations` row with `started_at` **before** applying
+and leaves it behind on failure — §6.1 records "0 unfinished". Zero `20261106` rows therefore means
+Prisma never started, not that it started and failed.
+
+**Not the repository's automation. VERIFIED, as a set of negative results:**
+
+- `.github/workflows/ci.yml` invokes `prisma migrate deploy` three times — lines 248 and 254 in the
+  `migrations` job, which asserts `count(*) = 0` over `information_schema.tables` first (236-243), and
+  line 402 in the `e2e` job against its ephemeral `autolenis_e2e` service. Neither uses
+  `secrets.DATABASE_URL`.
+- The only real `secrets.DATABASE_URL` / `DIRECT_URL` uses are ci.yml:86 (`pnpm db:report-target`,
+  which opens no connection), :109-110 (`test:matrix`) and :117-118 (`pnpm build`). Lines 94 and 439
+  are comments, not references.
+- No suite reachable from `test:all` opens a database client against `DATABASE_URL` and issues DDL.
+  The six `prisma/__tests__` files are static analyses over the migration text (zero client
+  constructions); `postgres-concurrency.test.ts` uses its own `ACTION_INTENT_TEST_DATABASE_URL`; the
+  destructive concurrency suite is excluded from `test:all` and guarded by
+  `lib/testing/isolated-database.ts`.
+- `pnpm build` is `prisma generate && next build` — no migration step. `frontend/vercel.json` declares
+  66 crons and no `ignoreCommand` or build hook.
+- Zero runtime DDL in the application: no `$executeRaw*` carrying `CREATE`/`ALTER`/`DROP`/`TRUNCATE`
+  exists anywhere under `app/` or `lib/` outside tests. `instrumentation.ts` runs no migration.
+- `scripts/production-runbook/01-baseline-chain.sh` and `02-deploy-post-baseline.sh` are hard-disabled,
+  take the DSN as `$1`, and would have applied **and recorded** the whole chain — inconsistent with a
+  ledger still holding 97 rows.
+- Production has not deployed since `70e237b6` (2026-09-06 21:15 UTC; `main` is 29 commits ahead), so
+  no production build ran inside the window at all.
+
+**Therefore (ASSUMPTION, narrowed by the above):** the DDL was applied by a human- or agent-initiated
+session against the production project. The remaining candidates are the Supabase SQL editor, the
+Supabase MCP (`execute_sql` / `apply_migration`), and a `psql` or other client session holding
+`DIRECT_URL`. This is the same mechanism that left the six §6.1 migrations unrecorded — CLAUDE.md
+already states it: *"Out-of-band DDL is how six migrations went unrecorded and how enum labels came to
+exist with no ledger row."*
+
+**Window.** §5.2 recorded the six absent tables on 2026-09-05. The wave's SQL first existed on `main`
+at 2026-09-07 01:37 UTC (PR #404, CI run 1016) and earlier on its own branch. The census found the
+objects present 2026-09-08 ~16:57 UTC.
+
+**Still NOT VERIFIED — what closes it (owner-side, none of it runnable from an agent session):**
+
+1. Supabase Dashboard → project `aieybibvewmvrubcpthm` → Logs → Postgres logs, filtered to DDL across
+   the window; and the SQL Editor's saved-query history.
+2. The organization audit log, for `apply_migration` / SQL-editor executions and the actor behind them.
+3. `supabase_migrations.schema_migrations` — if the Supabase CLI or MCP applied it, it records there
+   rather than in `_prisma_migrations`.
+4. GitHub → Settings → Secrets and variables → Actions: whether `DATABASE_URL` / `DIRECT_URL` are set
+   at all, and what the "Database target report" step printed in any recent `ci` job. **Independent of
+   this incident**, if those secrets resolve to production then `test:matrix` and `next build` both run
+   in CI with a production DSN in the environment — a standing exposure to close on its own merits.
+
+**Control gap this exposes — REPORTED, not implemented.** Every control in CLAUDE.md's *Production
+database access* protocol governs the commands **an agent session** may run. None of them can prevent
+a write issued from the Supabase dashboard, the MCP, or any other client. The protocol's guarantee is
+scoped to the agent, not to the database. Closing it needs a database-side control — restricting DDL
+privilege on the application role so that schema change requires a separate migration role. That is an
+owner decision and a separately authorized batch.
+
+### 6.5a The remedy — eight resolves, in order
+
+The wave is in the same class-(b) condition as the six in §6.1: physical contents match the migration,
+only the ledger row is absent. The remedy is therefore `resolve`, never `deploy`. Run from `frontend/`,
+each as its own approved run under the per-run protocol, after a `_prisma_migrations` snapshot
+(`resolve --applied` has no single-command undo):
+
+```bash
+pnpm exec prisma migrate resolve --applied 20261014000000_esign_envelope_history
+pnpm exec prisma migrate resolve --applied 20261015000000_esign_consent_and_executed_artifact
+pnpm exec prisma migrate resolve --applied 20261016000000_ai_action_intent_lifecycle
+pnpm exec prisma migrate resolve --applied 20261016000000_contract_scan_version_link
+pnpm exec prisma migrate resolve --applied 20261104000000_inventory_market_config_and_call_budget
+pnpm exec prisma migrate resolve --applied 20261105000000_inventory_dealer_provenance_and_call_accounting
+pnpm exec prisma migrate resolve --applied 20261106000000_transaction_spine_enums
+pnpm exec prisma migrate resolve --applied 20261106000100_transaction_spine_foundation
+```
+
+97 + 8 = **105**, which is the repository's migration-directory count (lock file excluded).
+
+**`prisma migrate deploy` is NOT part of this remedy.** Because `resolve` only writes the ledger,
+`preflight.sql` is not a gate here — nothing is applied, so its two data-dependent preconditions
+cannot fire. It remains the gate for any future wave that does apply SQL.
+
+**Read `applied_steps_count = 0` as SUCCESS, not failure.** `migrate resolve --applied` records the row
+with `applied_steps_count = 0` and `logs` populated. §6.1 already documents 32 of the 97 existing rows
+in exactly that shape from the 2026-08-31/09-01 reconciliation.
+
+### 6.5b Verification afterward — both halves, read-only
+
+**Half 1 — the ledger.** One `SELECT`, in the sanctioned read-only shape, over
+`migration_name, started_at, finished_at, rolled_back_at, applied_steps_count` from
+`_prisma_migrations`, restricted to the eight names listed in §6.5a and ordered by `migration_name`.
+PASS is: **eight rows**, every `finished_at` set, every `rolled_back_at` NULL. Then
+`SELECT count(*) FROM _prisma_migrations` must read **105**.
+
+**Half 2 — the physical schema.** Both proof files, each in the sanctioned read-only shape, must
+report **zero** `MISSING` rows:
+
+- `docs/transaction-flow/phase-1-proof/verify.sql` — expect the single `TOTAL 399` row.
+- `docs/transaction-flow/phase-1-proof/enum-census.sql` — expect the single `CHECKED 117` row.
+
+**Half 3 — the ledger's own view.** `pnpm exec prisma migrate status` from `frontend/`, expecting no
+pending migrations.
+
+`enum-census.sql` is new here and closes a measured gap. `verify.sql` asserts labels for the eight
+EXTENDED types plus `QueueOwnerRole`, but checks the other eight types CREATE'd by the wave for
+existence only. Because each `CREATE TYPE` in `20261106000100` sits behind its own
+`to_regtype(…) IS NULL` guard, a type that already exists with a partial label set has its CREATE
+skipped silently — no error, and no statement that could fail. Proved on a throwaway loopback
+PostgreSQL 16.13 built by applying all 105 migrations in order: against a database seeded with a
+two-label `AuctionInvitationStatus`, `verify.sql` reports `TOTAL 399` and **passes**, while
+`enum-census.sql` reports 9 `MISSING` rows (8 labels plus the cardinality) out of `CHECKED 117`.
+Against a correctly built database both report zero `MISSING`.
 
 ---
 
