@@ -200,20 +200,42 @@ async function createGuestCapture(
 ): Promise<GuestCaptureResult> {
   const { randomUUID } = await import("node:crypto");
   const existingUser = await db.user.findUnique({ where: { email: input.email }, select: { id: true } });
-  const userId =
-    existingUser?.id ??
-    (
-      await db.user.create({
-        data: { supabaseId: `guest_${randomUUID()}`, email: input.email, role: "BUYER" },
-        select: { id: true },
-      })
-    ).id;
+
+  // `users.email` is UNIQUE. Two concurrent captures of the same NEW address both
+  // read "no user" and both insert; one wins. The loser must read the winner, not
+  // hand a visitor a 500 for filling the form in twice. Same shape as the buyer
+  // race below and the open-request compare-and-swap one level up — every unique
+  // constraint on this path is a race someone will lose.
+  let userId: string;
+  if (existingUser) {
+    userId = existingUser.id;
+  } else {
+    try {
+      userId = (
+        await db.user.create({
+          data: { supabaseId: `guest_${randomUUID()}`, email: input.email, role: "BUYER" },
+          select: { id: true },
+        })
+      ).id;
+    } catch (err) {
+      if ((err as { code?: string } | null)?.code !== "P2002") throw err;
+      const winner = await db.user.findUnique({ where: { email: input.email }, select: { id: true } });
+      if (!winner) throw err;
+      logger.info("[intake-identity] lost the guest-user create race; reusing the concurrent winner");
+      userId = winner.id;
+    }
+  }
 
   // `Buyer.userId` is @unique. Two concurrent captures of the same address can
   // both reach here — one creates the user, the other reuses it — and only one may
   // create the buyer. The loser reads the winner's row rather than surfacing a
   // P2002 to a visitor who filled in a form twice. This is §7.2 case (i) at the
   // identity layer; the open-request CAS is the same idea one level up.
+  // If the user already existed, a buyer may already exist for it — check before
+  // inserting rather than relying on the P2002 path, which is the exceptional one.
+  const existingBuyer = await db.buyer.findFirst({ where: { userId }, select: { id: true } });
+  if (existingBuyer) return { buyerId: existingBuyer.id, reusedExistingUser: true };
+
   try {
     const buyer = await db.buyer.create({
       data: {

@@ -140,12 +140,24 @@ test("the buyer's contact details are carried onto the touch row", async () => {
   assert.equal(row.phone, "+15551230000", "the SMS leg needs the phone; the TCPA gate decides whether it sends");
 });
 
-// ── The flip must be scoped to this workload only ──────────────────────────
-// Other lifecycle workloads keep their flag-gated cutover; silently flipping all
-// of them would be a far larger behavioural change than this finding authorises.
+// ── PHASE 2: the flip is now GLOBAL, deliberately ──────────────────────────
+//
+// This test used to assert the opposite — that `deposit_reminder` was the only
+// workload flipped and the others kept their flag-gated cutover, because flipping
+// all of them was "a far larger behavioural change than this finding authorises".
+// §8.2 Phase 2 ("QStash neutralisation — no replacement vendor") is the change
+// that authorises it, so the assertion is inverted rather than deleted: it now
+// pins that NO lifecycle workload reaches the dead vendor.
+//
+// Why it had to move. `internalEnabled` fails SAFE to QStash by design, and QStash
+// is decommissioned (§13-D23), so a flag-store hiccup routed a touch into a
+// service that no longer answers: `dispatch` throws, the error is swallowed into a
+// `jobs_dead_letter` row, and `autoDrainDeadLetterJobs` terminalises any
+// `qstash:%` event as "TERMINAL — no internal owner". Delivery must not hinge on a
+// DB row nobody set.
 
-test("other workloads STILL respect their own flag (no accidental global flip)", async () => {
-  flagValue = false;
+test("EVERY lifecycle workload is internal-by-default — none reaches the dead vendor", async () => {
+  flagValue = false; // the flag store says OFF, and it no longer matters
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "auction_active",
@@ -155,12 +167,15 @@ test("other workloads STILL respect their own flag (no accidental global flip)",
     email: "buyer@example.com",
   });
 
-  assert.deepEqual(enqueued, [], "auction_active is not part of this change");
-  assert.equal(dispatched.length, 1, "it keeps its existing flag-gated routing");
-  assert.ok(flagReads.includes("lifecycle_internal_auction"), "and it still reads its flag");
+  assert.equal(enqueued.length, 1, "auction_active now enqueues internally regardless of its flag");
+  assert.deepEqual(dispatched, [], "nothing may dispatch into a vendor that no longer answers");
+  assert.ok(
+    !flagReads.includes("lifecycle_internal_auction"),
+    "the flag is not even consulted — routing must not depend on a DB row nobody set"
+  );
 });
 
-test("another workload with its flag ON still routes internally (unchanged)", async () => {
+test("a workload whose flag is ON routes internally too — the flag is now irrelevant either way", async () => {
   flagValue = true;
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
