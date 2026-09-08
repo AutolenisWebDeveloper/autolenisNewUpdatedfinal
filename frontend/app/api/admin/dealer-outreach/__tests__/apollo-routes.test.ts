@@ -30,6 +30,12 @@ let caller: Caller = null;
 let forbidLedger = true;
 let ledgerCalls: string[] = [];
 let ledgerRemainingValue = 500;
+// Whether the mocked ledger has budget for a draw, and what it then holds.
+let ledgerHasBudget = false;
+let ledgerSpent = 0;
+// Ledger and transport events in the order they happened, so a test can assert
+// the draw came BEFORE the paid call rather than merely that both occurred.
+let timeline: string[] = [];
 
 const ledgerGuard = (name: string) => {
   ledgerCalls.push(name);
@@ -44,12 +50,17 @@ mock.module("@/lib/services/dealer-recruitment/apollo-credit-ledger.service", {
       ledgerGuard("backfillReserveFloor");
       return 0;
     },
-    drawCredits: async () => {
+    drawCredits: async ({ cost }: { cost: number }) => {
       ledgerGuard("drawCredits");
-      return { drawn: false as const, reason: "insufficient" as const };
+      timeline.push("ledger:draw");
+      if (!ledgerHasBudget) return { drawn: false as const, reason: "insufficient" as const };
+      ledgerSpent += cost;
+      return { drawn: true as const };
     },
-    refundCredits: async () => {
+    refundCredits: async (_cycleKey: string, cost: number) => {
       ledgerGuard("refundCredits");
+      timeline.push("ledger:refund");
+      ledgerSpent -= cost;
     },
     remainingCredits: async () => {
       ledgerGuard("remainingCredits");
@@ -72,6 +83,8 @@ mock.module("@/lib/services/dealer-recruitment/apollo-credit-ledger.service", {
 // ── Apollo transport ─────────────────────────────────────────────────────────
 let apolloPaths: string[] = [];
 let searchPeople: Array<Record<string, unknown>> = [];
+// What people/match answers when a test enables the paid reveal; null = no match.
+let matchPerson: Record<string, unknown> | null = null;
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -79,6 +92,13 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   if (!href.includes("apollo.io")) return realFetch(url as RequestInfo, init);
   const path = new URL(href).pathname;
   apolloPaths.push(path);
+  timeline.push(`apollo:${path}`);
+  if (path.endsWith("/people/match")) {
+    return new Response(JSON.stringify(matchPerson ? { person: matchPerson } : {}), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
   if (path.endsWith("/mixed_people/api_search")) {
     return new Response(
       JSON.stringify({ people: searchPeople, pagination: { total_pages: 1, total_entries: searchPeople.length } }),
@@ -230,7 +250,11 @@ beforeEach(() => {
   seq = 0;
   forbidLedger = true;
   ledgerRemainingValue = 500;
+  ledgerHasBudget = false;
+  ledgerSpent = 0;
+  timeline = [];
   searchPeople = [];
+  matchPerson = null;
   process.env.APOLLO_API_KEY = "test-key";
   process.env.APOLLO_PEOPLE_SEARCH_ENABLED = "true";
   delete process.env.APOLLO_REVEAL_ENABLED;
@@ -477,4 +501,79 @@ test("the enrichment cap never exceeds what the ledger reports remaining", async
   const body = await json<{ data: { preview: { maxCredits: number; creditsRemaining: number } } }>(res);
   assert.equal(body.data.preview.maxCredits, 7, "the effective cap is the minimum of request, config and ledger");
   assert.equal(body.data.preview.creditsRemaining, 7);
+});
+
+// ── enrich: the draw precedes the paid call ─────────────────────────────────
+//
+// Until this batch runEnrichment tallied its spend in memory and never touched
+// ApolloCreditLedger. These two tests run the REAL job through the route with
+// the paid reveal enabled: the mocked ledger records every draw in a timeline
+// alongside every Apollo call, so "the draw came first" is asserted as an
+// ordering, and a ledger with no budget is shown to keep people/match unreached.
+
+const strongCandidate = (): Candidate => ({
+  id: "c1",
+  apolloPersonId: "p1",
+  apolloOrganizationId: "o1",
+  organizationName: "Round Rock Toyota",
+  organizationDomain: "roundrocktoyota.com",
+  organizationCity: "Round Rock",
+  organizationState: "TX",
+  organizationZip: "78664",
+  rooftopId: "rt_existing",
+  matchMethod: "website_host",
+  matchConfidence: "high",
+  enrichmentStatus: "NEW",
+  lastSyncedAt: null,
+  searchRunKey: "ps_run",
+  createdAt: new Date(),
+});
+
+test("execute draws a credit from the ledger BEFORE the paid call and records the net spend", async () => {
+  forbidLedger = false;
+  ledgerHasBudget = true;
+  process.env.APOLLO_ENRICHMENT_ENABLED = "true";
+  process.env.APOLLO_REVEAL_ENABLED = "true";
+  candidates = [strongCandidate()];
+  matchPerson = { email: "gm@roundrocktoyota.com", name: "Pat Example", title: "General Manager" };
+
+  const res = await post(ENRICH_ROUTE, { mode: "execute", maxCredits: 10 });
+  assert.equal(res.status, 200);
+  const body = await json<{ data: { run: { status: string; creditsSpent: number; creditsDrawn: number; creditsRefunded: number; enrichedCount: number } } }>(res);
+  assert.equal(body.data.run.status, "COMPLETED");
+  assert.equal(body.data.run.creditsDrawn, 1);
+  assert.equal(body.data.run.creditsSpent, 1);
+  assert.equal(body.data.run.creditsRefunded, 0);
+  assert.equal(body.data.run.enrichedCount, 1);
+
+  const draw = timeline.indexOf("ledger:draw");
+  const paid = timeline.findIndex((e) => e.startsWith("apollo:") && e.endsWith("/people/match"));
+  assert.ok(draw !== -1 && paid !== -1 && draw < paid, `the draw must precede the paid call: ${timeline.join(" → ")}`);
+  assert.equal(apolloPaths.filter((p) => p.endsWith("/people/match")).length, 1);
+  assert.equal(ledgerSpent, 1, "the ledger holds exactly the one credit the run reports");
+  assert.equal(runsCreated[0].creditsSpent, 1, "apollo_enrichment_runs records what the ledger moved");
+  assert.equal(candidates[0].enrichmentStatus, "ENRICHED");
+});
+
+test("a refused draw makes NO paid call, marks the candidate SKIPPED_CAP, and aborts the run", async () => {
+  forbidLedger = false;
+  ledgerHasBudget = false; // nothing above the reserve floor this cycle
+  process.env.APOLLO_ENRICHMENT_ENABLED = "true";
+  process.env.APOLLO_REVEAL_ENABLED = "true";
+  candidates = [strongCandidate()];
+  matchPerson = { email: "gm@roundrocktoyota.com" };
+
+  const res = await post(ENRICH_ROUTE, { mode: "execute", maxCredits: 10 });
+  assert.equal(res.status, 200);
+  const body = await json<{ data: { run: { status: string; creditsSpent: number; abortReason?: string } } }>(res);
+  assert.equal(body.data.run.status, "ABORTED_CAP");
+  assert.equal(body.data.run.creditsSpent, 0);
+  assert.match(String(body.data.run.abortReason), /refused/);
+  assert.match(String(body.data.run.abortReason), /1 candidate\(s\) not attempted/);
+  assert.equal(apolloPaths.some((p) => p.endsWith("/people/match")), false, "no paid call without a draw");
+  assert.ok(ledgerCalls.includes("drawCredits"), "the draw was attempted");
+  assert.equal(ledgerSpent, 0);
+  assert.equal(candidates[0].enrichmentStatus, "SKIPPED_CAP");
+  assert.equal(candidates[0].lastSyncedAt, null, "an unattempted candidate is not marked synced");
+  assert.equal(runsCreated[0].status, "ABORTED_CAP");
 });
