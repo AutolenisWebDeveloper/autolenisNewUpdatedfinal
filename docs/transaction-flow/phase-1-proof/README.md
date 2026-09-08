@@ -57,6 +57,38 @@ constraints, enums, triggers, policies or functions (compared by digest).
 ledger**. Ledger correctness is a separate question, addressed in §6 of the implementation workflow,
 and nothing in this directory should be read as evidence about it.
 
+
+## `enum-census.sql` — the gap `verify.sql` leaves (added 2026-09-08)
+
+`verify.sql` asserts 49 enum labels by name and the cardinality of two types. Those 49 cover the eight
+types this wave EXTENDS plus `QueueOwnerRole`; the other eight types the wave CREATEs
+(`VehicleRequestEntryType`, `DeliveryPreference`, `AuctionInvitationStatus`,
+`DealerReaffirmationStatus`, `PostCompletionObligationStatus`, `AuctionVehicleCandidateStatus`,
+`ESignSignerKind`, `SourcingCandidateSource`) are checked for **existence only**.
+
+That is a real hole, not a theoretical one, because each `CREATE TYPE` in
+`20261106000100_transaction_spine_foundation` sits behind its own `to_regtype(…) IS NULL` guard. A type
+that already exists with a partial label set has its `CREATE` skipped — silently, with no error and no
+statement that could fail. `ADD VALUE IF NOT EXISTS` does not rescue it either: the wave issues those
+only for the eight extended types, never for the nine it creates.
+
+`enum-census.sql` closes it with **117 assertions**: all 17 types of the wave exist, all 80 of their
+labels are present by name (39 on the created types, 41 added to the extended ones), all 17 have the
+exact post-wave label count, and 3 forbidden labels are absent. Same contract as its neighbours —
+PASS iff no row reads `MISSING`, with exactly one `CHECKED` row, and a zero-row result is a failure to
+run rather than a pass. It is generated from the migration source, not transcribed.
+
+**Proved both directions** on a throwaway loopback PostgreSQL 16.13 built by applying all 105
+migrations in order:
+
+| Database | `verify.sql` | `enum-census.sql` |
+| --- | --- | --- |
+| chain-built, correct | `TOTAL 399`, 0 MISSING | `CHECKED 117`, 0 MISSING |
+| seeded with a 1-label `QueueOwnerRole`, then the foundation applied over it | 8 MISSING — **catches it** | 8 MISSING — catches it |
+| seeded with a 2-label `AuctionInvitationStatus`, then the foundation applied over it | `TOTAL 399`, **0 MISSING — misses it** | 9 MISSING — **catches it** |
+
+The third row is why the file exists.
+
 ## How the baseline was obtained
 
 `pg_dump` could not be used: this session holds no production DSN, and the only available client is
