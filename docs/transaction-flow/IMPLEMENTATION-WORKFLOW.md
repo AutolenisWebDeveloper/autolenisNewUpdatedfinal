@@ -4503,8 +4503,8 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | --- | --- |
 | 1 | 261 |
 | 2 | 268 |
-| 3 | 173 |
-| 4 | 89 |
+| 3 | 172 |
+| 4 | 90 |
 | 5 | 117 |
 | 6 | 173 |
 | 7 | 129 |
@@ -4556,8 +4556,8 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
   "by_phase": {
     "1": 261,
     "2": 268,
-    "3": 173,
-    "4": 89,
+    "3": 172,
+    "4": 90,
     "5": 117,
     "6": 173,
     "7": 129,
@@ -4822,11 +4822,11 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | Category | Decisions |
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
-| BLOCKING A NAMED LATER PHASE | **37** |
+| BLOCKING A NAMED LATER PHASE | **38** |
 | DEFAULT AND PROCEED UNLESS OVERRIDDEN | **8** |
-| **Total** | **51** |
+| **Total** | **52** |
 
-Decisions in the table: **51**. Categories sum to **51**. Unclassified: **0**.
+Decisions in the table: **52**. Categories sum to **52**. Unclassified: **0**.
 
 **BLOCKING PHASE 1 — these, and only these, must be answered before the Phase 1 wave is authored and deployed:**
 

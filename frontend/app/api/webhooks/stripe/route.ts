@@ -1,4 +1,6 @@
 import { logger } from "@/lib/logger";
+import { applySettlementEffects } from "@/lib/services/payment/settlement-effects.service";
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
@@ -230,7 +232,33 @@ export async function POST(request: NextRequest) {
                 },
               },
             });
-            if (!deposit) return { deposit: null, createdAuction: null, isNewAuction: false };
+            if (!deposit) {
+              return { deposit: null, createdAuction: null, isNewAuction: false, effects: null };
+            }
+
+            // §5d, the settlement side effect: attach the payment to the Vehicle
+            // Request, unlock it, and open the sourcing case with its due-diligence
+            // checkpoints — all inside THIS transaction, with the PAID flip above.
+            // A sourcing case that outlived a failed settlement would show a request
+            // being sourced for money that never arrived.
+            const effects = await applySettlementEffects(
+              {
+                depositId: deposit.id,
+                buyerId: deposit.buyerId,
+                vehicleRequestId: deposit.vehicleRequestId,
+              },
+              tx,
+            );
+
+            // THE LEGACY PATH. Phase 3 stops settlement creating an auction — but it
+            // also removes the only thing that invites dealers, and the replacement is
+            // Phase 5's. So with SOURCING_CASE_REPLACES_AUCTION_LAUNCH off (the
+            // default) the auction is still created here, exactly as before, and the
+            // fact is COUNTED. §8.4's thirty-days-of-zero removal clock starts when
+            // Phase 5 flips the flag, not at Phase 3 acceptance (§13-D52).
+            if (!effects.runLegacyAuctionPath) {
+              return { deposit, createdAuction: null, isNewAuction: false, effects };
+            }
 
             // Auction.depositId is unique — re-use if a prior partial run created it.
             const existingAuction = await tx.auction.findUnique({
@@ -251,7 +279,7 @@ export async function POST(request: NextRequest) {
                 data: { buyerId: deposit.buyerId, title: "Auction activated!", body: "Your $99 deposit was received. Your private auction is being prepared.", type: "AUCTION_STARTED" },
               });
             }
-            return { deposit, createdAuction, isNewAuction: !existingAuction };
+            return { deposit, createdAuction, isNewAuction: !existingAuction, effects };
           }, {
             // Bound the row-lock hold and connection acquisition so a burst of
             // concurrent Stripe redeliveries on the same deposit can't exhaust
@@ -266,7 +294,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ received: true, duplicate: true });
           }
 
-          const { deposit, createdAuction, isNewAuction } = outcome;
+          const { deposit, createdAuction, isNewAuction, effects } = outcome;
           routed = deposit !== null;
           const existingAuction = isNewAuction ? null : createdAuction;
           if (deposit) {
@@ -288,8 +316,23 @@ export async function POST(request: NextRequest) {
               logger.error("[stripe/webhook] deposit reminder cancel failed:", err);
             }
 
-            // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were never notified)
+            // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were
+            // never notified). Phase 3: this is now the LEGACY path, reached only while
+            // SOURCING_CASE_REPLACES_AUCTION_LAUNCH is off, and every trip through it is
+            // recorded. Post-commit and best-effort by design — a dealer-invitation call
+            // inside the money transaction would hold a row lock on the deposit for the
+            // length of a third-party round trip.
             if (createdAuction && !existingAuction) {
+              await recordLegacyPathWrite({
+                kind: "SETTLEMENT_AUCTION_LAUNCH",
+                detail:
+                  `settlement created auction ${createdAuction.id} for deposit ${deposit.id} ` +
+                  `instead of leaving sourcing to the case` +
+                  (effects?.sourcingCaseId ? ` (case ${effects.sourcingCaseId} was opened too)` : ""),
+                entityType: "Deposit",
+                entityId: deposit.id,
+                removalPhase: 5,
+              });
               await launchAuction(createdAuction.id).catch((err: unknown) =>
                 logger.error("[stripe/webhook] launchAuction failed:", err)
               );

@@ -42,7 +42,7 @@ const APP_ROOT = process.cwd();
 const REPO_ROOT = resolve(APP_ROOT, "..");
 
 /** The phase this branch implements. */
-const CURRENT_PHASE = 2;
+const CURRENT_PHASE = 3;
 
 /** What each phase is allowed to ADD, beyond the baseline. §8.2 declares these. */
 const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string[]; libDirs: string[]; tables: string[] }> = {
@@ -54,6 +54,21 @@ const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string
     libDirs: [],
     // Phase 2 adds no table: constraint C1 allows exactly one schema wave and it
     // was Phase 1's.
+    tables: [],
+  },
+  3: {
+    routeFamilies: [],
+    // `sourcing` — the sourcing case §5d's settlement side effect opens
+    // (S6-02a/S6-29a). The `sourcing_cases` table has existed since the Phase 1 wave
+    // with nothing writing it; this is the writer. It is a new directory rather than a
+    // home inside `payment/` because Phase 5 builds the ladder, the band expansion and
+    // the readiness checklist on top of this record, and they are sourcing, not payment.
+    serviceDirs: ["sourcing"],
+    libDirs: [],
+    // Phase 3 adds no TABLE. Its one migration adds an enum LABEL —
+    // `DepositStatus.DISPUTED` (control/E26-10) — which this guard does not track and
+    // should not: constraint C1 bounds the additive COLUMN wave, and §12.2 provides for
+    // "any schema-touching phase".
     tables: [],
   },
 };

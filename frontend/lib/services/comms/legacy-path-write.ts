@@ -41,7 +41,17 @@ export type LegacyPathKind =
   /** Direct Resend/Twilio send in transaction code. §8.4 → removed Phase 10. */
   | "DIRECT_TRANSACTIONAL_SEND"
   /** QStash producer dispatching into the dead vendor. §8.4 → removed Phase 10. */
-  | "QSTASH_PRODUCER";
+  | "QSTASH_PRODUCER"
+  /**
+   * Settlement creating and launching an Auction and inviting dealers, instead of
+   * opening a sourcing case. §8.4 row 1 → neutralised Phase 3 (the adapter), retired
+   * Phase 5 (the flag flip, §13-D52).
+   *
+   * Unlike the other two, this counter is EXPECTED to be non-zero while the flag is
+   * off — that is the sequencing guard working, not a leak. §8.4's thirty-days-of-zero
+   * removal clock starts at the flip.
+   */
+  | "SETTLEMENT_AUCTION_LAUNCH";
 
 export interface LegacyPathWriteInput {
   kind: LegacyPathKind;

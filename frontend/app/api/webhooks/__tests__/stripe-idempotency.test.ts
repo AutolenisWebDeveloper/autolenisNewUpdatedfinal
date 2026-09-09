@@ -124,6 +124,26 @@ mock.module("@/lib/stripe", {
     }),
   },
 });
+// Phase 3: settlement now attaches the deposit to its Vehicle Request, unlocks it and
+// opens the sourcing case inside the money transaction. That has its own suite; this
+// file is about idempotency and the transaction boundary, so the effects are mocked to
+// their normal answer — including `runLegacyAuctionPath: true`, which is what the
+// SOURCING_CASE_REPLACES_AUCTION_LAUNCH default means and is why the auction assertions
+// below still hold.
+mock.module("@/lib/services/payment/settlement-effects.service", {
+  namedExports: {
+    applySettlementEffects: async () => ({
+      vehicleRequestId: "vr_1",
+      sourcingCaseId: "case_1",
+      unlocked: true,
+      runLegacyAuctionPath: true,
+    }),
+  },
+});
+mock.module("@/lib/services/comms/legacy-path-write", {
+  namedExports: { recordLegacyPathWrite: async () => {} },
+});
+
 mock.module("@/lib/logger", {
   namedExports: { logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } },
 });

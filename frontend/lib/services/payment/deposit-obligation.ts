@@ -150,8 +150,11 @@ export interface FindObligationInput {
    * ignored or treated as ambiguous. That is safe because of an invariant the schema
    * enforces: `vehicle_requests_one_open_per_buyer_key` permits a buyer at most one
    * open request, so an unattached deposit for this buyer can only belong to the one
-   * they have. Adopting it is what stops a second charge, and it performs R1b's
-   * eight-row backfill as ordinary traffic rather than as a script.
+   * they have. Adopting it is what stops a second charge.
+   *
+   * Adopting is a READ-scoping decision only. Nothing here writes the link back: §3
+   * forbids a service stamping a parent id onto an existing row, and R1b's eight-row
+   * backfill stays owner-run.
    */
   vehicleRequestId?: string | null;
   db?: Db;
