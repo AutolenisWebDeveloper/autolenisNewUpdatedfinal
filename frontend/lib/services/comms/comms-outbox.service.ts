@@ -24,7 +24,12 @@ import {
   recordTransactionalEmailSend,
   transactionalEmailAlreadySent,
 } from "@/lib/services/email/email-send-log";
-import { sendEmailViaResend, sendSmsViaTwilio } from "@/lib/services/comms/comms-providers";
+import {
+  sendEmailViaResend,
+  sendSmsViaTwilio,
+  assertEmailTransportConfigured,
+  assertSmsTransportConfigured,
+} from "@/lib/services/comms/comms-providers";
 import { normalizePhone } from "@/lib/utils/phone";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TemplateVariable } from "@/lib/types/crm";
@@ -206,6 +211,13 @@ export async function deliverEmail(
     rendered = { subject: payload.subject, html: payload.html, text: payload.text ?? "" };
   }
 
+  // PRE-FLIGHT BEFORE THE STAMP. A missing `RESEND_FROM_EMAIL` used to surface as a
+  // provider error AFTER dispatched_at was written, so the reclaim guard read a
+  // message that never left this process as "we may have sent it" and terminal-failed
+  // it at attempt 1 of 5. Checked here, the row is never stamped and the ordinary
+  // backoff runs with the real reason on it.
+  assertEmailTransportConfigured();
+
   // Stamp dispatched_at right before the provider call — a crash after this point
   // must NOT re-send on reclaim.
   await opts.onDispatch?.();
@@ -306,6 +318,11 @@ export async function deliverSms(
   if (await SuppressionService.isSmsSuppressed(supabase, standardized)) {
     return { outcome: "SUPPRESSED" };
   }
+
+  // Pre-flight before the stamp, as on the email path. It matters more here: Twilio
+  // has no provider-side idempotency and no local SENT-precheck, so an SMS that is
+  // stamped and then fails has no way back.
+  assertSmsTransportConfigured();
 
   // Stamp dispatched_at right before the provider call — a crash after this point
   // must NOT re-send on reclaim (Twilio has no provider-side idempotency).

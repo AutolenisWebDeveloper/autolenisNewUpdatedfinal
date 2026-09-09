@@ -92,6 +92,37 @@ export async function enqueueDraftRecovery(
   const resumeUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/request-vehicle`;
   let enqueued = 0;
 
+  // WHO the message is for, not just where it goes. The address is enough to send —
+  // it rides in `to` and in the payload — so this was easy to leave out, and it was.
+  // The cost shows up only when something fails: `terminalFail` raises with
+  // `buyerId: recipient_kind === "buyer" ? recipient_id : null`, so every Operations
+  // exception from this sequence arrived with no buyer on it and rendered
+  // "to buyer :" in its required action. Six such rows exist in production for one
+  // capture, and none of them can be joined to the person waiting on them.
+  //
+  // Resolved here rather than threaded through the caller: this service is already
+  // given the request, and the request owns the buyer. A miss is logged and the
+  // sequence still enqueues — a recipient id is for routing an exception, and
+  // withholding four recovery emails over it would be the worse trade.
+  let recipientId: string | null = null;
+  try {
+    const vr = await db.vehicleRequest.findUnique({
+      where: { id: input.vehicleRequestId },
+      select: { buyerId: true },
+    });
+    recipientId = vr?.buyerId ?? null;
+    if (!recipientId) {
+      logger.warn("[draft-recovery] no buyer on the request; exceptions will not be routable to one", {
+        vehicleRequestId: input.vehicleRequestId,
+      });
+    }
+  } catch (err) {
+    logger.error("[draft-recovery] buyer lookup failed; enqueueing without a recipient id", {
+      vehicleRequestId: input.vehicleRequestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   for (const touch of DRAFT_RECOVERY_TOUCHES) {
     const result = await enqueueTransactional(
       {
@@ -99,6 +130,7 @@ export async function enqueueDraftRecovery(
         templateKey: touch.template,
         channel: "email",
         recipientKind: "buyer",
+        recipientId,
         to: input.email,
         vehicleRequestId: input.vehicleRequestId,
         // Keyed on the REQUEST, not the address: a buyer whose address changes

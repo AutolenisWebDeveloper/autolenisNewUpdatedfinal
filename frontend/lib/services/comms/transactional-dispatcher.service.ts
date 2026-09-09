@@ -54,6 +54,7 @@ import {
   type EmailOutboxPayload,
   type SmsOutboxPayload,
 } from "./comms-outbox.service";
+import { isDefinitiveNonDelivery } from "./comms-providers";
 import { hasStateRecheck, runStateRecheck } from "./state-recheck-registry";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -253,7 +254,28 @@ interface ClaimedRow {
   deal_id: string | null;
   auction_id: string | null;
   dispatched_at: Date | null;
+  /**
+   * Carried so the reclaim guard can tell an OBSERVED provider refusal from an
+   * unobserved crash, and so a terminal failure does not overwrite the transport
+   * error that explains it. The claim used to return neither, which is exactly why
+   * the reclaim note could only replace the real reason.
+   */
+  last_error: string | null;
+  last_result: string | null;
+  /**
+   * The row's status BEFORE this claim. `'sending'` means a previous drain claimed
+   * it and never came back — the only case where the outcome is genuinely unknown.
+   * `'pending'` means the previous attempt finished its own bookkeeping and asked
+   * for this retry. Absent on a hand-built row, which is treated as reclaimed.
+   */
+  prev_status?: string | null;
 }
+
+/**
+ * `last_result` marking a failure we watched the provider refuse. Nothing was sent,
+ * so the row is an ordinary pending retry however it was reclaimed.
+ */
+const PROVIDER_REJECTED = "PROVIDER_REJECTED";
 
 /**
  * Claim up to `limit` due transactional rows.
@@ -269,7 +291,11 @@ interface ClaimedRow {
 export async function claimDueTransactional(limit = 100, staleMinutes = 10, db: Db = prisma): Promise<ClaimedRow[]> {
   return db.$queryRaw<ClaimedRow[]>`
     WITH due AS (
-      SELECT id
+      -- The PRIOR status, captured before the UPDATE below overwrites it. RETURNING
+      -- yields new values, so without carrying it here there is no way to tell a row
+      -- that came back on its own backoff from one whose drain died mid-flight — and
+      -- that difference is the whole basis of the reclaim guard.
+      SELECT id, status AS prev_status
         FROM comms_outbox
        WHERE template_key IS NOT NULL
          AND (
@@ -288,7 +314,8 @@ export async function claimDueTransactional(limit = 100, staleMinutes = 10, db: 
      WHERE o.id = due.id
     RETURNING o.id, o.channel, o.attempts, o.max_attempts, o.payload, o.template_key,
               o.trigger_event, o.recipient_kind, o.recipient_id, o.vehicle_request_id,
-              o.deal_id, o.auction_id, o.dispatched_at
+              o.deal_id, o.auction_id, o.dispatched_at, o.last_error, o.last_result,
+              due.prev_status
   `;
 }
 
@@ -310,8 +337,35 @@ export async function dispatchTransactionalRow(
   // A reclaimed row that already reached the provider is never re-sent: we cannot
   // know whether it was delivered, and a duplicate transactional message is worse
   // than a reported failure. Same rule as the CRM rail.
-  if (row.dispatched_at) {
-    await terminalFail(db, row, "RECLAIM_UNCERTAIN", "reclaimed after dispatch; not re-sent to avoid a duplicate");
+  //
+  // "Cannot know" is the whole content of the rule, and this guard asked the wrong
+  // question. `dispatched_at` is stamped immediately before the send, so EVERY
+  // provider failure landed with it set — including ones whose attempt finished
+  // normally, booked its own backoff and asked to be retried. Those were read as
+  // crashes: the retry budget was unreachable for the entire failure class, and
+  // §27's alert fired at attempt 1 of 5 with the transport error already overwritten.
+  //
+  // Two conditions now, and the first is the one that matters. `prev_status` is the
+  // status before this claim: 'sending' means a previous drain took the row and
+  // never came back, which is the only case where the outcome is genuinely unknown.
+  // 'pending' means the last attempt completed its bookkeeping — the process
+  // survived, and this is the retry it scheduled. That is the shape the CRM rail has
+  // always used (`reclaimed && row.dispatched_at`, comms-outbox.service.ts:419) and
+  // it is why that rail never had this defect.
+  //
+  // The second condition refines the genuinely-reclaimed case: if the last thing we
+  // watched happen was the provider REFUSING, nothing was sent, so even a crashed
+  // drain leaves nothing to duplicate.
+  const unobserved = (row.prev_status ?? "sending") === "sending";
+  if (unobserved && row.dispatched_at && row.last_result !== PROVIDER_REJECTED) {
+    await terminalFail(
+      db,
+      row,
+      "RECLAIM_UNCERTAIN",
+      "reclaimed after dispatch; not re-sent to avoid a duplicate",
+      undefined,
+      true,
+    );
     return "FAILED";
   }
 
@@ -400,6 +454,10 @@ async function recordFailedAttempt(db: Db, row: ClaimedRow, err: unknown): Promi
   const message = err instanceof Error ? err.message : String(err);
   const attempt = row.attempts + 1;
   const maxAttempts = row.max_attempts ?? DEFAULT_MAX_ATTEMPTS;
+  // Whether we WATCHED the provider refuse, or only know the attempt threw. The
+  // difference is the reclaim guard's entire premise, so it is recorded on the row
+  // rather than re-derived later from an error string.
+  const observed = isDefinitiveNonDelivery(err);
   if (attempt >= maxAttempts) {
     await terminalFail(db, row, "FAILED", message, attempt);
     return "FAILED";
@@ -410,6 +468,11 @@ async function recordFailedAttempt(db: Db, row: ClaimedRow, err: unknown): Promi
     data: {
       status: "pending",
       lastError: message,
+      // Always overwritten, never merely set. The marker describes THIS attempt: a
+      // row refused on attempt 1 and then timing out on attempt 2 is uncertain
+      // again, and leaving a stale PROVIDER_REJECTED behind would let the guard
+      // wave through exactly the re-send it exists to prevent.
+      lastResult: observed ? PROVIDER_REJECTED : null,
       attempts: attempt,
       nextAttemptAt: new Date(Date.now() + backoff * 60_000),
       updatedAt: new Date(),
@@ -431,15 +494,25 @@ async function terminalFail(
   row: ClaimedRow,
   lastResult: string,
   message: string,
-  attempts?: number
+  attempts?: number,
+  /** Reclaim path only: `message` is a note about not re-sending, not a diagnosis. */
+  preserveExistingError = false
 ): Promise<void> {
   const now = new Date();
+  // PRESERVE THE TRANSPORT ERROR — but only where `message` is not itself the
+  // diagnosis. Two callers reach here and they are opposites: the budget-exhausted
+  // path passes the CURRENT attempt's provider error, which is the freshest and best
+  // account of the failure, while the reclaim path passes a note about not re-sending,
+  // which explains nothing about why the send failed and used to overwrite the only
+  // record that did. On the production rows this defect produced, the real cause was
+  // gone before anyone looked at them.
+  const recordedError = preserveExistingError ? (row.last_error ?? message) : message;
   await db.commsOutbox.update({
     where: { id: row.id },
     data: {
       status: "failed",
       lastResult,
-      lastError: message,
+      lastError: recordedError,
       terminalFailedAt: now,
       ...(attempts !== undefined ? { attempts } : {}),
       updatedAt: now,
@@ -458,7 +531,16 @@ async function terminalFail(
       // Once-ever per outbox row: a terminal failure happens once, and re-raising
       // it on a later sweep would multiply the alert.
       idempotencyKey: `COMMS_TERMINAL_FAILURE:${row.id}`,
-      detail: `template ${row.template_key} to ${row.recipient_kind ?? "unknown"} ${row.recipient_id ?? ""}: ${message}`,
+      // Both halves: WHY it stopped (`message`, e.g. the reclaim note) and WHY it
+      // failed (`recordedError`, the transport error), which are different questions
+      // and were previously collapsed into whichever was written last. The recipient
+      // is rendered as "unidentified" rather than an empty string when the enqueue
+      // supplied no id — "to buyer :" read as a bug in the alert rather than a
+      // missing field on the row.
+      detail:
+        `template ${row.template_key} to ${row.recipient_kind ?? "unknown"} ` +
+        `${row.recipient_id ?? "(unidentified)"}: ${message}` +
+        (recordedError !== message ? ` — last transport error: ${recordedError}` : ""),
     },
     db
   );

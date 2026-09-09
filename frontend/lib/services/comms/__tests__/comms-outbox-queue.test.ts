@@ -23,6 +23,14 @@ let softSuppressed = false;
 
 mock.module("@/lib/services/comms/comms-providers", {
   namedExports: {
+    // The module's contract grew with the pre-flight guard. A mock that omits these
+    // fails loudly (TypeError) rather than silently, which is the point — but it still
+    // has to be complete for the paths under test.
+    assertEmailTransportConfigured: () => {},
+    assertSmsTransportConfigured: () => {},
+    isDefinitiveNonDelivery: (err: unknown) =>
+      typeof err === "object" && err !== null &&
+      (err as { definitiveNonDelivery?: boolean }).definitiveNonDelivery === true,
     sendEmailViaResend: async () => {
       if (resendThrows) throw new Error("resend down");
       return { id: "re_1" };
