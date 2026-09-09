@@ -1,0 +1,52 @@
+-- DepositStatus gains DISPUTED.
+--
+-- WRITTEN BUT NOT APPLIED. Ships for owner review; applies after 20261110000000.
+--
+-- WHY. §26 requires "Payment disputed or refunded -> hold fulfilment, stop unsent
+-- outreach", and control/E26-10 made the schema half of that conditional in as many
+-- words: "production migration if `DepositStatus.DISPUTED` absent". It is absent.
+-- Verified three ways rather than recalled: `grep -rn DISPUTED prisma/` returns
+-- nothing; `enum DepositStatus` in schema.prisma lists four labels; and restoring the
+-- committed production baseline onto PostgreSQL 17.6, applying the Phase 1 wave and
+-- reading `pg_enum` returns `PENDING, PAID, REFUNDED, FAILED`.
+--
+-- WHY NOT REUSE A LABEL. The two candidates both lie about the money.
+--
+--   FAILED   -- this phase reserves it for an intent that is cancelled or expired,
+--              precisely so a declined card can be retried on the same intent
+--              (defect 1). A disputed deposit is the opposite case: the charge
+--              SUCCEEDED and is now contested. Filing it under FAILED would make the
+--              retry path offer the buyer a second $99 for a charge they already paid.
+--   REFUNDED -- means money went back. During a dispute nobody knows yet; the funds
+--              are held by the provider pending evidence. Writing REFUNDED would tell
+--              the buyer, the receipt and the fee-reconciliation ledger that a refund
+--              happened, and §22.1 is explicit that a no-charge record must never be
+--              labelled as money refunded.
+--
+-- The hold itself needs no column. The Phase 1 wave already carries `disputed_at`,
+-- `hold_reason` and `hold_released_at`, and its own comment rules the predicate
+-- DERIVED -- `disputed_at IS NOT NULL AND hold_released_at IS NULL` -- rather than
+-- stored, so `pickup/V18`'s `dispute_hold_at` is satisfied without DDL. This file adds
+-- the status vocabulary and nothing else.
+--
+-- WHY ITS OWN DIRECTORY, WITH NO DDL BESIDE IT. PostgreSQL refuses to USE an enum
+-- label in the same transaction that added it:
+--
+--     ERROR:  unsafe use of new value "C" of enum type t_enum_probe
+--     HINT:   New enum values must be committed before they can be used.
+--
+-- (SQLSTATE 55P04, reproduced on 17.6 while writing this.) Prisma wraps each
+-- migration.sql in one transaction, so a CHECK, a default, a partial index predicate
+-- or a backfill naming 'DISPUTED' here would fail the whole file. This is the same
+-- reason the Phase 1 wave split 20261106000000_transaction_spine_enums out from
+-- 20261106000100_transaction_spine_foundation. Anything that references the label
+-- belongs in a later directory or in application code.
+--
+-- ORDERING AGAINST THE APPLICATION DEPLOY. This one is additive and safe in either
+-- order, which is not true of most of this wave's siblings: a deployment that does not
+-- yet know the label simply never writes it, and one that does write it fails with
+-- 22P02 invalid_text_representation until the label lands. Apply the migration first.
+--
+-- IDEMPOTENT. `IF NOT EXISTS` makes a re-apply a no-op that emits only a NOTICE.
+
+ALTER TYPE "DepositStatus" ADD VALUE IF NOT EXISTS 'DISPUTED';
