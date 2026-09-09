@@ -278,11 +278,21 @@ test("journey 3 — the refinance form is Lane 2: it advances no Lane 1 transact
 // the top of this file is what keeps it there.
 
 test.describe.serial("journey 4 — a registered address, offered anonymously", () => {
-  const seedEmail = () => `j4-registered@example.invalid`;
+  // ONE ADDRESS PER PROJECT, like every other journey in this file.
+  //
+  // `desktop` and `mobile` run as PARALLEL workers against ONE database. A fixed
+  // address makes the two runs the same person: mobile's `beforeAll` re-seed
+  // deletes the buyer, the tokens and the messages that desktop is midway through
+  // spending. This journey originally hard-coded the address, and it survived two
+  // local runs — on a fast machine the two projects finish in eleven seconds and
+  // barely interleave. CI took forty-eight and did: desktop failed outright,
+  // mobile failed and passed on its retry, which is the signature of a race
+  // rather than of a broken assertion.
+  const seedEmail = (projectName: string) => `j4-${ns(projectName)}@example.invalid`;
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({}, testInfo) => {
     test.skip(!HAS_DB, "no autolenis_e2e database");
-    const email = seedEmail();
+    const email = seedEmail(testInfo.project.name);
     // Idempotent: the suite may be re-run against the same throwaway database.
     // `buyer_request_claim_tokens` carries a buyer id, not a buyer relation, so
     // the id is resolved first rather than filtered through one.
@@ -309,9 +319,9 @@ test.describe.serial("journey 4 — a registered address, offered anonymously", 
     });
   });
 
-  test("nothing attaches, and the visitor is told so — not shown a request", async ({ page }) => {
+  test("nothing attaches, and the visitor is told so — not shown a request", async ({ page }, testInfo) => {
     test.skip(!HAS_DB, "no autolenis_e2e database");
-    const email = seedEmail();
+    const email = seedEmail(testInfo.project.name);
 
     await page.goto("/");
     await page.getByTestId("hero-intake-email").fill(email);
@@ -348,9 +358,9 @@ test.describe.serial("journey 4 — a registered address, offered anonymously", 
     expect(messages[0]!.channel).toBe("email");
   });
 
-  test("a second submission mints no second credential and sends no second email", async ({ page }) => {
+  test("a second submission mints no second credential and sends no second email", async ({ page }, testInfo) => {
     test.skip(!HAS_DB, "no autolenis_e2e database");
-    const email = seedEmail();
+    const email = seedEmail(testInfo.project.name);
 
     await page.goto("/");
     await page.getByTestId("hero-intake-email").fill(email);
@@ -370,9 +380,9 @@ test.describe.serial("journey 4 — a registered address, offered anonymously", 
     expect(messages, "and one email").toBe(1);
   });
 
-  test("the emailed link attaches the request — once, and then never again", async ({ request }) => {
+  test("the emailed link attaches the request — once, and then never again", async ({ request }, testInfo) => {
     test.skip(!HAS_DB, "no autolenis_e2e database");
-    const email = seedEmail();
+    const email = seedEmail(testInfo.project.name);
     const { buyerId } = await countsFor(email);
 
     // The raw token exists only in the message that carries it, which is exactly
