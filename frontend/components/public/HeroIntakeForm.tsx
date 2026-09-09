@@ -26,13 +26,16 @@
 // message rather than being dressed up as "your request is in".
 
 import { useState } from "react";
-import { ArrowRight, Loader2, CheckCircle2, AlertTriangle, Mail } from "lucide-react";
+import { ArrowRight, Loader2, CheckCircle2, AlertTriangle, Mail, Clock } from "lucide-react";
+
+import { submitVehicleRequest, apiErrorMessage } from "@/lib/api/client";
 
 type Status =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "captured" }
-  | { kind: "claim-sent"; message: string | null }
+  | { kind: "claim-sent"; message: string }
+  | { kind: "held"; message: string }
   | { kind: "error"; message: string };
 
 export default function HeroIntakeForm() {
@@ -54,82 +57,65 @@ export default function HeroIntakeForm() {
     setStatus({ kind: "submitting" });
 
     try {
-      const res = await fetch("/api/public/request-vehicle", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          draft: true,
-          email: email.trim(),
-          zip: zip.trim(),
-          interest: interest.trim() || undefined,
-          source: "homepage_hero",
-          source_url: typeof window !== "undefined" ? window.location.href : undefined,
-          referrer: typeof document !== "undefined" && document.referrer ? document.referrer : undefined,
-        }),
+      // The transport and the reading of the answer both live in lib/api/client.
+      // This form used to hold the only correct reading of that answer, hand-rolled;
+      // the other three surfaces each had their own, and got it wrong.
+      const outcome = await submitVehicleRequest({
+        draft: true,
+        email: email.trim(),
+        zip: zip.trim(),
+        interest: interest.trim() || undefined,
+        source: "homepage_hero",
+        source_url: typeof window !== "undefined" ? window.location.href : undefined,
+        referrer: typeof document !== "undefined" && document.referrer ? document.referrer : undefined,
       });
 
-      // A non-2xx is a failure and is shown as one. Parsing is guarded because an
-      // error page is not always JSON.
-      const body = (await res.json().catch(() => null)) as
-        | {
-            success?: boolean;
-            requiresClaim?: boolean;
-            vehicleRequestId?: string | null;
-            message?: string | null;
-            error?: { message?: string };
-          }
-        | null;
-
-      if (!res.ok || !body?.success) {
-        setStatus({
-          kind: "error",
-          message: body?.error?.message ?? "We could not save that just now. Try again in a moment.",
-        });
-        return;
+      switch (outcome.kind) {
+        case "persisted":
+          setStatus({ kind: "captured" });
+          break;
+        case "claim_sent":
+          setStatus({ kind: "claim-sent", message: outcome.message });
+          break;
+        case "held":
+          setStatus({ kind: "held", message: outcome.message });
+          break;
       }
-
-      // `requiresClaim` alone is NOT the claim case. The API sets it for ordinary
-      // guest captures too — the same emailed link claims them — and those DID
-      // create a request. The case that must not be dressed up as "your request is
-      // in" is the one where NOTHING was attached, which the API reports as
-      // `requiresClaim` with a null `vehicleRequestId` (and a `message` saying so).
-      // Branching on the flag alone told every first-time visitor that their
-      // address already had an AutoLenis account.
-      const nothingAttached = Boolean(body.requiresClaim) && !body.vehicleRequestId;
-      setStatus(
-        nothingAttached
-          ? { kind: "claim-sent", message: body.message ?? null }
-          : { kind: "captured" },
-      );
-    } catch {
-      setStatus({ kind: "error", message: "We could not reach the server. Check your connection and try again." });
+    } catch (err) {
+      setStatus({ kind: "error", message: apiErrorMessage(err, "We could not reach the server. Check your connection and try again.") });
     }
   }
 
-  if (status.kind === "captured" || status.kind === "claim-sent") {
+  if (status.kind === "captured" || status.kind === "claim-sent" || status.kind === "held") {
+    // ONE TESTID PER STATE. `hero-intake-success` used to render for the claim
+    // case as well, so a Playwright assertion on it proved only that the form had
+    // stopped — not that a request existed. The states are asserted separately now.
+    const testId =
+      status.kind === "captured" ? "hero-intake-success"
+      : status.kind === "claim-sent" ? "hero-intake-claim-sent"
+      : "hero-intake-held";
+    const Icon = status.kind === "captured" ? CheckCircle2 : status.kind === "claim-sent" ? Mail : Clock;
+    const heading =
+      status.kind === "captured" ? "Saved — check your email"
+      : status.kind === "claim-sent" ? "Check your email to continue"
+      : "We have your details";
+    const detail =
+      status.kind === "captured"
+        ? "We sent you a link to finish your request. Nothing is charged until you review offers."
+        : status.message;
+
     return (
       <div
         className="rounded-lg border border-[#D1D5DB] bg-white p-6"
-        data-testid="hero-intake-success"
+        data-testid={testId}
         role="status"
         aria-live="polite"
       >
         <div className="flex items-start gap-3">
-          {status.kind === "captured" ? (
-            <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-[#0B5FD1]" aria-hidden />
-          ) : (
-            <Mail size={20} className="mt-0.5 shrink-0 text-[#0B5FD1]" aria-hidden />
-          )}
+          <Icon size={20} className="mt-0.5 shrink-0 text-[#0B5FD1]" aria-hidden />
           <div>
-            <p className="font-semibold text-[#111827]">
-              {status.kind === "captured" ? "Saved — check your email" : "Check your email to continue"}
-            </p>
-            <p className="mt-1 text-sm text-[#4B5563]">
-              {status.kind === "captured"
-                ? "We sent you a link to finish your request. Nothing is charged until you review offers."
-                : (status.message ??
-                  "That address already has an AutoLenis account. For your security we sent a link there rather than adding this request to it.")}
-            </p>
+            <p className="font-semibold text-[#111827]">{heading}</p>
+            <p className="mt-1 text-sm text-[#4B5563]">{detail}</p>
           </div>
         </div>
       </div>

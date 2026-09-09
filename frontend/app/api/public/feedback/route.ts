@@ -71,6 +71,11 @@ export async function POST(request: NextRequest) {
   }
 
   // 3. Persist to DB for internal tracking.
+  //
+  // The only durable record this route makes — the Resend calls above are
+  // fire-and-forget. Swallowing this write and answering 201 "Feedback received"
+  // meant feedback could vanish with nothing said. Reported instead.
+  let logged = true;
   await prisma.notification.create({
     data: {
       type: "SYSTEM_ALERT",
@@ -78,7 +83,23 @@ export async function POST(request: NextRequest) {
       body: `${name ?? "Anonymous"}: ${message.slice(0, 500)}${message.length > 500 ? "…" : ""}`,
       metadata: { source: "public_feedback_form", name, email, category, message },
     },
-  }).catch(err => logger.error("[feedback] DB log failed:", err));
+  }).catch(err => {
+    logged = false;
+    logger.error("[feedback] DB log failed:", err);
+  });
+
+  if (!logged) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: {
+          code: "NOT_RECORDED",
+          message: "We could not record your feedback. Please try again in a moment.",
+        },
+      },
+      { status: 503 },
+    );
+  }
 
   return NextResponse.json({ success: true, data: { message: "Feedback received" } }, { status: 201 });
 }

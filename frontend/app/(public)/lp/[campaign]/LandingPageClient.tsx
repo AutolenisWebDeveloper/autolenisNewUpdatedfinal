@@ -34,6 +34,7 @@ import {
 
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
 import { trackVehicleRequest, trackLPFormStep } from "@/lib/analytics/tiktok-events";
+import { submitVehicleRequest, apiErrorMessage, type IntakeOutcome } from "@/lib/api/client";
 import ChatWidget from "@/components/public/ChatWidget";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -223,6 +224,10 @@ export default function LandingPageClient({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  /** The two outcomes that are NOT a request: no conversion, no redirect. */
+  const [pendingOutcome, setPendingOutcome] = useState<
+    Extract<IntakeOutcome, { kind: "claim_sent" | "held" }> | null
+  >(null);
 
   const [showExitIntent, setShowExitIntent] = useState(false);
   const exitIntentShown = useRef(false);
@@ -442,14 +447,15 @@ export default function LandingPageClient({
     };
 
     try {
-      const res = await fetch("/api/public/request-vehicle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(err.error?.message ?? "Submission failed");
+      const outcome = await submitVehicleRequest(payload);
+
+      // A CONVERSION IS A PERSISTED REQUEST, and nothing else. This ran on
+      // `res.ok` alone, so a §7.2 held capture — nothing attached to any account —
+      // was reported to Meta and TikTok as a lead and then redirected to a page
+      // that says "Request Received!". Neither happens now unless a request exists.
+      if (outcome.kind !== "persisted") {
+        setPendingOutcome(outcome);
+        return;
       }
 
       trackFunnelEvent("lp_form_submit", { campaign, budget, timeline, vehicle_type: vehicleType });
@@ -461,6 +467,13 @@ export default function LandingPageClient({
       // map the closest available fields: vehicleType -> model, ZIP -> city.
       trackVehicleRequest({ model: vehicleType || undefined, city: zip });
       trackLPFormStep(1, campaign);
+      // The externally-injected sink that used to be called from the /thank-you
+      // mount effect. Nothing in this repository defines `AutoLenisAnalytics` —
+      // only the optional type in lib/analytics/funnel-events.ts — so whether it
+      // is live is NOT VERIFIED here. It is re-homed rather than dropped: moving
+      // the two pixels off the page and silently deleting a third sink would be
+      // removing a capability, not relocating one.
+      if (typeof window !== "undefined") window.AutoLenisAnalytics?.trackVehicleRequest?.();
 
       // Successful submission — clear session-recovery cache so a future
       // visit doesn't restore a request the buyer has already completed.
@@ -473,12 +486,11 @@ export default function LandingPageClient({
       setSubmitted(true);
       setTimeout(() => {
         router.push(
-          `/thank-you?email=${encodeURIComponent(email)}&campaign=${encodeURIComponent(campaign)}&name=${encodeURIComponent(firstName)}`,
+          `/thank-you?submitted=1&email=${encodeURIComponent(email)}&campaign=${encodeURIComponent(campaign)}&name=${encodeURIComponent(firstName)}`,
         );
       }, 1500);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Something went wrong";
-      setSubmitError(message);
+      setSubmitError(apiErrorMessage(err, "Something went wrong"));
     } finally {
       setSubmitting(false);
     }
@@ -660,7 +672,17 @@ export default function LandingPageClient({
                 </div>
 
                 <form onSubmit={handleSubmit} noValidate>
-                  {submitted ? (
+                  {pendingOutcome ? (
+                    <div className="text-center py-6" data-testid="lp-form-pending" role="status" aria-live="polite">
+                      <div className="w-14 h-14 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-3">
+                        <Mail size={26} className="text-[#0B5FD1]" />
+                      </div>
+                      <p className="text-lg font-bold text-slate-900">
+                        {pendingOutcome.kind === "claim_sent" ? "Check your email to continue" : "We have your details"}
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1">{pendingOutcome.message}</p>
+                    </div>
+                  ) : submitted ? (
                     <div className="text-center py-6">
                       <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
                         <CheckCircle2 size={26} className="text-green-600" />

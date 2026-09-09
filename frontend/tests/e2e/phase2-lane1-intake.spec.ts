@@ -257,3 +257,193 @@ test("journey 3 — the refinance form is Lane 2: it advances no Lane 1 transact
   expect(buyerId).toBeNull();
   expect(requests.length, "Lane 2 creates no Vehicle Request").toBe(0);
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// JOURNEY 4 — a registered address offered anonymously: §7.2, end to end
+// ───────────────────────────────────────────────────────────────────────────
+//
+// §12.4 asks for the browser-visible result AND the persisted state, and this is
+// the journey where the two used to disagree completely. Rule 16 says an address
+// a caller merely asserts is not an identity, so nothing may attach — and the
+// surface said "your request is in" anyway, because it read `success: true`.
+//
+// The three claims, in order: nothing attaches; the visitor is told the truth and
+// the link that makes the truth actionable really exists; and a second submission
+// mints no second credential. Then the link is used, and stops working.
+//
+// The registered buyer is SEEDED here rather than registered through the UI:
+// registration is Supabase-authenticated and there is no non-production
+// authenticated environment (CLAUDE.md). Seeding a row in the throwaway
+// `autolenis_e2e` database is exactly what that database is for, and the guard at
+// the top of this file is what keeps it there.
+
+test.describe.serial("journey 4 — a registered address, offered anonymously", () => {
+  const seedEmail = () => `j4-registered@example.invalid`;
+
+  test.beforeAll(async () => {
+    test.skip(!HAS_DB, "no autolenis_e2e database");
+    const email = seedEmail();
+    // Idempotent: the suite may be re-run against the same throwaway database.
+    // `buyer_request_claim_tokens` carries a buyer id, not a buyer relation, so
+    // the id is resolved first rather than filtered through one.
+    const existing = await prisma.user.findUnique({ where: { email }, select: { buyer: { select: { id: true } } } });
+    const existingBuyerId = existing?.buyer?.id ?? null;
+    if (existingBuyerId) {
+      await prisma.vehicleRequest.deleteMany({ where: { buyerId: existingBuyerId } });
+      await prisma.buyerRequestClaimToken.deleteMany({ where: { buyerId: existingBuyerId } });
+      await prisma.commsOutbox.deleteMany({ where: { recipientId: existingBuyerId } });
+    }
+    await prisma.buyerOpportunity.deleteMany({ where: { email } });
+    await prisma.buyer.deleteMany({ where: { user: { email } } });
+    await prisma.user.deleteMany({ where: { email } });
+
+    await prisma.user.create({
+      data: {
+        email,
+        // NOT a `guest_` prefix — that prefix is precisely what marks a capture
+        // rather than a registered account, and this journey is about the latter.
+        supabaseId: `sb_e2e_${Date.now()}`,
+        role: "BUYER",
+        buyer: { create: { firstName: "Registered", lastName: "Owner" } },
+      },
+    });
+  });
+
+  test("nothing attaches, and the visitor is told so — not shown a request", async ({ page }) => {
+    test.skip(!HAS_DB, "no autolenis_e2e database");
+    const email = seedEmail();
+
+    await page.goto("/");
+    await page.getByTestId("hero-intake-email").fill(email);
+    await page.getByTestId("hero-intake-zip").fill("75035");
+    await page.getByTestId("hero-intake-interest").fill("Used SUV under $35k");
+    await page.getByTestId("hero-intake-submit").click();
+
+    // THE ASSERTION THAT WOULD HAVE FAILED BEFORE: the claim panel, not the
+    // success panel. These were one shared testid until this batch, so an
+    // assertion on `hero-intake-success` proved only that the form had stopped.
+    await expect(page.getByTestId("hero-intake-claim-sent")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("hero-intake-success")).toHaveCount(0);
+
+    // ── persisted state: the lead is kept, the account is untouched ────────
+    const { buyerId, requests, leads } = await countsFor(email);
+    expect(buyerId, "the registered buyer still exists").not.toBeNull();
+    expect(requests.length, "§7.2: nothing is written under an account on an asserted email").toBe(0);
+    expect(leads, "the visitor's typing is never discarded — the lead persists").toBeGreaterThanOrEqual(1);
+
+    // ── and the link the page promises actually exists ────────────────────
+    const tokens = await prisma.buyerRequestClaimToken.findMany({
+      where: { buyerId: buyerId!, consumedAt: null },
+      select: { id: true, purpose: true, expiresAt: true },
+    });
+    expect(tokens.length, "one live claim credential").toBe(1);
+    expect(tokens[0]!.purpose, "scoped: a claim token, not a deposit-resume link").toBe("claim");
+    expect(tokens[0]!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    const messages = await prisma.commsOutbox.findMany({
+      where: { recipientId: buyerId!, templateKey: "registered_claim_prompt" },
+      select: { id: true, channel: true, status: true },
+    });
+    expect(messages.length, "exactly one message carries it").toBe(1);
+    expect(messages[0]!.channel).toBe("email");
+  });
+
+  test("a second submission mints no second credential and sends no second email", async ({ page }) => {
+    test.skip(!HAS_DB, "no autolenis_e2e database");
+    const email = seedEmail();
+
+    await page.goto("/");
+    await page.getByTestId("hero-intake-email").fill(email);
+    await page.getByTestId("hero-intake-zip").fill("75035");
+    await page.getByTestId("hero-intake-submit").click();
+    await expect(page.getByTestId("hero-intake-claim-sent")).toBeVisible({ timeout: 15_000 });
+
+    const { buyerId } = await countsFor(email);
+    const tokens = await prisma.buyerRequestClaimToken.count({ where: { buyerId: buyerId!, consumedAt: null } });
+    const messages = await prisma.commsOutbox.count({
+      where: { recipientId: buyerId!, templateKey: "registered_claim_prompt" },
+    });
+    // The key used to be the opportunity id, which is a fresh row per submission —
+    // so this counted 2 and 2, and every extra post put another live 5-day write
+    // credential in that person's inbox.
+    expect(tokens, "one live credential per target buyer, however many times the form is posted").toBe(1);
+    expect(messages, "and one email").toBe(1);
+  });
+
+  test("the emailed link attaches the request — once, and then never again", async ({ request }) => {
+    test.skip(!HAS_DB, "no autolenis_e2e database");
+    const email = seedEmail();
+    const { buyerId } = await countsFor(email);
+
+    // The raw token exists only in the message that carries it, which is exactly
+    // how a buyer gets it. Reading it from the outbox payload is the closest a
+    // test can stand to opening the email.
+    const message = await prisma.commsOutbox.findFirst({
+      where: { recipientId: buyerId!, templateKey: "registered_claim_prompt" },
+      select: { payload: true },
+    });
+    expect(message, "the message that carries the link").not.toBeNull();
+    const rawToken = /[?&]claim=([A-Za-z0-9%._-]+)/.exec(JSON.stringify(message!.payload))?.[1];
+    expect(rawToken, "the claim URL in the email carries the token").toBeTruthy();
+
+    const res = await request.post("/api/public/request-vehicle", {
+      data: {
+        claimToken: decodeURIComponent(rawToken!),
+        firstName: "Registered",
+        lastName: "Owner",
+        email,
+        phone: "5550001111",
+        zip: "75035",
+        city: "Frisco",
+        state: "TX",
+        contactMethod: "Email",
+        timeline: "ASAP",
+        vehicleType: "SUV",
+        newOrUsed: "Used",
+        budget: "$25,000–$35,000",
+        financingOption: "no_financing",
+        openToAlternatives: true,
+        agreedToContact: true,
+      },
+    });
+    expect(res.status(), "the token is the capability the write needs").toBe(200);
+    const body = (await res.json()) as { vehicleRequestId?: string | null; requiresClaim?: boolean };
+    expect(body.vehicleRequestId, "the click is tier 2: THIS is where it attaches").toBeTruthy();
+
+    const attached = await prisma.vehicleRequest.findUnique({
+      where: { id: body.vehicleRequestId! },
+      select: { buyerId: true },
+    });
+    expect(attached!.buyerId, "to the registered buyer the link was minted for").toBe(buyerId);
+
+    // SINGLE USE. The intake write path never consumed the token it used, so a
+    // forwarded link stayed a write credential against this account for five days.
+    const live = await prisma.buyerRequestClaimToken.count({ where: { buyerId: buyerId!, consumedAt: null } });
+    expect(live, "the token is spent by the write it authorised").toBe(0);
+
+    // And the same link a second time authorises nothing.
+    const replay = await request.post("/api/public/request-vehicle", {
+      data: {
+        claimToken: decodeURIComponent(rawToken!),
+        firstName: "Someone",
+        lastName: "Else",
+        email,
+        phone: "5550002222",
+        zip: "75035",
+        city: "Frisco",
+        state: "TX",
+        contactMethod: "Email",
+        timeline: "ASAP",
+        vehicleType: "Sedan",
+        newOrUsed: "Used",
+        budget: "$15,000–$25,000",
+        financingOption: "no_financing",
+        openToAlternatives: true,
+        agreedToContact: true,
+      },
+    });
+    const replayBody = (await replay.json()) as { vehicleRequestId?: string | null; requiresClaim?: boolean };
+    expect(replayBody.vehicleRequestId, "a spent link falls through to tier 3, which refuses").toBeNull();
+    expect(replayBody.requiresClaim).toBe(true);
+  });
+});

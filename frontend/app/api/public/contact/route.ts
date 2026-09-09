@@ -97,6 +97,13 @@ export async function POST(request: NextRequest) {
   // 3. Persist to DB so admin has a paper trail even if email delivery fails.
   // Notification.buyerId/dealerId/affiliateId are all optional — a free-floating
   // SYSTEM_ALERT is acceptable for internal staff visibility.
+  //
+  // THIS IS THE ONLY DURABLE RECORD this route makes. The two Resend calls above
+  // are fire-and-forget by design, so if this write fails and the mail also
+  // failed, the message is gone — and the route still answered 201 "Message
+  // sent". The failure is now reported: the paper trail either exists or the
+  // sender is told to reach us another way.
+  let logged = true;
   await prisma.notification.create({
     data: {
       type: "SYSTEM_ALERT",
@@ -104,7 +111,10 @@ export async function POST(request: NextRequest) {
       body: `From: ${name} <${email}>\n\n${message.slice(0, 500)}${message.length > 500 ? "…" : ""}`,
       metadata: { source: "public_contact_form", name, email, phone: phone ?? null, subject, fullMessage: message, ...smsConsentRecord },
     },
-  }).catch(err => logger.error("[contact] DB log failed:", err));
+  }).catch(err => {
+    logged = false;
+    logger.error("[contact] DB log failed:", err);
+  });
 
   // 4. Record SMS consent in the CANONICAL consent store (contacts.consent_sms),
   //    which is the field the outbound SMS gate actually reads — otherwise the
@@ -125,6 +135,20 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       logger.error("[contact] consent upsert failed:", err);
     }
+  }
+
+  if (!logged) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: {
+          code: "NOT_RECORDED",
+          message:
+            "We could not record your message. Please email team@autolenis.com directly so it does not get lost.",
+        },
+      },
+      { status: 503 },
+    );
   }
 
   return NextResponse.json({ success: true, data: { message: "Message sent" } }, { status: 201 });

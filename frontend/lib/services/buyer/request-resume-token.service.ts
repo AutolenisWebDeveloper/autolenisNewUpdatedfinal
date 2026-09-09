@@ -75,6 +75,11 @@ export interface IssuedResumeToken {
   /** Raw token — embed in the emailed resume link ONLY; never stored or logged. */
   rawToken: string;
   expiresAt: Date;
+  /**
+   * The row id. Safe to log and to key a message on — it identifies the token
+   * without being one. The create already selects it; it used to be discarded.
+   */
+  tokenId: string;
 }
 
 /**
@@ -101,7 +106,7 @@ export async function issueResumeToken(
   const tokenHash = hashResumeToken(rawToken);
   const expiresAt = new Date(Date.now() + RESUME_TOKEN_TTL_MS);
 
-  await db.buyerRequestClaimToken.create({
+  const row = await db.buyerRequestClaimToken.create({
     data: {
       tokenHash,
       buyerId: params.buyerId,
@@ -116,7 +121,51 @@ export async function issueResumeToken(
     select: { id: true },
   });
 
-  return { rawToken, expiresAt };
+  return { rawToken, expiresAt, tokenId: row.id };
+}
+
+/**
+ * Is a claim-capable token already live for this buyer?
+ *
+ * The one caller is the §7.2 held-capture branch, which must not mint a second
+ * live credential (and send a second email) because the same visitor submitted
+ * the form twice. Keyed on the buyer rather than on the submission for exactly
+ * that reason: the submission is a fresh row every time, so it can never
+ * deduplicate anything.
+ *
+ * Returns the row id of the live token, or null. Explicit select, like every
+ * other access to this model.
+ */
+export async function findLiveClaimToken(
+  buyerId: string,
+  db: PrismaClient | Prisma.TransactionClient = prisma,
+): Promise<{ tokenId: string; expiresAt: Date } | null> {
+  const row = await db.buyerRequestClaimToken.findFirst({
+    where: {
+      buyerId,
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+      // EXACTLY `claim`, and deliberately NOT the wider set the tier-2 lookup
+      // accepts. The two questions are different and the safe answer points the
+      // opposite way for each:
+      //
+      //   • resolving a token a caller PRESENTED — accept `legacy_unscoped` and
+      //     NULL, because refusing them would break live links minted before the
+      //     column existed;
+      //   • deciding whether to SUPPRESS a new one — accept neither, because a
+      //     $99 deposit-resume token backfilled to `legacy_unscoped` (or written
+      //     as NULL by an old instance mid-deploy) is not a claim credential, and
+      //     treating it as one suppresses the claim email while the caller is
+      //     told to go and read it.
+      //
+      // Erring here costs at most one extra claim token; erring the other way
+      // costs the visitor a link that does not exist.
+      purpose: TOKEN_PURPOSE.CLAIM,
+    },
+    orderBy: { expiresAt: "desc" },
+    select: { id: true, expiresAt: true },
+  });
+  return row ? { tokenId: row.id, expiresAt: row.expiresAt } : null;
 }
 
 export type ResumeTokenValidation =

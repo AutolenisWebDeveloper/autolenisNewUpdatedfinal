@@ -1489,6 +1489,33 @@ marked otherwise. **Coverage: 268 rows** — the 266 carrying a Phase-2 cell whe
 plus `control/B2-01` and `control/G35-01`, whose cells read Phase 1 while §11.5 rulings 9 and 10
 assigned them here. Both are reconciled above.
 
+**CORRECTION (2026-09-09) — the blanket clause above is wrong for four rows.** "The §10 rows above
+are satisfied unless marked otherwise" reads as a claim about all 268, and four of them were not
+implemented in Phase 2 and are not implemented now. A reader taking the clause at face value would
+believe work exists that does not:
+
+| Row | What it requires | Actual state |
+| --- | --- | --- |
+| **R3b** | Attribution on every submission; channel derived server-side; `ip_address` captured or `ip_unavailable_reason` recorded | The intake writer and the two public routes do this. The dashboard (`app/api/buyer/requests/route.ts`), the concierge (`app/api/concierge/route.ts`) and voice (`dispatch-request.ts`) still send no attribution. **PARTIAL**, as the row itself says. |
+| **R7b** | Every partial surface creates a DRAFT Vehicle Request and enters §6.4 | The homepage hero and the LP Step-1 path do. The lead magnet, the fee calculator and the abandoned concierge do not. **PARTIAL.** |
+| **R18** | Concierge passes attribution and IP, treats the gate email as unverified, captures `lastName` | The §7.2 identity fix covers "treat as unverified" through the shared resolver. Attribution, IP and `lastName` are unchanged. **PARTIAL.** |
+| **N4** | Every incomplete Lane 1 capture enrolled in the four-touch recovery; per-surface cadences retired | `draft-recovery.service.ts` enrols captures that reach it. `lead-magnet-sequence.ts` and the `lead_nurture_schedule` cadences are still running alongside it. **TO CONSOLIDATE**, unchanged. |
+
+The four rows' own status cells were always accurate. The blanket sentence is what overrode them,
+and it is the sentence that is corrected: **the §10 rows are satisfied only where their own status
+cell says so.** Nothing here is a new finding — it is the record being made to match the code.
+
+**CORRECTION (2026-09-09) — two claims made in Phase 3 commit messages.**
+
+1. Commit `54c427d` said the Playwright journey asserts the claim-case copy. It did not. Journey 1
+   asserted `hero-intake-success`, and that testid rendered for BOTH the captured state and the
+   claim state, so the assertion proved only that the form had stopped — not which answer the API
+   had given. Fixed in this batch: the three outcomes now have distinct testids
+   (`hero-intake-success`, `hero-intake-claim-sent`, `hero-intake-held`), and journey 4 asserts the
+   claim panel is visible AND the success panel is absent.
+2. The same shared testid is why journey 1 could not have caught the §7.2 regression it was cited
+   as covering. Recorded here so the coverage claim is not made again from the old spec.
+
 **The three Step Zero checks, and what they found.** Three issues were real and are corrected in this
 document rather than worked around; one was in the prompt that commissioned the phase rather than in
 the plan.

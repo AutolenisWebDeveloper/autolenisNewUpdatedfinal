@@ -447,6 +447,16 @@ jobs:
       - name: E2E — dealer outreach
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/dealer-outreach.spec.ts
 
+      # The Lane 1 intake journeys (§12.4). This spec existed and CI never ran it,
+      # so the assertions it makes about §7.2 — a registered address offered
+      # anonymously attaches NOTHING, and the surface says so — held only when
+      # someone ran Playwright by hand. Journey 4 is the one that fails loudly if
+      # the intake response contract regresses.
+      #
+      # Same server and same throwaway autolenis_e2e database the step above uses.
+      - name: E2E — Lane 1 intake journeys
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase2-lane1-intake.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
