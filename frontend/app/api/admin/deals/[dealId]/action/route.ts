@@ -4,7 +4,12 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { refundDepositCharge } from "@/lib/services/payment/refund.service";
-import { advanceDealStatus, DealTransitionError, InsuranceRequiredError } from "@/lib/services/deal/deal.service";
+import {
+  advanceDealStatus,
+  cancelDeal,
+  DealTransitionError,
+  InsuranceRequiredError,
+} from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
   sendDealerContractIssuesEmail,
@@ -169,25 +174,37 @@ export async function POST(request: NextRequest, { params }: Props) {
         return adminError("INVALID_STATE", `Deal is already ${deal.status.toLowerCase()}`, 400);
       }
 
-      // Refund the deposit's real charge if one is still held (FS-K: a
-      // no-real-charge / admin-seeded deposit returns NO_CHARGE — no money moves
-      // and `refunded` stays false, so the buyer is never falsely told a refund
-      // was processed). Guarded flip + deposit-scoped idempotency key inside the
-      // shared helper make this safe against double-refund.
-      let refunded = false;
-      const deposit = await prisma.deposit.findFirst({
-        where: { buyerId: deal.buyerId, status: "PAID" },
-        orderBy: { createdAt: "desc" },
+      // MONEY-PATH DEFECT 3. This branch used to refund the buyer's deposit as a
+      // side effect of cancelling. §22.1 is explicit that it must not:
+      //
+      //   "Cancellation and refund are separate decisions. Cancelling a transaction
+      //    does not entitle a refund, and issuing a refund does not erase the
+      //    transaction record."
+      //
+      //   "Refunds are reviewed manually. There is no automatic refund."
+      //
+      // An automatic refund on cancel is both of those rules broken at once, and it
+      // moved real money on an action an administrator took for a different purpose.
+      // Cancelling now cancels. A refund is REFUND_TRIGGERED, reviewed on its own.
+      //
+      // Routed through `cancelDeal` rather than calling `advanceDealStatus` directly:
+      // that is the ONE terminal cancellation path, it never refunds, and its
+      // `expectedFrom` pin is what stops a cancel racing a concurrent completion and
+      // silently undoing a finished purchase. Calling the underlying advance here was
+      // how this route came to have its own cancellation semantics in the first place.
+      const cancelled = await cancelDeal(dealId, reason, {
+        actorId: admin.adminId,
+        actorRole: "ADMIN",
       });
-      if (deposit) {
-        try {
-          refunded = (await refundDepositCharge(deposit)) === "REFUNDED";
-        } catch (err) {
-          return adminError("STRIPE_ERROR", `Deal cancel refund failed: ${err}`, 500);
-        }
+      if (!cancelled) {
+        return adminError(
+          "INVALID_STATE",
+          "The deal changed state while this cancellation was being applied and was not cancelled. " +
+            "Reload and check its current status before retrying.",
+          409,
+        );
       }
-
-      await advanceDealStatus(dealId, "CANCELLED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });
+      const refunded = false;
 
       // Notify buyer.
       await prisma.notification.create({
@@ -230,13 +247,42 @@ export async function POST(request: NextRequest, { params }: Props) {
         orderBy: { createdAt: "desc" },
       });
 
-      let refunded = false;
+      // MONEY-PATH DEFECT 3. The advance used to sit outside this guard, with a
+      // comment calling it "an admin bookkeeping transition" — so a deal reached
+      // REFUNDED when the primitive had returned NO_CHARGE and no money had moved.
+      // The buyer notification was already gated on the real outcome, which made the
+      // deal record and the message the buyer received disagree with each other.
+      //
+      // §22.1: a no-charge record is never labelled as money refunded. REFUNDED is a
+      // claim about money, so it is written only when money actually went back.
+      let outcome: Awaited<ReturnType<typeof refundDepositCharge>>["outcome"] = "NO_CHARGE";
       if (deposit) {
         try {
-          refunded = (await refundDepositCharge(deposit)) === "REFUNDED";
+          ({ outcome } = await refundDepositCharge(deposit, reason));
         } catch (err) {
           return adminError("STRIPE_ERROR", `Refund failed: ${err}`, 500);
         }
+      }
+      const refunded = outcome === "REFUNDED";
+
+      if (!refunded) {
+        // Nothing moved, so nothing is recorded as having moved. The message names
+        // which of the three reasons applies, because they need different follow-ups:
+        // reconcile out of band, look at the provider, or nothing to do.
+        const why =
+          !deposit
+            ? "this buyer has no settled deposit"
+            : outcome === "NO_CHARGE"
+              ? "the deposit carries no captured Stripe charge (admin-seeded or comped) and must be reconciled out of band"
+              : outcome === "NOT_SUCCEEDED"
+                ? "Stripe reports the PaymentIntent never succeeded, so there is no captured money to return"
+                : "a concurrent action already refunded it";
+        return adminError(
+          "NO_REFUND_PERFORMED",
+          `No money was returned: ${why}. The deal has NOT been marked refunded — §22.1 does not permit ` +
+            `recording a refund that did not happen.`,
+          409,
+        );
       }
 
       await advanceDealStatus(dealId, "REFUNDED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });

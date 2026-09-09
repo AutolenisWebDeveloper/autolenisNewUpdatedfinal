@@ -1,34 +1,102 @@
 // lib/services/payment/refund.service.ts
+//
+// THE ONE PRIMITIVE THAT REFUNDS A $99 DEPOSIT.
+//
+// Before Phase 3 there were three, and they disagreed about the things that matter:
+//
+//   • `refundDepositCharge` — the good one, but its "is there a real charge?" test
+//     knew only about `pi_admin_` ids, so a `pi_sandbox_mock_` id was treated as a
+//     real charge and sent to Stripe;
+//   • `processRefund` — a near-copy used by the AI action-intent command, which did
+//     NOT handle `charge_already_refunded` (so an out-of-band refund made it throw
+//     and report failure for money that had already gone back) and sent its own
+//     buyer notification, so the same event produced different messaging depending
+//     on which path an operator happened to take;
+//   • the admin refund route — a third inline copy, and the only one that checked the
+//     PaymentIntent was actually `succeeded` before issuing a refund.
+//
+// Consolidating is not "pick one and delete the others". Each carried a safety check
+// the others lacked, so the primitive below is the UNION of all three, and the other
+// two now call it. §22.1 governs: refunds are reviewed manually, execution is
+// idempotency-keyed, and a no-charge record is NEVER labelled as money refunded.
+
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { refundPaymentIntent } from "./stripe.service";
+import { refundPaymentIntent, retrievePaymentIntent } from "./stripe.service";
+import { isSyntheticIntentId } from "./deposit-obligation";
+import { REFUND_FROM } from "@/lib/payments/deposit-state";
 import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 
-export type DepositRefundOutcome = "REFUNDED" | "ALREADY_REFUNDED" | "NO_CHARGE";
+export type DepositRefundOutcome =
+  /** Money was returned (or had already been returned out of band) and our row now says so. */
+  | "REFUNDED"
+  /** A concurrent path won the status flip. The money moved exactly once. */
+  | "ALREADY_REFUNDED"
+  /**
+   * There is nothing to return. The deposit carries no PaymentIntent, or one we minted
+   * ourselves (`pi_admin_`, `pi_sandbox_mock_`, `pi_fee_admin_`) that Stripe never saw.
+   * Callers MUST NOT tell the buyer a refund is on the way on this outcome — that is a
+   * fake success, and §22.1 forbids labelling a no-charge record as money refunded.
+   */
+  | "NO_CHARGE"
+  /**
+   * Stripe holds the intent but says it never succeeded, so there is no captured money
+   * to return. Refunding it would 4xx at the provider; flipping our row to REFUNDED
+   * without that would record a refund that never happened. Absorbed from the admin
+   * route, which was the only one of the three that checked.
+   */
+  | "NOT_SUCCEEDED";
 
-// FS-K — the ONE shared "refund a deposit's real charge" primitive, so every
-// admin refund path treats a no-real-charge deposit identically. A deposit
-// seeded by an admin-override path took no money: it carries either no
-// PaymentIntent or a synthetic `pi_admin_` id (created when Stripe is
-// unreachable). Refunding + flipping those to REFUNDED and telling the buyer a
-// refund is on the way is a fake success — no money ever moves. This returns
-// NO_CHARGE for them (no Stripe call, no status flip); callers MUST gate their
-// "your refund has been processed" messaging on a REFUNDED result.
-//
-// Real charge → issues one idempotency-keyed Stripe refund (deposit-scoped key,
-// so concurrent paths collapse to a single refund; charge_already_refunded is
-// treated as money-already-gone) and flips PAID→REFUNDED via a status-guarded
-// updateMany (never the findFirst+unconditional-update anti-pattern). ALREADY_
-// REFUNDED means a concurrent path won the flip.
+export interface DepositRefundResult {
+  outcome: DepositRefundOutcome;
+  /**
+   * The Stripe `re_...` id, when this call created one. Null for every outcome that
+   * moved no money, and also for `charge_already_refunded` — where the refund exists
+   * at Stripe but was created by something else, so claiming its id here would be a
+   * guess. Recorded in the admin audit log so an operator can find the refund object
+   * without reconstructing it from the PaymentIntent.
+   */
+  stripeRefundId: string | null;
+}
+
+export interface RefundDepositInput {
+  id: string;
+  stripePaymentIntentId: string | null;
+}
+
+/**
+ * Refund a deposit's real charge, once.
+ *
+ * Idempotency-keyed on the DEPOSIT, so every path that refunds the same deposit
+ * collapses to a single Stripe refund even when two operators act at the same moment.
+ * The status flip is scoped by the transition matrix rather than read-then-written, so
+ * a concurrent writer loses the race cleanly instead of double-writing.
+ */
 export async function refundDepositCharge(
-  deposit: { id: string; stripePaymentIntentId: string | null },
-): Promise<DepositRefundOutcome> {
-  const hasRealCharge =
-    !!deposit.stripePaymentIntentId && !deposit.stripePaymentIntentId.startsWith("pi_admin_");
-  if (!hasRealCharge) return "NO_CHARGE";
+  deposit: RefundDepositInput,
+  reason = "admin refund",
+): Promise<DepositRefundResult> {
+  const intentId = deposit.stripePaymentIntentId;
+  if (!intentId || isSyntheticIntentId(intentId)) return { outcome: "NO_CHARGE", stripeRefundId: null };
 
+  // Ask the provider before moving money. This is the admin route's check, promoted:
+  // refunding a non-succeeded intent is an error Stripe returns 4xx for, and catching
+  // the divergence here is what stops our row saying REFUNDED while the money never
+  // left. A provider we cannot reach is NOT treated as "not succeeded" — it throws, so
+  // the caller reports a failure rather than recording a refund that did not happen.
+  const intent = await retrievePaymentIntent(intentId);
+  if (intent.status !== "succeeded") {
+    logger.warn(
+      `[refund] refusing to refund deposit ${deposit.id}: PaymentIntent ${intentId} is ` +
+        `"${intent.status}", not "succeeded" — there is no captured money to return`,
+    );
+    return { outcome: "NOT_SUCCEEDED", stripeRefundId: null };
+  }
+
+  let stripeRefundId: string | null = null;
   try {
-    await refundPaymentIntent(deposit.stripePaymentIntentId!, "admin refund", `refund-deposit-${deposit.id}`);
+    const refund = await refundPaymentIntent(intentId, reason, `refund-deposit-${deposit.id}`);
+    stripeRefundId = refund?.id ?? null;
   } catch (err) {
     const code = (err as { code?: string } | null)?.code;
     // Money already left Stripe out of band — safe to sync our DB state.
@@ -37,38 +105,45 @@ export async function refundDepositCharge(
     logger.warn("[refund] charge already refunded out-of-band — syncing DB only:", { depositId: deposit.id });
   }
 
+  // `REFUND_FROM` is PAID or DISPUTED. DISPUTED is included because a dispute the
+  // platform loses returns the funds and Stripe reports the charge as refunded; the
+  // row must be able to follow that. It is still matrix-scoped, so a REFUNDED or
+  // PENDING row is untouched.
   const flipped = await prisma.deposit.updateMany({
-    where: { id: deposit.id, status: "PAID" },
+    where: { id: deposit.id, status: { in: [...REFUND_FROM] } },
     data: { status: "REFUNDED", refundedAt: new Date() },
   });
-  return flipped.count > 0 ? "REFUNDED" : "ALREADY_REFUNDED";
+  return { outcome: flipped.count > 0 ? "REFUNDED" : "ALREADY_REFUNDED", stripeRefundId };
 }
 
+/**
+ * The AI action-intent command's entry point. Kept as a named export because
+ * `lib/services/ai/action-intent/catalog.ts` records it as the canonical service for
+ * the `refund_deposit` intent, and that registry is what the guardrails check against.
+ *
+ * It is now a thin adapter over the one primitive rather than a second implementation.
+ * The behaviour change worth stating: it used to throw on `charge_already_refunded`
+ * and report failure for money that had ALREADY gone back to the buyer. It now
+ * reports success for that case, which is what actually happened.
+ */
 export async function processRefund(depositId: string, reason: string): Promise<boolean> {
-  const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
-  // FS-K: only a PAID deposit with a REAL captured charge (not a synthetic
-  // pi_admin_ id) can be refunded — otherwise there is no money to return.
-  if (
-    !deposit ||
-    deposit.status !== "PAID" ||
-    !deposit.stripePaymentIntentId ||
-    deposit.stripePaymentIntentId.startsWith("pi_admin_")
-  ) {
-    return false;
-  }
-
-  await refundPaymentIntent(deposit.stripePaymentIntentId, reason, `refund-deposit-${depositId}`);
-  // Status-guarded flip so a concurrent refund path can't double-write.
-  const flipped = await prisma.deposit.updateMany({
-    where: { id: depositId, status: "PAID" },
-    data: { status: "REFUNDED", refundedAt: new Date() },
+  const deposit = await prisma.deposit.findUnique({
+    where: { id: depositId },
+    select: { id: true, buyerId: true, status: true, stripePaymentIntentId: true },
   });
-  if (flipped.count === 0) return false;
+  if (!deposit) return false;
 
-  await prisma.notification.create({ data: {
-    buyerId: deposit.buyerId, type: "DEAL_STAGE_CHANGED",
-    title: "Refund processed", body: `Your ${DEPOSIT_AMOUNT_USD} deposit refund has been processed. Allow 3-5 business days.`,
-  }}).catch(() => {});
+  const { outcome } = await refundDepositCharge(deposit, reason);
+  if (outcome !== "REFUNDED") return false;
+
+  await prisma.notification.create({
+    data: {
+      buyerId: deposit.buyerId,
+      type: "DEAL_STAGE_CHANGED",
+      title: "Refund processed",
+      body: `Your ${DEPOSIT_AMOUNT_USD} deposit refund has been processed. Allow 3-5 business days.`,
+    },
+  }).catch(() => {});
 
   return true;
 }

@@ -116,7 +116,16 @@ test("a real, succeeded PI refunds: Stripe refund issued, status-guarded flip, b
   const res = (await POST(req(), { params })) as unknown as { __kind: string; data: { status: string } };
   assert.equal(res.__kind, "success");
   assert.equal(ctrl.refundsCreated, 1, "a real Stripe refund was issued");
-  assert.deepEqual(ctrl.flipWhere, { id: "dep_1", status: "PAID" }, "flip is guarded on still-PAID");
+  // Phase 3: the route delegates to the one refund primitive, whose flip is scoped by
+  // the transition matrix (PAID or DISPUTED — a lost dispute returns the funds too)
+  // rather than by a bare "PAID". The set itself is asserted in the primitive's own
+  // test; here we only care that this deposit was targeted and the flip stayed guarded.
+  const flip = ctrl.flipWhere as { id: string; status: { in: string[] } };
+  assert.equal(flip.id, "dep_1");
+  assert.ok(
+    Array.isArray(flip.status?.in) && !flip.status.in.includes("REFUNDED"),
+    "flip stays status-guarded and can never resurrect an already-refunded deposit",
+  );
   assert.equal(ctrl.notifications.length, 1);
   assert.equal(ctrl.audits.length, 1);
   assert.equal(ctrl.audits[0]!.action, "DEPOSIT_REFUNDED");

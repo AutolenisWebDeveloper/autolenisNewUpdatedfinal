@@ -7,8 +7,8 @@ import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError, getClientIp } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { getStripe } from "@/lib/stripe";
 import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
+import { refundDepositCharge } from "@/lib/services/payment/refund.service";
 
 interface Props { params: Promise<{ depositId: string }> }
 
@@ -37,58 +37,41 @@ export async function POST(request: NextRequest, { params }: Props) {
   // telling the buyer "your refund has been processed, allow 3–5 business days"
   // is a fake success — no money ever moves. Reject them here so the DB never
   // records a refund that did not happen; a comped/admin-seeded deposit is
-  // reconciled out of band, not through the Stripe refund path.
-  const hasRealCharge =
-    !!deposit.stripePaymentIntentId && !deposit.stripePaymentIntentId.startsWith("pi_admin_");
-  if (!hasRealCharge) {
+  // MONEY-PATH DEFECT 3, the consolidation. Everything that used to be written out
+  // inline here — the has-a-real-charge test, the succeeded precheck, the
+  // deposit-scoped idempotency key, the charge_already_refunded sync and the
+  // status-guarded flip — now lives in the one primitive, and the other two refund
+  // paths call the same thing. This route was the ONLY one of the three that checked
+  // the PaymentIntent had actually succeeded, so consolidating meant promoting that
+  // check rather than dropping it.
+  let outcome: Awaited<ReturnType<typeof refundDepositCharge>>["outcome"];
+  let stripeRefundId: string | null = null;
+  try {
+    ({ outcome, stripeRefundId } = await refundDepositCharge(deposit, reason));
+  } catch (stripeErr) {
+    const msg = (stripeErr as { message?: string } | null)?.message ?? "Unknown Stripe error";
+    logger.error("[deposit/refund] Stripe refund failed:", { msg, depositId });
+    return adminError("STRIPE_REFUND_FAILED", `Stripe refund failed: ${msg}`, 502);
+  }
+
+  if (outcome === "NO_CHARGE") {
     return adminError(
       "NO_STRIPE_CHARGE",
       "This deposit has no captured Stripe charge (admin-seeded or comped) — there is nothing to refund. It must be reconciled out of band.",
       400,
     );
   }
-
-  // Verify the PI is actually in `succeeded` state before issuing a refund —
-  // refunding a non-succeeded PI is an error path Stripe returns 4xx for, and
-  // we'd rather catch the divergence here than mark the deposit REFUNDED in our
-  // DB while the money never actually leaves Stripe.
-  let stripeRefundId: string | null = null;
-  try {
-    const pi = await getStripe().paymentIntents.retrieve(deposit.stripePaymentIntentId!);
-    if (pi.status !== "succeeded") {
-      return adminError(
-        "STRIPE_PI_NOT_SUCCEEDED",
-        `Cannot refund: Stripe PaymentIntent status is "${pi.status}", expected "succeeded".`,
-        400,
-      );
-    }
-    const refund = await getStripe().refunds.create(
-      { payment_intent: deposit.stripePaymentIntentId! },
-      { idempotencyKey: `refund-deposit-${depositId}` },
+  if (outcome === "NOT_SUCCEEDED") {
+    return adminError(
+      "STRIPE_PI_NOT_SUCCEEDED",
+      "Cannot refund: Stripe reports this PaymentIntent never succeeded, so there is no captured money to return.",
+      400,
     );
-    stripeRefundId = refund.id;
-  } catch (stripeErr) {
-    const code = (stripeErr as { code?: string } | null)?.code;
-    const msg = (stripeErr as { message?: string } | null)?.message ?? "Unknown Stripe error";
-    // `charge_already_refunded` means the money already left Stripe — safe to
-    // sync our DB state. Any other error means the refund did NOT happen and
-    // we must NOT mark the deposit as refunded.
-    if (code !== "charge_already_refunded") {
-      logger.error("[deposit/refund] Stripe refund failed:", { code, msg, depositId });
-      return adminError("STRIPE_REFUND_FAILED", `Stripe refund failed: ${msg}`, 502);
-    }
-    logger.warn("[deposit/refund] charge already refunded out-of-band — syncing DB only:", { depositId });
   }
-
-  // Status-guarded flip (only a still-PAID deposit) so a concurrent refund path
-  // collapses to one write and a REFUNDED/FAILED deposit is never resurrected.
-  const flip = await prisma.deposit.updateMany({
-    where: { id: depositId, status: "PAID" },
-    data: { status: "REFUNDED", refundedAt: new Date() },
-  });
-  if (flip.count === 0) {
+  if (outcome === "ALREADY_REFUNDED") {
     return adminError("ALREADY_REFUNDED", "Deposit was already refunded by a concurrent action", 409);
   }
+
   const updated = await prisma.deposit.findUnique({ where: { id: depositId } });
 
   // Notify buyer via in-app notification
