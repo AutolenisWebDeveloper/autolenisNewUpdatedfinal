@@ -410,7 +410,22 @@ jobs:
       - name: Install the Playwright browser
         # Only chromium, and only here. The agent image ships one preinstalled;
         # a GitHub runner does not.
-        run: pnpm exec playwright install --with-deps chromium
+        # `--with-deps` is deliberately NOT used. It shells out to `apt-get
+        # update`, which fails whenever ANY repository already configured on the
+        # runner image is serving an inconsistent index — and on 2026-09-09
+        # `dl.google.com` did exactly that, with a release file created at 17:16
+        # UTC advertising an index last modified at 09:41 UTC:
+        #
+        #   Err: https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages
+        #     Hash Sum mismatch
+        #   Failed to install browsers — exit code 100
+        #
+        # That took out the visual guardrail and this job together, before a
+        # single test body ran, on a repository neither of them uses. The flag was
+        # buying nothing: the GitHub `ubuntu-24.04` image already ships Playwright's
+        # system libraries, so only the browser binary itself is missing, and that
+        # comes from Playwright's own CDN rather than from apt.
+        run: pnpm exec playwright install chromium
 
       # Same readiness probe visual.yml uses. There is no /api/health route in
       # this app, so the check is a 200 on / — polled, not slept on.
