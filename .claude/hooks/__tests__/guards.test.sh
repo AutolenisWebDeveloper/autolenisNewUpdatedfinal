@@ -177,6 +177,29 @@ cmd deny 'DATABASE_URL=postgresql://app:placeholder-not-a-secret@db.example.inva
 cmd deny 'export DIRECT_URL="postgresql://app:placeholder-not-a-secret@db.example.invalid:5432/postgres"'
 cmd deny 'psql postgresql://app:placeholder-not-a-secret@db.example.invalid:5432/postgres -c "select 1"'
 cmd deny 'PGPASSWORD=placeholder-not-a-secret psql -h db.example.invalid -U app -c "select 1"'
+
+echo "== the loopback carve-out: the host is PARSED, never substring-matched =="
+# Owner ruling, 2026-09-09. A throwaway Postgres on 127.0.0.1 is the sanctioned
+# place to exercise anything that writes, and reaching one means naming its DSN.
+cmd allow 'DATABASE_URL=postgresql://postgres@127.0.0.1:55432/chain1 pnpm test:migrations'
+cmd allow 'DIRECT_URL=postgresql://postgres@localhost:55432/chain1 pnpm exec tsx frontend/scripts/apply-chain.ts'
+cmd allow 'PROD_READONLY_URL=postgresql://ro@[::1]:55432/chain1 pnpm test:migrations'
+cmd allow 'DATABASE_URL=postgresql://postgres@LOCALHOST:55432/chain1 pnpm test:migrations'   # DNS is case-insensitive
+cmd allow 'export DATABASE_URL=postgresql://postgres@127.0.0.1:55432/chain1'
+cmd ask   'DATABASE_URL=postgresql://postgres@127.0.0.1:55432/chain1 pnpm exec prisma migrate deploy'  # loopback or not, deploy is operation 1
+cmd deny  'DATABASE_URL=postgresql://user@localhost.evil.com:5432/db pnpm test:migrations'    # a suffix is not the host
+cmd deny  'DATABASE_URL=postgresql://user@127.0.0.1.evil.com:5432/db pnpm test:migrations'
+cmd deny  'DATABASE_URL=postgresql://postgres@evil.com@127.0.0.1:5432/db pnpm test:migrations'  # ambiguous authority: two @
+cmd deny  'DATABASE_URL=postgresql://postgres@aieybibvewmvrubcpthm.supabase.co:5432/postgres pnpm test:migrations'
+cmd deny  'DATABASE_URL=postgresql://postgres.aieybibvewmvrubcpthm@127.0.0.1:6543/postgres pnpm test:migrations'  # a tunnel does not launder the ref
+cmd deny  'DATABASE_URL=postgresql://postgres@127.0.0.1:5432/db?host=db.example.invalid pnpm test:migrations'     # libpq: host= overrides the authority
+cmd deny  'DATABASE_URL=postgresql://app:placeholder-not-a-secret@127.0.0.1:5432/db pnpm test:migrations'         # a password is typed whatever the host
+cmd deny  'DATABASE_URL=mysql://postgres@127.0.0.1:3306/db pnpm test:migrations'                                  # not a postgres URL: nothing to parse
+cmd deny  'DATABASE_URL=postgresql://postgres@127.0.0.1:5432/db PGPASSWORD=placeholder-not-a-secret pnpm test:migrations'  # one bad assignment sinks the line
+cmd deny  'PGPASSWORD=placeholder-not-a-secret psql -h 127.0.0.1 -U app -c "select 1"'       # a bare secret has no host to prove
+GUARD_ENV='DATABASE_URL=postgresql://u:p@db.example.invalid:5432/postgres'
+cmd deny  'DATABASE_URL=postgresql://postgres@127.0.0.1:55432/chain1 pnpm test:migrations'   # no carve-out in a deploy session
+GUARD_ENV=""
 cmd deny 'supabase migration up'
 cmd deny 'supabase migration repair --status applied 20260901000000'
 cmd deny 'supabase db dump -f prod.sql'
