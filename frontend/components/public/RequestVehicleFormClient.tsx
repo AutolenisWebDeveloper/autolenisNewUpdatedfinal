@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2, Loader2, Upload, Lock, ShieldCheck,
-  RefreshCw, ChevronLeft, FileText, CreditCard,
+  RefreshCw, ChevronLeft, FileText, CreditCard, Mail, Clock,
 } from "lucide-react";
+import { submitVehicleRequest, apiErrorMessage, type IntakeOutcome } from "@/lib/api/client";
 import { POPULAR_MAKES, fetchModelsForMake } from "@/lib/utils/vehicle-makes";
 
 const VEHICLE_TYPES = ["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"] as const;
@@ -185,6 +186,44 @@ function SuccessState({ name }: { name: string }) {
   );
 }
 
+/**
+ * The two outcomes that are NOT a request.
+ *
+ * This form used to render `SuccessState` — "Request Received", "your concierge
+ * team is now sourcing dealer offers" — for all three, because it read only
+ * `success: true`. For a §7.2 held capture that sentence was false in every
+ * clause: no request existed and nothing was being sourced.
+ */
+function PendingState({ outcome }: { outcome: Extract<IntakeOutcome, { kind: "claim_sent" | "held" }> }) {
+  const claim = outcome.kind === "claim_sent";
+  const Icon = claim ? Mail : Clock;
+  return (
+    <div
+      className="bg-white rounded-2xl border border-[#E2E8F0] p-10 md:p-14 text-center shadow-sm"
+      data-testid={claim ? "rv-claim-sent" : "rv-held"}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="w-20 h-20 rounded-2xl bg-[#EFF6FF] border border-[#BFDBFE] flex items-center justify-center mx-auto mb-6">
+        <Icon size={36} className="text-[#0B5FD1]" />
+      </div>
+      <h2 className="text-2xl font-bold text-[#0F172A] mb-2">
+        {claim ? "Check your email to continue" : "We have your details"}
+      </h2>
+      <p className="text-[#64748B] text-sm mb-8 max-w-sm mx-auto">{outcome.message}</p>
+      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <a
+          href="/"
+          data-testid="rv-pending-home-link"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B5FD1] text-white px-6 py-3 text-sm font-bold hover:bg-[#0944A8] transition-colors shadow-md shadow-[#0B5FD1]/20"
+        >
+          Back to AutoLenis
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function ButtonGroup<T extends string>({
   options,
   value,
@@ -262,7 +301,7 @@ function YesNoToggle({
 export default function RequestVehicleFormClient() {
   const [currentStep, setCurrentStep] = useState(1);
 
-  const [submitted, setSubmitted] = useState(false);
+  const [outcome, setOutcome] = useState<IntakeOutcome | null>(null);
   const [submittedName, setSubmittedName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -510,28 +549,15 @@ export default function RequestVehicleFormClient() {
     setLoading(true);
     setError(null);
     try {
-      let res: Response;
-      if (financingOption === "have_financing" && preApprovalFile) {
-        const fd = new FormData();
-        fd.append("data", JSON.stringify(buildPayload()));
-        fd.append("preApprovalFile", preApprovalFile);
-        res = await fetch("/api/public/request-vehicle", { method: "POST", body: fd });
-      } else {
-        res = await fetch("/api/public/request-vehicle", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
-        });
-      }
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { message?: string } };
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Submission failed.");
-        return;
-      }
+      // `success: true` was the whole of this form's reading of the answer, and it
+      // is true for all three outcomes. The client now returns which one happened.
+      const result = await submitVehicleRequest(buildPayload(), {
+        preApprovalFile: financingOption === "have_financing" ? preApprovalFile : null,
+      });
       setSubmittedName(firstName);
-      setSubmitted(true);
-    } catch {
-      setError("Network error. Please try again.");
+      setOutcome(result);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed."));
     } finally {
       setLoading(false);
     }
@@ -558,8 +584,10 @@ export default function RequestVehicleFormClient() {
 
       {/* Form content */}
       <div className="max-w-2xl mx-auto px-4 py-8 md:py-12">
-        {submitted ? (
+        {outcome?.kind === "persisted" ? (
           <SuccessState name={submittedName} />
+        ) : outcome ? (
+          <PendingState outcome={outcome} />
         ) : (
           <>
             <p className="text-xs font-bold text-[#0B5FD1] uppercase tracking-widest mb-2 text-center">

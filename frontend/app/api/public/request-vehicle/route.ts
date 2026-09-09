@@ -28,6 +28,7 @@ import {
 } from "@/lib/services/acquisition/unified-buyer-intake.service";
 import { notifyActiveDealersOfOpportunity } from "@/lib/services/acquisition/dealer-opportunity-notification.service";
 import { captureClientIp } from "@/lib/services/acquisition/intake-attribution";
+import { throttleIntakeByIp, throttleIntakeByEmail, type ThrottleRefusal } from "@/lib/security/intake-throttle";
 import {
   getAttributionFromCookieHeader,
   recordContentAttribution,
@@ -209,6 +210,14 @@ const draftSchema = z.object({
   claimToken: z.string().min(8).max(200).optional(),
 });
 
+/** A refusal, as this route's error envelope. */
+function throttled(refusal: ThrottleRefusal): NextResponse {
+  return NextResponse.json(
+    { success: false, error: { code: "RATE_LIMITED", message: refusal.message } },
+    { status: refusal.status },
+  );
+}
+
 async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<NextResponse> {
   const parsed = draftSchema.safeParse(raw);
   if (!parsed.success) {
@@ -218,9 +227,11 @@ async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<N
     );
   }
   const d = parsed.data;
+  const byEmail = await throttleIntakeByEmail(d.email, "intake");
+  if (byEmail) return throttled(byEmail);
   const clientIp = captureClientIp(request.headers);
 
-  const { buyerOpportunityId, vehicleRequestId, requiresClaim, identityTier } = await intakeBuyerRequest({
+  const { buyerOpportunityId, vehicleRequestId, requiresClaim, claimLinkSent, identityTier } = await intakeBuyerRequest({
     source: "lp_campaign",
     campaign: d.source ?? "hero",
     draft: true,
@@ -267,11 +278,19 @@ async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<N
     buyerOpportunityId,
     vehicleRequestId,
     requiresClaim,
+    claimLinkSent,
     identityTier,
   });
 }
 
 export async function POST(request: NextRequest) {
+  // BEFORE THE BODY IS TOUCHED. The multipart branch below uploads the
+  // pre-approval file to storage while parsing, so a limiter placed after
+  // validation would let an unauthenticated caller write 10 MB per request and
+  // then 400. The address half runs once the body is parsed and an email exists.
+  const byIp = await throttleIntakeByIp(request.headers, "intake");
+  if (byIp) return throttled(byIp);
+
   const contentType = request.headers.get("content-type") ?? "";
 
   let raw: unknown;
@@ -332,6 +351,9 @@ export async function POST(request: NextRequest) {
     );
   }
   const data: Parsed = parsed.data;
+
+  const byEmail = await throttleIntakeByEmail(data.email, "intake");
+  if (byEmail) return throttled(byEmail);
 
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
@@ -433,7 +455,7 @@ export async function POST(request: NextRequest) {
     claimToken: data.claimToken ?? null,
   };
 
-  const { buyerOpportunityId, vehicleRequestId, requiresClaim, identityTier } =
+  const { buyerOpportunityId, vehicleRequestId, requiresClaim, claimLinkSent, identityTier } =
     await intakeBuyerRequest(input);
 
   // ── Auto-advance the request toward ACTIVE_SOURCING (non-blocking) ─────────
@@ -740,49 +762,61 @@ export async function POST(request: NextRequest) {
 
   // Persist as a SYSTEM_ALERT with the standardised "Vehicle Request:" title
   // prefix that /admin/vehicle-requests filters on.
+  //
+  // GATED ON A REAL REQUEST. This used to be written unconditionally, so a
+  // capture that produced NO VehicleRequest still put a row titled
+  // "Vehicle Request: <name>" on the admin queue — and all four admin surfaces
+  // that consume these key on that title prefix, none of them reading
+  // metadata.vehicleRequestId. An operator opening the row found nothing behind
+  // it. The held capture is not dropped: the intake service raises the §26
+  // BUYER_UNVERIFIED exception for it, which is a queue item with an owner, a
+  // clock and a return point rather than a notification about a request that
+  // does not exist.
   let notificationId: string | undefined;
-  try {
-    const created = await prisma.notification.create({
-      data: {
-        type: "SYSTEM_ALERT",
-        channel: "IN_APP",
-        title: `Vehicle Request: ${fullName}`,
-        body: `${data.vehicleType} · ${data.budget} · ${data.financingOption} · ${data.city}, ${data.state} ${data.zip}`,
-        actionUrl: "/admin/vehicle-requests",
-        // §13-D47. This used to be `{ ...data }` — the WHOLE validated form,
-        // spread into a notification row: income, employment, credit-band answers,
-        // trade payoff amounts and the pre-approval file reference, all sitting in
-        // a metadata column with no retention story and no access control beyond
-        // the admin list that renders it.
-        //
-        // The allowlist below is what an admin triaging the queue actually needs:
-        // who, what vehicle, where, and the ids to open the real records. Anything
-        // financial or personal beyond a name stays in `vehicle_requests` and
-        // `pre_qualifications`, which are the records that own it.
-        //
-        // The PURGE of the rows already written is owner-run against production
-        // and is deliberately not attempted here (CLAUDE.md forbids an UPDATE or
-        // DELETE against a business table outside the per-run protocol). This
-        // change stops the bleeding; D47's second half is the owner's.
-        metadata: {
-          fullName,
-          requestStatus: "new",
-          vehicleRequestId: vehicleRequestId ?? null,
-          buyerOpportunityId,
-          vehicleType: data.vehicleType,
-          preferredMake: data.preferredMake ?? null,
-          preferredModel: data.preferredModel ?? null,
-          city: data.city || null,
-          state: data.state || null,
-          zip: data.zip,
-          timeline: data.timeline,
-          hasPreApprovalFile: Boolean(preApprovalFileUrl),
-        } as unknown as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
-      },
-    });
-    notificationId = created.id;
-  } catch (err) {
-    logger.error("[request-vehicle] notification persist failed:", err);
+  if (vehicleRequestId) {
+    try {
+      const created = await prisma.notification.create({
+        data: {
+          type: "SYSTEM_ALERT",
+          channel: "IN_APP",
+          title: `Vehicle Request: ${fullName}`,
+          body: `${data.vehicleType} · ${data.budget} · ${data.financingOption} · ${data.city}, ${data.state} ${data.zip}`,
+          actionUrl: "/admin/vehicle-requests",
+          // §13-D47. This used to be `{ ...data }` — the WHOLE validated form,
+          // spread into a notification row: income, employment, credit-band answers,
+          // trade payoff amounts and the pre-approval file reference, all sitting in
+          // a metadata column with no retention story and no access control beyond
+          // the admin list that renders it.
+          //
+          // The allowlist below is what an admin triaging the queue actually needs:
+          // who, what vehicle, where, and the ids to open the real records. Anything
+          // financial or personal beyond a name stays in `vehicle_requests` and
+          // `pre_qualifications`, which are the records that own it.
+          //
+          // The PURGE of the rows already written is owner-run against production
+          // and is deliberately not attempted here (CLAUDE.md forbids an UPDATE or
+          // DELETE against a business table outside the per-run protocol). This
+          // change stops the bleeding; D47's second half is the owner's.
+          metadata: {
+            fullName,
+            requestStatus: "new",
+            vehicleRequestId: vehicleRequestId ?? null,
+            buyerOpportunityId,
+            vehicleType: data.vehicleType,
+            preferredMake: data.preferredMake ?? null,
+            preferredModel: data.preferredModel ?? null,
+            city: data.city || null,
+            state: data.state || null,
+            zip: data.zip,
+            timeline: data.timeline,
+            hasPreApprovalFile: Boolean(preApprovalFileUrl),
+          } as unknown as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
+        },
+      });
+      notificationId = created.id;
+    } catch (err) {
+      logger.error("[request-vehicle] notification persist failed:", err);
+    }
   }
 
   // VehicleRequest-specific emails (admin queue notification + buyer
@@ -827,11 +861,14 @@ export async function POST(request: NextRequest) {
       sendVehicleRequestConfirmation(data.email, data.firstName),
     ]);
 
-    // Buyer-side dedicated confirmation (uses unified resend template).
-    // Prefer vehicleRequestId so the link resolves to the canonical record.
-    const buyerEmailRequestId = vehicleRequestId ?? notificationId ?? "";
-    if (buyerEmailRequestId) {
-      await sendVehicleRequestReceived(data.email, fullName, buyerEmailRequestId)
+    // Buyer-side dedicated confirmation (uses unified resend template). This
+    // block only runs when a request exists, so the request id is the only
+    // possible value — it used to read `vehicleRequestId ?? notificationId ?? ""`,
+    // an unreachable fallback that made a notification id look like an acceptable
+    // stand-in for a request id. It is not, and that confusion is what this batch
+    // removes elsewhere.
+    if (vehicleRequestId) {
+      await sendVehicleRequestReceived(data.email, fullName, vehicleRequestId)
         .catch(err => logger.error("[request-vehicle] buyer confirmation email failed:", err));
     }
   }
@@ -839,7 +876,15 @@ export async function POST(request: NextRequest) {
   // Notify active dealers of the new buyer opportunity — DEALER-FACING, so it is
   // held behind the $99 pre-activation cost gate (notifyActiveDealersOfOpportunity
   // no-ops until the buyer has an authoritative PAID deposit). Best-effort tail.
-  if (notificationId) {
+  //
+  // Gated on the REQUEST, not on the notification row. It used to read
+  // `if (notificationId)`, which was the same condition only because the
+  // notification was written unconditionally; now that it is not, keying on it
+  // would make dealer notification depend on whether an admin row happened to
+  // persist. The opportunity id passed on is the real `buyerOpportunityId` — it
+  // was passing the Notification id under that name, which resolves to nothing
+  // for a dealer who quotes it back.
+  if (vehicleRequestId) {
     const vehicleInterest = [
       data.preferredMake,
       data.preferredModel,
@@ -847,7 +892,7 @@ export async function POST(request: NextRequest) {
     ].filter(Boolean).join(" ") || data.vehicleType;
     await notifyActiveDealersOfOpportunity({
       buyerId: buyerId || null,
-      opportunityId: notificationId,
+      opportunityId: buyerOpportunityId,
       vehicleInterest,
       buyerCity: data.city,
       buyerState: data.state,
@@ -867,9 +912,16 @@ export async function POST(request: NextRequest) {
     buyerOpportunityId,
     vehicleRequestId,
     requiresClaim,
+    // `requiresClaim` says a link is required; this says one is actually on the
+    // outbox. They come apart (a registered user with no buyer row has nothing to
+    // mint against), and the surface must not promise an email that is not coming.
+    claimLinkSent,
     identityTier,
-    message: requiresClaim && !vehicleRequestId
-      ? "We sent a link to that email address. Open it to finish your request — for your security we do not attach a request to an existing account without it."
-      : null,
+    message:
+      requiresClaim && !vehicleRequestId && claimLinkSent
+        ? "We sent a link to that email address. Open it to finish your request — for your security we do not attach a request to an existing account without it."
+        : !vehicleRequestId
+          ? "We have your details and a member of our team will follow up shortly."
+          : null,
   });
 }

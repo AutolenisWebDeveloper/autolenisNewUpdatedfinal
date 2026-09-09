@@ -205,6 +205,129 @@ test("(iv) a claim-token resend creates no second buyer and no second request", 
   assert.equal(db.state.vehicleRequests.size, 1, "…nor a second request");
 });
 
+// ── token purpose: the $99 deposit link is not a write credential ───────────
+//
+// `resolveClaimToken` matched on the hash alone, so every row in
+// `buyer_request_claim_tokens` was interchangeable. Two sites mint into it: the
+// rule-16 claim link, which is meant to authorise a write on the request it names,
+// and the $99 pre-checkout resume link, whose own service comment says it "confers
+// NO authenticated capability". Pasted into `/request-vehicle?claim=`, the second
+// resolved as tier 2 and wrote to the buyer's account.
+
+test("a RESUME-purpose token does NOT resolve as a rule-16 tier-2 identity", async () => {
+  const { buyerId } = seedRegisteredBuyer("registered@example.com");
+  const intakeBuyerRequest = await intake();
+
+  const raw = "deposit-resume-token";
+  db.state.claimTokens.set("tok_resume", {
+    id: "tok_resume",
+    tokenHash: createHash("sha256").update(raw).digest("hex"),
+    buyerId,
+    vehicleRequestId: null,
+    purpose: "resume",
+    consumedAt: null,
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+
+  const r = await intakeBuyerRequest({
+    source: "request_vehicle_wizard",
+    firstName: "Anyone",
+    email: "registered@example.com",
+    claimToken: raw,
+    zip: "75035",
+  });
+
+  // Falls through to tier 3, which refuses a registered address to an anonymous
+  // caller — so the deposit link buys exactly nothing.
+  assert.equal(r.identityTier, "REGISTERED_REQUIRES_CLAIM");
+  assert.equal(r.vehicleRequestId, null, "a deposit deep link must not authorise a write");
+  assert.equal(db.state.vehicleRequests.size, 0);
+});
+
+test("a CLAIM-purpose token still resolves as tier 2", async () => {
+  const { buyerId } = seedRegisteredBuyer("registered@example.com");
+  const intakeBuyerRequest = await intake();
+
+  const raw = "genuine-claim-token";
+  db.state.claimTokens.set("tok_claim", {
+    id: "tok_claim",
+    tokenHash: createHash("sha256").update(raw).digest("hex"),
+    buyerId,
+    vehicleRequestId: null,
+    purpose: "claim",
+    consumedAt: null,
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+
+  const r = await intakeBuyerRequest({
+    source: "request_vehicle_wizard",
+    firstName: "Sam",
+    email: "registered@example.com",
+    claimToken: raw,
+    zip: "75035",
+  });
+
+  assert.equal(r.identityTier, "CLAIM_TOKEN");
+  assert.ok(r.vehicleRequestId, "the emailed claim link is what makes the address verified");
+});
+
+test("a LEGACY-purpose token still resolves — pre-migration links must not break", async () => {
+  const { buyerId } = seedRegisteredBuyer("registered@example.com");
+  const intakeBuyerRequest = await intake();
+
+  const raw = "minted-before-the-column";
+  db.state.claimTokens.set("tok_legacy", {
+    id: "tok_legacy",
+    tokenHash: createHash("sha256").update(raw).digest("hex"),
+    buyerId,
+    vehicleRequestId: null,
+    purpose: "legacy_unscoped",
+    consumedAt: null,
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+
+  const r = await intakeBuyerRequest({
+    source: "request_vehicle_wizard",
+    firstName: "Sam",
+    email: "registered@example.com",
+    claimToken: raw,
+    zip: "75035",
+  });
+
+  assert.equal(r.identityTier, "CLAIM_TOKEN", "the data cannot attribute these; both paths accept them");
+});
+
+test("a NULL-purpose token still resolves — the rolling-deploy window", async () => {
+  const { buyerId } = seedRegisteredBuyer("registered@example.com");
+  const intakeBuyerRequest = await intake();
+
+  // An old instance, still live during the deploy, mints without a purpose. `in`
+  // does not match NULL in SQL, so refusing these would kill every claim link issued
+  // in that window — and would disagree with the resume side, which reads
+  // `purpose ?? LEGACY`. Two lookups that decide an unattributed row differently is
+  // how one of them becomes a trapdoor.
+  const raw = "minted-mid-deploy";
+  db.state.claimTokens.set("tok_null", {
+    id: "tok_null",
+    tokenHash: createHash("sha256").update(raw).digest("hex"),
+    buyerId,
+    vehicleRequestId: null,
+    purpose: null,
+    consumedAt: null,
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+
+  const r = await intakeBuyerRequest({
+    source: "request_vehicle_wizard",
+    firstName: "Sam",
+    email: "registered@example.com",
+    claimToken: raw,
+    zip: "75035",
+  });
+
+  assert.equal(r.identityTier, "CLAIM_TOKEN");
+});
+
 // ── (v) attribution defaults ────────────────────────────────────────────────
 
 test("(v) no campaign → channel `direct`, UTM fields NULL, url columns NULL not `direct`", async () => {
@@ -306,6 +429,44 @@ test("an anonymous submission NEVER attaches to a registered buyer on an asserte
   assert.equal(db.state.vehicleRequests.size, 0);
   assert.equal(db.state.buyers.size, 1, "no second buyer either — the registered one is untouched");
   assert.ok(r.buyerOpportunityId, "the lead IS captured; only the attachment is withheld");
+});
+
+// The POSITIVE half of the rule-16 branch, which had never executed in any test.
+//
+// The branch swallows its own failure by design — "the capture still stands, and the
+// visitor was told to check their email" — and `fake-prisma`'s claim-token model had
+// only `findFirst`, so `issueResumeToken` threw at the mint on every run, was
+// swallowed, and the suite went green. The test above proved what is NOT written;
+// nothing proved that the link the response promises is actually sent. That is the
+// whole substance of the fix, so it is asserted here rather than assumed.
+test("the claim link the response promises is actually minted and enqueued", async () => {
+  const { buyerId } = seedRegisteredBuyer("registered@example.com");
+  const intakeBuyerRequest = await intake();
+
+  const r = await intakeBuyerRequest({
+    source: "request_vehicle_wizard",
+    firstName: "Anyone",
+    email: "registered@example.com",
+    zip: "75035",
+  });
+
+  assert.equal(r.requiresClaim, true);
+
+  // A token exists, is bound to the REGISTERED buyer, and is live.
+  assert.equal(db.state.claimTokens.size, 1, "a claim token is minted for the registered address");
+  const token = [...db.state.claimTokens.values()][0]!;
+  assert.equal(token.buyerId, buyerId, "bound to the account the link must reach");
+  assert.equal(token.consumedAt, null, "live — the click is what consumes it");
+  assert.ok((token.expiresAt as Date) > new Date(), "and not already expired");
+
+  // And the message that carries it is on the §27 rail, in the same transaction.
+  assert.equal(db.state.commsOutbox.size, 1, "exactly one message enqueued");
+  const msg = [...db.state.commsOutbox.values()][0]!;
+  assert.equal(msg.templateKey, "registered_claim_prompt");
+  assert.equal(msg.triggerEvent, "registered_address_offered_anonymously");
+  assert.equal(msg.recipientKind, "buyer");
+  assert.equal(msg.recipientId, buyerId);
+  assert.equal(msg.channel, "email");
 });
 
 test("an AUTHENTICATED submission from that same buyer attaches normally", async () => {

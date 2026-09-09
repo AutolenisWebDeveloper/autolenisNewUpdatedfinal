@@ -19,9 +19,11 @@
 
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, ShieldCheck, ArrowRight } from "lucide-react";
+import { Lock, ShieldCheck, ArrowRight, Mail, Clock } from "lucide-react";
 import type { FormSource } from "@/lib/seo/locations";
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
+import { trackVehicleRequest } from "@/lib/analytics/tiktok-events";
+import { submitVehicleRequest, apiErrorMessage, type IntakeOutcome } from "@/lib/api/client";
 
 const VEHICLE_TYPES = ["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"] as const;
 const BUDGETS = [
@@ -67,6 +69,8 @@ export default function VehicleRequestForm({
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set only for the two outcomes that are NOT a request — the page stays put. */
+  const [pending, setPending] = useState<Extract<IntakeOutcome, { kind: "claim_sent" | "held" }> | null>(null);
 
   // Capture attribution on mount (client-only — referrer/UTM/path).
   const [attribution, setAttribution] = useState<Attribution>({
@@ -126,15 +130,21 @@ export default function VehicleRequestForm({
     };
 
     try {
-      const res = await fetch("/api/public/request-vehicle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(err.error?.message ?? "Submission failed. Please try again.");
+      const outcome = await submitVehicleRequest(payload);
+
+      // A CONVERSION IS A PERSISTED REQUEST, and nothing else.
+      //
+      // This block used to run on `res.ok` alone, so a capture that attached to no
+      // request — a registered address offered anonymously — was reported to the
+      // ad platforms as a lead and the visitor was redirected to a page reading
+      // "Request Received!". The two non-persisted outcomes now stay on the form
+      // and say what actually happened.
+      if (outcome.kind !== "persisted") {
+        setPending(outcome);
+        setSubmitting(false);
+        return;
       }
+
       trackFunnelEvent("lp_form_submit", {
         source,
         budget,
@@ -144,9 +154,24 @@ export default function VehicleRequestForm({
       if (typeof window !== "undefined") {
         window.fbq?.("track", "Lead", { currency: "USD", value: 0 });
       }
-      router.push("/thank-you");
+      // The TikTok conversion this funnel used to get from /thank-you's mount
+      // effect. That fire counted anyone who reached the page — including a
+      // direct visit and a held capture — so it moves here, to the one place that
+      // knows a request exists. Same mapping the paid LP form uses: the SEO form
+      // captures a category and a budget band, not a make/model or a number.
+      trackVehicleRequest({ model: vehicleType || undefined, city: zip });
+      // Same externally-injected sink, same reasoning as the paid LP form: moved
+      // off the page's mount effect rather than dropped.
+      if (typeof window !== "undefined") window.AutoLenisAnalytics?.trackVehicleRequest?.();
+      // NO PII IN THE URL. `submitted=1` is the only thing added: it is what lets
+      // /thank-you say "Request Received!" truthfully instead of asserting it from
+      // nothing. It deliberately does NOT carry the address — this repository has
+      // already ruled `/thank-you?email=<plaintext>` insecure
+      // (lib/services/buyer/request-resume-token.service.ts:3), and the page loads
+      // third-party pixels that would receive the query string as a Referer.
+      router.push("/thank-you?submitted=1");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setError(apiErrorMessage(err, "Something went wrong. Please try again."));
       setSubmitting(false);
     }
   }
@@ -154,6 +179,29 @@ export default function VehicleRequestForm({
   const fieldClass =
     "w-full min-h-[48px] rounded-lg border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 placeholder:text-slate-400 focus:border-[#0B5FD1] focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30";
   const labelClass = "block text-sm font-medium text-slate-700 mb-1.5";
+
+  if (pending) {
+    const claim = pending.kind === "claim_sent";
+    const Icon = claim ? Mail : Clock;
+    return (
+      <div
+        className="rounded-lg border border-slate-200 bg-white p-6"
+        data-testid={claim ? "seo-form-claim-sent" : "seo-form-held"}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex items-start gap-3">
+          <Icon size={20} className="mt-0.5 shrink-0 text-[#0B5FD1]" aria-hidden />
+          <div>
+            <p className="font-semibold text-slate-900">
+              {claim ? "Check your email to continue" : "We have your details"}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">{pending.message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} aria-label="Vehicle request" data-testid="seo-vehicle-request-form" noValidate>

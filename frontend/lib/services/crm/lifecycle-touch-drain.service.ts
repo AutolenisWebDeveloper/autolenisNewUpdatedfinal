@@ -56,8 +56,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // build the opaque resume URL. The link carries NO PII and no capability — it
 // deep-links to the auth-gated $99 checkout for the preserved request.
 async function preCheckoutResumeUrl(buyerId: string): Promise<{ resumeUrl: string }> {
-  const { issueResumeToken } = await import("@/lib/services/buyer/request-resume-token.service");
-  const { rawToken } = await issueResumeToken({ buyerId });
+  const { issueResumeToken, TOKEN_PURPOSE } = await import("@/lib/services/buyer/request-resume-token.service");
+  const { rawToken } = await issueResumeToken({ buyerId, purpose: TOKEN_PURPOSE.RESUME });
   return { resumeUrl: `${NOTIFY_APP_URL}/api/public/request/resume/${rawToken}` };
 }
 

@@ -29,7 +29,11 @@ export default function FeedbackPage() {
       if (res.ok) {
         setSubmitted(true);
       } else {
-        setError("We couldn't send your feedback. Please try again in a moment.");
+        // The route answers 503 with a specific message when the only durable
+        // write failed. Showing it beats a generic retry prompt for a failure a
+        // retry will not fix.
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        setError(body.error?.message ?? "We couldn't send your feedback. Please try again in a moment.");
       }
     } catch {
       // Network/transport failure — never leave the button stuck on "Sending…".

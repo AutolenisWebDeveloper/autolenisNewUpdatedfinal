@@ -52,6 +52,8 @@ import {
 import { resolveIdentity, flagPhoneCollision, type IdentityResolution } from "./intake-identity";
 import { attachOrCreateOpenRequest, type MergeableRequestData } from "@/lib/services/vehicle-request/open-request.service";
 import { consentColumns, type ConsentCapture } from "./intake-consent";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { withSavepoint } from "@/lib/prisma-savepoint";
 
 /** Prisma client or an interactive-transaction handle. */
 type Db = typeof prisma | Prisma.TransactionClient;
@@ -173,6 +175,14 @@ export interface UnifiedIntakeResult {
    * link rather than showing the request.
    */
   requiresClaim: boolean;
+  /**
+   * True only once the claim email is actually on the outbox. `requiresClaim`
+   * says a link is REQUIRED; this says one was SENT, and they come apart: a
+   * registered user with no buyer row has nothing to mint a token against, and
+   * the enqueue itself can fail. The surface used to say "we sent a link to that
+   * email address" in both cases, which for the first was simply untrue.
+   */
+  claimLinkSent: boolean;
   /** CREATED, ATTACHED, or ATTACHED_AFTER_RACE — null when no request was written. */
   attachOutcome: "CREATED" | "ATTACHED" | "ATTACHED_AFTER_RACE" | null;
 }
@@ -345,6 +355,7 @@ export async function intakeBuyerRequest(
         vehicleRequestId: null,
         identityTier: "UNRESOLVED" as const,
         requiresClaim: false,
+        claimLinkSent: false,
         attachOutcome: null,
       };
     }
@@ -365,6 +376,7 @@ export async function intakeBuyerRequest(
     vehicleRequestId: result.vehicleRequestId,
     identityTier: result.identityTier,
     requiresClaim: result.requiresClaim,
+    claimLinkSent: result.claimLinkSent,
     attachOutcome: result.attachOutcome,
   };
 }
@@ -401,7 +413,50 @@ interface PromoteResult {
   vehicleRequestId: string | null;
   identityTier: IdentityResolution["tier"];
   requiresClaim: boolean;
+  /** See UnifiedIntakeResult.claimLinkSent — reported, never inferred. */
+  claimLinkSent: boolean;
   attachOutcome: "CREATED" | "ATTACHED" | "ATTACHED_AFTER_RACE" | null;
+}
+
+/**
+ * A capture that produced no VehicleRequest is WORK, not a footnote.
+ *
+ * Until now it produced an admin `Notification` titled "Vehicle Request: <name>"
+ * — a row that four admin surfaces treat as a request, pointing at a request
+ * that does not exist. §26 already has the right instrument: BUYER_UNVERIFIED,
+ * owned by SYSTEM, with a 14-day clock and a return point. The row carries the
+ * buyer id when one is known and always the opportunity id, so a human can get
+ * from the queue to the actual record.
+ *
+ * Deliberately carries no email, name or phone: the queue item is an operational
+ * record, and §13-D47 is what happens when contact detail is copied into one.
+ *
+ * Best-effort at THIS call site: the queue must never fail a visitor's capture.
+ * `raiseException` throws by design and does not swallow on the caller's behalf,
+ * so the wrapping is here, where the trade-off is known.
+ */
+async function reportHeldCapture(
+  tx: Db,
+  args: { opportunityId: string; buyerId: string | null; reason: string },
+): Promise<void> {
+  try {
+    await raiseException(
+      {
+        code: "BUYER_UNVERIFIED",
+        buyerId: args.buyerId,
+        // The opportunity is the only durable handle on a capture with no request,
+        // and it is what makes the row findable. Once-ever per capture.
+        idempotencyKey: `BUYER_UNVERIFIED:opportunity:${args.opportunityId}`,
+        detail: `${args.reason} Lead: buyer_opportunities.id=${args.opportunityId}. Resolved when the buyer verifies the address (a claim link may be reissued at any time) or Operations attaches the capture by hand.`,
+      },
+      tx,
+    );
+  } catch (err) {
+    logger.error("[unified-intake] held-capture exception could not be raised", {
+      opportunityId: args.opportunityId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -426,7 +481,7 @@ async function promoteOpportunityInTx(
       opportunityId,
       vehicleRequestId: existing.id,
     });
-    return { vehicleRequestId: existing.id, identityTier: "AUTHENTICATED", requiresClaim: false, attachOutcome: null };
+    return { vehicleRequestId: existing.id, identityTier: "AUTHENTICATED", requiresClaim: false, claimLinkSent: false, attachOutcome: null };
   }
 
   const identity = await resolveIdentityForIntake(input, tx);
@@ -446,49 +501,121 @@ async function promoteOpportunityInTx(
     // response told the visitor "we sent a link to that email address" and nothing
     // was ever sent. The token is minted in THIS transaction: the message and the
     // held capture commit together or neither does.
+    let claimLinkSent = false;
+    // A live token found here means the link is already in that inbox; returning
+    // out of the savepoint below would skip the held-capture report, so the
+    // decision is carried out rather than returned from inside it.
+    let alreadyLive = false;
     if (identity.claimTargetBuyerId && identity.email) {
+      const claimTargetBuyerId = identity.claimTargetBuyerId;
       try {
-        const { issueResumeToken } = await import("@/lib/services/buyer/request-resume-token.service");
-        const { rawToken } = await issueResumeToken({ buyerId: identity.claimTargetBuyerId }, tx);
+        // SAVEPOINTED. Everything in this block runs inside the caller's
+        // transaction, and in Postgres ONE failed statement aborts the whole
+        // transaction — a later `COMMIT` silently becomes a `ROLLBACK` while
+        // Prisma's `$transaction` still resolves (lib/prisma-savepoint.ts). So a
+        // `catch` here is not enough on its own: without the savepoint, swallowing
+        // an error from the mint or the enqueue would discard the visitor's
+        // capture AND the held-capture exception meant to report it, and the route
+        // would answer as though both had been written. The savepoint is what
+        // makes "the capture still stands" true rather than merely intended.
+        await withSavepoint(tx, async () => {
+          const { issueResumeToken, findLiveClaimToken, TOKEN_PURPOSE } = await import(
+            "@/lib/services/buyer/request-resume-token.service"
+          );
+
+          // ONE LIVE CREDENTIAL PER TARGET BUYER.
+          //
+          // The key used to be the opportunity id, and the opportunity is a fresh row
+          // on every submission — so it deduplicated nothing. Neither public route is
+          // rate limited, so N posts at any registered address produced N emails and N
+          // live 5-day write credentials in that person's inbox.
+          //
+          // Keying on the buyer ALONE would be the other error: the prompt is a
+          // once-ever key, so a legitimate submission months later, long after the
+          // first token expired, would be silently suppressed for good. The live token
+          // is the state that actually matters, so it is what the key names — and when
+          // one already exists we send nothing and still report the link as sent,
+          // because it truthfully is in that inbox.
+          const live = await findLiveClaimToken(claimTargetBuyerId, tx);
+          if (live) {
+            logger.info("[unified-intake] claim link already live for this address — not reissued", {
+              opportunityId,
+              expiresAt: live.expiresAt.toISOString(),
+        });
+          alreadyLive = true;
+          return;
+        }
+
+        const { rawToken, tokenId } = await issueResumeToken(
+          { buyerId: claimTargetBuyerId, purpose: TOKEN_PURPOSE.CLAIM },
+          tx,
+        );
         const { renderRegisteredClaimPrompt } = await import("@/lib/services/comms/phase2-email-content");
         const claimUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/request-vehicle?claim=${encodeURIComponent(rawToken)}`;
+        const idempotencyKey = `registered_claim_prompt:${claimTargetBuyerId}:${tokenId}`;
         await enqueueTransactional(
           {
             triggerEvent: "registered_address_offered_anonymously",
             templateKey: PHASE_2_TEMPLATES.REGISTERED_CLAIM_PROMPT,
             channel: "email",
             recipientKind: "buyer",
-            recipientId: identity.claimTargetBuyerId,
+            recipientId: claimTargetBuyerId,
             to: identity.email,
-            // One live prompt per opportunity: a visitor who submits twice gets one
-            // link, and a link that has been used is consumed by the route.
-            idempotencyKey: `registered_claim_prompt:${opportunityId}`,
+            idempotencyKey,
             payload: {
               email: identity.email,
               type: "transactional",
-              idempotencyKey: `registered_claim_prompt:${opportunityId}`,
+              idempotencyKey,
               ...renderRegisteredClaimPrompt({ firstName: input.firstName ?? null, claimUrl }),
             },
           },
           tx,
         );
+        claimLinkSent = true;
+        });
       } catch (err) {
-        // The capture still stands, and the visitor was told to check their email.
-        // This is loud rather than silent precisely because it is the half that
-        // makes that statement true.
+        // The capture still stands — the savepoint above is what makes that true —
+        // but the visitor must NOT be told a link is on its way. `claimLinkSent`
+        // stays false, the surface says something true instead, and the held-capture
+        // report below puts a human on it.
         logger.error("[unified-intake] claim link could not be enqueued", {
           opportunityId,
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    } else {
+      // A registered USER with no buyer row: there is nothing to mint a token
+      // against, so no link can exist. This branch used to fall straight through to
+      // a response that said one had been sent — silently, with nothing logged.
+      logger.warn("[unified-intake] registered address has no buyer row — no claim link can be issued", {
+        opportunityId,
+        hasEmail: Boolean(identity.email),
+      });
     }
 
-    return { vehicleRequestId: null, identityTier: identity.tier, requiresClaim: true, attachOutcome: null };
+    if (alreadyLive) claimLinkSent = true;
+
+    if (!claimLinkSent) {
+      await reportHeldCapture(tx, {
+        opportunityId,
+        buyerId: identity.claimTargetBuyerId ?? null,
+        reason:
+          "A registered address was submitted anonymously and NO claim link could be issued, so the visitor was told only that we would follow up. Nothing was attached to the account.",
+      });
+    }
+
+    return { vehicleRequestId: null, identityTier: identity.tier, requiresClaim: true, claimLinkSent, attachOutcome: null };
   }
 
   if (!identity.buyerId) {
     logger.info("[unified-intake] no buyer resolved — lead captured without a request", { opportunityId });
-    return { vehicleRequestId: null, identityTier: identity.tier, requiresClaim: false, attachOutcome: null };
+    await reportHeldCapture(tx, {
+      opportunityId,
+      buyerId: null,
+      reason:
+        "A capture carried too little information to identify a buyer, so no vehicle request was created and no claim link could be sent.",
+    });
+    return { vehicleRequestId: null, identityTier: identity.tier, requiresClaim: false, claimLinkSent: false, attachOutcome: null };
   }
 
   const buyerId = identity.buyerId;
@@ -568,6 +695,37 @@ async function promoteOpportunityInTx(
     await tx.buyerOpportunity.update({ where: { id: opportunityId }, data: { buyerId } });
   }
 
+  // SINGLE USE, on the path that used it.
+  //
+  // /complete consumes the token it presents, and the resume route consumes the
+  // one it presents — but the intake write path, the one the emailed link
+  // actually points at (`/request-vehicle?claim=…`), never did. A forwarded link
+  // therefore stayed a write credential against someone else's account for the
+  // full 5-day TTL, and every submission through it authorised another write.
+  //
+  // Consumed AFTER the write it authorised and inside the same transaction, so
+  // the two cannot come apart in either direction: a failed write rolls the
+  // consumption back with it (a genuine buyer whose submission failed still has a
+  // working link), and a failed consumption rolls the write back with it (a link
+  // that could not be spent never authorises a lasting change).
+  //
+  // A `false` return means the row was already consumed — two uses of a single-use
+  // credential raced, and this one lost. It is NOT failed: the token binds both
+  // callers to the SAME buyer, §5 rule 5 gives that buyer one open request, so the
+  // second write updates the first one rather than crossing any boundary. Failing
+  // it would discard a real capture (§5 rule 6) to no security benefit. Logged
+  // because a race on a single-use credential is worth being able to see.
+  if (identity.tier === "CLAIM_TOKEN" && identity.claimTokenId) {
+    const { consumeResumeToken } = await import("@/lib/services/buyer/request-resume-token.service");
+    const spent = await consumeResumeToken(identity.claimTokenId, tx);
+    if (!spent) {
+      logger.warn("[unified-intake] claim token was already consumed when this write finished", {
+        opportunityId,
+        buyerId,
+      });
+    }
+  }
+
   // §7.2 (iv) — flag, never merge. Two buyers sharing a normalised phone with
   // different verified emails are TWO identities under rule 16; this tells a human
   // so an audited merge can happen if one is warranted, and returns nothing a
@@ -588,6 +746,10 @@ async function promoteOpportunityInTx(
     vehicleRequestId: attached.vehicleRequest.id,
     identityTier: identity.tier,
     requiresClaim: identity.requiresClaim,
+    // A request exists, so there is nothing to claim by email. `requiresClaim` is
+    // still true for a guest capture here — which is exactly why no surface may
+    // read it as "nothing was attached".
+    claimLinkSent: false,
     attachOutcome: attached.outcome,
   };
 }

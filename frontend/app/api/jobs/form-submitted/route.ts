@@ -22,7 +22,12 @@ export async function POST(request: NextRequest) {
   try {
     const { buyerId, firstName, email, phone } = (await request.json()) as Payload;
 
-    const completeUrl = `${NOTIFY_APP_URL}/thank-you?email=${encodeURIComponent(email)}&complete=true`;
+    // `submitted=1` is what lets /thank-you say "Request Received!" — the page no
+    // longer asserts it from a bare query string. This job only runs for a buyer
+    // whose request WAS created (it is triggered by the persistence itself), so
+    // the flag is true here; without it the recipient would open a link saying
+    // "your vehicle request was received" onto a page saying it was not confirmed.
+    const completeUrl = `${NOTIFY_APP_URL}/thank-you?submitted=1&email=${encodeURIComponent(email)}&complete=true`;
 
     await notifyContact({
       entityType: "buyer",

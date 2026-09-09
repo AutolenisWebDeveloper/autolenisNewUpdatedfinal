@@ -19,6 +19,10 @@ interface Ctrl {
   recordsByHash: Record<string, Record<string, unknown> | null>;
   consumeCount: number;
   consumeWhere: Record<string, unknown> | null;
+  /** Every argument object findUnique was called with, so the SELECT can be asserted. */
+  findUniqueArgs: Array<Record<string, unknown>>;
+  /** Counts calls that reached the MODULE-LEVEL client rather than a supplied handle. */
+  moduleConsumeCalls: number;
 }
 let ctrl: Ctrl;
 
@@ -30,9 +34,12 @@ mock.module("@/lib/prisma", {
           ctrl.created.push(data);
           return { id: "tok_1", ...data };
         },
-        findUnique: async ({ where }: { where: { tokenHash: string } }) =>
-          ctrl.recordsByHash[where.tokenHash] ?? null,
+        findUnique: async (args: { where: { tokenHash: string } }) => {
+          ctrl.findUniqueArgs.push(args as unknown as Record<string, unknown>);
+          return ctrl.recordsByHash[args.where.tokenHash] ?? null;
+        },
         updateMany: async ({ where }: { where: Record<string, unknown> }) => {
+          ctrl.moduleConsumeCalls += 1;
           ctrl.consumeWhere = where;
           return { count: ctrl.consumeCount };
         },
@@ -46,12 +53,15 @@ async function load() {
 }
 
 beforeEach(() => {
-  ctrl = { created: [], recordsByHash: {}, consumeCount: 1, consumeWhere: null };
+  ctrl = {
+    created: [], recordsByHash: {}, consumeCount: 1, consumeWhere: null,
+    findUniqueArgs: [], moduleConsumeCalls: 0,
+  };
 });
 
 test("issue persists ONLY the SHA-256 hash; the raw token is 256-bit and never stored", async () => {
-  const { issueResumeToken, hashResumeToken } = await load();
-  const { rawToken, expiresAt } = await issueResumeToken({ buyerId: "b1", vehicleRequestId: "vr1" });
+  const { issueResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const { rawToken, expiresAt } = await issueResumeToken({ buyerId: "b1", vehicleRequestId: "vr1", purpose: TOKEN_PURPOSE.CLAIM });
   // 32 random bytes → 64 hex chars.
   assert.equal(rawToken.length, 64);
   assert.match(rawToken, /^[0-9a-f]{64}$/);
@@ -66,8 +76,8 @@ test("issue persists ONLY the SHA-256 hash; the raw token is 256-bit and never s
 });
 
 test("validate resolves a live token to its bound buyer (hash lookup)", async () => {
-  const { issueResumeToken, validateResumeToken, hashResumeToken } = await load();
-  const { rawToken } = await issueResumeToken({ buyerId: "bA", vehicleRequestId: "vrA" });
+  const { issueResumeToken, validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const { rawToken } = await issueResumeToken({ buyerId: "bA", vehicleRequestId: "vrA", purpose: TOKEN_PURPOSE.RESUME });
   const hash = hashResumeToken(rawToken);
   ctrl.recordsByHash[hash] = {
     id: "tok_1", buyerId: "bA", vehicleRequestId: "vrA",
@@ -126,4 +136,133 @@ test("consume is single-use + race-safe — only the winner (count===1) succeeds
   // A concurrent loser sees count===0.
   ctrl.consumeCount = 0;
   assert.equal(await consumeResumeToken("tok_1"), false);
+});
+
+// ── the transaction handle ──────────────────────────────────────────────────
+//
+// The intake write path consumes the token that authorised it from inside
+// `prisma.$transaction`. Bound to the module-level client, the consume would commit
+// on its own connection — the token would burn even when the intake it authorised
+// rolled back, leaving the visitor a dead link to a request that was never written.
+// These two assert the handle is honoured AND that the default is unchanged, because
+// the resume route and /complete still call it with one argument.
+
+test("consume writes through a SUPPLIED transaction handle, not the module client", async () => {
+  const { consumeResumeToken } = await load();
+  const txCalls: Array<Record<string, unknown>> = [];
+  const tx = {
+    buyerRequestClaimToken: {
+      updateMany: async ({ where }: { where: Record<string, unknown> }) => {
+        txCalls.push(where);
+        return { count: 1 };
+      },
+    },
+  } as unknown as Parameters<typeof consumeResumeToken>[1];
+
+  assert.equal(await consumeResumeToken("tok_tx", tx), true);
+  assert.equal(txCalls.length, 1, "the supplied handle performed the write");
+  assert.equal(txCalls[0]?.id, "tok_tx");
+  assert.equal(txCalls[0]?.consumedAt, null, "still the conditional, race-safe update");
+  assert.equal(
+    ctrl.moduleConsumeCalls, 0,
+    "the module-level client must NOT be touched — that is the write that would escape the transaction",
+  );
+});
+
+test("consume still defaults to the module client — the two single-argument callers are unchanged", async () => {
+  const { consumeResumeToken } = await load();
+  ctrl.consumeCount = 1;
+  assert.equal(await consumeResumeToken("tok_default"), true);
+  assert.equal(ctrl.moduleConsumeCalls, 1, "no handle supplied → module client");
+});
+
+// ── the 42703 window ────────────────────────────────────────────────────────
+
+// ── purpose scoping ─────────────────────────────────────────────────────────
+//
+// Every row in this table used to be interchangeable. The rule-16 tier-2 lookup
+// matched on the hash alone, so the $99 pre-checkout resume link — documented at the
+// top of the service as conferring "NO authenticated capability" — was a tier-2 write
+// credential for that buyer's account if pasted into `/request-vehicle?claim=`. These
+// assert the boundary from the resume side; the claim side is asserted against
+// `resolveClaimToken` in the intake suite.
+
+test("a CLAIM token is refused by the resume route", async () => {
+  const { validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const hash = hashResumeToken("claim-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: "vr1", consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: TOKEN_PURPOSE.CLAIM,
+  };
+  const v = await validateResumeToken("claim-tok");
+  assert.equal(v.ok, false, "a claim token authorises a write; it is not a deposit deep link");
+  // Reported as not_found, not a distinct reason: the route sends every failure to one
+  // destination so the response cannot be used to probe which tokens exist, and a
+  // "wrong purpose" answer would hand back exactly that.
+  if (!v.ok) assert.equal(v.reason, "not_found");
+});
+
+test("a RESUME token is accepted by the resume route", async () => {
+  const { validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const hash = hashResumeToken("resume-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null, consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: TOKEN_PURPOSE.RESUME,
+  };
+  const v = await validateResumeToken("resume-tok");
+  assert.equal(v.ok, true);
+});
+
+test("a LEGACY token is accepted — pre-migration rows cannot be attributed and must not break", async () => {
+  const { validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const hash = hashResumeToken("legacy-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null, consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: TOKEN_PURPOSE.LEGACY,
+  };
+  const v = await validateResumeToken("legacy-tok");
+  assert.equal(v.ok, true, "refusing these would break live deposit links for five days");
+});
+
+test("a NULL purpose is treated as legacy — the window between the ALTER and the backfill", async () => {
+  const { validateResumeToken, hashResumeToken } = await load();
+  const hash = hashResumeToken("null-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null, consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: null,
+  };
+  const v = await validateResumeToken("null-tok");
+  assert.equal(v.ok, true);
+});
+
+test("minting records the purpose it was asked for", async () => {
+  const { issueResumeToken, TOKEN_PURPOSE } = await load();
+  await issueResumeToken({ buyerId: "b1", purpose: TOKEN_PURPOSE.RESUME });
+  assert.equal(ctrl.created[0]?.purpose, "resume");
+  await issueResumeToken({ buyerId: "b1", purpose: TOKEN_PURPOSE.CLAIM });
+  assert.equal(ctrl.created[1]?.purpose, "claim");
+});
+
+test("validate names its columns explicitly — a new declared column cannot 42703 this read", async () => {
+  const { validateResumeToken, hashResumeToken } = await load();
+  const hash = hashResumeToken("sel");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null,
+    consumedAt: null, expiresAt: new Date(Date.now() + 1000),
+  };
+  await validateResumeToken("sel");
+
+  assert.equal(ctrl.findUniqueArgs.length, 1);
+  const select = ctrl.findUniqueArgs[0]?.select as Record<string, boolean> | undefined;
+  assert.ok(
+    select,
+    "findUnique must pass an explicit select: Prisma's default read selects EVERY declared " +
+      "scalar, so a column declared before its migration is applied raises 42703 here — which " +
+      "breaks the $99 resume link and the rule-16 claim link at the same time",
+  );
+  assert.deepEqual(
+    Object.keys(select).sort(),
+    ["buyerId", "consumedAt", "expiresAt", "id", "purpose", "vehicleRequestId"],
+    "exactly the columns this function reads, and no more",
+  );
 });

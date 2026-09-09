@@ -35,6 +35,7 @@ import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.ser
 import { cancelDraftRecovery } from "@/lib/services/acquisition/draft-recovery.service";
 import { consumeResumeToken } from "@/lib/services/buyer/request-resume-token.service";
 import { getAuthenticatedBuyer } from "@/lib/auth/session";
+import { throttleIntakeByIp, throttleIntakeByEmail } from "@/lib/security/intake-throttle";
 import {
   sendVehicleRequestCompletedConfirmation,
   sendVehicleRequestCompletedAdminNotification,
@@ -98,6 +99,17 @@ async function authenticatedBuyerIdFrom(): Promise<string | null> {
 }
 
 export async function POST(request: NextRequest) {
+  // Throttled like the intake route it follows. This one takes an email and an
+  // optional token and writes to whatever they resolve to, so an unthrottled
+  // caller can probe addresses as fast as the network allows.
+  const byIp = await throttleIntakeByIp(request.headers, "complete");
+  if (byIp) {
+    return NextResponse.json(
+      { success: false, error: { code: "RATE_LIMITED", message: byIp.message } },
+      { status: byIp.status },
+    );
+  }
+
   let raw: unknown;
   try {
     raw = await request.json();
@@ -116,6 +128,14 @@ export async function POST(request: NextRequest) {
     );
   }
   const data: Parsed = parsed.data;
+
+  const byEmail = await throttleIntakeByEmail(data.email, "complete");
+  if (byEmail) {
+    return NextResponse.json(
+      { success: false, error: { code: "RATE_LIMITED", message: byEmail.message } },
+      { status: byEmail.status },
+    );
+  }
 
   try {
     const make = meaningful(data.make);
@@ -219,6 +239,12 @@ export async function POST(request: NextRequest) {
     const firstName = buyer?.firstName || "there";
     const fullName = buyer ? `${buyer.firstName} ${buyer.lastName}`.trim() : "";
 
+    // Did the buyer's typing actually land anywhere? Two 200s used to be
+    // byte-identical whether the detail was written to the canonical request, to
+    // a CRM timeline, or — when no contact existed either — to nothing at all,
+    // and the page said "Your request is complete!" for all three.
+    let recorded = false;
+
     if (vehicleRequest) {
       // ── Update the canonical VehicleRequest with the supplied detail ───────
       const mergedNotes = [vehicleRequest.notes?.trim(), detailBlock]
@@ -243,6 +269,7 @@ export async function POST(request: NextRequest) {
           notes: mergedNotes,
         },
       });
+      recorded = true;
 
       // SINGLE USE. The token is emailed and can be forwarded; without this it
       // authorises the same write for its full 5-day TTL, which turns a deep-link
@@ -291,7 +318,10 @@ export async function POST(request: NextRequest) {
         const supabase = getServiceSupabase();
         const { data: contact } = await ContactService.findContactByEmail(supabase, data.email);
         if (contact) {
-          await supabase.from("contact_timeline_events").insert({
+          // The insert's own error is READ. Supabase returns failures in the
+          // payload rather than throwing, so `await`ing it and moving on reported
+          // a save that had not happened.
+          const { error: insertError } = await supabase.from("contact_timeline_events").insert({
             contact_id: contact.id,
             event_type: "note_added",
             event_data: {
@@ -300,6 +330,18 @@ export async function POST(request: NextRequest) {
               detail: detailPayload,
             },
             created_by: null,
+          });
+          if (insertError) {
+            logger.error("[request-vehicle/complete] CRM timeline insert failed:", insertError);
+          } else {
+            recorded = true;
+          }
+        } else {
+          // ERROR, not warn: the buyer typed a form and none of it was stored.
+          // Nothing downstream can recover it, so this has to reach Sentry rather
+          // than sit in a log level nobody alerts on.
+          logger.error("[request-vehicle/complete] no request and no CRM contact — detail NOT persisted", {
+            tier: identity.tier,
           });
         }
       } catch (crmErr) {
@@ -320,7 +362,15 @@ export async function POST(request: NextRequest) {
       : `Vehicle request completed by ${data.email} (no buyer account on file): ${vehicleLine}`;
 
     await Promise.allSettled([
-      sendVehicleRequestCompletedConfirmation(data.email, firstName, summaryRows),
+      // GATED ON `recorded`, like the page. The confirmation is subject-lined
+      // "Your vehicle request is complete" and carries an "Activate my auction"
+      // button; sending it when the detail reached no record would put the two
+      // channels in direct contradiction, and the email is the one that persists.
+      // The ADMIN notification is deliberately NOT gated — an operator is exactly
+      // who should hear about a submission that landed nowhere.
+      recorded
+        ? sendVehicleRequestCompletedConfirmation(data.email, firstName, summaryRows)
+        : Promise.resolve(),
       sendVehicleRequestCompletedAdminNotification({
         fullName: fullName || data.email,
         email: data.email,
@@ -334,10 +384,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         accountFound: false,
-        note: "Account not found — your details were saved and our team will follow up.",
+        // `recorded` is the honest half. "Saved to the CRM timeline" and "written
+        // nowhere at all" used to be the same 200 with the same reassuring note,
+        // and the page rendered "Your request is complete!" for both.
+        recorded,
+        note: recorded
+          ? "Account not found — your details were saved to your contact record and our team will follow up."
+          : "We could not match these details to an existing request. Open the link in your confirmation email to finish, or contact us and we will help.",
       });
     }
-    return NextResponse.json({ success: true, accountFound: true });
+    return NextResponse.json({ success: true, accountFound: true, recorded });
   } catch (err) {
     logger.error("[request-vehicle/complete] failed:", err);
     return NextResponse.json(

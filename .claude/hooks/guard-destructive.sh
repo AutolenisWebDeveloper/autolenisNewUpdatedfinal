@@ -142,6 +142,70 @@ is_local_target() {
   printf '%s' "$1" | grep -Eiq '@(127\.0\.0\.1|localhost|\[::1\]|::1)([:/]|$)|(^|[ ;])PGHOST=(127\.0\.0\.1|localhost|::1)([ ;]|$)|(^| )(-h|--host)[= ](127\.0\.0\.1|localhost|::1)( |$)|host=(127\.0\.0\.1|localhost|::1)([ &]|$)'
 }
 
+# --- the loopback carve-out (owner ruling, 2026-09-09) ----------------------
+# A throwaway Postgres on 127.0.0.1 is the sanctioned place to exercise anything
+# that writes (CLAUDE.md -> Test data belongs in the isolated environment), and
+# reaching one means naming its DSN on the command line. That is the ONLY reason a
+# credential-shaped assignment is ever allowed, and it is allowed only when the
+# DSN's host -- PARSED OUT of the authority, never matched as a substring -- is
+# exactly a loopback literal. A substring match would walk
+# postgresql://user@localhost.evil.com/db straight through, which is precisely the
+# class of bug this guard exists to prevent.
+is_loopback_dsn() { # is_loopback_dsn <dsn value>
+  local dsn auth host ats
+  # DNS is case-insensitive, so fold once and match exactly afterwards.
+  dsn="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  # The production project is never loopback, however the string is shaped -- a
+  # pooler username carrying the ref, or an SSH tunnel forwarding to it, both refuse.
+  case "$dsn" in *"$PROD_REF"*) return 1 ;; esac
+  # Only a postgres URL has an authority to parse. Anything else has no host.
+  case "$dsn" in postgres://*|postgresql://*) ;; *) return 1 ;; esac
+  # libpq lets host= / hostaddr= in the query string override the authority, so a
+  # DSN that carries one is not the target its authority claims.
+  case "$dsn" in *[?\&]host=*|*[?\&]hostaddr=*) return 1 ;; esac
+  auth="${dsn#*://}"        # drop the scheme
+  auth="${auth%%[/?]*}"     # authority only: [userinfo@]host[:port]
+  # A password in the userinfo is a credential typed on the command line, which is
+  # forbidden whatever the host -- a tunnel can put production behind 127.0.0.1.
+  case "$auth" in *:*@*) return 1 ;; esac
+  # Two `@` in one authority is malformed and its split is parser-dependent.
+  # Refuse rather than pick a rule libpq might not share.
+  ats="$(printf '%s' "$auth" | tr -cd '@' | wc -c)"
+  [ "$ats" -gt 1 ] && return 1
+  host="${auth##*@}"
+  case "$host" in
+    \[*\]:*) host="${host%%]*}]" ;;   # bracketed IPv6 with a port
+    \[*\])   : ;;                     # bracketed IPv6, no port
+    *)       host="${host%%:*}" ;;
+  esac
+  case "$host" in
+    127.0.0.1|localhost|'[::1]') return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Does EVERY credential-shaped assignment on this command line qualify for the
+# carve-out? One that does not sinks the whole line: a loopback DSN standing next
+# to a real secret does not launder it. PGPASSWORD and the Supabase keys never
+# qualify -- a bare secret has no host to parse, so there is nothing to prove.
+all_secret_assignments_loopback() { # all_secret_assignments_loopback <collapsed raw segment>
+  local a name val seen=0 ok=1
+  while IFS= read -r a; do
+    [ -z "$a" ] && continue
+    a="${a# }"
+    name="${a%%=*}"; val="${a#*=}"
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    seen=1
+    case "$name" in
+      DATABASE_URL|DIRECT_URL|PROD_READONLY_URL) is_loopback_dsn "$val" || ok=0 ;;
+      *) ok=0 ;;
+    esac
+  done <<EOF
+$(printf '%s' "$1" | grep -oE "(^| )(${SECRET_VARS})=[^ ]*")
+EOF
+  [ "$seen" -eq 1 ] && [ "$ok" -eq 1 ]
+}
+
 # Does this psql invocation actually open a connection or carry SQL? `psql --version`
 # and `psql --help` do neither and must stay runnable.
 opens_connection() {
@@ -454,8 +518,9 @@ while IFS= read -r line; do
           fi
           ;;
       esac
-      if printf '%s' "$rawc" | grep -Eq "^(export )?([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(${SECRET_VARS})=['\"]?[^\$'\" ]"; then
-        deny "BLOCKED: a literal production credential is assigned on the command line. $PROTO: read it from the environment at runtime; never inline a DSN, password or key. Provisioning the variable is the owner's, in the environment — not yours, in a command."
+      if printf '%s' "$rawc" | grep -Eq "^(export )?([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(${SECRET_VARS})=['\"]?[^\$'\" ]" \
+         && { [ "$deploy_mode" -eq 1 ] || ! all_secret_assignments_loopback "$rawc"; }; then
+        deny "BLOCKED: a literal production credential is assigned on the command line. $PROTO: read it from the environment at runtime; never inline a DSN, password or key. Provisioning the variable is the owner's, in the environment — not yours, in a command. The one carve-out is a throwaway loopback database, in a session that carries no production credential: DATABASE_URL, DIRECT_URL or PROD_READONLY_URL whose parsed host is exactly 127.0.0.1, localhost or [::1], with no password and never the production project ref."
       fi
       if printf '%s' "$rawc" | grep -Eq '^(env|printenv)( *$| +(>|>>|-))' \
          || printf '%s' "$lc" | grep -Eq '^printenv( |$)|^env$|^env +(>|>>|-)|^set$|^set +(>|>>)|^export( +-p)?$|^declare( +-[a-z]*[xp][a-z]*)?$|^typeset( +-x)?$' \

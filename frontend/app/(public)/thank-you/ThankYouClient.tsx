@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, Gavel } from "lucide-react";
+import { CheckCircle2, Gavel, AlertTriangle } from "lucide-react";
 
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
 
@@ -41,6 +41,11 @@ export default function ThankYouClient() {
   const email = params.get("email") ?? "";
   const campaign = params.get("campaign") ?? "unknown";
   const firstName = params.get("name") ?? params.get("firstName") ?? "";
+  // Set by the form that redirected here, and only after the API confirmed a
+  // VehicleRequest exists. Without it this page has no evidence of a submission
+  // at all — it reads query parameters, which anyone can type — so it must not
+  // assert that a request was received.
+  const submitted = params.get("submitted") === "1";
 
   // ── Step 2 form state ────────────────────────────────────────────────────
   const [make, setMake] = useState("Any");
@@ -62,17 +67,24 @@ export default function ThankYouClient() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [completed, setCompleted] = useState(false);
+  /** null = not submitted yet. `recorded` is the server's answer to "did this
+   *  detail land anywhere", which used to be indistinguishable from "it did not". */
+  const [completed, setCompleted] = useState<{ recorded: boolean; note: string | null } | null>(null);
 
   const showDownPayment = FINANCING_OPTIONS.find((o) => o.value === financingPlan)?.financing ?? false;
 
   useEffect(() => {
+    // NO CONVERSION FIRES HERE.
+    //
+    // This effect used to report a Meta `Lead` and a TikTok `SubmitForm` on MOUNT.
+    // Mounting is not converting: a direct visit, a bookmark, a back-navigation
+    // and a held capture that never produced a request all reached this line, and
+    // each was counted. The single fire now happens in the form, once, after the
+    // API says a VehicleRequest exists.
+    //
+    // `ty_view` stays: it is a page-view in the internal funnel taxonomy, not a
+    // conversion, and its whole job is to count arrivals.
     trackFunnelEvent("ty_view", { campaign });
-    if (typeof window !== "undefined") {
-      window.fbq?.("track", "Lead", { currency: "USD", value: 0 });
-      window.ttq?.track("SubmitForm");
-      window.AutoLenisAnalytics?.trackVehicleRequest?.();
-    }
     // CRM timeline: log the thank-you view if we have an email. Fire-and-forget.
     if (email) {
       fetch("/api/public/crm/thank-you-view", {
@@ -134,12 +146,19 @@ export default function ThankYouClient() {
           additionalNotes: additionalNotes || undefined,
         }),
       });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(err.error?.message ?? "Something went wrong");
+      const body = (await res.json().catch(() => null)) as
+        | { success?: boolean; recorded?: boolean; note?: string | null; error?: { message?: string } }
+        | null;
+      if (!res.ok || body?.success !== true) {
+        throw new Error(body?.error?.message ?? "Something went wrong");
       }
-      trackFunnelEvent("ty_complete_submit", { campaign });
-      setCompleted(true);
+      // `recorded: false` means the detail reached no record — no request matched
+      // the caller and no CRM contact existed to hold it. That was previously the
+      // same 200 as a successful save, and the page said "Your request is
+      // complete!" either way. Only the recorded case is the funnel event.
+      const recorded = body.recorded === true;
+      if (recorded) trackFunnelEvent("ty_complete_submit", { campaign });
+      setCompleted({ recorded, note: body.note ?? null });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -154,25 +173,51 @@ export default function ThankYouClient() {
       <div className="max-w-6xl mx-auto grid gap-6 lg:grid-cols-[35fr_65fr] lg:items-start">
         {/* ── LEFT PANEL — Confirmation ──────────────────────────────────── */}
         <aside className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 lg:sticky lg:top-8">
-          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mb-5">
-            <CheckCircle2 size={36} className="text-green-600" />
+          <div
+            className={`w-16 h-16 rounded-full flex items-center justify-center mb-5 ${
+              submitted ? "bg-green-100" : "bg-slate-100"
+            }`}
+          >
+            {submitted ? (
+              <CheckCircle2 size={36} className="text-green-600" />
+            ) : (
+              <Gavel size={32} className="text-slate-500" />
+            )}
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mb-3 tracking-tight">
-            Request Received!
+          <h1
+            className="text-2xl sm:text-3xl font-black text-slate-900 mb-3 tracking-tight"
+            data-testid={submitted ? "ty-confirmed" : "ty-unconfirmed"}
+          >
+            {submitted ? "Request Received!" : "Complete Your Request"}
           </h1>
           <p className="text-slate-500 text-sm leading-relaxed mb-7">
-            Hi {firstName || "there"} — your vehicle request is in. Complete the details below so
-            dealers can submit their most competitive offers for exactly what you want.
+            {submitted ? (
+              <>
+                Hi {firstName || "there"} — your vehicle request is in. Complete the details below so
+                dealers can submit their most competitive offers for exactly what you want.
+              </>
+            ) : (
+              <>
+                Hi {firstName || "there"} — add your vehicle details below so dealers can submit their
+                most competitive offers. If you have already submitted a request, open the link in your
+                confirmation email so we can match these details to it.
+              </>
+            )}
           </p>
 
           {/* Progress indicator */}
           <ol className="space-y-3 mb-7">
             <li className="flex items-center gap-3">
-              <span className="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center shrink-0">
-                <CheckCircle2 size={16} />
+              <span
+                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                  submitted ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400 text-xs font-bold"
+                }`}
+              >
+                {submitted ? <CheckCircle2 size={16} /> : "1"}
               </span>
               <span className="text-sm text-slate-600">
-                <strong className="text-slate-800">Step 1: Your Info</strong> — Complete
+                <strong className="text-slate-800">Step 1: Your Info</strong>
+                {submitted ? " — Complete" : " — not confirmed on this page"}
               </span>
             </li>
             <li className="flex items-center gap-3">
@@ -204,16 +249,22 @@ export default function ThankYouClient() {
 
         {/* ── RIGHT PANEL — Step 2 Form ──────────────────────────────────── */}
         <section className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8">
-          {completed ? (
-            <div data-testid="step2-complete" className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-5">
-                <CheckCircle2 size={36} className="text-green-600" />
+          {!email ? (
+            // NO CONTROL THAT CANNOT WORK. The step-2 form posts to /complete,
+            // which identifies the caller by session or claim token and takes the
+            // address from the query string; without one, every submission fails
+            // at the first check. The SEO funnel reaches this page with no address
+            // on purpose — the query string is not a place to put one — so the
+            // form is replaced by the thing that actually works.
+            <div data-testid="step2-unidentified" className="text-center py-8" role="status">
+              <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-5">
+                <Gavel size={32} className="text-slate-500" />
               </div>
-              <h2 className="text-2xl font-black text-slate-900 mb-3">Your request is complete!</h2>
+              <h2 className="text-2xl font-black text-slate-900 mb-3">Finish from your confirmation email</h2>
               <p className="text-slate-500 text-sm leading-relaxed max-w-md mx-auto mb-7">
-                Thanks for the detail{firstName ? `, ${firstName}` : ""}. We've sent a confirmation to{" "}
-                <strong className="text-slate-700">{email || "your inbox"}</strong>. The final step is to
-                activate your private dealer auction so verified dealers can start competing.
+                We have sent you a link. Opening it brings you back here with your request attached, so the
+                details you add reach it — we deliberately do not carry your email address in this page&apos;s
+                web address.
               </p>
               <Link
                 href={activateHref}
@@ -223,6 +274,50 @@ export default function ThankYouClient() {
                 <Gavel size={18} />
                 Activate My Dealer Auction →
               </Link>
+            </div>
+          ) : completed ? (
+            <div
+              data-testid={completed.recorded ? "step2-complete" : "step2-not-recorded"}
+              className="text-center py-8"
+              role="status"
+              aria-live="polite"
+            >
+              <div
+                className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5 ${
+                  completed.recorded ? "bg-green-100" : "bg-amber-50 border border-amber-200"
+                }`}
+              >
+                {completed.recorded ? (
+                  <CheckCircle2 size={36} className="text-green-600" />
+                ) : (
+                  <AlertTriangle size={32} className="text-amber-600" />
+                )}
+              </div>
+              <h2 className="text-2xl font-black text-slate-900 mb-3">
+                {completed.recorded ? "Your request is complete!" : "We could not match these details"}
+              </h2>
+              <p className="text-slate-500 text-sm leading-relaxed max-w-md mx-auto mb-7">
+                {completed.recorded ? (
+                  <>
+                    Thanks for the detail{firstName ? `, ${firstName}` : ""}. We&apos;ve sent a confirmation
+                    to <strong className="text-slate-700">{email || "your inbox"}</strong>. The final step is
+                    to activate your private dealer auction so verified dealers can start competing.
+                  </>
+                ) : (
+                  completed.note ??
+                  "Open the link in your confirmation email to finish, or contact us and we will help."
+                )}
+              </p>
+              {completed.recorded && (
+                <Link
+                  href={activateHref}
+                  onClick={() => trackFunnelEvent("ty_activate_cta_click", { campaign })}
+                  className="inline-flex items-center justify-center gap-2 bg-[#0B5FD1] text-white font-semibold px-8 py-4 rounded-xl hover:bg-[#0944a8] transition-colors"
+                >
+                  <Gavel size={18} />
+                  Activate My Dealer Auction →
+                </Link>
+              )}
             </div>
           ) : (
             <form onSubmit={handleSubmit} data-testid="step2-form" noValidate>

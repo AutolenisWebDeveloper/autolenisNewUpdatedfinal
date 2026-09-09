@@ -171,6 +171,12 @@ mock.module("@/lib/qstash/state", {
 mock.module("@/lib/services/buyer/request-resume-token.service", {
   namedExports: {
     issueResumeToken: async () => ({ rawToken: "RAWTOKEN", expiresAt: new Date(Date.now() + 86400000) }),
+    // The module's contract grew with the token `purpose` column. Reading
+    // TOKEN_PURPOSE.RESUME off an undefined export throws at the mint, which is how
+    // this mock's absence surfaced: two touches stopped minting entirely.
+    TOKEN_PURPOSE: { CLAIM: "claim", RESUME: "resume", LEGACY: "legacy_unscoped" },
+    CLAIM_CAPABLE_PURPOSES: ["claim", "legacy_unscoped"],
+    RESUME_CAPABLE_PURPOSES: ["resume", "legacy_unscoped"],
   },
 });
 

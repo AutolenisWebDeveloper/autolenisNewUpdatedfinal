@@ -220,6 +220,8 @@ test("the state recheck runs BEFORE the provider, and a `no` writes skipped", as
       deal_id: null,
       auction_id: null,
       dispatched_at: null,
+      last_error: null,
+      last_result: null,
     },
     {} as never
   );
@@ -253,6 +255,8 @@ test("a recheck that says yes sends, and records that it checked", async () => {
       deal_id: null,
       auction_id: null,
       dispatched_at: null,
+      last_error: null,
+      last_result: null,
     },
     {} as never
   );
@@ -282,6 +286,8 @@ test("a failure below max attempts retries with backoff; at max it is terminal a
     deal_id: null,
     auction_id: null,
     dispatched_at: null,
+    last_error: null,
+    last_result: null,
   };
 
   const retry = await dispatchTransactionalRow({ ...base, attempts: 0, max_attempts: 3 } as never, {} as never);
@@ -339,10 +345,20 @@ test("cancelByKey stops every not-yet-sent row and never touches a sent one", as
   }
 });
 
-test("a reclaimed row that already reached the provider is never re-sent", async () => {
+// ── the reclaim guard, split by what we actually observed ───────────────────
+//
+// One fixture used to cover this: dispatched_at set, no other signal, expect
+// FAILED. That is the UNOBSERVED case and it is still correct. But the stamp sits
+// immediately before the send, so in production every provider failure also landed
+// with dispatched_at set — and was read the same way. Six Operations exceptions
+// came from one capture, each dead at attempt 1 of 5 with the transport error
+// overwritten by the reclaim note. The two cases are now separate tests because
+// they are separate facts.
+
+test("a reclaimed row we never watched resolve is never re-sent", async () => {
   const { dispatchTransactionalRow } = await svc();
   const { PHASE_2_TEMPLATES } = await registry();
-  db.rows.set("row1", { id: "row1", status: "sending" });
+  db.rows.set("row1", { id: "row1", status: "sending", lastError: "connect ETIMEDOUT" });
 
   const result = await dispatchTransactionalRow(
     {
@@ -359,12 +375,95 @@ test("a reclaimed row that already reached the provider is never re-sent", async
       deal_id: null,
       auction_id: null,
       dispatched_at: new Date(),
+      last_error: "connect ETIMEDOUT",
+      last_result: null,
     },
     {} as never
   );
   assert.equal(result, "FAILED");
   assert.equal(deliverCalls, 0, "a duplicate transactional message is worse than a reported failure");
-  assert.equal(db.rows.get("row1")!.lastResult, "RECLAIM_UNCERTAIN");
+  const row = db.rows.get("row1")!;
+  assert.equal(row.lastResult, "RECLAIM_UNCERTAIN");
+  assert.equal(
+    row.lastError,
+    "connect ETIMEDOUT",
+    "the reclaim note says why it was not re-sent; it must not overwrite why the send failed",
+  );
+});
+
+test("a pending retry is NOT a reclaim, even with dispatched_at set — a timeout keeps its budget", async () => {
+  const { dispatchTransactionalRow } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  db.requests.set("vr1", { id: "vr1", status: "DRAFT", abandonedAt: null });
+  db.rows.set("row1", { id: "row1", status: "sending" });
+
+  // The case the first version of this fix still got wrong. The previous attempt
+  // timed out — genuinely ambiguous, so no PROVIDER_REJECTED — but it finished its
+  // own bookkeeping and set status 'pending' with a backoff. The process survived;
+  // this is the retry it asked for, not a crashed drain. Gating on dispatched_at
+  // alone terminal-failed it, so a flapping provider still burned the whole budget
+  // in one attempt.
+  const result = await dispatchTransactionalRow(
+    {
+      id: "row1",
+      channel: "email",
+      attempts: 1,
+      max_attempts: 5,
+      payload: {},
+      template_key: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1,
+      trigger_event: "t",
+      recipient_kind: "buyer",
+      recipient_id: "b1",
+      vehicle_request_id: "vr1",
+      deal_id: null,
+      auction_id: null,
+      dispatched_at: new Date(),
+      last_error: "connect ETIMEDOUT",
+      last_result: null,
+      prev_status: "pending",
+    },
+    {} as never
+  );
+
+  assert.equal(result, "SENT");
+  assert.equal(deliverCalls, 1, "the scheduled retry reaches the provider");
+});
+
+test("a reclaimed row the provider REFUSED is an ordinary retry — the budget is reachable", async () => {
+  const { dispatchTransactionalRow } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  db.requests.set("vr1", { id: "vr1", status: "DRAFT", abandonedAt: null });
+  db.rows.set("row1", { id: "row1", status: "sending" });
+
+  const result = await dispatchTransactionalRow(
+    {
+      id: "row1",
+      channel: "email",
+      attempts: 1,
+      max_attempts: 5,
+      payload: {},
+      template_key: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1,
+      trigger_event: "t",
+      recipient_kind: "buyer",
+      recipient_id: null,
+      vehicle_request_id: "vr1",
+      deal_id: null,
+      auction_id: null,
+      // Stamped — but the provider ANSWERED and refused, so nothing was sent.
+      dispatched_at: new Date(),
+      last_error: "RESEND_API_EXCEPTION: from address is required",
+      last_result: "PROVIDER_REJECTED",
+    },
+    {} as never
+  );
+
+  assert.equal(result, "SENT", "an observed refusal is not an unknown outcome");
+  assert.equal(deliverCalls, 1, "the retry the backoff scheduled actually reaches the provider");
+  assert.notEqual(
+    db.rows.get("row1")!.lastResult,
+    "RECLAIM_UNCERTAIN",
+    "this is precisely the row class that used to die at attempt 1 of 5",
+  );
 });
 
 test("every Phase 2 template has a registered recheck", async () => {
