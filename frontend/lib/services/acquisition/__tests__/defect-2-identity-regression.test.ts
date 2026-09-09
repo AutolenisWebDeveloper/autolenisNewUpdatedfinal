@@ -308,6 +308,44 @@ test("an anonymous submission NEVER attaches to a registered buyer on an asserte
   assert.ok(r.buyerOpportunityId, "the lead IS captured; only the attachment is withheld");
 });
 
+// The POSITIVE half of the rule-16 branch, which had never executed in any test.
+//
+// The branch swallows its own failure by design — "the capture still stands, and the
+// visitor was told to check their email" — and `fake-prisma`'s claim-token model had
+// only `findFirst`, so `issueResumeToken` threw at the mint on every run, was
+// swallowed, and the suite went green. The test above proved what is NOT written;
+// nothing proved that the link the response promises is actually sent. That is the
+// whole substance of the fix, so it is asserted here rather than assumed.
+test("the claim link the response promises is actually minted and enqueued", async () => {
+  const { buyerId } = seedRegisteredBuyer("registered@example.com");
+  const intakeBuyerRequest = await intake();
+
+  const r = await intakeBuyerRequest({
+    source: "request_vehicle_wizard",
+    firstName: "Anyone",
+    email: "registered@example.com",
+    zip: "75035",
+  });
+
+  assert.equal(r.requiresClaim, true);
+
+  // A token exists, is bound to the REGISTERED buyer, and is live.
+  assert.equal(db.state.claimTokens.size, 1, "a claim token is minted for the registered address");
+  const token = [...db.state.claimTokens.values()][0]!;
+  assert.equal(token.buyerId, buyerId, "bound to the account the link must reach");
+  assert.equal(token.consumedAt, null, "live — the click is what consumes it");
+  assert.ok((token.expiresAt as Date) > new Date(), "and not already expired");
+
+  // And the message that carries it is on the §27 rail, in the same transaction.
+  assert.equal(db.state.commsOutbox.size, 1, "exactly one message enqueued");
+  const msg = [...db.state.commsOutbox.values()][0]!;
+  assert.equal(msg.templateKey, "registered_claim_prompt");
+  assert.equal(msg.triggerEvent, "registered_address_offered_anonymously");
+  assert.equal(msg.recipientKind, "buyer");
+  assert.equal(msg.recipientId, buyerId);
+  assert.equal(msg.channel, "email");
+});
+
 test("an AUTHENTICATED submission from that same buyer attaches normally", async () => {
   const { buyerId } = seedRegisteredBuyer("registered@example.com");
   const intakeBuyerRequest = await intake();

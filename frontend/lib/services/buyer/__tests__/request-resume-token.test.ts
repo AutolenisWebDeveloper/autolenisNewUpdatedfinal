@@ -19,6 +19,10 @@ interface Ctrl {
   recordsByHash: Record<string, Record<string, unknown> | null>;
   consumeCount: number;
   consumeWhere: Record<string, unknown> | null;
+  /** Every argument object findUnique was called with, so the SELECT can be asserted. */
+  findUniqueArgs: Array<Record<string, unknown>>;
+  /** Counts calls that reached the MODULE-LEVEL client rather than a supplied handle. */
+  moduleConsumeCalls: number;
 }
 let ctrl: Ctrl;
 
@@ -30,9 +34,12 @@ mock.module("@/lib/prisma", {
           ctrl.created.push(data);
           return { id: "tok_1", ...data };
         },
-        findUnique: async ({ where }: { where: { tokenHash: string } }) =>
-          ctrl.recordsByHash[where.tokenHash] ?? null,
+        findUnique: async (args: { where: { tokenHash: string } }) => {
+          ctrl.findUniqueArgs.push(args as unknown as Record<string, unknown>);
+          return ctrl.recordsByHash[args.where.tokenHash] ?? null;
+        },
         updateMany: async ({ where }: { where: Record<string, unknown> }) => {
+          ctrl.moduleConsumeCalls += 1;
           ctrl.consumeWhere = where;
           return { count: ctrl.consumeCount };
         },
@@ -46,7 +53,10 @@ async function load() {
 }
 
 beforeEach(() => {
-  ctrl = { created: [], recordsByHash: {}, consumeCount: 1, consumeWhere: null };
+  ctrl = {
+    created: [], recordsByHash: {}, consumeCount: 1, consumeWhere: null,
+    findUniqueArgs: [], moduleConsumeCalls: 0,
+  };
 });
 
 test("issue persists ONLY the SHA-256 hash; the raw token is 256-bit and never stored", async () => {
@@ -126,4 +136,68 @@ test("consume is single-use + race-safe — only the winner (count===1) succeeds
   // A concurrent loser sees count===0.
   ctrl.consumeCount = 0;
   assert.equal(await consumeResumeToken("tok_1"), false);
+});
+
+// ── the transaction handle ──────────────────────────────────────────────────
+//
+// The intake write path consumes the token that authorised it from inside
+// `prisma.$transaction`. Bound to the module-level client, the consume would commit
+// on its own connection — the token would burn even when the intake it authorised
+// rolled back, leaving the visitor a dead link to a request that was never written.
+// These two assert the handle is honoured AND that the default is unchanged, because
+// the resume route and /complete still call it with one argument.
+
+test("consume writes through a SUPPLIED transaction handle, not the module client", async () => {
+  const { consumeResumeToken } = await load();
+  const txCalls: Array<Record<string, unknown>> = [];
+  const tx = {
+    buyerRequestClaimToken: {
+      updateMany: async ({ where }: { where: Record<string, unknown> }) => {
+        txCalls.push(where);
+        return { count: 1 };
+      },
+    },
+  } as unknown as Parameters<typeof consumeResumeToken>[1];
+
+  assert.equal(await consumeResumeToken("tok_tx", tx), true);
+  assert.equal(txCalls.length, 1, "the supplied handle performed the write");
+  assert.equal(txCalls[0]?.id, "tok_tx");
+  assert.equal(txCalls[0]?.consumedAt, null, "still the conditional, race-safe update");
+  assert.equal(
+    ctrl.moduleConsumeCalls, 0,
+    "the module-level client must NOT be touched — that is the write that would escape the transaction",
+  );
+});
+
+test("consume still defaults to the module client — the two single-argument callers are unchanged", async () => {
+  const { consumeResumeToken } = await load();
+  ctrl.consumeCount = 1;
+  assert.equal(await consumeResumeToken("tok_default"), true);
+  assert.equal(ctrl.moduleConsumeCalls, 1, "no handle supplied → module client");
+});
+
+// ── the 42703 window ────────────────────────────────────────────────────────
+
+test("validate names its columns explicitly — a new declared column cannot 42703 this read", async () => {
+  const { validateResumeToken, hashResumeToken } = await load();
+  const hash = hashResumeToken("sel");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null,
+    consumedAt: null, expiresAt: new Date(Date.now() + 1000),
+  };
+  await validateResumeToken("sel");
+
+  assert.equal(ctrl.findUniqueArgs.length, 1);
+  const select = ctrl.findUniqueArgs[0]?.select as Record<string, boolean> | undefined;
+  assert.ok(
+    select,
+    "findUnique must pass an explicit select: Prisma's default read selects EVERY declared " +
+      "scalar, so a column declared before its migration is applied raises 42703 here — which " +
+      "breaks the $99 resume link and the rule-16 claim link at the same time",
+  );
+  assert.deepEqual(
+    Object.keys(select).sort(),
+    ["buyerId", "consumedAt", "expiresAt", "id", "vehicleRequestId"],
+    "exactly the five columns this function reads, and no more",
+  );
 });

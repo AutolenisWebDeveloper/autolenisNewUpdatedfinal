@@ -86,7 +86,18 @@ export type ResumeTokenValidation =
 export async function validateResumeToken(rawToken: string): Promise<ResumeTokenValidation> {
   if (!rawToken || typeof rawToken !== "string") return { ok: false, reason: "not_found" };
   const tokenHash = hashResumeToken(rawToken);
-  const record = await prisma.buyerRequestClaimToken.findUnique({ where: { tokenHash } });
+  // EXPLICIT SELECT, not a bare findUnique. Prisma's default read selects every
+  // scalar the model declares, so the moment `schema.prisma` declares a column the
+  // database does not yet have, every call here raises `42703 undefined_column` —
+  // which is this function, the tier-2 claim lookup and the consume, i.e. both the
+  // $99 resume link and the rule-16 claim link at once. Naming the five columns
+  // this function actually uses confines that window to the code that genuinely
+  // needs a new column (IMPLEMENTATION-WORKFLOW §8.1a.2 documents the same failure
+  // at wave scale).
+  const record = await prisma.buyerRequestClaimToken.findUnique({
+    where: { tokenHash },
+    select: { id: true, buyerId: true, vehicleRequestId: true, consumedAt: true, expiresAt: true },
+  });
   if (!record) return { ok: false, reason: "not_found" };
   if (record.consumedAt) return { ok: false, reason: "consumed" };
   if (record.expiresAt < new Date()) return { ok: false, reason: "expired" };
@@ -101,9 +112,21 @@ export async function validateResumeToken(rawToken: string): Promise<ResumeToken
 /**
  * Atomically mark a token consumed. Conditional update (consumedAt: null) so two
  * concurrent clicks can never both win. Returns true if THIS call consumed it.
+ *
+ * Takes a `db` handle for the same reason `issueResumeToken` does, and it is not
+ * symmetry for its own sake. The intake write path consumes the token that
+ * authorised it from INSIDE `prisma.$transaction` (unified-buyer-intake.service.ts).
+ * Bound to the module-level client, this would commit on its own connection: the
+ * token would burn even when the intake it authorised rolled back, and the visitor
+ * would be left holding a dead link to a request that was never written. Defaulted,
+ * so the two existing single-argument callers — the resume route and
+ * `/api/public/request-vehicle/complete` — are unchanged.
  */
-export async function consumeResumeToken(tokenId: string): Promise<boolean> {
-  const res = await prisma.buyerRequestClaimToken.updateMany({
+export async function consumeResumeToken(
+  tokenId: string,
+  db: PrismaClient | Prisma.TransactionClient = prisma,
+): Promise<boolean> {
+  const res = await db.buyerRequestClaimToken.updateMany({
     where: { id: tokenId, consumedAt: null },
     data: { consumedAt: new Date() },
   });

@@ -208,10 +208,37 @@ export function makeFakePrisma(): FakeDb {
     },
   };
 
+  // `findFirst` alone was a hole with the same shape as the one the outbox comment
+  // below describes, and it hid a shipped feature rather than proving it. The
+  // registered-claim branch MINTS a token (`issueResumeToken`) inside the intake
+  // transaction, and the call site swallows its own failure by design — "the capture
+  // still stands, and the visitor was told to check their email". With no `create`
+  // here, every unit test threw at the mint, was swallowed, and passed: the claim
+  // link that commit 54c427d shipped as a blocking fix had NEVER executed in a test.
+  // `updateMany` is the consume half, on the write path.
   const claimTokenModel = {
     findFirst: async ({ where, select }: { where: Row; select?: Row }) => {
       const row = [...state.claimTokens.values()].find((t) => matches(t, where));
       return row ? pick(row, select) : null;
+    },
+    create: async ({ data }: { data: Row }) => {
+      // `token_hash` is UNIQUE in the schema; a fake that let two rows share one
+      // would model a database this repository does not have.
+      if ([...state.claimTokens.values()].some((t) => t.tokenHash === data.tokenHash)) {
+        throw p2002("buyer_request_claim_tokens.token_hash");
+      }
+      const row = { id: id("tok"), consumedAt: null, vehicleRequestId: null, ...data };
+      state.claimTokens.set(row.id as string, row);
+      return { ...row };
+    },
+    updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+      let count = 0;
+      for (const row of state.claimTokens.values()) {
+        if (!matches(row, where)) continue;
+        Object.assign(row, data);
+        count++;
+      }
+      return { count };
     },
   };
 
