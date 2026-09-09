@@ -60,8 +60,8 @@ beforeEach(() => {
 });
 
 test("issue persists ONLY the SHA-256 hash; the raw token is 256-bit and never stored", async () => {
-  const { issueResumeToken, hashResumeToken } = await load();
-  const { rawToken, expiresAt } = await issueResumeToken({ buyerId: "b1", vehicleRequestId: "vr1" });
+  const { issueResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const { rawToken, expiresAt } = await issueResumeToken({ buyerId: "b1", vehicleRequestId: "vr1", purpose: TOKEN_PURPOSE.CLAIM });
   // 32 random bytes → 64 hex chars.
   assert.equal(rawToken.length, 64);
   assert.match(rawToken, /^[0-9a-f]{64}$/);
@@ -76,8 +76,8 @@ test("issue persists ONLY the SHA-256 hash; the raw token is 256-bit and never s
 });
 
 test("validate resolves a live token to its bound buyer (hash lookup)", async () => {
-  const { issueResumeToken, validateResumeToken, hashResumeToken } = await load();
-  const { rawToken } = await issueResumeToken({ buyerId: "bA", vehicleRequestId: "vrA" });
+  const { issueResumeToken, validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const { rawToken } = await issueResumeToken({ buyerId: "bA", vehicleRequestId: "vrA", purpose: TOKEN_PURPOSE.RESUME });
   const hash = hashResumeToken(rawToken);
   ctrl.recordsByHash[hash] = {
     id: "tok_1", buyerId: "bA", vehicleRequestId: "vrA",
@@ -178,6 +178,71 @@ test("consume still defaults to the module client — the two single-argument ca
 
 // ── the 42703 window ────────────────────────────────────────────────────────
 
+// ── purpose scoping ─────────────────────────────────────────────────────────
+//
+// Every row in this table used to be interchangeable. The rule-16 tier-2 lookup
+// matched on the hash alone, so the $99 pre-checkout resume link — documented at the
+// top of the service as conferring "NO authenticated capability" — was a tier-2 write
+// credential for that buyer's account if pasted into `/request-vehicle?claim=`. These
+// assert the boundary from the resume side; the claim side is asserted against
+// `resolveClaimToken` in the intake suite.
+
+test("a CLAIM token is refused by the resume route", async () => {
+  const { validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const hash = hashResumeToken("claim-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: "vr1", consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: TOKEN_PURPOSE.CLAIM,
+  };
+  const v = await validateResumeToken("claim-tok");
+  assert.equal(v.ok, false, "a claim token authorises a write; it is not a deposit deep link");
+  // Reported as not_found, not a distinct reason: the route sends every failure to one
+  // destination so the response cannot be used to probe which tokens exist, and a
+  // "wrong purpose" answer would hand back exactly that.
+  if (!v.ok) assert.equal(v.reason, "not_found");
+});
+
+test("a RESUME token is accepted by the resume route", async () => {
+  const { validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const hash = hashResumeToken("resume-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null, consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: TOKEN_PURPOSE.RESUME,
+  };
+  const v = await validateResumeToken("resume-tok");
+  assert.equal(v.ok, true);
+});
+
+test("a LEGACY token is accepted — pre-migration rows cannot be attributed and must not break", async () => {
+  const { validateResumeToken, hashResumeToken, TOKEN_PURPOSE } = await load();
+  const hash = hashResumeToken("legacy-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null, consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: TOKEN_PURPOSE.LEGACY,
+  };
+  const v = await validateResumeToken("legacy-tok");
+  assert.equal(v.ok, true, "refusing these would break live deposit links for five days");
+});
+
+test("a NULL purpose is treated as legacy — the window between the ALTER and the backfill", async () => {
+  const { validateResumeToken, hashResumeToken } = await load();
+  const hash = hashResumeToken("null-tok");
+  ctrl.recordsByHash[hash] = {
+    id: "t", buyerId: "bA", vehicleRequestId: null, consumedAt: null,
+    expiresAt: new Date(Date.now() + 1000), purpose: null,
+  };
+  const v = await validateResumeToken("null-tok");
+  assert.equal(v.ok, true);
+});
+
+test("minting records the purpose it was asked for", async () => {
+  const { issueResumeToken, TOKEN_PURPOSE } = await load();
+  await issueResumeToken({ buyerId: "b1", purpose: TOKEN_PURPOSE.RESUME });
+  assert.equal(ctrl.created[0]?.purpose, "resume");
+  await issueResumeToken({ buyerId: "b1", purpose: TOKEN_PURPOSE.CLAIM });
+  assert.equal(ctrl.created[1]?.purpose, "claim");
+});
+
 test("validate names its columns explicitly — a new declared column cannot 42703 this read", async () => {
   const { validateResumeToken, hashResumeToken } = await load();
   const hash = hashResumeToken("sel");
@@ -197,7 +262,7 @@ test("validate names its columns explicitly — a new declared column cannot 427
   );
   assert.deepEqual(
     Object.keys(select).sort(),
-    ["buyerId", "consumedAt", "expiresAt", "id", "vehicleRequestId"],
-    "exactly the five columns this function reads, and no more",
+    ["buyerId", "consumedAt", "expiresAt", "id", "purpose", "vehicleRequestId"],
+    "exactly the columns this function reads, and no more",
   );
 });

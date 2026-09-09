@@ -39,6 +39,38 @@ export function hashResumeToken(rawToken: string): string {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
+// ── What a token is FOR ─────────────────────────────────────────────────────
+//
+// Two call sites mint into this table and, until 20261110000000, they minted the
+// same shape. The rule-16 tier-2 lookup matches on the hash alone, so the $99
+// pre-checkout resume link — whose own comment above says it "confers NO
+// authenticated capability" — was a tier-2 write credential for that buyer's
+// account if pasted into `/request-vehicle?claim=`. The comment was true when it
+// was written and stopped being true when tier 2 was added. This is the column
+// that makes it true again.
+
+export const TOKEN_PURPOSE = {
+  /** Rule-16 tier 2: authorises supplying detail on the request the token names. */
+  CLAIM: "claim",
+  /** The $99 pre-checkout deep link. Grants no write; redirects to an auth-gated page. */
+  RESUME: "resume",
+  /**
+   * Minted before the column existed. Accepted by BOTH lookups, because the data
+   * cannot say which site produced it and guessing would either break live claim
+   * links or leave live deposit links as write credentials. Self-limiting: the TTL
+   * is five days, so this value stops appearing five days after the migration
+   * applies and the compatibility branches can then be deleted.
+   */
+  LEGACY: "legacy_unscoped",
+} as const;
+
+export type TokenPurpose = (typeof TOKEN_PURPOSE)[keyof typeof TOKEN_PURPOSE];
+
+/** Purposes a rule-16 claim lookup will accept. */
+export const CLAIM_CAPABLE_PURPOSES: readonly string[] = [TOKEN_PURPOSE.CLAIM, TOKEN_PURPOSE.LEGACY];
+/** Purposes the $99 resume route will accept. */
+export const RESUME_CAPABLE_PURPOSES: readonly string[] = [TOKEN_PURPOSE.RESUME, TOKEN_PURPOSE.LEGACY];
+
 export interface IssuedResumeToken {
   /** Raw token — embed in the emailed resume link ONLY; never stored or logged. */
   rawToken: string;
@@ -53,6 +85,12 @@ export async function issueResumeToken(
   params: {
     buyerId: string;
     vehicleRequestId?: string | null;
+    /**
+     * REQUIRED, and deliberately not defaulted. A default would silently give a
+     * purpose to any future call site that forgot to state one, which is the same
+     * mistake as having no column — the type error is the point.
+     */
+    purpose: TokenPurpose;
   },
   // Accepts a transaction handle so a token can be minted in the same transaction
   // as the capture that needs it — the message and the state it refers to commit
@@ -68,8 +106,14 @@ export async function issueResumeToken(
       tokenHash,
       buyerId: params.buyerId,
       vehicleRequestId: params.vehicleRequestId ?? null,
+      purpose: params.purpose,
       expiresAt,
     },
+    // Explicit, like every other access to this model. A bare `create` returns every
+    // declared scalar, so it raises 42703 exactly as a bare read does when the column
+    // is declared ahead of its migration — and this one runs inside the intake
+    // transaction, where a throw is the whole capture.
+    select: { id: true },
   });
 
   return { rawToken, expiresAt };
@@ -96,11 +140,18 @@ export async function validateResumeToken(rawToken: string): Promise<ResumeToken
   // at wave scale).
   const record = await prisma.buyerRequestClaimToken.findUnique({
     where: { tokenHash },
-    select: { id: true, buyerId: true, vehicleRequestId: true, consumedAt: true, expiresAt: true },
+    select: { id: true, buyerId: true, vehicleRequestId: true, consumedAt: true, expiresAt: true, purpose: true },
   });
   if (!record) return { ok: false, reason: "not_found" };
   if (record.consumedAt) return { ok: false, reason: "consumed" };
   if (record.expiresAt < new Date()) return { ok: false, reason: "expired" };
+  // A claim token is not a resume token. Reported as `not_found` rather than a
+  // distinct reason: the route maps every failure to one destination precisely so
+  // the response cannot be used to probe which tokens exist, and a "wrong purpose"
+  // answer would hand back exactly that.
+  if (!RESUME_CAPABLE_PURPOSES.includes(record.purpose ?? TOKEN_PURPOSE.LEGACY)) {
+    return { ok: false, reason: "not_found" };
+  }
   return {
     ok: true,
     tokenId: record.id,

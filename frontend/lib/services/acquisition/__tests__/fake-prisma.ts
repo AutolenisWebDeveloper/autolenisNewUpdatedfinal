@@ -59,6 +59,15 @@ function p2002(target: string): Error & { code: string; meta: { target: string[]
 
 function matches(row: Row, where: Row): boolean {
   for (const [k, v] of Object.entries(where)) {
+    // Prisma's OR: an array of alternative where-clauses, any of which may match.
+    // Without this the loop below hits the unknown-object branch and returns false
+    // for EVERY row, so a lookup that uses OR silently matches nothing — which reads
+    // in a test exactly like the filter being correct and the row being absent.
+    if (k === "OR") {
+      if (!Array.isArray(v)) return false;
+      if (!(v as Row[]).some((clause) => matches(row, clause))) return false;
+      continue;
+    }
     if (v && typeof v === "object") {
       const cond = v as Record<string, unknown>;
       if ("in" in cond) {
@@ -76,6 +85,13 @@ function matches(row: Row, where: Row): boolean {
         continue;
       }
       return false;
+    }
+    // `WHERE col IS NULL` matches a column that has no value. The fake stores rows as
+    // plain objects, where "no value" is usually an absent key rather than an explicit
+    // null — so a strict !== would refuse a row Postgres would return.
+    if (v === null) {
+      if (row[k] !== null && row[k] !== undefined) return false;
+      continue;
     }
     if (row[k] !== v) return false;
   }

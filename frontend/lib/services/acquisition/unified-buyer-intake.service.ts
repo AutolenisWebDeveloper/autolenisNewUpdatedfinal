@@ -448,8 +448,11 @@ async function promoteOpportunityInTx(
     // held capture commit together or neither does.
     if (identity.claimTargetBuyerId && identity.email) {
       try {
-        const { issueResumeToken } = await import("@/lib/services/buyer/request-resume-token.service");
-        const { rawToken } = await issueResumeToken({ buyerId: identity.claimTargetBuyerId }, tx);
+        const { issueResumeToken, TOKEN_PURPOSE } = await import("@/lib/services/buyer/request-resume-token.service");
+        const { rawToken } = await issueResumeToken(
+          { buyerId: identity.claimTargetBuyerId, purpose: TOKEN_PURPOSE.CLAIM },
+          tx,
+        );
         const { renderRegisteredClaimPrompt } = await import("@/lib/services/comms/phase2-email-content");
         const claimUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/request-vehicle?claim=${encodeURIComponent(rawToken)}`;
         await enqueueTransactional(

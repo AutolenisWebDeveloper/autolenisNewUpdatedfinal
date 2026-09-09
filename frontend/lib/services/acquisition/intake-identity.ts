@@ -44,6 +44,7 @@ import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { normalizePhone } from "@/lib/utils/phone";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { CLAIM_CAPABLE_PURPOSES } from "@/lib/services/buyer/request-resume-token.service";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -204,8 +205,27 @@ interface ClaimResolution {
 async function resolveClaimToken(rawToken: string, db: Db): Promise<ClaimResolution | null> {
   const { createHash } = await import("node:crypto");
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  // SCOPED, not just live. Matching on the hash alone made every row in this table
+  // interchangeable: the $99 pre-checkout resume link, minted by the lifecycle drain
+  // and emailed as a deep link that "confers no capability", resolved here as a
+  // tier-2 identity and authorised a write on the buyer's account. `purpose` is what
+  // separates the two, and `legacy_unscoped` covers rows minted before the column
+  // existed — the data cannot attribute those, and refusing them would break live
+  // claim links for the five days it takes them to expire.
+  //
+  // NULL is accepted alongside them, and deliberately, because `in` does not match
+  // NULL in SQL. During a rolling deploy an old instance can still mint a token
+  // without a purpose for as long as both versions are live; refusing those would
+  // kill the claim links issued in that window. It matches the resume side, which
+  // reads `purpose ?? LEGACY` for the same reason — the two lookups have to make the
+  // same decision about an unattributed row or one of them is a trapdoor.
   const row = await db.buyerRequestClaimToken.findFirst({
-    where: { tokenHash, consumedAt: null, expiresAt: { gt: new Date() } },
+    where: {
+      tokenHash,
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+      OR: [{ purpose: { in: [...CLAIM_CAPABLE_PURPOSES] } }, { purpose: null }],
+    },
     select: { id: true, buyerId: true, vehicleRequestId: true },
   });
   if (!row) return null;
