@@ -79,10 +79,22 @@ mock.module("@/lib/prisma", {
       },
       shortlistItem: { count: async () => 1 },
       deposit: {
+        // Phase 3: the route no longer point-looks-up one row. It calls the shared
+        // obligation check, which selects EVERY obligation-bearing row for the buyer
+        // and asks Stripe about each. The fake models that selection rather than
+        // returning the fixture unconditionally, so a test that sets a REFUNDED
+        // fixture really does exercise "no obligation".
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          const d = ctrl.existingDeposit;
+          if (!d) return [];
+          const statuses = ((args.where.status as Record<string, unknown>)?.in ?? []) as string[];
+          return statuses.includes(d.status as string) ? [d] : [];
+        },
         findFirst: async () => ctrl.existingDeposit,
         upsert: async () => { ctrl.upsertCalls += 1; return { id: "dep_1" }; },
         create: async () => ({ id: "dep_1" }),
         update: async (args: Record<string, unknown>) => { ctrl.depositUpdates.push(args); return { id: "dep_1" }; },
+        updateMany: async (args: Record<string, unknown>) => { ctrl.depositUpdates.push(args); return { count: 1 }; },
       },
     },
   },
@@ -257,10 +269,39 @@ test("a buyer with no deposit at all still gets an intent", async () => {
   assert.equal(ctrl.createCalls.length, 1);
 });
 
-test("an ALREADY_PAID deposit still short-circuits ahead of this guard", async () => {
+test("an ALREADY_PAID deposit still short-circuits, with its own clearer message", async () => {
+  // The fixture now states BOTH facts, because Phase 3 requires both to agree before
+  // the buyer is told they have paid: our row says PAID and Stripe says the intent
+  // succeeded. The old fixture left the PaymentIntent at the beforeEach default
+  // (`requires_payment_method`), so it was asserting "already paid" for a deposit the
+  // provider said had never been paid — the exact disagreement the CONTRADICTION case
+  // below now refuses to resolve silently.
   ctrl.existingDeposit = { id: "dep_1", status: "PAID", stripePaymentIntentId: PAID_PI };
+  ctrl.retrievedPi = { status: "succeeded", client_secret: "x", metadata: { type: "deposit" } };
+
   const POST = await load();
   const res = (await POST(req())) as { ok: boolean; code?: string };
   assert.equal(res.code, "ALREADY_PAID", "settled deposits keep their own clearer message");
   assert.equal(ctrl.createCalls.length, 0);
+});
+
+test("a PAID row the provider contradicts is blocked, reported to the buyer from OUR record, and flagged", async () => {
+  // Our record says the money arrived; Stripe says that intent never took it. The
+  // known producer is the admin deposit override, which writes PAID with no charge.
+  // Two wrong answers are available here and both are silent: mint (charging someone
+  // whose record says paid) or reuse (letting a "settled" deposit be paid again).
+  ctrl.existingDeposit = { id: "dep_1", status: "PAID", stripePaymentIntentId: PAID_PI };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "x", metadata: { type: "deposit" } };
+
+  const POST = await load();
+  const res = (await POST(req())) as { ok: boolean; code?: string; details?: Record<string, unknown> };
+
+  // ALREADY_PAID, not CHARGE_UNSETTLED. Both block, so neither risks a double charge,
+  // and the only question is which sentence is true: "it isn't recorded on our side
+  // yet" is false for a row that IS recorded on our side. The disagreement travels as
+  // `needsReview` for Finance instead of as confusing copy for the buyer.
+  assert.equal(res.code, "ALREADY_PAID");
+  assert.equal(ctrl.createCalls.length, 0, "and no second intent is minted");
+  assert.equal(res.details?.intentStatus, "requires_payment_method", "the disagreement is reported, not hidden");
+  assert.equal(res.details?.needsReview, true, "and flagged, because one of the two records is wrong");
 });

@@ -212,8 +212,25 @@ test("reused conversion (auction already existed) does not re-notify", async () 
   assert.equal(db.notifications.length, 0, "no duplicate 'offers ready' notice when auction already existed");
 });
 
-test("concierge deposit payment_failed flips PENDING → FAILED", async () => {
+// PHASE 3, money-path defect 1. This test used to assert the opposite, and the
+// behaviour it pinned is the defect: `payment_intent.payment_failed` is a DECLINED
+// ATTEMPT, not a dead intent. Stripe Elements retries on the same PaymentIntent, so
+// the obligation still stands — and writing FAILED made the row terminal under the
+// old matrix, stranded the retry, and dropped it out of a reconciler that swept
+// PENDING only. A concierge deposit declines and retries exactly like a standard one.
+test("concierge deposit payment_failed leaves the row PENDING — the intent is live and retryable", async () => {
   const res = await deliver("evt_c4", "payment_intent.payment_failed", CONCIERGE_PI);
+  assert.equal(res.status, 200);
+  assert.equal(
+    db.deposits[0].status,
+    "PENDING",
+    "a declined attempt is not a closed obligation; the buyer may still pay on this intent",
+  );
+});
+
+// What DOES write FAILED, now that a decline does not.
+test("concierge deposit payment_intent.canceled flips PENDING → FAILED — the intent is dead", async () => {
+  const res = await deliver("evt_c4b", "payment_intent.canceled", CONCIERGE_PI);
   assert.equal(res.status, 200);
   assert.equal(db.deposits[0].status, "FAILED");
 });
@@ -221,6 +238,16 @@ test("concierge deposit payment_failed flips PENDING → FAILED", async () => {
 test("late failure never downgrades a PAID concierge deposit", async () => {
   db.deposits[0].status = "PAID";
   const res = await deliver("evt_c5", "payment_intent.payment_failed", CONCIERGE_PI);
+  assert.equal(res.status, 200);
+  assert.equal(db.deposits[0].status, "PAID");
+});
+
+test("a late CANCELLATION never downgrades a PAID concierge deposit either", async () => {
+  // Cancellation and success do cross in practice. The guard is the matrix-scoped
+  // WHERE (DEAD_INTENT_FROM = PENDING), enforced by the database rather than by a
+  // read-then-write.
+  db.deposits[0].status = "PAID";
+  const res = await deliver("evt_c5b", "payment_intent.canceled", CONCIERGE_PI);
   assert.equal(res.status, 200);
   assert.equal(db.deposits[0].status, "PAID");
 });

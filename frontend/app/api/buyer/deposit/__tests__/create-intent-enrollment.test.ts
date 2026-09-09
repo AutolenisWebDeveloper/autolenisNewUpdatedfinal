@@ -56,10 +56,19 @@ mock.module("@/lib/prisma", {
       },
       shortlistItem: { count: async () => ctrl.shortlistCount },
       deposit: {
+        // Phase 3: the route calls the shared obligation check, which selects every
+        // obligation-bearing row for the buyer rather than point-looking-up one.
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          const d = ctrl.existingDeposit;
+          if (!d) return [];
+          const statuses = ((args.where.status as Record<string, unknown>)?.in ?? []) as string[];
+          return statuses.includes(d.status as string) ? [d] : [];
+        },
         findFirst: async () => ctrl.existingDeposit,
         upsert: async () => ({ id: "dep_1" }),
         create: async () => ({ id: "dep_1" }),
         update: async () => ({ id: "dep_1" }),
+        updateMany: async () => ({ count: 1 }),
       },
     },
   },

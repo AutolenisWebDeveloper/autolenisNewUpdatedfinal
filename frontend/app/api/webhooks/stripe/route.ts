@@ -20,7 +20,11 @@ import { writeServiceFeePayment } from "@/lib/services/deal/service-fee.service"
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
-import { allowedPredecessors } from "@/lib/payments/deposit-state";
+import {
+  SETTLE_FROM,
+  DEAD_INTENT_FROM,
+  REFUND_FROM,
+} from "@/lib/payments/deposit-state";
 import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
 
@@ -198,13 +202,23 @@ export async function POST(request: NextRequest) {
               });
             }
 
-            // Transition matrix (deposit-state.ts): only advance to PAID from a
-            // permitted predecessor (PENDING). A terminal REFUNDED/FAILED, or an
-            // already-PAID row, is left untouched — the WHERE clause enforces the
-            // allowed edge at the DB level, so a late/out-of-order success can
+            // Transition matrix (deposit-state.ts): advance to PAID only from a
+            // state this EVENT may act from — `SETTLE_FROM`, which is PENDING or
+            // FAILED. FAILED is in the set because production holds rows the
+            // pre-Phase-3 behaviour pushed there on a card decline while their
+            // PaymentIntent stayed live at Stripe; a successful retry on that same
+            // intent must be able to land (money-path defect 1).
+            //
+            // It is `SETTLE_FROM` rather than `allowedPredecessors("PAID")`
+            // deliberately: the matrix also allows DISPUTED → PAID, and that edge
+            // belongs to `charge.dispute.closed` alone. A redelivered success event
+            // must never clear a live dispute.
+            //
+            // REFUNDED and already-PAID rows are untouched, and the WHERE clause
+            // enforces the edge at the DB level, so a late/out-of-order success can
             // never resurrect a settled deposit.
             await tx.deposit.updateMany({
-              where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("PAID") } },
+              where: { stripePaymentIntentId: pi.id, status: { in: [...SETTLE_FROM] } },
               data: { status: "PAID" },
             });
 
@@ -390,11 +404,13 @@ export async function POST(request: NextRequest) {
             });
             if (claimed.count === 0) return null; // another delivery won
 
-            // Guarded PAID flip (transition matrix): only from an allowed
-            // predecessor, so a late/out-of-order success can't resurrect a
-            // settled deposit.
+            // Guarded PAID flip (transition matrix): only from a state this event
+            // may act from, so a late/out-of-order success can't resurrect a
+            // settled deposit or clear a live dispute. Same `SETTLE_FROM` set as
+            // the standard branch, including FAILED for the rows defect 1
+            // stranded — a concierge deposit declines and retries identically.
             await tx.deposit.updateMany({
-              where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("PAID") } },
+              where: { stripePaymentIntentId: pi.id, status: { in: [...SETTLE_FROM] } },
               data: { status: "PAID" },
             });
 
@@ -634,14 +650,36 @@ export async function POST(request: NextRequest) {
         const pi = event.data.object as Stripe.PaymentIntent;
 
         if (pi.metadata.type === "deposit" || pi.metadata.type === "concierge_deposit") {
-          // Transition matrix: FAILED is reachable only from PENDING, so a late
-          // failure event can never downgrade a PAID or REFUNDED deposit. Both the
-          // standard and concierge deposit types are $99 Deposit rows keyed on the
-          // same stripePaymentIntentId, so the same guarded flip applies.
-          await prisma.deposit.updateMany({
-            where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("FAILED") } },
-            data:  { status: "FAILED" },
-          });
+          // MONEY-PATH DEFECT 1, fixed at the cause. This branch used to write
+          // FAILED here. It must not, and the reason is not a matrix detail — it is
+          // what the event means.
+          //
+          // `payment_intent.payment_failed` is a DECLINED ATTEMPT, not a dead
+          // intent. Stripe Elements retries on the same PaymentIntent, so the
+          // obligation still stands and the buyer can still pay it. Recording that
+          // as FAILED made the row terminal, stranded the retry, and left the
+          // reconciler — which swept PENDING only — unable to find it ever again.
+          //
+          // So the deposit STAYS PENDING and nothing is written. PENDING is the
+          // truth: an unpaid obligation with a live intent. The row remains inside
+          // the create-intent reuse lookup and inside the reconciler sweep, which
+          // is the whole point.
+          //
+          // What DOES write FAILED is `payment_intent.canceled` and
+          // `checkout.session.expired` below — the two events that mean the intent
+          // itself is gone.
+          //
+          // §5c/§27's "Payment failed → truthful failure and retry path" message is
+          // NOT sent from here and is not silently dropped: the six-touch series
+          // owns buyer-facing $99 messaging and rechecks live payment state at send
+          // time, so a decline is already covered by the next due touch. This branch
+          // sent the buyer nothing before this change either, so no capability is
+          // removed. Recorded rather than assumed, because "we left it as it was" is
+          // exactly the kind of gap that reads as deliberate a year later.
+          logger.info(
+            `[stripe/webhook] deposit payment attempt declined for PI ${pi.id} — deposit left PENDING; ` +
+              `the intent is live and the buyer may retry on it`,
+          );
         }
 
         if (pi.metadata.type === "concierge_fee" || pi.metadata.type === "service_fee") {
@@ -660,6 +698,35 @@ export async function POST(request: NextRequest) {
         break;
       }
 
+      // MONEY-PATH DEFECT 1, the other half. Nothing in this webhook handled a dead
+      // intent before Phase 3, because `payment_failed` was (wrongly) doing that job.
+      // Now that a decline correctly leaves the deposit PENDING, something has to
+      // record the case where the intent really is gone — otherwise a cancelled
+      // obligation sits PENDING for ever, keeps blocking new intents through the
+      // obligation check, and keeps drawing deposit-reminder touches for money the
+      // buyer can no longer pay.
+      //
+      // Stripe emits this when an intent is cancelled explicitly or by its automatic
+      // timeout. `DEAD_INTENT_FROM` is PENDING only: a cancellation arriving after a
+      // success (they do cross) must never downgrade a PAID row, and the WHERE clause
+      // enforces that at the database rather than in a read-then-write.
+      case "payment_intent.canceled": {
+        const pi = event.data.object as Stripe.PaymentIntent;
+        if (pi.metadata.type === "deposit" || pi.metadata.type === "concierge_deposit") {
+          const dead = await prisma.deposit.updateMany({
+            where: { stripePaymentIntentId: pi.id, status: { in: [...DEAD_INTENT_FROM] } },
+            data: { status: "FAILED" },
+          });
+          if (dead.count === 1) {
+            logger.info(
+              `[stripe/webhook] PaymentIntent ${pi.id} cancelled — deposit marked FAILED (dead intent). ` +
+                `The buyer may start a new one.`,
+            );
+          }
+        }
+        break;
+      }
+
       case "charge.refunded": {
         const charge = event.data.object as Stripe.Charge;
         const piId   = typeof charge.payment_intent === "string"
@@ -673,13 +740,15 @@ export async function POST(request: NextRequest) {
           select: { id: true, status: true, buyerId: true },
         });
 
-        // Transition matrix: REFUNDED is reachable only from PAID. The updateMany
+        // Transition matrix: REFUNDED is reachable from PAID or DISPUTED — the second
+        // being a dispute the platform lost, where the funds are withdrawn and Stripe
+        // reports the charge as refunded. The updateMany
         // WHERE enforces the edge atomically (count 1 = we performed the refund,
         // count 0 = disallowed/already-settled → skip side effects). This closes
         // the check-then-write race a findFirst+update leaves open.
         const refundApplied = deposit
           ? (await prisma.deposit.updateMany({
-              where: { id: deposit.id, status: { in: allowedPredecessors("REFUNDED") } },
+              where: { id: deposit.id, status: { in: [...REFUND_FROM] } },
               data:  { status: "REFUNDED", refundedAt: new Date() },
             })).count === 1
           : false;

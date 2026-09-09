@@ -1,4 +1,3 @@
-import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -8,10 +7,12 @@ import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-schedule
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { cancelPreCheckoutTouches } from "@/lib/services/crm/lifecycle-touch-drain.service";
+import { logger } from "@/lib/logger";
 import {
-  classifyPaymentConfirmation,
-  wasCharged,
-} from "@/lib/services/payment/payment-confirmation";
+  findExistingDepositObligation,
+  retireDeadDeposits,
+} from "@/lib/services/payment/deposit-obligation";
+import { DEAD_INTENT_FROM } from "@/lib/payments/deposit-state";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -85,14 +86,82 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Check for existing active deposit
-  const existingDeposit = await prisma.deposit.findFirst({
-    where: { buyerId: buyer.id, status: { in: ["PENDING", "PAID"] } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existingDeposit?.status === "PAID") {
-    return errorResponse("ALREADY_PAID", "Deposit already paid for this buyer", 400);
+  // MONEY-PATH DEFECT 4. This used to be a point lookup on the single newest
+  // PENDING-or-PAID row, and three classes of real obligation escaped it: a settled
+  // older row hiding behind a fresher PENDING one; a row the pre-Phase-3 behaviour
+  // parked at FAILED on a card decline while its intent stayed live at Stripe
+  // (defect 1); and a send-link row carrying no PaymentIntent at all. Each of those
+  // fell through to `paymentIntents.create`.
+  //
+  // The shared check is the same one the two admin routes now call, so the three
+  // paths cannot drift apart again, and it asks Stripe about every candidate rather
+  // than believing our own status column — which §5d requires by name.
+  const obligation = await findExistingDepositObligation({ buyerId: buyer.id });
+
+  if (obligation.kind === "PROVIDER_UNREACHABLE") {
+    logger.error(
+      `[deposit/create-intent] failing closed for buyer ${buyer.id}: Stripe unreachable while ` +
+        `checking intent ${obligation.paymentIntentId}`,
+    );
+    return errorResponse(
+      "PROVIDER_UNREACHABLE",
+      "We couldn't reach our payment provider to check your payment status. Please try again in a moment — " +
+        "we won't create a second charge while we're unsure.",
+      503,
+    );
   }
+
+  if (obligation.kind === "SETTLED" || obligation.kind === "SETTLING" || obligation.kind === "CONTRADICTION") {
+    logger.warn(
+      `[deposit/create-intent] blocked duplicate intent for buyer ${buyer.id}: PI ` +
+        `${obligation.paymentIntentId ?? "none"} is ${obligation.intentStatus ?? "unverifiable"} ` +
+        `while deposit ${obligation.deposit.id} is ${obligation.deposit.status} (${obligation.kind})`,
+    );
+
+    // WHICH MESSAGE. Both codes block the mint, so neither risks a double charge; the
+    // only question is which sentence is true.
+    //
+    // Our own books saying PAID is what decides it. CHARGE_UNSETTLED's copy — "we've
+    // received your payment, it isn't recorded on our side yet" — is FALSE for a row
+    // that is recorded on our side; that is the state an admin override produces
+    // (PAID with no PaymentIntent), and it usually means a real payment made off
+    // Stripe. Telling that buyer their payment is unrecorded invites a support ticket
+    // at best and a second payment attempt at worst.
+    //
+    // So a PAID row gets ALREADY_PAID even when the provider disagrees, and the
+    // disagreement travels as `needsReview` for Finance rather than as confusing copy
+    // for the buyer. CHARGE_UNSETTLED is kept for what it was written for: Stripe says
+    // the money arrived and OUR row has not caught up.
+    const ourBooksSayPaid = obligation.deposit.status === "PAID";
+
+    return errorResponse(
+      ourBooksSayPaid ? "ALREADY_PAID" : "CHARGE_UNSETTLED",
+      ourBooksSayPaid
+        ? "Your deposit is already paid."
+        : "We've received your payment. It isn't recorded on our side yet — please do not pay again.",
+      ourBooksSayPaid ? 400 : 409,
+      {
+        paymentIntentId: obligation.paymentIntentId,
+        intentStatus: obligation.intentStatus,
+        ...(obligation.kind === "CONTRADICTION" ? { needsReview: true } : {}),
+      },
+    );
+  }
+
+  // Nothing is owed, but some of the buyer's rows point at intents Stripe has
+  // cancelled. Retire them here — this is the only moment we know, and leaving them
+  // PENDING costs a Stripe round-trip on every future call and keeps the six-touch
+  // series chasing money that can no longer be paid. Best-effort by design: it is
+  // bookkeeping, and it must never stop a buyer paying.
+  if (obligation.kind === "NONE" && obligation.deadDepositIds.length > 0) {
+    await retireDeadDeposits(obligation.deadDepositIds);
+  }
+
+  // The row this request should attach to, if any. IN_FLIGHT carries a live intent to
+  // reuse; UNVERIFIABLE is a row with no usable provider reference (a send-link row, or
+  // a sandbox mock) that must be attached to rather than duplicated.
+  const existingDeposit =
+    obligation.kind === "IN_FLIGHT" || obligation.kind === "UNVERIFIABLE" ? obligation.deposit : null;
 
   // Sandbox short-circuit: if a live Stripe key is configured outside production,
   // return a mock client secret so the UI can proceed without exposing real Stripe.
@@ -132,44 +201,17 @@ export async function POST(request: NextRequest) {
         existingDeposit.stripePaymentIntentId,
       );
 
-      // DUPLICATE-CHARGE GUARD.
+      // The duplicate-charge guard that used to live here has MOVED UP, into
+      // `findExistingDepositObligation`, and is no longer repeated in this block.
+      // That is the point of extracting it: the guard used to sit downstream of a
+      // point lookup that could not see the rows it most needed to catch, so it was
+      // a correct rule applied to an incomplete candidate set. It now runs over
+      // every obligation-bearing row for the buyer, before this block is reached, and
+      // a SETTLED result has already returned 409/400 above.
       //
-      // The ALREADY_PAID check above keys on Deposit.status === "PAID", but the
-      // live production condition is a real payment sitting on a PENDING row,
-      // because the Stripe webhook — the only writer that flips PENDING → PAID —
-      // has never been delivered. Such a buyer passed that guard, then fell
-      // through everything below: a succeeded PI is not `isReusable` (that list
-      // covers only the three requires_* states), and the terminal-state block
-      // does nothing because the PI is not `canceled` and the deposit IS
-      // "PENDING". Execution reached paymentIntents.create. Same UTC day the
-      // idempotency bucket hid it; the next day it minted a fresh $99 intent and
-      // upserted a SECOND PENDING deposit, and the page put a live card form in
-      // front of someone who had already paid.
-      //
-      // Stripe is authoritative about the money here and our own row is not, so
-      // the decision is deferred to the same pure rule the confirmation surfaces
-      // use — there is one definition of "the buyer has been charged" in this
-      // codebase, and this is a caller of it, not a second copy.
-      const outcome = classifyPaymentConfirmation({
-        intentStatus: existingPi.status,
-        recordedStatus: existingDeposit.status,
-      });
-      if (wasCharged(outcome) || outcome === "processing") {
-        logger.warn(
-          `[deposit/create-intent] blocked duplicate intent for buyer ${buyer.id}: ` +
-            `PI ${existingDeposit.stripePaymentIntentId} is ${existingPi.status} ` +
-            `while deposit ${existingDeposit.id} is ${existingDeposit.status}`,
-        );
-        return errorResponse(
-          "CHARGE_UNSETTLED",
-          "We've received your payment. It isn't recorded on our side yet — please do not pay again.",
-          409,
-          {
-            paymentIntentId: existingDeposit.stripePaymentIntentId,
-            intentStatus: existingPi.status,
-          },
-        );
-      }
+      // Re-testing it here would be a second copy of the decision — exactly what the
+      // original comment argued against — and a second copy that would now disagree
+      // with the first, because this one keys on a single row.
 
       const isReusable =
         existingPi.status === "requires_payment_method" ||
@@ -190,11 +232,17 @@ export async function POST(request: NextRequest) {
       if (isReusable && existingPi.client_secret && typeMatches && reviewMatches) {
         return successResponse({ clientSecret: existingPi.client_secret });
       }
-      // PI is in a terminal state (canceled/failed) — mark deposit failed
-      // and fall through to create a fresh one below.
-      if (existingPi.status === "canceled" || existingDeposit.status !== "PENDING") {
-        await prisma.deposit.update({
-          where: { id: existingDeposit.id },
+      // MONEY-PATH DEFECT 1, the second half. This condition used to be
+      // `canceled || existingDeposit.status !== "PENDING"`, so it wrote FAILED for a
+      // row that was merely not PENDING — including a row already FAILED, and a row
+      // whose intent was perfectly alive but whose type did not match the path
+      // (concierge vs standard), which falls through here on purpose. Under the
+      // Phase 3 semantics FAILED means THE INTENT IS DEAD, so only `canceled` may
+      // write it, and the write is scoped by the matrix so it cannot downgrade a PAID
+      // or REFUNDED row that a concurrent webhook has just settled.
+      if (existingPi.status === "canceled") {
+        await prisma.deposit.updateMany({
+          where: { id: existingDeposit.id, status: { in: [...DEAD_INTENT_FROM] } },
           data: { status: "FAILED" },
         });
       }
