@@ -68,8 +68,14 @@ const nextConfig = {
       // Supabase storage (covers any project ref)
       { protocol: "https", hostname: "*.supabase.co" },
       { protocol: "https", hostname: "*.supabase.in" },
-      // Dev fallback
-      { protocol: "https", hostname: "**" },
+      // No catch-all. A `hostname: "**"` entry turns /_next/image into an open
+      // image proxy: any attacker-supplied HTTPS URL is fetched by the optimizer
+      // and served from this origin, on this origin's bandwidth and image-
+      // optimization quota. Every host next/image actually renders is listed
+      // above; an unlisted host degrades to a broken image (Next only throws for
+      // an unconfigured host outside production — see
+      // next/dist/shared/lib/image-loader.js), never to a failed page. Add the
+      // specific host here when a new source appears.
     ],
   },
 
