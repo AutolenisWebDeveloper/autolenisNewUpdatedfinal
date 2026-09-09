@@ -51,6 +51,7 @@ let ctrl: Ctrl;
 
 mock.module("@/lib/auth/api", {
   namedExports: {
+    getRequestUser: async () => ({ email_confirmed_at: "2026-01-01T00:00:00Z" }),
     getRequestBuyer: async () => ({ id: BUYER_ID, preQualification: { decision: "APPROVED" } }),
     successResponse: (data: unknown) => ({ ok: true, data }),
     // Mirrors the real helper's optional 4th `details` argument so the tests can
@@ -127,6 +128,24 @@ mock.module("@/lib/services/crm/lifecycle-touch-drain.service", {
   namedExports: { cancelPreCheckoutTouches: async () => ({ canceled: 0, status: "OK" }) },
 });
 mock.module("@/lib/events/emit", { namedExports: { emitDomainEvent: async () => {} } });
+// Phase 3: the route now resolves the buyer's open Vehicle Request, runs the §5a
+// eligibility recheck and moves the request to PAYMENT_REQUIRED before it reaches the
+// duplicate-charge logic these tests are about. Those are mocked to their passing
+// answers here — they have their own suites — so this file keeps testing the one thing
+// it was written for.
+mock.module("@/lib/services/vehicle-request/open-request.service", {
+  namedExports: {
+    findOpenRequest: async () => ({ id: "vr_1", buyerId: BUYER_ID, status: "SUBMITTED" }),
+    OPEN_REQUEST_STATUSES: ["DRAFT", "SUBMITTED", "INTAKE", "PAYMENT_REQUIRED"],
+  },
+});
+mock.module("@/lib/services/vehicle-request/vehicle-request.service", {
+  namedExports: { enterPaymentRequired: async () => true },
+});
+mock.module("@/lib/services/payment/deposit-eligibility", {
+  namedExports: { gatherAndCheckEligibility: async () => ({ eligible: true }) },
+});
+
 mock.module("@/lib/logger", {
   namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } },
 });

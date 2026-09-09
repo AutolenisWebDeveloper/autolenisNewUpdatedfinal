@@ -5,7 +5,6 @@ import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
-import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { cancelPreCheckoutTouches } from "@/lib/services/crm/lifecycle-touch-drain.service";
 import { logger } from "@/lib/logger";
 import {
@@ -13,6 +12,10 @@ import {
   retireDeadDeposits,
 } from "@/lib/services/payment/deposit-obligation";
 import { DEAD_INTENT_FROM } from "@/lib/payments/deposit-state";
+import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
+import { enterPaymentRequired } from "@/lib/services/vehicle-request/vehicle-request.service";
+import { gatherAndCheckEligibility } from "@/lib/services/payment/deposit-eligibility";
+import { getRequestUser } from "@/lib/auth/api";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -34,9 +37,14 @@ export async function POST(request: NextRequest) {
   // auction with canonical Offers by the Stripe webhook.
   let conciergeVehicleOfferId: string | null = null;
   let conciergeReviewToken: string | null = null;
+  let acceptedDisclosuresVersion: string | null = null;
   {
-    let body: { reviewToken?: unknown } = {};
-    try { body = (await request.json()) as { reviewToken?: unknown }; } catch { /* no body — standard path */ }
+    let body: { reviewToken?: unknown; disclosuresVersion?: unknown } = {};
+    try {
+      body = (await request.json()) as { reviewToken?: unknown; disclosuresVersion?: unknown };
+    } catch { /* no body — standard path */ }
+    acceptedDisclosuresVersion =
+      typeof body?.disclosuresVersion === "string" ? body.disclosuresVersion.trim() : null;
     const reviewToken = typeof body?.reviewToken === "string" ? body.reviewToken.trim() : "";
     if (reviewToken) {
       const review = await prisma.buyerOfferReview.findUnique({
@@ -61,29 +69,52 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // §5a ELIGIBILITY RECHECK, and the PAYMENT_REQUIRED transition it gates.
+  //
+  // Standard path only. A concierge deposit has no Vehicle Request until the webhook's
+  // conversion creates one at settlement, so there is nothing here to recheck against
+  // or to transition; its gate is the strict buyer↔offer binding above, which is a
+  // different and stricter thing than §5a.
+  //
+  // This replaces two ad-hoc checks. The prequal one is folded in unchanged (PAY-04).
+  // The shortlist one is NOT folded in and is deliberately dropped: §5a's eight
+  // conditions do not include it, Phase 3 removes the auction-at-settlement behaviour
+  // it was defending ("paying the deposit launches the auction" stops being true), and
+  // shortlist candidates are Phase 4's subject. Recorded rather than silently removed.
+  let openRequest: { id: string } | null = null;
   if (!conciergeReviewToken) {
-    // D1: Verify prequal is valid before allowing deposit. Uses the platform
-    // single-source-of-truth (decision === APPROVED AND not expired) rather than
-    // an expiry-only check — a future-dated DECLINED/PENDING/MANUAL_REVIEW record
-    // must not pass this gate (defense-in-depth behind the layout gate).
-    const prequal = buyer.preQualification;
-    if (!isPrequalValid(prequal ?? null)) {
-      return errorResponse("PREQUAL_REQUIRED", "Valid prequalification required before deposit", 400);
-    }
-
-    // Auction activation precondition: the buyer must have at least one vehicle on
-    // their shortlist — there must be something for dealers to compete over. Paying
-    // the deposit launches the auction, so this gate belongs before payment.
-    const shortlistCount = await prisma.shortlistItem.count({
-      where: { shortlist: { buyerId: buyer.id } },
-    });
-    if (shortlistCount === 0) {
+    openRequest = await findOpenRequest(buyer.id);
+    if (!openRequest) {
       return errorResponse(
-        "SHORTLIST_REQUIRED",
-        "Add at least one vehicle to your shortlist before activating your auction.",
+        "REQUEST_REQUIRED",
+        "Start a vehicle request before paying — the $99 activates sourcing for a specific request.",
         400,
       );
     }
+
+    // `email_confirmed_at` lives on the Supabase user, not on our User row, so PAY-01's
+    // "read email_confirmed_at on the API path" means asking the session for it.
+    const sessionUser = await getRequestUser(request);
+    const gate = await gatherAndCheckEligibility({
+      buyerId: buyer.id,
+      requestId: openRequest.id,
+      acceptedDisclosuresVersion,
+      emailConfirmedAt: sessionUser?.email_confirmed_at
+        ? new Date(sessionUser.email_confirmed_at)
+        : null,
+    });
+    if (!gate.eligible) {
+      // §5a: "Any failure returns the buyer to the exact missing requirement — named,
+      // not generic." The code and the named item both travel, so the checkout client
+      // can route the buyer to the step that fixes it (PAY-09) rather than showing a
+      // dead end.
+      return errorResponse(gate.code, gate.message, 400, { missing: gate.missing });
+    }
+
+    // PAY-10b: eligibility passing is what moves the request into PAYMENT_REQUIRED.
+    // Guarded by the source status set so a request that has moved on — settled,
+    // cancelled, already sourcing — is not dragged backwards by a stale checkout tab.
+    await enterPaymentRequired(openRequest.id);
   }
 
   // MONEY-PATH DEFECT 4. This used to be a point lookup on the single newest
@@ -96,7 +127,13 @@ export async function POST(request: NextRequest) {
   // The shared check is the same one the two admin routes now call, so the three
   // paths cannot drift apart again, and it asks Stripe about every candidate rather
   // than believing our own status column — which §5d requires by name.
-  const obligation = await findExistingDepositObligation({ buyerId: buyer.id });
+  // Request-scoped (PAY-11b). Plan is elected per Vehicle Request — §23.1's "a new
+  // request means a new $99" — so a deposit attached to a DIFFERENT request must not
+  // block this one, and one attached to THIS request must.
+  const obligation = await findExistingDepositObligation({
+    buyerId: buyer.id,
+    vehicleRequestId: openRequest?.id ?? null,
+  });
 
   if (obligation.kind === "PROVIDER_UNREACHABLE") {
     logger.error(
@@ -264,12 +301,35 @@ export async function POST(request: NextRequest) {
           reviewToken: conciergeReviewToken,
           ...(conciergeVehicleOfferId ? { vehicleOfferId: conciergeVehicleOfferId } : {}),
         }
-      : { buyerId: buyer.id, type: "deposit" };
-    // Scope the concierge idempotency bucket by the specific review so two
-    // different reviews for the same buyer never collapse onto one PI/auction.
+      : {
+          buyerId: buyer.id,
+          type: "deposit",
+          // PAY-11b: stamp the Vehicle Request on the intent. The webhook can then
+          // attach the settlement to the right request without inferring it, and an
+          // operator looking at a charge in the Stripe dashboard can see what it bought.
+          ...(openRequest ? { vehicleRequestId: openRequest.id } : {}),
+        };
+
+    // PAY-11b — ONE PaymentIntent per VEHICLE REQUEST, not per buyer per day.
+    //
+    // The old key was `deposit-buyer-${id}-${dayKey}`, bucketed by UTC day. That had two
+    // faults and they pulled in opposite directions. WITHIN a day it collapsed two
+    // different requests onto one intent, because the buyer was the only thing in the
+    // key. ACROSS days it minted a fresh intent for the SAME unpaid request, which is
+    // how the duplicate-charge path opened: the guard that would have caught it sat
+    // behind a point lookup, and the day bucket hid the collision until the next day.
+    //
+    // Keying on the request fixes both, and matches what §5b actually asks for: "Create
+    // or reuse ONE Stripe PaymentIntent tied to THAT Vehicle Request — not merely to
+    // the buyer." A returning buyer gets the same intent; a new request gets a new one,
+    // which is §23.1's "a new request means a new $99".
+    //
+    // The concierge bucket keeps its own shape: it has no Vehicle Request until the
+    // webhook's conversion creates one, and its review token is what a concierge intent
+    // is genuinely "per".
     const idempotencyKey = conciergeReviewToken
       ? `concierge-deposit-buyer-${buyer.id}-${conciergeReviewToken}-${dayKey}`
-      : `deposit-buyer-${buyer.id}-${dayKey}`;
+      : `deposit-vr-${openRequest!.id}`;
     const paymentIntent = await getStripe().paymentIntents.create(
       {
         amount: DEPOSIT_AMOUNT_CENTS, // $99 hardcoded
@@ -288,8 +348,29 @@ export async function POST(request: NextRequest) {
         amountCents: DEPOSIT_AMOUNT_CENTS,
         status: "PENDING",
         stripePaymentIntentId: paymentIntent.id,
+        // PAY-11a/11b: the deposit is attached to the request at CREATION, not at
+        // settlement. Attaching later would leave a window in which a paid deposit
+        // belonged to no request, which is the shape of the eight unattached rows
+        // R1b's owner-gated backfill exists to clean up.
+        ...(openRequest ? { vehicleRequestId: openRequest.id } : {}),
+        // PAY-D / PAY-08: the acceptance is recorded WITH the version accepted. A
+        // later wording change bumps the version and invalidates it, so a buyer is
+        // never treated as having agreed to words they did not see (§13-D48).
+        ...(acceptedDisclosuresVersion
+          ? { disclosuresAcceptedAt: new Date(), disclosuresVersion: acceptedDisclosuresVersion }
+          : {}),
       },
-      update: {},
+      // An existing row is BROUGHT UP TO DATE rather than left alone. The reuse path
+      // returns before reaching here, so arriving with a row that already carries this
+      // intent means a concurrent retry wrote it — and that row may predate the request
+      // link or the acceptance. `update: {}` would have silently kept the older, emptier
+      // version of both.
+      update: {
+        ...(openRequest ? { vehicleRequestId: openRequest.id } : {}),
+        ...(acceptedDisclosuresVersion
+          ? { disclosuresAcceptedAt: new Date(), disclosuresVersion: acceptedDisclosuresVersion }
+          : {}),
+      },
     });
 
     // CONCIERGE EXCLUSION (Section 2): concierge deposits (reviewToken present)
