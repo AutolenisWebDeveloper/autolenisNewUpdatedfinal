@@ -48,7 +48,7 @@ import { raiseException, type ExceptionRefs } from "./queue-item.service";
 type Db = typeof prisma | Prisma.TransactionClient;
 
 /** The six record classes §3 names. */
-export type LineageClass = "deposit" | "auction" | "offer" | "deal" | "contractVersion" | "pickup";
+export type LineageClass = "deposit" | "auction" | "offer" | "deal" | "contractVersion" | "pickup" | "auctionVehicle";
 
 /** A parent reference: which kind of parent, and the id claimed for it. */
 export interface ParentRef {
@@ -92,9 +92,40 @@ export const LINEAGE_SPECS: Readonly<Record<LineageClass, LineageSpec>> = {
   },
   contractVersion: { parents: ["deal"], requiredFromPhase: 2 },
   pickup: { parents: ["deal"], requiredFromPhase: 2 },
+  // PHASE 4. A candidate belongs to a Vehicle Request: `auction_vehicles_enforce_cap_trg`
+  // counts the five-cap per request, so a candidate with no request is outside the cap as
+  // well as outside the lineage. Nothing wrote the column before Phase 4
+  // (`ensureAuctionVehicleFromRequest` read the request and discarded its id), so production's
+  // three rows are all orphans. They are LEFT IN PLACE with an exception raised rather than
+  // backfilled or dropped: they predate the transaction spine, their auctions carry
+  // vehicle_request_id NULL too, so there is no request to attribute them to — and deleting
+  // them would remove the record of a real auction.
+  //
+  // ONE parent, not two. `parents` is an alternatives list judged in priority order — any one
+  // resolving clears the row (that is what lets a Deal satisfy lineage through EITHER offer
+  // link) — so naming `auction` alongside `vehicleRequest` would let a candidate with a valid
+  // auction and NO request pass, which is exactly the population being looked for. The auction
+  // link needs no lineage check: `auction_vehicles.auction_id` is NOT NULL with a foreign key,
+  // so the database already refuses an unresolvable one.
+  auctionVehicle: { parents: ["vehicleRequest"], requiredFromPhase: 4 },
 };
 
-/** The phase this code belongs to. Bump with the phase; the registry compares against it. */
+/**
+ * The phase this code belongs to. Bump with the phase; the registry compares against it.
+ *
+ * STILL 2 IN PHASE 4, DELIBERATELY, AND REPORTED RATHER THAN QUIETLY RAISED. Bumping it to 4
+ * would also activate the `deposit` and `auction` classes, whose deferral is not a stale note
+ * but an open owner ruling — `control/L3-01`, named in `SweepOptions.includeDeferred` and
+ * asserted by test: "the owner rules control/L3-01 before historical rows are swept". Turning
+ * that on would raise a LINEAGE_ORPHAN for every historical deposit and auction, which is the
+ * owner's call and not this phase's.
+ *
+ * Phase 4's own class, `auctionVehicle`, is registered at `requiredFromPhase: 4` and is
+ * reachable WITHOUT that bump: `sweepLineageOrphans({ only: ["auctionVehicle"],
+ * includeDeferred: true })` raises for exactly the candidate rows and nothing else. That is the
+ * runnable form of the ruling on production's three orphaned candidates — leave them in place,
+ * with an exception raised.
+ */
 export const CURRENT_PHASE = 2;
 
 /**
@@ -213,6 +244,12 @@ export interface SweepOptions {
    * for every historical auction and deposit.
    */
   includeDeferred?: boolean;
+  /**
+   * Sweep only these classes. Added in Phase 4 so a single deferred class can be swept without
+   * dragging every other deferred class in with it — `includeDeferred` is all-or-nothing, and
+   * the candidate rows needed raising while the deposit and auction ruling is still open.
+   */
+  only?: readonly LineageClass[];
 }
 
 /**
@@ -224,12 +261,15 @@ export interface SweepOptions {
 export async function sweepLineageOrphans(opts: SweepOptions = {}, db: Db = prisma): Promise<SweepReport> {
   const take = opts.limitPerClass ?? 500;
   const report: SweepReport = {
-    scanned: { deposit: 0, auction: 0, offer: 0, deal: 0, contractVersion: 0, pickup: 0 },
+    scanned: { deposit: 0, auction: 0, offer: 0, deal: 0, contractVersion: 0, pickup: 0, auctionVehicle: 0 },
     findings: [],
     skipped: [],
   };
 
+  const only = opts.only ? new Set(opts.only) : null;
+
   for (const recordClass of Object.keys(LINEAGE_SPECS) as LineageClass[]) {
+    if (only && !only.has(recordClass)) continue;
     const spec = LINEAGE_SPECS[recordClass];
     if (CURRENT_PHASE < spec.requiredFromPhase && !opts.includeDeferred) {
       report.skipped.push(recordClass);
@@ -304,6 +344,20 @@ async function loadForSweep(db: Db, recordClass: LineageClass, take: number): Pr
     case "pickup": {
       const rows = await db.pickup.findMany({ select: { id: true, dealId: true }, take });
       return rows.map((r) => ({ id: r.id, parents: [{ kind: "deal" as const, id: r.dealId }], refs: { dealId: r.dealId } }));
+    }
+    case "auctionVehicle": {
+      // DROPPED candidates are excluded: a dropped row is a record of a decision, not a live
+      // child, and raising an exception for one would ask an operator to fix history.
+      const rows = await db.auctionVehicle.findMany({
+        where: { candidateStatus: { not: "DROPPED" } },
+        select: { id: true, vehicleRequestId: true, auctionId: true },
+        take,
+      });
+      return rows.map((r) => ({
+        id: r.id,
+        parents: [{ kind: "vehicleRequest" as const, id: r.vehicleRequestId }],
+        refs: { auctionId: r.auctionId, vehicleRequestId: r.vehicleRequestId },
+      }));
     }
   }
 }

@@ -267,6 +267,15 @@ export const CLEANUP_ORDER = [
   "dealer",
   "buyer",
   "user",
+  // LAST, and it has to be. `shortlist_items.inventory_item_id` is RESTRICT and
+  // `auction_vehicles.inventory_item_id` is NO ACTION, so a listing cannot be deleted while
+  // anything points at it. Both of those children go with the buyer and the auction, which are
+  // deleted above — so the listings come off cleanly only once everything else has.
+  //
+  // Added in Phase 4 for the shortlist five-cap concurrency proof, which seeds real listings.
+  // Without it that suite would leave rows behind, and the guard's own contract is that a run
+  // which cannot remove its own rows fails loudly.
+  "inventoryItem",
 ] as const;
 
 export type CleanupClient = {
@@ -313,6 +322,10 @@ export function taggedWhere(
     case "dealStatusHistory":
       // An empty id list matches nothing, which is the correct answer when the run made no deals.
       return { dealId: { in: context.dealIds } };
+    case "inventoryItem":
+      // Tagged through `source_adapter`, which is a free-text provenance column: a seeded
+      // listing says which run created it, and nothing else in the database writes that value.
+      return { sourceAdapter: { startsWith: runTag } };
   }
 }
 

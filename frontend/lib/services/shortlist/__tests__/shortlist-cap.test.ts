@@ -15,6 +15,10 @@ let inventory: Record<string, { isActive: boolean; priceCents: number }> = {};
 let shortlistItems: Array<{ id: string; inventoryItemId: string }> = [];
 const created: Array<Record<string, unknown>> = [];
 
+mock.module("@/lib/services/integrations/geocoding.service", {
+  namedExports: { geocodeZip: async () => ({ lat: 32.7357, lng: -97.1081, source: "static" }) },
+});
+
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
@@ -23,6 +27,17 @@ mock.module("@/lib/prisma", {
           where.id.in
             .filter((id) => id in inventory)
             .map((id) => ({ id, ...inventory[id]! })),
+        // The gate moved INTO the service (Phase 4), so an add now reads the candidate's own
+        // gate inputs. Every fixture vehicle sits 2 miles from the buyer and was seen today,
+        // which keeps these tests about the CAP and nothing else.
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          where.id in inventory
+            ? {
+                id: where.id, ...inventory[where.id]!,
+                lastSeenAt: new Date(), lane: "LANE_3", dealerId: null, addedByAdminId: null,
+                latitude: 32.75, longitude: -97.12,
+              }
+            : null,
       },
       shortlist: {
         upsert: async () => ({ id: "sl_1", buyerId: "b1", items: shortlistItems }),
@@ -38,6 +53,7 @@ mock.module("@/lib/prisma", {
       buyer: {
         findUnique: async () => ({
           id: "b1",
+          zip: "76011",
           preQualification: { expiresAt: new Date("2099-01-01"), decision: "APPROVED" },
         }),
       },
@@ -63,9 +79,16 @@ test("five LIVE vehicles fill the shortlist", async () => {
     inventory[`v${i}`] = LIVE;
     shortlistItems.push({ id: `s${i}`, inventoryItemId: `v${i}` });
   }
+  inventory.v_new = LIVE;  // the candidate must EXIST before the cap is the reason to refuse
   const { countAvailableItems, addToShortlist } = await load();
   assert.equal(await countAvailableItems(shortlistItems), 5);
-  await assert.rejects(() => addToShortlist("b1", "v_new"), /limited to 5/);
+  // A RESULT, not a throw: the route needs a code (`SHORTLIST_FULL` means something different
+  // to a client than `OUT_OF_RADIUS`) and prose in an Error cannot be turned into one without
+  // matching on the message.
+  const refused = await addToShortlist("b1", "v_new");
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.code, "SHORTLIST_FULL");
+  assert.equal(created.length, 0, "nothing is written on a refusal");
 });
 
 test("REPRODUCTION: three of five sold — the buyer can still add a replacement", async () => {
@@ -77,8 +100,9 @@ test("REPRODUCTION: three of five sold — the buyer can still add a replacement
   assert.equal(await countAvailableItems(shortlistItems), 2, "but only two are available");
 
   inventory.v_new = LIVE;
-  await addToShortlist("b1", "v_new");
-  assert.equal(created.length, 1, "the add must succeed — the cap counts candidates, not corpses");
+  const added = await addToShortlist("b1", "v_new");
+  assert.equal(added.ok, true, "the add must succeed — the cap counts candidates, not corpses");
+  assert.equal(created.length, 1);
 });
 
 test("a shortlist of only unavailable vehicles is NOT ready to auction", async () => {

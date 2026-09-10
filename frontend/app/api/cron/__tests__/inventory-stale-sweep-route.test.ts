@@ -51,6 +51,15 @@ mock.module("@/lib/prisma", {
   },
 });
 
+// PHASE 4: both dealer emails moved onto the §27 outbox dispatcher. The resend mock stays so a
+// regression BACK to a direct send is visible as a non-empty array rather than as a silence.
+const enqueued: Array<Record<string, unknown>> = [];
+mock.module("@/lib/services/comms/transactional-dispatcher.service", {
+  namedExports: {
+    enqueueTransactional: async (a: Record<string, unknown>) => { enqueued.push(a); return { enqueued: true }; },
+  },
+});
+
 mock.module("@/lib/services/email/resend.service", {
   namedExports: {
     sendDealerStaleListingRemovalEmail: async (a: Record<string, unknown>) => { removalEmails.push(a); },
@@ -76,7 +85,7 @@ function rows(n: number, withDealer = false) {
 
 beforeEach(() => {
   process.env.CRON_SECRET = "test-secret";
-  cronLog.create = []; cronLog.update = [];
+  cronLog.create = []; cronLog.update = []; enqueued.length = 0;
   itemCalls.findMany = []; itemCalls.updateMany = [];
   removalEmails.length = 0; failureEmails.length = 0; notifications.length = 0;
   staleRows = [];
@@ -164,10 +173,18 @@ test("dealer-owned removals are emailed, and only on a real deactivation", async
   const { GET } = await import("@/app/api/cron/inventory-stale-sweep/route");
   await GET(cronReq());
 
-  assert.equal(removalEmails.length, 1, "one email per affected dealer");
-  assert.equal((removalEmails[0]!.affectedVehicles as unknown[]).length, 3);
+  // The CAPABILITY is unchanged; the PATH is the outbox. §27 requires every communication to
+  // go through the dispatcher so it is deduped, state-rechecked and retried — a cron that
+  // called Resend directly had none of that.
+  assert.equal(enqueued.length, 1, "one enqueue per affected dealer");
+  assert.equal(enqueued[0]!.templateKey, "dealer_stale_listing_removal");
+  assert.equal(enqueued[0]!.recipientKind, "dealer");
+  assert.equal(enqueued[0]!.recipientId, "d1");
+  assert.match(String(enqueued[0]!.idempotencyKey), /^dealer_stale_listing_removal:d1:\d{4}-\d{2}-\d{2}$/,
+    "keyed on the DAY: the retired direct call keyed on Date.now(), which is no idempotency at all");
+  assert.equal(removalEmails.length, 0, "and it must not ALSO send directly");
   // This is the regression the new predicate had to protect: pinning dealerId: null in the
-  // sweep would have made this email structurally unreachable dead code.
+  // sweep would have made this notification structurally unreachable dead code.
 });
 
 test("the FS-G suppression survives: no feed-failure email when no sync was ever attempted", async () => {

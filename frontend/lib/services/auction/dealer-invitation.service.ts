@@ -128,7 +128,7 @@ export async function ensureAuctionVehicleFromRequest(
   const req = await prisma.vehicleRequest.findFirst({
     where: { buyerId, cancelledAt: null },
     orderBy: { createdAt: "desc" },
-    select: { makePreference: true, modelPreference: true, yearMin: true },
+    select: { id: true, makePreference: true, modelPreference: true, yearMin: true },
   });
   if (!req || !req.makePreference) {
     return { makes: [], primary: null };
@@ -136,6 +136,12 @@ export async function ensureAuctionVehicleFromRequest(
   await prisma.auctionVehicle.create({
     data: {
       auctionId,
+      // PHASE 4: the request this candidate came FROM. It was read here to source the make and
+      // then discarded, so every row this function created was born a lineage orphan — the
+      // three `auction_vehicles` rows in production all carry vehicle_request_id NULL, and
+      // `auction_vehicles_enforce_cap_trg` counts per request, so a candidate with no request
+      // is also outside the five-cap. Writing the id costs nothing and was simply missed.
+      vehicleRequestId: req.id,
       make: req.makePreference,
       model: req.modelPreference,
       year: req.yearMin,
