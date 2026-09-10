@@ -268,11 +268,14 @@ export async function promoteShortlistToCandidates(
   const coords = await buyerCoords(buyerId);
 
   for (const item of shortlist.items) {
+    // ALREADY-A-CANDIDATE IS CHECKED FIRST. With the cap test above it, re-running after a
+    // full promotion reported five CAP_REACHED skips instead of the documented "counted, not
+    // duplicated" no-op — harmless to data, misleading to a caller branching on `skipped`.
+    if (claimed.has(item.inventoryItemId)) continue;
     if (result.existing + result.created.length >= MAX_SHORTLIST_ITEMS) {
       result.skipped.push({ inventoryItemId: item.inventoryItemId, reason: "CAP_REACHED" });
       continue;
     }
-    if (claimed.has(item.inventoryItemId)) continue;
 
     const listing = await prisma.inventoryItem.findUnique({
       where: { id: item.inventoryItemId },
@@ -316,8 +319,12 @@ export async function promoteShortlistToCandidates(
       result.created.push(row.id);
     } catch (e) {
       // The database cap (P0001) is the authority. Losing the race is a refusal, not a crash.
+      // Matched on the trigger's own sentence, not on the word "candidate": `/candidate|cap/i`
+      // also matches any Prisma message naming `candidate_status`, so a P2022 during a
+      // migration window would have been reported as "cap reached" and the item silently
+      // skipped, with the re-throw never reached. Found in review.
       const msg = String((e as Error)?.message ?? "");
-      if (/candidate|cap/i.test(msg) || (e as { code?: string })?.code === "P0001") {
+      if (/already holds the maximum of \d+ candidates/i.test(msg) || (e as { code?: string })?.code === "P0001") {
         result.skipped.push({ inventoryItemId: item.inventoryItemId, reason: "CAP_REACHED" });
         continue;
       }

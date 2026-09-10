@@ -10,7 +10,7 @@ import {
   isShortlistItemAvailable,
   buildSimilarRequestHref,
 } from "@/lib/services/shortlist/shortlist-availability";
-import { freshnessOf, SHORTLIST_RADIUS_MILES } from "@/lib/services/shortlist/shortlist-radius";
+import { freshnessOf } from "@/lib/services/shortlist/shortlist-radius";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,6 @@ export default async function ShortlistPage() {
   // sweep makes this common rather than exotic: 10 of the 15 shortlist rows in production
   // point at listings the corrected sweep deactivates.
   const vehicles = items.map((item: ShortlistItem) => {
-    void SHORTLIST_RADIUS_MILES; // policy is reported to the client below, not re-derived here
     const inv = inventoryMap.get(item.inventoryItemId);
     const available = isShortlistItemAvailable(inv ?? null);
 

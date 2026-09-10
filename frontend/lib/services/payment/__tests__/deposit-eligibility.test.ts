@@ -151,21 +151,15 @@ test("the most fundamental failure is reported first when several apply at once"
   );
 });
 
-// §11.6 ruling 12. If this ever fails, someone has moved PAY-06b back to Phase 3 ahead
-// of the Phase 4 capture surface, and the payment gate will refuse every buyer.
-test("the co-buyer/trade elections clause is NOT checked here — it moved to Phase 4 with its writer", () => {
-  const res = checkPaymentEligibility(facts(), INTENT);
-  assert.deepEqual(res, { eligible: true });
-
-  const source = Object.keys(facts()).join(",");
-  assert.ok(
-    !/coBuyer|co_buyer|tradeElection|trade_election/i.test(source),
-    "the facts this gate reads must not include an election nothing writes until Phase 4 — " +
-      "and it must not be added here inert either, because a predicate that always passes " +
-      "cannot be told apart from a missing one",
-  );
-});
-
+// RETIRED IN PHASE 4, and its retirement is the point worth recording.
+//
+// A test named "the co-buyer/trade elections clause is NOT checked here — it moved to Phase 4
+// with its writer" sat here, with a comment reading "If this ever fails, someone has moved
+// PAY-06b back to Phase 3." Phase 4 did exactly that, and it did NOT fail: its guard read
+// `Object.keys(facts())`, which returns only the top-level keys, while the elections live
+// inside `facts().request`. The regex could never have matched them, before or after. So the
+// file briefly held two tests asserting contradictory things, and the green one was the
+// vacuous one. Found in review. The behaviour is covered below, by assertions that can fail.
 
 // ── §5a: co-buyer and trade elections RECORDED (Phase 4) ────────────────────
 

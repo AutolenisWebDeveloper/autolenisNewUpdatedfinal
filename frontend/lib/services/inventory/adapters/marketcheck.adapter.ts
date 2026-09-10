@@ -499,6 +499,9 @@ export class MarketCheckAdapter implements IInventoryAdapter {
     // a claimed success to FAILED; it never upgrades anything.
     const verdict = classifyYield({
       outcome, numFound, rawListings, normalized: vehicles.length, pagesFetched, rowsPerCall: rows0,
+      // A radius rejection is a policy decision, not a response-shape failure. Without this
+      // the normalization gate reads every dropped row as normalize() failing on it.
+      radiusRejected: outOfRadiusDropped,
     });
 
     return {

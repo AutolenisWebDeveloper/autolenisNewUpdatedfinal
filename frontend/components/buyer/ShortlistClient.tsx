@@ -251,7 +251,12 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
                         )}
                         {item.freshness === "EXPIRED" && (
                           <p className="text-xs text-slate-500 mt-1 inline-flex items-center gap-1" data-testid={`shortlist-expired-${i}`}>
-                            <Clock size={10} aria-hidden="true" /> Not seen in over 30 days — we&rsquo;ll check before your auction opens
+                            {/* The copy used to say "we'll check before your auction opens".
+                                Nothing performs that check yet: `revalidateCandidate` exists
+                                but has no production caller until the phase that creates
+                                auctions wires it. A promise the system does not keep is worse
+                                than a plain fact, so this states the fact. Found in review. */}
+                            <Clock size={10} aria-hidden="true" /> Not seen in over 30 days — this one may not make it to auction
                           </p>
                         )}
                       </div>

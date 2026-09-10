@@ -572,3 +572,32 @@ test("the price floor coexists with a configured maximum", async () => {
   assert.equal(u.searchParams.get("price_min"), "1");
   assert.equal(u.searchParams.get("price_max"), "35000", "cents internally, dollars at the wire");
 });
+
+
+test("a page that is mostly OUT OF RADIUS is not reported as a normalization failure", async () => {
+  // FOUND IN REVIEW, and it is the exact case the radius rejection was added for (§9 item 2).
+  //
+  // Dropped rows are counted in `rawListings` but never reach normalize(), so the
+  // normalization gate saw 10 normalized of 50 raw — below the 0.25 floor — and downgraded a
+  // perfectly healthy run to FAILED with "normalization dropped 40 of 50 listings (missing
+  // year/make/model/price)". The orchestrator then raised INVENTORY_SWEEP_SHORTFALL with that
+  // false root cause, `assessSyncRun` logged the cron FAILED, and the qualified-results view
+  // told buyers the market was unknowable over ten good cars.
+  //
+  // The earlier test here dropped 10 of 50 — 20%, under the floor — so it could never reach
+  // this. This one drops 40.
+  const listings = [
+    ...Array.from({ length: 40 }, (_, i) => listing(i, 250)),
+    ...Array.from({ length: 10 }, (_, i) => listing(100 + i, 12)),
+  ];
+  stubFetch(() => ({ numFound: 50, listings }));
+
+  const res = await new MarketCheckAdapter().search({ zip: "76011", radius: 100, rowsPerCall: 50, maxCalls: 1 });
+
+  assert.equal(res.rawListings, 50, "rawListings stays an honest count of what the provider sent");
+  assert.equal(res.outOfRadiusDropped, 40);
+  assert.equal(res.vehicles.length, 10);
+  assert.equal(res.outcome, "SUCCESS",
+    "ten good cars is a healthy run — the normalization gate measures SHAPE loss, not policy rejections");
+  assert.equal(res.error, undefined, "and it must not be given a false root cause");
+});

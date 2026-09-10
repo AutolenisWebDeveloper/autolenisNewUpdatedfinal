@@ -104,10 +104,24 @@ export type CoBuyerResult =
  */
 const PROHIBITED_KEY = /^(ssn|social|social_?security|taxId|tax_?id|itin|dob|dateOfBirth|date_of_birth|driversLicense|drivers_?license|dlNumber)$/i;
 
-export function findProhibitedField(raw: unknown): string | null {
-  if (!raw || typeof raw !== "object") return null;
-  for (const key of Object.keys(raw as Record<string, unknown>)) {
+export function findProhibitedField(raw: unknown, depth = 0): string | null {
+  // NESTED, not just top-level. The first version walked one level, so
+  // `{"coBuyer":{"ssn":"…"}}` was stripped by Zod and never seen — the caller got a 200 and
+  // "would believe it had been stored and stop looking for where", which is the exact
+  // reasoning this guard cites for refusing rather than dropping. Depth-bounded so a
+  // pathological body cannot turn a validation check into a stack overflow.
+  if (!raw || typeof raw !== "object" || depth > 6) return null;
+  if (Array.isArray(raw)) {
+    for (const v of raw) {
+      const hit = findProhibitedField(v, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (PROHIBITED_KEY.test(key)) return key;
+    const hit = findProhibitedField(value, depth + 1);
+    if (hit) return hit;
   }
   return null;
 }
@@ -180,8 +194,35 @@ export async function recordCoBuyerElection(
   if (!OPEN_REQUEST_STATUSES.includes(request.status as never)) return refuse("REQUEST_CLOSED");
 
   if (!elected) {
+    // ANONYMISE AND DETACH — never delete. This was a hard `deleteMany`, and that was a
+    // blocker found in review.
+    //
+    // `deals.co_buyer_id` and `e_sign_envelopes.co_buyer_id` are both ON DELETE SET NULL
+    // (verified against pg_constraint). A buyer on an OFFER_ACCEPTED request — still an open
+    // status — who mis-clicks "No" would have silently erased a signed deal's and an
+    // envelope's record of WHO SIGNED, with no confirmation and no undo. That is exactly the
+    // harm `anonymizeCoBuyersForBuyer` below exists to avoid, and this path was doing it.
+    //
+    // Saying "no" means two things and this does both: the third party's details go (which is
+    // the whole point of the answer), and the co-buyer is detached from THIS request with the
+    // signer flag cleared, so nothing downstream puts a required signer on an envelope for a
+    // deal that has none. Any Deal or envelope that already referenced the row keeps its
+    // reference, pointing at a record that no longer carries anyone's personal data.
+    //
+    // A row with no consent recorded and nothing referencing it is still just anonymised
+    // rather than removed: one code path is easier to reason about than two, and the
+    // difference costs one empty row.
     await prisma.$transaction([
-      prisma.coBuyer.deleteMany({ where: { buyerId, vehicleRequestId: requestId } }),
+      prisma.coBuyer.updateMany({
+        where: { buyerId, vehicleRequestId: requestId },
+        data: {
+          legalFirstName: "Removed", legalLastName: "Co-Buyer",
+          email: null, phone: null, address: null, city: null, state: null, zip: null,
+          isRequiredSigner: false,
+          vehicleRequestId: null,
+          updatedAt: now,
+        },
+      }),
       prisma.vehicleRequest.update({
         where: { id: requestId },
         data: { coBuyerElected: false, updatedAt: now },
@@ -227,18 +268,24 @@ export async function recordCoBuyerElection(
     updatedAt: now,
   };
 
-  const row = existing
-    ? await prisma.coBuyer.update({ where: { id: existing.id }, data, select: CO_BUYER_SELECT })
-    : await prisma.coBuyer.create({
-        data: { id: crypto.randomUUID(), buyerId, vehicleRequestId: requestId, createdAt: now, ...data },
-        select: CO_BUYER_SELECT,
-      });
-
-  await prisma.vehicleRequest.update({
-    where: { id: requestId },
-    data: { coBuyerElected: true, updatedAt: now },
-    select: { id: true },
-  });
+  // ONE TRANSACTION. These were two separate statements, and the window between them was a
+  // PII window: if the election update failed after the upsert, a third party's name, email,
+  // phone and address were stored while `co_buyer_elected` stayed NULL — data retained, the
+  // deposit gate still refusing, and the buyer told it had saved. The `elected: false` branch
+  // above was already transactional; this one was not.
+  const [row] = await prisma.$transaction([
+    existing
+      ? prisma.coBuyer.update({ where: { id: existing.id }, data, select: CO_BUYER_SELECT })
+      : prisma.coBuyer.create({
+          data: { id: crypto.randomUUID(), buyerId, vehicleRequestId: requestId, createdAt: now, ...data },
+          select: CO_BUYER_SELECT,
+        }),
+    prisma.vehicleRequest.update({
+      where: { id: requestId },
+      data: { coBuyerElected: true, updatedAt: now },
+      select: { id: true },
+    }),
+  ]);
 
   return { ok: true, elected: true, coBuyer: toRecord(row as Record<string, unknown>) };
 }

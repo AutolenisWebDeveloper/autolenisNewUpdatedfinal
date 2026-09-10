@@ -138,8 +138,11 @@ FROM (
      AND i.rooftop_id IS NULL AND i.mc_rooftop_id IS NULL
      AND NOT EXISTS (SELECT 1 FROM shortlist_items  s WHERE s.inventory_item_id = i.id)
      AND NOT EXISTS (SELECT 1 FROM auction_vehicles a WHERE a.inventory_item_id = i.id)) AS doomed,
-    -- Character-for-character step 2's survivor assertion.
-    ((i.state IS NULL OR btrim(i.state) = '') AND i.latitude IS NULL)                    AS defective
+    -- Character-for-character step 2's survivor assertion. `OR` on the coordinates, not
+    -- `AND`: half a coordinate pair is not a location, and a row carrying one of the two
+    -- would otherwise be invisible to both this column and the delete's own check.
+    ((i.state IS NULL OR btrim(i.state) = '')
+      AND (i.latitude IS NULL OR i.longitude IS NULL))                                   AS defective
   FROM inventory_items i
 ) d;
 

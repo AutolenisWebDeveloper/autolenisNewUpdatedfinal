@@ -210,12 +210,22 @@ export async function failCronRun(
     result || build
       ? { ...(result ?? {}), ...(build ? { build } : {}) }
       : undefined;
+  // DURATION, like `completeCronRun`. This used to be omitted, which was survivable while
+  // FAILED meant "threw" — but this batch makes a sweep that RESOLVES with a failure inside
+  // it record FAILED, and those runs were previously recorded COMPLETED **with** a duration.
+  // Leaving it unset would have quietly turned the Operations table's duration column into
+  // `—` (app/admin/operations/page.tsx:498) for exactly the runs an operator is looking at.
+  // A row that cannot be read is not a lost duration, so this is best-effort in the same
+  // shape as the complete path.
+  const log = await prisma.cronJobLog.findUnique({ where: { id: logId }, select: { startedAt: true } });
+  const duration = log ? Date.now() - log.startedAt.getTime() : undefined;
   return prisma.cronJobLog.update({
     where: { id: logId },
     data: {
       status: CronJobStatus.FAILED,
       error,
       completedAt: new Date(),
+      ...(duration !== undefined ? { duration } : {}),
       // Only when there is something to say — a failed run off Vercel with no payload keeps
       // the null `result` it has always had.
       ...(merged ? { result: merged as object } : {}),

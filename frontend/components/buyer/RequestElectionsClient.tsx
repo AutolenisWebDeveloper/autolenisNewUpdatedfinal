@@ -168,6 +168,7 @@ export default function RequestElectionsClient(props: Props) {
   const [coForm, setCoForm] = useState(false);
   const [trForm, setTrForm] = useState(false);
   const [busy, setBusy] = useState<"co" | "trade" | null>(null);
+  const [confirmRemoveCoBuyer, setConfirmRemoveCoBuyer] = useState(false);
   const [error, setError] = useState<{ where: "co" | "trade"; message: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -266,9 +267,39 @@ export default function RequestElectionsClient(props: Props) {
         testId="co-buyer-card"
       >
         {editable && <YesNo value={coElected} disabled={busy !== null} testId="co-buyer" onPick={(v) => {
-          if (!v) { void put("co", { elected: false }); return; }
+          if (!v) {
+            // Removing a co-buyer who has ALREADY been captured is destructive to a third
+            // party's record and, once a deal exists, to who signed it. One mis-click on a
+            // toggle is not consent for that, so a captured co-buyer needs a second act.
+            // Answering "no" when none was ever captured is not destructive and needs none.
+            if (coBuyer) { setConfirmRemoveCoBuyer(true); return; }
+            void put("co", { elected: false });
+            return;
+          }
           setCoElected(true); setCoForm(true);
         }} />}
+
+        {confirmRemoveCoBuyer && coBuyer && (
+          <div className="rounded-lg bg-al-danger-subtle p-3 text-sm mb-3" role="alertdialog"
+               aria-label="Remove co-buyer" data-testid="co-buyer-confirm-remove">
+            <p className="text-slate-800">
+              Remove <strong>{coBuyer.legalFirstName} {coBuyer.legalLastName}</strong> from this
+              request? We will delete their contact details. If they have already signed
+              anything, that record is kept.
+            </p>
+            <div className="flex gap-2 mt-2">
+              <Button size="sm" variant="destructive" disabled={busy !== null}
+                onClick={() => { setConfirmRemoveCoBuyer(false); void put("co", { elected: false }); }}
+                data-testid="co-buyer-confirm-remove-yes">
+                Remove them
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy !== null}
+                onClick={() => setConfirmRemoveCoBuyer(false)}>
+                Keep them
+              </Button>
+            </div>
+          </div>
+        )}
 
         {coElected === true && coBuyer && !coForm && (
           <div className="rounded-lg bg-al-bg p-3 text-sm" data-testid="co-buyer-summary">

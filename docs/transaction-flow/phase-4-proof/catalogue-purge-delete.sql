@@ -243,7 +243,11 @@ BEGIN
    WHERE NOT EXISTS (SELECT 1 FROM shortlist_items  s WHERE s.inventory_item_id = i.id)
      AND NOT EXISTS (SELECT 1 FROM auction_vehicles a WHERE a.inventory_item_id = i.id)
      AND (i.state IS NULL OR btrim(i.state) = '')
-     AND i.latitude IS NULL;
+     -- OR, not AND. A row carrying a latitude with a NULL longitude is just as unplaceable
+     -- as one carrying neither — `distanceMilesBetween` needs both — but an AND here called
+     -- it healthy, so it was neither doomed by the six predicates nor caught by this
+     -- assertion, and it would have survived the purge silently still showing the defect.
+     AND (i.latitude IS NULL OR i.longitude IS NULL);
   IF n_unreferenced <> 0 THEN
     RAISE EXCEPTION
       '% ungeocoded, unreferenced listing(s) survived the purge — the delete set was narrower than the defect it was written for; rolling back so the discrepancy can be read rather than half-applied',

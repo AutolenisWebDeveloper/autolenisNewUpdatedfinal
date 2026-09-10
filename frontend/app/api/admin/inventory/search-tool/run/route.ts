@@ -7,8 +7,14 @@
 // This route used to build its own URL and fetch `https://marketcheck-prod.apigee.net`
 // directly — a different HOST from the adapter's `api.marketcheck.com`, with:
 //
-//   * no radius parameter at all, so the provider's own default applied and AutoLenis's
-//     100-mile policy did not;
+//   * no radius parameter at all, so the provider's own default applied and nothing bounded
+//     the search — it now sends the SWEEP's configured radius
+//     (`inventory_sources.radius_miles`), which is the right bound for an operations tool
+//     looking at the market we sweep. It is deliberately NOT `SHORTLIST_RADIUS_MILES`: that
+//     constant is the BUYER policy for shortlist eligibility, and an admin diagnosing what
+//     the sweep sees should see the sweep's circle. (The first version of this comment said
+//     the fix applied the 100-mile policy. It does not, and the claim was corrected in
+//     review rather than the code changed to match it.)
 //   * none of the three `include_*` flags, while reading `l.build?.*` — the same latent
 //     shape defect the adapter had, which returns nothing when the flags are absent;
 //   * its own narrower listing type, so no dealer object was captured and nothing this

@@ -118,10 +118,10 @@ only for the owner, one approved run at a time.
 
 | File | Bytes | SHA-256 |
 | --- | --- | --- |
-| `catalogue-purge-establish.sql` | 9909 | `ffb242497f75d4f07c14f8069f565531b7073376585306356954b804e9b7cc62` |
-| `catalogue-purge-delete.sql` | 17220 | `a7717ccad1a92bbd9bdb53454dd71db912f205b13d2500c9230589abf0dc7087` |
+| `catalogue-purge-establish.sql` | 10158 | `e7ca4502504f277a1befc203107c753a222d78eccdd9f992e47ff3baae9194c8` |
+| `catalogue-purge-delete.sql` | 17611 | `b53cceaa9bac966a53477f28f5512fe539d8f7340fbb9eb9e84bef871f6379e5` |
 | `sweep-failure-diagnostic.sql` | 7831 | `6dbb442d5e5d6db4a6d6f567e29b58d66a26930e9165202c4f30d627b91cad42` |
-| `catalogue-purge-rehearsal.sh` | 19338 | `35e28fd74385145aa13d57eab5daefb227403374e3293c136ada18761c7e8d6c` |
+| `catalogue-purge-rehearsal.sh` | 21394 | `8b69f82e0eb5ae39f39cc003cf739bc72eaa9fb0539984b3b9188561d3ab2838` |
 
 ## Why
 
@@ -176,18 +176,28 @@ anything but 0, step 2 refuses; report the number rather than widening the predi
 
 ## Proof
 
-`./catalogue-purge-rehearsal.sh` — 11 steps, exit 0, PostgreSQL 16.13 (**DEGRADED**, as above).
+`./catalogue-purge-rehearsal.sh` — 12 steps, exit 0, PostgreSQL 16.13 (**DEGRADED**, as above).
 It restores production's physical schema, seeds a synthetic replica of the census, and proves:
 the FK topology the scripts were written against; the establish script running inside a
-server-enforced read-only transaction; four refusals (no `expected_deletes`; a count that does
+server-enforced read-only transaction; five refusals (no `expected_deletes`; a count that does
 not reconcile; no geocoded listing present; a row that shares the defect but escapes a
-predicate — that last one rolls back rather than half-applying); the real delete removing exactly
-203 listings; 15 shortlisted and 3 candidate listings retained; 4 requests cleared and evented;
+predicate; and a row carrying half a coordinate pair — the last two roll back rather than
+half-applying); the real delete removing exactly 203 listings; 15 shortlisted and 3 candidate listings retained; 4 requests cleared and evented;
 the four soft references cut selectively in both directions; zero orphans; and a second run
 refusing rather than silently doing nothing.
 
 The seed is modelled on the census. It is **not** a copy of production data, so it proves the SQL,
 not the row contents.
+
+### One correction the rehearsal forced (2026-09-10)
+
+Both scripts originally tested the coordinate half of the defect as `latitude IS NULL` alone.
+A row carrying a latitude with a NULL longitude is exactly as unplaceable — `distanceMilesBetween`
+needs both — but under that test it was neither **doomed** by the six predicates (which require
+both NULL) nor **defective** by the survivor assertion. Invisible to both, it would have survived
+the purge still showing the defect, and the run would have reported success. Both scripts now test
+`latitude IS NULL OR longitude IS NULL` in the defect/survivor position, the six predicates still
+require both NULL for a delete, and rehearsal step 7b is that row: the run refuses and rolls back.
 
 ## No `audit_logs` row
 

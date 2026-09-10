@@ -170,3 +170,30 @@ test("assessSyncRun names which adapter failed and why", async () => {
   assert.match(String(v.error), /short run/);
   assert.doesNotMatch(String(v.error), /custom/, "a healthy source is not named as a cause");
 });
+
+test("a failed-by-assessment run RECORDS ITS DURATION, like a completed one", async () => {
+  // A capability this batch would otherwise have removed silently. Before the assessor
+  // existed, a sweep that resolved with a failure inside it was recorded COMPLETED — and
+  // `completeCronRun` sets `duration`. Moving those runs to FAILED moved them onto
+  // `failCronRun`, which did not, so the Operations table's duration column
+  // (app/admin/operations/page.tsx:498, `job.duration != null ? … : '—'`) would have gone
+  // blank for precisely the rows an operator opens it to read.
+  const { withCronRun } = await load();
+  await withCronRun(
+    "inventory-sync-full",
+    async () => ({ outcome: "FAILED" as const }),
+    { assess: () => ({ failed: true, error: "short run" }) },
+  );
+  const row = only();
+  assert.equal(row.status, "FAILED");
+  assert.equal(typeof row.duration, "number", "a failed run is still a run that took time");
+  assert.ok((row.duration as number) >= 0);
+});
+
+test("a THROWN run records its duration too", async () => {
+  const { withCronRun } = await load();
+  await withCronRun("inventory-sync-full", async () => { throw new Error("boom"); });
+  const row = only();
+  assert.equal(row.status, "FAILED");
+  assert.equal(typeof row.duration, "number");
+});

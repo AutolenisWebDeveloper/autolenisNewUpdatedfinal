@@ -165,8 +165,16 @@ export async function addToShortlist(buyerId: string, inventoryItemId: string): 
     // `shortlist_items_enforce_cap_trg` is a BEFORE INSERT trigger taking FOR UPDATE on the
     // parent shortlist, so two concurrent adds at four items cannot both land. It raises
     // P0001. The count above is the friendly path; this is the one that actually holds.
+    //
+    // MATCHED NARROWLY, and the first version was not. `/shortlist/i` over the message also
+    // matches Prisma's own preamble — "Invalid `prisma.shortlistItem.create()` invocation" —
+    // so EVERY failure on this call became "your shortlist is full". A buyer double-clicking
+    // one card hit the unique index (P2002) and was told to remove a car to make room for the
+    // one they already had; a P2022 during a migration window would have said the same.
     const code = (e as { code?: string } | null)?.code;
-    if (code === "P2010" || code === "P0001" || /shortlist/i.test(String((e as Error)?.message))) {
+    const message = String((e as Error)?.message ?? "");
+    if (code === "P2002") return refuse("ALREADY_IN_SHORTLIST");
+    if (code === "P2010" || code === "P0001" || /maximum of \d+ (?:vehicles|items|candidates)/i.test(message)) {
       logger.warn(`[shortlist] database cap refused an add for buyer ${buyerId}`);
       return refuse("SHORTLIST_FULL");
     }

@@ -292,24 +292,28 @@ export async function recordTradeElection(
     shareConsentAt: now,
   };
 
-  const row = existing
-    ? await prisma.tradeInSubmission.update({
-        where: { id: existing.id },
-        // An edit to a packet a dealer may already have seen is itself a fact: §6.2's
-        // appraisal-changed marker is what tells the desk the numbers moved.
-        data: { ...data, appraisalChangedAt: now },
-        select: PACKET_SELECT,
-      })
-    : await prisma.tradeInSubmission.create({
-        data: { buyerId, vehicleRequestId: requestId, status: TradeInStatus.SUBMITTED, ...data },
-        select: PACKET_SELECT,
-      });
-
-  await prisma.vehicleRequest.update({
-    where: { id: requestId },
-    data: { tradeElected: true, updatedAt: now },
-    select: { id: true },
-  });
+  // ONE TRANSACTION, like the `elected: false` branch. Two separate statements left a window
+  // in which the packet was stored while `trade_elected` stayed NULL — the deposit gate still
+  // refusing, and the buyer told it had saved.
+  const [row] = await prisma.$transaction([
+    existing
+      ? prisma.tradeInSubmission.update({
+          where: { id: existing.id },
+          // An edit to a packet a dealer may already have seen is itself a fact: §6.2's
+          // appraisal-changed marker is what tells the desk the numbers moved.
+          data: { ...data, appraisalChangedAt: now },
+          select: PACKET_SELECT,
+        })
+      : prisma.tradeInSubmission.create({
+          data: { buyerId, vehicleRequestId: requestId, status: TradeInStatus.SUBMITTED, ...data },
+          select: PACKET_SELECT,
+        }),
+    prisma.vehicleRequest.update({
+      where: { id: requestId },
+      data: { tradeElected: true, updatedAt: now },
+      select: { id: true },
+    }),
+  ]);
   await mirrorTradeToFinancing(requestId, true);
 
   return { ok: true, elected: true, packet: toPacket(row as Record<string, unknown>) };
@@ -326,7 +330,17 @@ export async function recordTradeElection(
  */
 async function mirrorTradeToFinancing(requestId: string, tradeIn: boolean): Promise<void> {
   try {
-    await prisma.vehicleRequestFinancing.updateMany({ where: { vehicleRequestId: requestId }, data: { tradeIn } });
+    // UPSERT, not updateMany. `updateMany` is a silent no-op when the request has no
+    // financing row — and "no financing row" is the exact state the migration header cites as
+    // the reason `trade_elected` had to exist at all, so the mirror was missing precisely the
+    // population it was written for. That also made rollback.sql's "the mirror is what makes
+    // the revert lossless" false for those requests.
+    await prisma.vehicleRequestFinancing.upsert({
+      where: { vehicleRequestId: requestId },
+      create: { vehicleRequestId: requestId, tradeIn },
+      update: { tradeIn },
+      select: { id: true },
+    });
   } catch (err) {
     logger.warn("[trade-in] financing mirror failed; the election itself is recorded:", err);
   }

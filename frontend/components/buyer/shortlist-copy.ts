@@ -19,20 +19,10 @@ export const CARD_REFUSAL: Record<string, string> = {
   NOT_IN_CATALOGUE: "New to the market — start a request and we'll go and get this one for you.",
 };
 
-/**
- * The custom-request path, pre-filled from the car the buyer was looking at.
- *
- * §22a's "Find one like this": the point is that the buyer does not start over. Make, model
- * and a year floor carry across, and the price they were looking at becomes the budget —
- * they were, after all, willing to consider it.
- */
-export function findOneLikeThisHref(v: {
-  make: string; model: string; year?: number | null; priceCents?: number | null;
-}): string {
-  const p = new URLSearchParams();
-  p.set("makePreference", v.make);
-  p.set("modelPreference", v.model);
-  if (v.year) p.set("yearMin", String(v.year));
-  if (v.priceCents) p.set("maxBudgetCents", String(v.priceCents));
-  return `/buyer/requests/new?${p.toString()}`;
-}
+// The "Find one like this" href is NOT defined here. `buildSimilarRequestHref` in
+// `lib/services/shortlist/shortlist-availability.ts` already builds it, and better: a year
+// band rather than a floor, a mileage band, a rounded price band with headroom, and the
+// buyer's features. A second implementation here produced a narrower link for the same car
+// depending on which page it was clicked from — the drift this file's own header warns about,
+// created by this file. Found in review.
+export { buildSimilarRequestHref as findOneLikeThisHref } from "@/lib/services/shortlist/shortlist-availability";

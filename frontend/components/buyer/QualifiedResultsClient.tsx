@@ -57,6 +57,7 @@ const money = (c: number) => `$${(c / 100).toLocaleString()}`;
 export default function QualifiedResultsClient({ initialZip }: { initialZip: string | null }) {
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zip, setZip] = useState(initialZip ?? "");
   const [saved, setSaved] = useState<Set<string>>(new Set());
@@ -64,6 +65,7 @@ export default function QualifiedResultsClient({ initialZip }: { initialZip: str
 
   const load = useCallback(async (withZip?: string) => {
     setLoading(true);
+    setSearched(true);
     setError(null);
     try {
       const qs = withZip && /^\d{5}$/.test(withZip) ? `?zip=${withZip}` : "";
@@ -79,7 +81,11 @@ export default function QualifiedResultsClient({ initialZip }: { initialZip: str
     }
   }, []);
 
-  useEffect(() => { void load(initialZip ?? undefined); }, [load, initialZip]);
+  // NO SEARCH ON MOUNT. Each run spends a call from the same monthly provider ledger the
+  // daily sweep draws on, so a page that searched on load turned every refresh into a draw —
+  // and a few hundred of them into a frozen catalogue. The buyer asks; then we spend. The
+  // server-side reserve in `sweepReserveFor` is the second half of the same fix.
+  useEffect(() => { setLoading(false); }, []);
 
   async function addToShortlist(card: Card) {
     // The buyer's choice, never ours: this only ever runs from a click on an ADD card, and
@@ -119,6 +125,31 @@ export default function QualifiedResultsClient({ initialZip }: { initialZip: str
       <div className="bg-white border border-al-danger/30 rounded-xl p-6 text-center" role="alert" data-testid="qual-error">
         <p className="text-sm text-slate-800 font-medium mb-3">{error}</p>
         <Button size="sm" variant="secondary" onClick={() => void load(zip)}>Try again</Button>
+      </div>
+    );
+  }
+
+  // The resting state: nothing has been spent, and the buyer is told what the button does.
+  if (!searched && !view) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center" data-testid="qual-idle">
+        <h2 className="font-semibold text-slate-900 mb-2">Check the live market</h2>
+        <p className="text-sm text-slate-600 mb-5 max-w-md mx-auto">
+          We will search dealer listings around you right now, filtered to what you are
+          approved for. Nothing is saved to your shortlist unless you add it.
+        </p>
+        <div className="flex gap-2 justify-center items-center flex-wrap">
+          <label htmlFor="qual-zip-idle" className="sr-only">ZIP code</label>
+          <input
+            id="qual-zip-idle" inputMode="numeric" maxLength={5} value={zip}
+            onChange={(e) => setZip(e.target.value.replace(/\D/g, ""))}
+            placeholder="ZIP code"
+            className="h-10 w-36 rounded-lg border border-slate-200 px-3 text-sm
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-primary focus-visible:ring-offset-2"
+            data-testid="qual-idle-zip"
+          />
+          <Button onClick={() => void load(zip)} data-testid="qual-search-cta">Search the market</Button>
+        </div>
       </div>
     );
   }

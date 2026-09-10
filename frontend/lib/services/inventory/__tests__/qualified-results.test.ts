@@ -32,6 +32,8 @@ let ledgerAllows = true;
 let cacheRow: Record<string, unknown> | null = null;
 /** VIN -> inventory_items.id for the rows the sweep has already ingested. */
 let catalogue: Record<string, string> = {};
+/** False models rows the stale sweep has deactivated: present by VIN, excluded by the query. */
+let catalogueActive = true;
 const cacheWrites: Array<Record<string, unknown>> = [];
 const shortlistWrites: string[] = [];
 const searchCalls: SearchParams[] = [];
@@ -44,12 +46,19 @@ mock.module("@/lib/prisma", {
       // A live provider result is not a catalogue row. The service resolves VIN -> id and
       // only offers "Add to shortlist" for what it can resolve.
       inventoryItem: {
+        // The service selects on `isActive` and `priceCents` as well as the VIN; the double
+        // has to honour that or the availability fix would look untested.
         findMany: async ({ where }: { where: { vin: { in: string[] } } }) =>
-          where.vin.in.filter((v) => v in catalogue).map((v) => ({ id: catalogue[v]!, vin: v })),
+          catalogueActive
+            ? where.vin.in.filter((v) => v in catalogue).map((v) => ({ id: catalogue[v]!, vin: v }))
+            : [],
       },
       preQualification: { findUnique: async () => prequalRow },
       inventorySource: {
         findFirst: async () => sourceRow,
+        // `remainingCalls` reads through findUnique. Without it the reserve check silently
+        // catches and skips, which would make the two tests below pass for the wrong reason.
+        findUnique: async () => sourceRow,
         updateMany: async (args: { where: Record<string, unknown> }) =>
           Array.isArray((args.where as { OR?: unknown[] }).OR) ? { count: 1 } : { count: ledgerAllows ? 1 : 0 },
       },
@@ -114,6 +123,7 @@ beforeEach(() => {
   ledgerAllows = true;
   cacheRow = null;
   catalogue = { VIN1: "inv_1", far: "inv_far", near: "inv_near", VIN2: "inv_2" };
+  catalogueActive = true;
   cacheWrites.length = 0;
   shortlistWrites.length = 0;
   searchCalls.length = 0;
@@ -453,4 +463,63 @@ test("a catalogue lookup failure fails CLOSED — every card offers the request 
   const view = await getQualifiedResults({ buyerId: "b1" }, broken);
   assert.equal(view.cards[0]!.action, "REQUEST_SIMILAR");
   assert.equal(view.inRadiusCount, 0, "a resolution failure must never produce a shortlistable card");
+});
+
+
+// ── 8. the daily sweep's reserve (found in review) ─────────────────────────
+
+test("a buyer search never eats into the calls the daily sweep still needs", async () => {
+  // Same ledger, same counter. With the cache off and the page firing on mount, refreshes
+  // could drain a 500/month plan and freeze the catalogue on the next sweep — the 191-run
+  // incident, reachable from a browser.
+  const { getQualifiedResults, sweepReserveFor } = await load();
+  const now = new Date("2026-09-10T12:00:00Z");        // 21 days left in September
+  assert.equal(sweepReserveFor(10, now), 210, "10 calls/run x 21 days left");
+
+  sourceRow = { ...(sourceRow as object), monthlyCallBudget: 400, callsUsedThisCycle: 200, maxCallsPerRun: 10 };
+  const view = await getQualifiedResults({ buyerId: "b1" }, { ...deps(), now });
+
+  assert.equal(view.outcome, "BUDGET_EXHAUSTED");
+  assert.equal(view.provider.outcome, "BUDGET_RESERVED_FOR_SWEEP");
+  assert.equal(view.marketKnown, false, "declining to spend is not an empty market");
+  assert.equal(view.offerRequestPath, true);
+  assert.equal(searchCalls.length, 0, "and no call was spent finding that out");
+});
+
+test("with real surplus the search runs", async () => {
+  const { getQualifiedResults } = await load();
+  const now = new Date("2026-09-10T12:00:00Z");
+  sourceRow = { ...(sourceRow as object), monthlyCallBudget: 400, callsUsedThisCycle: 9, maxCallsPerRun: 10 };
+  const view = await getQualifiedResults({ buyerId: "b1" }, { ...deps(), now });
+  assert.equal(view.outcome, "OK");
+  assert.equal(searchCalls.length, 1);
+});
+
+test("the reserve shrinks as the month runs out, so late-cycle surplus is spendable", async () => {
+  const { sweepReserveFor } = await load();
+  assert.equal(sweepReserveFor(10, new Date("2026-09-01T00:00:00Z")), 300, "a full month of runs");
+  assert.equal(sweepReserveFor(10, new Date("2026-09-30T00:00:00Z")), 10, "one run left");
+  assert.equal(sweepReserveFor(0, new Date("2026-09-10T00:00:00Z")), 0, "a source that makes no calls reserves none");
+});
+
+test("an unplaceable SUPPLIED ZIP asks again instead of quietly using the stored location", async () => {
+  // Falling through to the buyer's stored coordinates searched the market around one place
+  // and measured every distance from another — a spent call returning fifty out-of-radius
+  // cards. Found in review.
+  const { getQualifiedResults } = await load();
+  const view = await getQualifiedResults({ buyerId: "b1", zip: "99999" }, deps());
+  assert.equal(view.outcome, "NEED_ZIP");
+  assert.equal(searchCalls.length, 0, "and it spends nothing to say so");
+});
+
+test("a listing the stale sweep deactivated does not offer Add to shortlist", async () => {
+  // resolveCatalogueIds matched on VIN alone, so a deactivated row still resolved to an id,
+  // the card used the PROVIDER's isActive and offered ADD, and the shortlist API then refused
+  // it with UNAVAILABLE. Found in review.
+  const { getQualifiedResults } = await load();
+  catalogueActive = false;
+  const view = await getQualifiedResults({ buyerId: "b1" }, deps());
+  assert.equal(view.cards[0]!.inventoryItemId, null);
+  assert.equal(view.cards[0]!.action, "REQUEST_SIMILAR");
+  assert.equal(view.cards[0]!.reason, "NOT_IN_CATALOGUE");
 });

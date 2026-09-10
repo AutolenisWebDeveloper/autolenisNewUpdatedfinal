@@ -67,7 +67,12 @@ mock.module("@/lib/prisma", {
         updateMany: async ({ data }: { data: Record<string, unknown> }) => { tradeWrites.push({ op: "updateMany", data }); return { count: 1 }; },
       },
       vehicleRequestFinancing: {
-        updateMany: async ({ data }: { data: Record<string, unknown> }) => { financingUpdates.push(data); return { count: 1 }; },
+        // UPSERT, not updateMany: `updateMany` was a silent no-op when the request had no
+        // financing row, which is the exact state `trade_elected` exists for. Found in review.
+        upsert: async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+          financingUpdates.push({ ...create, ...update });
+          return { id: "f1" };
+        },
       },
     },
   },
@@ -150,15 +155,30 @@ test("a missing legal name is refused — the contract is signed in that name", 
 
 // ── rule 3: "no" is an answer, and it takes the PII with it ─────────────────
 
-test("electing NO records the election and removes any co-buyer already captured", async () => {
+test("electing NO anonymises and detaches the co-buyer — it never DELETES the row", async () => {
+  // A BLOCKER FOUND IN REVIEW. This used to be a hard `deleteMany`, and `deals.co_buyer_id`
+  // and `e_sign_envelopes.co_buyer_id` are both ON DELETE SET NULL — so a buyer on an
+  // OFFER_ACCEPTED request (still an open status) who mis-clicked "No" silently erased a
+  // signed deal's record of WHO SIGNED. Saying "no" must do two things and only two: remove
+  // the third party's details, and detach them from this request with the signer flag
+  // cleared. Anything that already referenced the row keeps its reference.
   const { recordCoBuyerElection } = await coBuyerSvc();
   coBuyerRow = { id: "cb1", legalFirstName: "Dana" };
   const r = await recordCoBuyerElection("b1", "vr1", false, undefined, {}, NOW);
   assert.equal(r.ok, true);
   assert.equal(r.ok === true && r.elected, false);
   assert.equal(r.ok === true && r.coBuyer, null);
-  assert.ok(coBuyerWrites.some((w) => w.op === "deleteMany"),
-    "recording 'no' while keeping their details would hold data we were just told not to");
+
+  assert.equal(coBuyerWrites.filter((w) => w.op === "deleteMany").length, 0,
+    "deleting severs a retained deal's record of who signed it");
+  const wipe = coBuyerWrites.find((w) => w.op === "updateMany");
+  assert.ok(wipe, "the row must be anonymised");
+  for (const field of ["email", "phone", "address", "city", "state", "zip"]) {
+    assert.equal(wipe!.data[field], null, `${field} must be cleared`);
+  }
+  assert.equal(wipe!.data.isRequiredSigner, false,
+    "no required signer on an envelope for a deal that has none");
+  assert.equal(wipe!.data.vehicleRequestId, null, "and detached from this request");
   assert.equal(requestUpdates[0]!.coBuyerElected, false, "false is RECORDED — it is not the absence of an answer");
 });
 

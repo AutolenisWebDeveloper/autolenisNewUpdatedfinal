@@ -2003,14 +2003,18 @@ Three things were true of production when this phase opened, and none of them wa
 ##### Before → after capability map
 
 Every route, control and workflow the batch touched, with a disposition. Counts reconcile: 24 in,
-24 out — 18 KEPT, 3 EXTENDED, 1 MOVED, 1 REGROUPED, 1 RETIRED-BY-REPLACEMENT, 0 REMOVED.
+24 out — 18 KEPT, 3 EXTENDED, 1 MOVED, 1 REGROUPED, 1 RETIRED-BY-REPLACEMENT, **1 REMOVED**.
+
+**The one `REMOVED` needs explicit owner sign-off**: the `radiusMiles` query parameter on
+`GET /api/buyer/search`. It was first recorded here as REGROUPED; the independent review
+challenged that and was right, and the row below carries the corrected disposition.
 
 | Capability | Disposition | Note |
 | --- | --- | --- |
 | `GET /api/buyer/search` — every filter (q, make, model, year, price, mileage, condition, body, transmission, drivetrain, fuel, features, sort, limit) | **KEPT** | all 14 unchanged |
 | `GET /api/buyer/search` — `hasLocalDealerInventory` empty-state probe | **KEPT** | unchanged |
-| `GET /api/buyer/search` — `radiusMiles` as a client-supplied **filter** | **REGROUPED** | it was applied twice (a bounding box in the WHERE, then `d !== null && d <= radius`) and silently dropped every listing with a null coordinate — which was all of them. Distance is now a label and a sort order; the 100-mile line is policy and decides the card's ACTION. The buyer can still sort by distance and every card shows its miles. NOT `REMOVED`: nothing a buyer could see or reach is gone. |
-| Buyer search UI — radius `<select>` | **REGROUPED** | replaced by a statement of the policy on the same surface. A control that no longer filters is a lie. |
+| `GET /api/buyer/search` — `radiusMiles` as a client-supplied **filter** | **REMOVED — needs owner sign-off** | Reclassified from REGROUPED after the independent review, which was right to challenge it. The reasoning for dropping the filter stands: it was applied twice (a bounding box in the WHERE, then `d !== null && d <= radius`) and silently dropped every listing with a null coordinate, which was all of them. But a client capability did go — the query parameter is ignored, so a bookmark, a saved search or an external link carrying `radiusMiles=25` now silently returns a 100-mile result set. Under the capability-preservation invariant that is `REMOVED`, not a regrouping, and `REMOVED` requires explicit sign-off. What stands in its place: distance on every card, distance sorting, and a stated policy line that decides the card's ACTION. |
+| Buyer search UI — radius `<select>` | **REGROUPED** | replaced by a statement of the policy on the same surface. A control that no longer filters is a lie. Both empty states were corrected with it: they told the buyer to "expand your search radius in the filters above", which after this batch points at a control that is not there |
 | Buyer search UI — "Shortlist" button | **EXTENDED** | now renders the server's `action`; out-of-radius/stale/unavailable/unplaceable cards offer "Find one like this", pre-filled |
 | `POST/GET/DELETE /api/buyer/shortlist` | **KEPT** | same routes, same codes; DELETE additionally accepts `itemId` |
 | `shortlist.service.addToShortlist` — throwing contract | **MOVED** | returns a result carrying the gate's reason code. A caller cannot turn `throw new Error("Shortlist limited to 5 items")` into `SHORTLIST_FULL` without matching on prose. |
@@ -2019,7 +2023,7 @@ Every route, control and workflow the batch touched, with a disposition. Counts 
 | Shortlist page — card content | **EXTENDED** | distance and freshness on every card |
 | Admin inventory search tool | **EXTENDED** | routed through `MarketCheckAdapter`; the apigee client is retired. Same inputs, same audit row, plus `providerOutcome` and a truthful FAILED status |
 | `MarketCheckAdapter.search` | **EXTENDED** | include flags, `mc_dealership` ids, `dealer.website`, radius rejection, 422 classification, throttle headers |
-| `runInventorySync` / the two inventory crons | **KEPT** | same schedule, same budget, plus a truthful cron log |
+| `runInventorySync` / the two inventory crons | **KEPT** | same schedule, same budget, plus a truthful cron log. `failCronRun` now records `duration` as `completeCronRun` always has: moving a resolved-but-failed sweep from COMPLETED to FAILED moved it onto the writer that did not set one, which would have blanked the Operations table's duration column (`app/admin/operations/page.tsx:498`) for exactly the runs an operator opens it to read |
 | Stale-sweep dealer emails | **MOVED** | from the direct Resend rail to the §27 outbox dispatcher, with day-scoped idempotency and a registered state recheck. The retired call keyed on `Date.now()`, which is no idempotency at all |
 | `ensureAuctionVehicleFromRequest` | **EXTENDED** | writes `vehicleRequestId`; it read the request and discarded its id |
 | `sweepLineageOrphans` | **EXTENDED** | new `auctionVehicle` class and an `only` option |
@@ -2031,6 +2035,18 @@ Every route, control and workflow the batch touched, with a disposition. Counts 
 | Public catalogue and detail pages | **KEPT** | already gated in an earlier phase |
 | Buyer qualified-results view (QUAL) | **NEW** | |
 | Stage 4 elections surface | **NEW** | |
+
+##### Late corrections, after the independent review and the second gate run
+
+Recorded because each is a defect this batch itself introduced or would have shipped, found after
+the map above was first written.
+
+| Correction | Why it mattered |
+| --- | --- |
+| `failCronRun` records `duration` | Phase 4 makes a sweep that RESOLVES with a failure inside it record FAILED. Those runs were previously recorded COMPLETED **with** a duration, and `failCronRun` never set one — so the batch would have silently removed a value the Operations table renders. Two regression tests, mutation-probed. |
+| Buyer search empty-state copy | Two strings still told the buyer to expand a search radius in "the filters above". This batch removed that control. |
+| `deposit-eligibility.ts` header arithmetic | The file said "SEVEN CONDITIONS HERE, NOT THE EIGHT §5a LISTS" while now implementing all eight, and three further doc comments still said "six". Comments only; the predicate list was already right. |
+| The purge scripts' coordinate test | `latitude IS NULL` alone treated a row carrying a latitude and a NULL longitude as healthy. It is exactly as unplaceable. Both scripts now test `latitude IS NULL OR longitude IS NULL` in the defect/survivor position, and rehearsal step 7b proves the run refuses on such a row instead of reporting success. |
 
 ##### Corrections to the Appendix's MarketCheck rows (§8.1 row 4: "Appendix (re-verified)")
 
@@ -2067,6 +2083,8 @@ Every route, control and workflow the batch touched, with a disposition. Counts 
 | **The criteria-hash cache** | §13-D8 (MarketCheck terms) is unanswered. Built, wired, and OFF behind `INVENTORY_QUERY_CACHE`, so the answer is a flag flip. It needs no migration: `inventory_query_cache` already exists in production's physical schema and had no readers and no writers |
 | **`CURRENT_PHASE` in the lineage registry** | Still 2. Raising it to 4 also activates the `deposit` and `auction` classes, whose deferral is the open owner ruling `control/L3-01`. Phase 4's own class is reachable without that bump via `sweepLineageOrphans({ only: ["auctionVehicle"], includeDeferred: true })` |
 | **"DRAFT until Stage 4 exit"** | Not built. §5a places the elections gate at the deposit, and `ELECTIONS_REQUIRED` implements it there. Forcing a request to stay DRAFT until the elections are answered would block the public intake funnel at a point no cited section asks for, and `abandonStaleDrafts` would then stamp completed requests abandoned at 14 days |
+| **The five-cap counts rows in the database and AVAILABLE candidates in code** | Found in review, and the contradiction is real. `shortlist_items_enforce_cap_trg` does `count(*)` with no availability predicate (Phase 1 wave `migration.sql:1261-1278`), while `countAvailableItems` excludes sold and missing listings — the very thing it was written to fix. A buyer holding five rows of which four point at deactivated listings passes the friendly gate and is then refused by the trigger, which is exactly the lock-out the service's own header says it prevents. Not fixed here: the remedy is either a new migration changing a Phase 1 enforcement object, or pruning buyer-owned rows without asking, and neither is this batch's to decide. The narrow refusal-code fix landed (a P2002 no longer reports as "full"), so the buyer at least gets the right message; the lock-out itself needs an owner ruling |
+| **The candidate model is built and UNWIRED** | Found in review. `promoteShortlistToCandidates`, `revalidateCandidate` and `revalidateRequestCandidates` have no production caller — nothing materialises a shortlist into candidates and nothing revalidates one — because both belong to auction creation, which is Stage 5's. The `auctionVehicle` lineage class is likewise reachable only through `sweepLineageOrphans({ only: … })`. The buyer-facing copy that promised "we'll check before your auction opens" now states the fact instead of a promise nothing keeps. Wiring is Phase 5's, at the point the auction exists |
 | **`auction_vehicles.auction_id` is NOT NULL** | Reported, not worked around. A candidate row cannot exist before an auction does, and the auction is created at deposit settlement (Stage 5) — so at Stage 4 the SHORTLIST is the candidate set and `promoteShortlistToCandidates` materialises it the moment an auction exists. Making the column nullable is a schema change this phase was not scoped for |
 | **`SuppressionService.isSmsSuppressed` fails open** | Queued, not built, on the owner's explicit instruction: live TCPA exposure, its own batch |
 | **The `next` dependency-audit failure** | Two critical advisories (GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4), both patched in `>=16.3.3`. Pre-existing on `main`, which pins the same `16.2.9`; reported on the pull request rather than absorbed into a phase batch |

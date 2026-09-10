@@ -44,7 +44,7 @@ import { logger } from "@/lib/logger";
 import { MarketCheckAdapter } from "./adapters/marketcheck.adapter";
 import type { AdapterRunResult, NormalizedVehicle, SearchParams, StopReason } from "./adapters/IInventoryAdapter";
 import { resolveMarketConfig } from "./inventory-source-config.service";
-import { cycleKeyFor, rollCycleForward, makeCallBudget, makeStaticBudget } from "./inventory-call-budget.service";
+import { cycleKeyFor, rollCycleForward, makeCallBudget, makeStaticBudget, remainingCalls } from "./inventory-call-budget.service";
 import {
   SHORTLIST_RADIUS_MILES, shortlistGate, distanceMilesBetween,
   type Freshness, type GateReason, type ShortlistAction,
@@ -72,6 +72,27 @@ export const QUALIFIED_RESULTS_ROWS = 50;
  * a cited requirement: §22a says "thin or zero results offer the request path" and does not
  * define thin.
  */
+/**
+ * The daily sweep's claim on the monthly ledger, which a buyer-facing search may never eat
+ * into. Sized by what the sweep will actually need for the rest of the cycle rather than by a
+ * fixed fraction: `maxCallsPerRun` multiplied by the days left in the UTC month.
+ *
+ * FOUND IN REVIEW, and the failure it prevents is a documented incident, not a hypothetical.
+ * This search draws from `inventory_sources.calls_used_this_cycle` — the SAME counter the
+ * daily sweep spends from. With the page firing on mount and the cache off (§13-D8), one
+ * authenticated buyer refreshing a few hundred times could exhaust a 500/month plan; the next
+ * `inventory-sync-full` would return BUDGET_EXHAUSTED and the catalogue would freeze. That is
+ * the 191-run silent freeze in `inventory-call-budget.service.ts:5-8`, reachable from a
+ * browser. Two things close it: this reserve, and the surface no longer searching on load.
+ */
+export function sweepReserveFor(maxCallsPerRun: number, now: Date): number {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const daysLeft = Math.max(1, daysInMonth - now.getUTCDate() + 1);
+  return Math.max(0, maxCallsPerRun) * daysLeft;
+}
+
 export const THIN_RESULTS_THRESHOLD = 3;
 
 /** How long a cached provider answer may be served. Only read when the cache is enabled. */
@@ -224,10 +245,14 @@ async function placeBuyer(
   const validStored = /^\d{5}$/.test(stored) ? stored : null;
   const validZip = validSupplied ?? validStored;
 
-  // A supplied ZIP is the buyer telling us where to look, so it outranks a stored coordinate.
+  // A supplied ZIP is the buyer telling us where to look, so it outranks a stored coordinate
+  // — and when it cannot be placed we STOP rather than quietly substituting one. Falling
+  // through used to search the market around an unplaceable ZIP while measuring every
+  // distance from the buyer's home, which spent a provider call to return fifty cards all
+  // marked out-of-radius. Found in review.
   if (validSupplied) {
     const c = await geocode(validSupplied);
-    if (c) return { coords: c, zip: validSupplied };
+    return c ? { coords: c, zip: validSupplied } : { coords: null, zip: validSupplied };
   }
   if (buyer?.latitude != null && buyer?.longitude != null) {
     return { coords: { lat: buyer.latitude, lng: buyer.longitude }, zip: validZip };
@@ -298,8 +323,13 @@ async function resolveCatalogueIds(vehicles: NormalizedVehicle[]): Promise<Map<s
   const vins = [...new Set(vehicles.map((v) => v.vin).filter((v): v is string => !!v))];
   if (vins.length === 0) return new Map();
   try {
+    // AVAILABILITY IS PART OF RESOLUTION. Matching on VIN alone resolved rows the stale sweep
+    // had already deactivated, so the card offered "Add to shortlist" using the PROVIDER's
+    // isActive and the shortlist API then refused it with UNAVAILABLE. Given that most of
+    // production's shortlist rows point at listings the corrected sweep deactivates, that is
+    // the common case rather than the exotic one. Found in review.
     const rows = await prisma.inventoryItem.findMany({
-      where: { vin: { in: vins } },
+      where: { vin: { in: vins }, isActive: true, priceCents: { gt: 0 } },
       select: { id: true, vin: true },
     });
     return new Map(rows.filter((r) => r.vin).map((r) => [r.vin as string, r.id]));
@@ -423,6 +453,24 @@ export async function getQualifiedResults(
   if (resolved.config.sourceId && resolved.config.configSource === "row") {
     const cycleKey = cycleKeyFor(now);
     await rollCycleForward(resolved.config.sourceId, cycleKey);
+
+    // The sweep's reserve. A buyer search spends only true surplus: what is left after the
+    // daily sweep's needs for the rest of the cycle are set aside.
+    const left = await remainingCalls(resolved.config.sourceId, cycleKey);
+    const reserve = sweepReserveFor(resolved.config.maxCallsPerRun, now);
+    if (left !== null && left <= reserve) {
+      return emptyView("BUDGET_EXHAUSTED", {
+        ...base,
+        provider: {
+          outcome: "BUDGET_RESERVED_FOR_SWEEP",
+          apiCallsUsed: 0,
+          numFound: null,
+          error: `${left} calls left this cycle; ${reserve} are reserved for the daily sweep`,
+        },
+        cache: { enabled: cacheEnabled, hit: false, key },
+      });
+    }
+
     budget = makeCallBudget(resolved.config.sourceId, cycleKey, resolved.config.monthlyCallBudget, QUALIFIED_RESULTS_MAX_CALLS);
   } else {
     budget = makeStaticBudget(QUALIFIED_RESULTS_MAX_CALLS);

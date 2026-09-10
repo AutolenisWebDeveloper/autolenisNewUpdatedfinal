@@ -225,6 +225,32 @@ case "$OUT" in *"ungeocoded, unreferenced listing(s) survived"*) ;; *) echo "FAI
 echo "  PASS: rolled back with 0 rows deleted — the count assertion passed and the SURVIVOR assertion caught it"
 psql "$URL" -v ON_ERROR_STOP=1 -q -c "delete from inventory_items where id = 'odd_1';"
 
+echo "== 7b. refuses on HALF a coordinate pair — the gap the OR closes =="
+# A row carrying a latitude and a NULL longitude is exactly as unplaceable as one carrying
+# neither: `distanceMilesBetween` needs both. The first version of these scripts tested
+# `latitude IS NULL` alone, so such a row was neither doomed by the six predicates (which
+# require both NULL) nor caught by the survivor assertion — invisible to both, it would have
+# survived the purge still showing the defect and nothing would have said so. This is that
+# row, and the run must refuse.
+psql "$URL" -v ON_ERROR_STOP=1 -q -c "
+  insert into inventory_items (id, lane, vin, year, make, model, price_cents,
+    latitude, external_dealer_state, is_active, created_at, updated_at)
+  values ('half_1','LANE_3','VINHALF0000000001',2019,'Mazda','CX-5',1500000,
+          32.7357,'TX', true, timestamp '2026-09-01 09:00:00', timestamp '2026-09-03 04:00:00');"
+ESTAB4=$(psql "$URL" -X -A -F'|' -v ON_ERROR_STOP=1 --single-transaction \
+  -c "SET TRANSACTION READ ONLY" -f "$HERE/catalogue-purge-establish.sql" \
+  | grep -A1 '^deletable|' | tail -1 | cut -d'|' -f1,3)
+[ "$ESTAB4" = "203|1" ] || { echo "FAIL: expected 'deletable|defective_not_selected' = 203|1, got '$ESTAB4' — the establish script does not see half a coordinate pair as the defect" >&2; exit 1; }
+echo "  establish reports: deletable=203, defective_not_selected=1 (the half-geocoded row)"
+set +e
+OUT=$(psql "$URL" -X -v ON_ERROR_STOP=1 -v expected_deletes=203 -f "$HERE/catalogue-purge-delete.sql" 2>&1); RC=$?
+set -e
+[ $RC -ne 0 ] || { echo "FAIL: a half-geocoded row survived a purge that reported success" >&2; exit 1; }
+case "$OUT" in *"ungeocoded, unreferenced listing(s) survived"*) ;; *) echo "FAIL: wrong refusal: $OUT" >&2; exit 1 ;; esac
+[ "$(psql "$URL" -At -c 'select count(*) from inventory_items;')" = "224" ] || { echo "FAIL: rows deleted on a refusal" >&2; exit 1; }
+echo "  PASS: rolled back with 0 rows deleted"
+psql "$URL" -v ON_ERROR_STOP=1 -q -c "delete from inventory_items where id = 'half_1';"
+
 echo "== 8. the real run =="
 BEFORE=$(psql "$URL" -At -F'|' -c "select
   (select count(*) from inventory_items), (select count(*) from shortlist_items),

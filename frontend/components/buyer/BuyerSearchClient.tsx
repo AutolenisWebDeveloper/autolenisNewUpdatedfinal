@@ -1010,8 +1010,12 @@ function NoInventoryState({
           </svg>
         </a>
 
+        {/* NOT "expand your search radius". There is no radius control any more — it was
+            removed in Phase 4 because the 100-mile line is policy, not a filter — and copy
+            that sends a buyer to look for one is copy that wastes their time at exactly the
+            moment they have found nothing. */}
         <p className="text-xs text-[#6B7280] mt-6">
-          Or try expanding your search radius in the filters above
+          Cars further away still show here — we just cannot bring them to auction.
         </p>
       </div>
     );
@@ -1023,7 +1027,8 @@ function NoInventoryState({
       data-testid="no-results"
     >
       <p className="text-lg font-medium text-slate-600 mb-2">No vehicles found</p>
-      <p className="text-sm">Try adjusting your filters or expanding your search radius</p>
+      {/* Same correction as the geo empty state above: the radius control is gone. */}
+      <p className="text-sm">Try adjusting your filters, or ask us to find one for you</p>
       <a
         href="/buyer/requests/new"
         className="inline-flex items-center gap-1.5 mt-6 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors"
