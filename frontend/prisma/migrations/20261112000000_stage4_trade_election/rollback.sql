@@ -1,0 +1,35 @@
+-- Rollback for 20261112000000_stage4_trade_election.
+--
+-- ROLL THE CODE BACK. DO NOT DROP THE COLUMN BY REFLEX.
+--
+-- Unlike an enum label, a column CAN be dropped -- which makes this the more dangerous
+-- rollback of the two, not the safer one. `DROP COLUMN` is not reversible by re-adding
+-- the column: it destroys every election recorded in it, and an election is a fact the
+-- buyer stated. Reverting a feature must not delete an answer a person gave.
+--
+-- WHAT ROLLING THE CODE BACK ACHIEVES, ON ITS OWN. With the Stage 4 writers reverted,
+-- nothing sets `trade_elected`, the §5a predicate reverts to the seven conditions it
+-- checked before this phase, and the column is inert. No row is rewritten, no buyer is
+-- refused, and nothing reads a value it does not understand -- the reverse of the
+-- deploy-order hazard in migration.sql, and the reason that hazard is one-directional.
+--
+-- WHAT THE MIRROR MEANS FOR A REVERT. Phase 4 writes the election to BOTH
+-- `vehicle_requests.trade_elected` and `vehicle_request_financing.trade_in`, and the
+-- second is pre-existing and independently read (`app/admin/requests/[requestId]/page.tsx:175`).
+-- So a code revert leaves the admin surface still showing the trade answer for any
+-- request captured while this phase was live. That is the intended asymmetry: the
+-- mirror is what makes the revert lossless rather than merely survivable.
+--
+-- IF THE COLUMN GENUINELY MUST GO. It is an owner decision about buyer-stated data, not
+-- a rollback script's to take under pressure, so the statement is left commented out.
+-- Read the elections first and satisfy yourself none is still needed:
+--
+--   -- SELECT id, buyer_id, status, co_buyer_elected, trade_elected
+--   --   FROM "vehicle_requests"
+--   --  WHERE "trade_elected" IS NOT NULL;
+--
+--   -- ALTER TABLE "vehicle_requests" DROP COLUMN IF EXISTS "trade_elected";
+--
+-- Note the ordering inverts on the way back: DROP the column only AFTER the reverted
+-- code is deployed. Dropping it while code that selects it is still running produces
+-- the same 42703 the forward direction warns about, from the other side.

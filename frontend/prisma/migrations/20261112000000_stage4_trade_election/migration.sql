@@ -1,0 +1,102 @@
+-- Stage 4 exit: the trade election, as a first-class fact on the request.
+--
+-- WRITTEN BUT NOT APPLIED. Ships for owner review; applies after 20261111000000.
+--
+-- WHY THIS COLUMN EXISTS AT ALL, WHEN PHASE 1 SHIPPED ITS SIBLING. §5a requires the
+-- eligibility recheck to confirm "co-buyer and trade elections recorded" before payment
+-- is offered. Phase 1's wave shipped `vehicle_requests.co_buyer_elected` and no trade
+-- counterpart, and that omission was correct at the time: `payment/PAY-06b`, the row
+-- that READS both elections, was a Phase 3 row when the wave was authored, so the
+-- trade half was not yet anyone's schema question. §11.6 ruling 12 then moved PAY-06b
+-- to Phase 4 (2026-09-09) to ship the check with its writer -- and nobody re-derived
+-- which schema objects the destination phase now required. Phase 4 is where that lands.
+--
+-- WHY NOT REUSE `vehicle_request_financing.trade_in`. It is genuinely a per-request
+-- nullable boolean (`schema.prisma:1414`, one row per request via `@unique`), it is
+-- live -- written at `car-request-financing.service.ts:172`, read by the admin detail
+-- page at `app/admin/requests/[requestId]/page.tsx:175` -- and reuse-before-create says
+-- look there first. It still cannot answer the question §5a asks.
+--
+--   The relation is OPTIONAL (`financing VehicleRequestFinancing?`). So "no financing
+--   row" and "the buyer has not answered the trade question" are the same observation,
+--   and an election is precisely a three-state fact: unanswered / yes / no. A predicate
+--   built on it would refuse a buyer who answered "no trade" through any path that
+--   never created a financing row, and pass one who answered nothing through a path
+--   that did.
+--
+-- So the election lives beside its sibling, shaped identically, and the existing
+-- boolean is MIRRORED rather than replaced: Phase 4 writes both, nothing that reads
+-- `trade_in` today changes, and `schema/D5`'s consolidation of the trade DATA onto
+-- `trade_in_submissions` is a separate concern from the ELECTION. No capability is
+-- removed by this file.
+--
+-- ORDERING AGAINST THE APPLICATION DEPLOY: **MIGRATION FIRST, WITHOUT EXCEPTION.**
+-- It is additive, and it is NOT safe in either order. Stating that plainly here because
+-- the immediately preceding migration in this chain claimed "safe in either order" and
+-- was wrong, in the direction that gets someone hurt -- see
+-- 20261111000000_deposit_status_disputed/ORDERING.md, which corrects it.
+--
+-- The mechanism here is the simpler of the two that document describes, and it does not
+-- need a predicate to bite. Prisma selects EVERY scalar a model declares unless the
+-- query narrows it. Once `trade_elected` is on the `VehicleRequest` model and the client
+-- is regenerated (`pnpm build` is `prisma generate && next build`), every unnarrowed
+-- read of that model asks PostgreSQL for a column an unmigrated database does not have,
+-- and fails with **42703 undefined_column** -- for every caller, not only for requests
+-- that carry an election.
+--
+-- Six unnarrowed reads exist at the time of writing. Note that `include:` does not
+-- narrow: it adds relations while still selecting all of the parent's scalars.
+--
+--   lib/services/vehicle-request/open-request.service.ts:67   findOpenRequest
+--   lib/services/vehicle-request/vehicle-request.service.ts:22 hasActiveRequest (dead)
+--   app/api/buyer/requests/[requestId]/cancel/route.ts:14
+--   app/api/admin/requests/[requestId]/route.ts:73
+--   app/api/public/request-vehicle/complete/route.ts:230
+--   app/admin/vehicle-requests/page.tsx:18                     (include, no select)
+--
+-- `findOpenRequest` is the one that matters. It is the Phase 2 open-request primitive
+-- and it has seven live call sites, which between them are the buyer's entire payment
+-- path:
+--
+--   app/api/buyer/deposit/create-intent/route.ts:163   a buyer at checkout
+--   app/buyer/deposit/success/page.tsx:36              the post-payment page
+--   app/api/buyer/plan/upgrade/route.ts:85             the Premium upgrade
+--   app/api/admin/payments/deposit/create-intent/route.ts:61
+--   app/api/admin/payments/deposit/send-link/route.ts:59
+--   app/api/admin/buyers/[buyerId]/plan/route.ts:125
+--   app/api/public/request-vehicle/complete/route.ts:231
+--
+-- So an application deploy that precedes this migration takes down checkout for every
+-- buyer with an open request. `hasActiveRequest` is the one exception in the list: it
+-- has zero callers and its own successor's comment says so
+-- (open-request.service.ts:34), so it cannot contribute an outage.
+--
+-- THE REVERSE ORDER IS SAFE, and that is the whole reason the order is stated rather
+-- than merely preferred. A database carrying an unread column costs nothing: the
+-- deployed application predates the field, never selects it, never writes it, and the
+-- column sits NULL until the code that uses it ships. Apply, then deploy.
+--
+-- NOT NULL IS DELIBERATELY ABSENT. 21 vehicle_requests exist and none of them recorded
+-- an election, because nothing has ever written one. NULL is the correct value for all
+-- of them and it is the value the predicate needs: `ELECTIONS_REQUIRED` fires on NULL,
+-- which is exactly "the buyer has not answered". A DEFAULT false would silently record
+-- 21 buyers as having declined a trade they were never asked about.
+--
+-- NO CHECK CONSTRAINT. This chain contains zero CHECK constraints outside the Phase 1
+-- wave's three, Prisma cannot model them, and scripts/check-migration-drift.ts fails in
+-- both directions once `prisma migrate diff` sees a structural statement off the
+-- recorded baseline. A three-state boolean needs no constraint anyway.
+--
+-- NO INDEX. The column is read only alongside the row it sits on -- the §5a predicate
+-- already has the request in hand -- so an index would cost writes and buy nothing.
+--
+-- RLS: untouched. `vehicle_requests` has relrowsecurity=true with zero policies and the
+-- application connects as the table owner; adding a column changes none of that, and
+-- adding a policy to a zero-policy table would OPEN access rather than harden it.
+--
+-- IDEMPOTENT: `ADD COLUMN IF NOT EXISTS` makes a re-apply a no-op emitting only a
+-- NOTICE. Proved by round trip -- see the phase-4-proof directory.
+--
+-- ROLLBACK: see rollback.sql in this directory. Roll the CODE back first.
+
+ALTER TABLE "vehicle_requests" ADD COLUMN IF NOT EXISTS "trade_elected" BOOLEAN;
