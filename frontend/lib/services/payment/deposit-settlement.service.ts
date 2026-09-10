@@ -55,6 +55,8 @@ import {
   searchPaymentIntentsByDepositId,
 } from "@/lib/services/payment/stripe.service";
 import { classifyPaymentConfirmation, wasCharged } from "@/lib/services/payment/payment-confirmation";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { applySettlementEffects } from "@/lib/services/payment/settlement-effects.service";
 
 export const DEPOSIT_SETTLEMENT_FLAG = "DEPOSIT_SETTLEMENT_RECONCILE_ENABLED";
 export const DEPOSIT_SETTLEMENT_EXCLUDED_FLAG = "DEPOSIT_SETTLEMENT_EXCLUDED_DEPOSIT_IDS";
@@ -133,36 +135,47 @@ export interface SettlementSweepResult {
   skipped?: string;
 }
 
-// Ops-only alert. Reuses the SYSTEM_ALERT Notification rail the deposit-activation
-// reconciler already uses (surfaced on /admin/operations), rather than inventing an
-// exception store. NO buyerId: the buyer is never told a cron rescued their payment.
-// Best-effort — it must never roll back a settlement that already committed.
-async function raiseWebhookGapAlert(depositId: string, intentId: string): Promise<void> {
-  const title = `Deposit settled by reconciler (webhook gap): ${depositId}`;
+/**
+ * THE ONE RAIL for a webhook gap (§13-D12, C5, DUP-03).
+ *
+ * WHAT THIS REPLACED, and why each part of it mattered. This wrote a `Notification`
+ * row with `type: "SYSTEM_ALERT"` and `actionUrl: "/admin/operations"`, deduped by
+ * reading back its own exact title string. Three defects travelled with that:
+ *
+ *   1. read-then-write dedup on a TITLE — two concurrent sweeps both read "not
+ *      found" and both inserted. `raiseException` dedups on a real unique index.
+ *   2. `/admin/operations` renders no notifications, so the alert was reachable
+ *      only through the `/admin/queues` "system" tab — the instruction pointed at
+ *      a dead end.
+ *   3. no owner. §26 assigns this row to FINANCE and `Notification` has no column
+ *      to say so; `queue_items.owner_role` does.
+ *
+ * KEYED ON THE PAYMENT INTENT, not the deposit, and that is the fold. The read-only
+ * detector in `health.service.checkDepositProviderEvidence` finds the SAME rows by
+ * the same provider fact and now raises with the same key, so a gap the reconciler
+ * settles and the detector notices produces ONE queue row rather than two. §13-D12's
+ * post-completion check (c) is exactly that assertion, run against production.
+ *
+ * NO buyerId: the buyer is never told a cron rescued their payment. Best-effort — it
+ * must never roll back a settlement that already committed.
+ */
+async function raiseWebhookGapException(depositId: string, intentId: string): Promise<void> {
   try {
-    // Same dedupe key and destination the deposit-activation reconciler uses for
-    // its own operator exceptions, so both land on one operations queue.
-    const existing = await prisma.notification.findFirst({
-      where: { title, type: "SYSTEM_ALERT" },
-      select: { id: true },
-    });
-    if (existing) return;
-    await prisma.notification.create({
-      data: {
-        buyerId: null,
-        type: "SYSTEM_ALERT",
-        actionUrl: "/admin/operations",
-        title,
-        body:
-          `Deposit ${depositId} was flipped PENDING → PAID by the settlement reconciler after ` +
-          `Stripe reported PaymentIntent ${intentId} as succeeded. The money moved, so the deposit ` +
-          `is now correct — but this transition is the Stripe webhook's job, and the webhook did ` +
-          `not deliver it. Treat this as a webhook outage: check the endpoint and signing secret. ` +
-          `No PaymentProviderEvent was written, because none was received.`,
-      },
+    await raiseException({
+      code: "PAYMENT_WEBHOOK_MISSED",
+      depositId,
+      idempotencyKey: `PAYMENT_WEBHOOK_MISSED:${intentId}`,
+      detail:
+        `Deposit ${depositId} was flipped to PAID by the settlement reconciler after Stripe reported ` +
+        `PaymentIntent ${intentId} as succeeded. The money moved, so the deposit is now correct — but ` +
+        `this transition is the Stripe webhook's job and the webhook did not deliver it. Treat this as a ` +
+        `webhook outage: check Stripe Dashboard → Developers → Webhooks that the endpoint exists in LIVE ` +
+        `mode, that payment_intent.succeeded is subscribed, and that the signing secret matches ` +
+        `STRIPE_WEBHOOK_SECRET. No PaymentProviderEvent was written, because none was received — do NOT ` +
+        `fabricate one.`,
     });
   } catch (err) {
-    logger.error(`[deposit-settlement] ops alert failed for deposit ${depositId}:`, err);
+    logger.error(`[deposit-settlement] webhook-gap exception failed for deposit ${depositId}:`, err);
   }
 }
 
@@ -219,7 +232,7 @@ export async function reconcileDepositSettlements(opts?: {
       createdAt: { lt: cutoff },
       id: { notIn: excluded },
     },
-    select: { id: true, stripePaymentIntentId: true, status: true },
+    select: { id: true, stripePaymentIntentId: true, status: true, buyerId: true, vehicleRequestId: true },
     orderBy: { createdAt: "asc" },
     take: limit,
   });
@@ -285,13 +298,40 @@ export async function reconcileDepositSettlements(opts?: {
       // `SETTLE_FROM` rather than `allowedPredecessors("PAID")`: the matrix also
       // permits DISPUTED -> PAID, and a reconciler must never clear a live dispute.
       // That edge belongs to `charge.dispute.closed` alone.
-      const updated = await prisma.deposit.updateMany({
-        where: { id: deposit.id, status: { in: [...SETTLE_FROM] } },
-        data: { status: "PAID" },
-      });
+      //
+      // THE SETTLEMENT EFFECT RIDES WITH THE FLIP, in one transaction, for the same
+      // reason it does in the webhook (§5d "atomically"). This reconciler exists to
+      // do the webhook's job when the webhook did not run — so it has to do the WHOLE
+      // job. Flipping the status alone would leave a paid buyer with no sourcing case
+      // and a Vehicle Request still sitting at PAYMENT_REQUIRED, which is a quieter
+      // failure than the one this sweep was written to fix and would only surface
+      // once SOURCING_CASE_REPLACES_AUCTION_LAUNCH is on: with the flag off the
+      // ACTIVATION reconciler still creates the auction from the PAID row, so the
+      // legacy path converges and the hole is invisible.
+      //
+      // `runLegacyAuctionPath` is deliberately IGNORED here. The activation sweep in
+      // the same cron tick owns auction creation for reconciler-settled rows and is
+      // already gated on the same flag; creating one here as well would race it.
+      const effects = await prisma.$transaction(async (tx) => {
+        const updated = await tx.deposit.updateMany({
+          where: { id: deposit.id, status: { in: [...SETTLE_FROM] } },
+          data: { status: "PAID" },
+        });
+        // Someone else settled it between the read and the write. Not an error, and
+        // not ours to apply effects for — the winner applied its own.
+        if (updated.count === 0) return null;
 
-      if (updated.count === 0) {
-        // Someone else settled it between the read and the write. Not an error.
+        return applySettlementEffects(
+          {
+            depositId: deposit.id,
+            buyerId: deposit.buyerId,
+            vehicleRequestId: deposit.vehicleRequestId,
+          },
+          tx,
+        );
+      }, { maxWait: 2000, timeout: 5000 });
+
+      if (effects === null) {
         unsettled += 1;
         continue;
       }
@@ -299,9 +339,10 @@ export async function reconcileDepositSettlements(opts?: {
       settled += 1;
       logger.warn(
         `[deposit-settlement] settled deposit ${deposit.id} from PaymentIntent ${intentId} ` +
-          `(${intent.status}) — the webhook did not deliver this`,
+          `(${intent.status}) — the webhook did not deliver this` +
+          (effects.sourcingCaseId ? `; sourcing case ${effects.sourcingCaseId} opened` : ""),
       );
-      await raiseWebhookGapAlert(deposit.id, intentId);
+      await raiseWebhookGapException(deposit.id, intentId);
     } catch (err) {
       // One unreachable intent must not strand every other paid buyer in the sweep.
       errors += 1;

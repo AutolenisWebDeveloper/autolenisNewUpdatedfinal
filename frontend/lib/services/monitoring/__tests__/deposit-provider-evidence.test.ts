@@ -33,7 +33,18 @@ const state = {
   retrieveThrows: false,
   retrievedIds: [] as string[],
   infoLogs: [] as string[],
+  // §13-D12: the single exception rail this detector now raises on.
+  exceptions: [] as Array<Record<string, unknown>>,
 };
+
+mock.module("@/lib/services/operations/queue-item.service", {
+  namedExports: {
+    raiseException: async (input: Record<string, unknown>) => {
+      state.exceptions.push(input);
+      return { item: { id: "q1" }, created: true };
+    },
+  },
+});
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -106,11 +117,12 @@ beforeEach(() => {
   state.retrieveThrows = false;
   state.retrievedIds = [];
   state.infoLogs = [];
+  state.exceptions = [];
 });
 
 // ── PAID branch (existing contract, unchanged) ────────────────────────────────
 
-test("flags each PAID+pi_ deposit lacking provider evidence with a reconciliation SYSTEM_ALERT", async () => {
+test("flags each PAID+pi_ deposit lacking provider evidence on the exception rail", async () => {
   const checkDepositProviderEvidence = await load();
   state.gapRows = [
     { id: "dep_a", pi: "pi_111", status: "PAID" },
@@ -118,11 +130,12 @@ test("flags each PAID+pi_ deposit lacking provider evidence with a reconciliatio
   ];
   const res = await checkDepositProviderEvidence();
   assert.equal(res.gaps, 2);
-  assert.equal(state.createdNotifications.length, 2);
-  assert.equal(state.createdNotifications[0].type, "SYSTEM_ALERT");
-  assert.match(String(state.createdNotifications[0].title), /dep_a/);
-  assert.match(String(state.createdNotifications[0].body), /pi_111/);
-  assert.match(String(state.createdNotifications[0].body), /do NOT fabricate a provider event/);
+  assert.equal(state.exceptions.length, 2);
+  assert.equal(state.exceptions[0].code, "PAYMENT_WEBHOOK_MISSED");
+  assert.equal(state.exceptions[0].depositId, "dep_a");
+  assert.match(String(state.exceptions[0].detail), /pi_111/);
+  assert.match(String(state.exceptions[0].detail), /do NOT fabricate a provider event/);
+  assert.equal(state.createdNotifications.length, 0, "§13-D12 check (d): the SYSTEM_ALERT rail is gone for these");
   assert.equal(state.retrievedIds.length, 0, "a PAID gap needs no provider round-trip");
 });
 
@@ -138,13 +151,37 @@ test("NEVER fabricates a provider event (evidence, not inference)", async () => 
   assert.equal(state.depositWrites, 0, "reconciliation observes; it never flips a deposit");
 });
 
-test("idempotent: a deposit already alerted is not re-alerted", async () => {
+// Idempotency MOVED, and that is the fix rather than a loss of coverage. It used to
+// live here as a read-then-write on an exact title string — a check two concurrent
+// sweeps both pass. It now lives in `raiseException`, on a real unique index over
+// `queue_items.idempotency_key`. What this file can still prove, and what actually
+// makes the index work, is that the key does not vary between sweeps.
+test("the exception key is stable across sweeps, so the unique index collapses repeats", async () => {
   const checkDepositProviderEvidence = await load();
   state.gapRows = [{ id: "dep_a", pi: "pi_111", status: "PAID" }];
-  state.recentTitles = new Set(["Reconcile: PAID deposit lacks Stripe provider evidence: dep_a"]);
-  const res = await checkDepositProviderEvidence();
-  assert.equal(res.gaps, 1, "still reports the gap count");
-  assert.equal(state.createdNotifications.length, 0, "but raises no duplicate alert");
+
+  await checkDepositProviderEvidence();
+  const first = state.exceptions[0]!.idempotencyKey;
+  state.exceptions = [];
+  await checkDepositProviderEvidence();
+
+  assert.equal(state.exceptions[0]!.idempotencyKey, first);
+  assert.equal(first, "PAYMENT_WEBHOOK_MISSED:pi_111");
+});
+
+// §13-D12 / C5 / DUP-03 — THE FOLD ITSELF. The settlement reconciler and this
+// detector find the same rows by the same provider fact. Two rails meant two rows,
+// two owners and two people closing the same incident. One key means one row.
+test("the key matches the settlement reconciler's, keyed on the intent not the deposit", async () => {
+  const checkDepositProviderEvidence = await load();
+  state.gapRows = [{ id: "dep_a", pi: "pi_111", status: "PAID" }];
+  await checkDepositProviderEvidence();
+
+  assert.equal(
+    state.exceptions[0]!.idempotencyKey,
+    "PAYMENT_WEBHOOK_MISSED:pi_111",
+    "deposit-settlement.service raises exactly this key for the same gap — see its own suite",
+  );
 });
 
 test("no gaps → no alerts", async () => {
@@ -152,6 +189,7 @@ test("no gaps → no alerts", async () => {
   const res = await checkDepositProviderEvidence();
   assert.equal(res.gaps, 0);
   assert.equal(res.strandedPending, 0);
+  assert.equal(state.exceptions.length, 0);
   assert.equal(state.createdNotifications.length, 0);
 });
 
@@ -172,17 +210,18 @@ test("a PENDING deposit whose PaymentIntent SUCCEEDED at Stripe raises a deliver
 
   const res = await checkDepositProviderEvidence();
   assert.equal(res.strandedPending, 1);
-  assert.equal(state.createdNotifications.length, 1);
+  assert.equal(state.exceptions.length, 1);
 
-  const alert = state.createdNotifications[0];
-  assert.equal(alert.type, "SYSTEM_ALERT");
-  assert.equal(alert.buyerId, undefined, "ops-only — never notify the buyer");
-  assert.match(String(alert.title), /dep_live/);
-  assert.match(String(alert.body), /pi_3U98ES/);
-  // The body must point the operator at the actual thing to check.
-  assert.match(String(alert.body), /webhook/i);
-  assert.match(String(alert.body), /STRIPE_WEBHOOK_SECRET/);
-  assert.match(String(alert.body), /\/api\/webhooks\/stripe/);
+  const raised = state.exceptions[0]!;
+  assert.equal(raised.code, "PAYMENT_WEBHOOK_MISSED");
+  assert.equal(raised.depositId, "dep_live");
+  assert.equal(raised.buyerId, undefined, "ops-only — never notify the buyer");
+  assert.equal(raised.idempotencyKey, "PAYMENT_WEBHOOK_MISSED:pi_3U98ES");
+  // The detail must point the operator at the actual thing to check.
+  assert.match(String(raised.detail), /pi_3U98ES/);
+  assert.match(String(raised.detail), /webhook/i);
+  assert.match(String(raised.detail), /STRIPE_WEBHOOK_SECRET/);
+  assert.match(String(raised.detail), /\/api\/webhooks\/stripe/);
 });
 
 test("an abandoned checkout is NOT an exception — the common benign case stays silent", async () => {
@@ -195,7 +234,7 @@ test("an abandoned checkout is NOT an exception — the common benign case stays
 
   const res = await checkDepositProviderEvidence();
   assert.equal(res.strandedPending, 0, "a buyer who never paid is not a delivery failure");
-  assert.equal(state.createdNotifications.length, 0);
+  assert.equal(state.exceptions.length, 0);
 });
 
 test("an authorized-but-uncaptured intent also counts as money the platform never learned about", async () => {
@@ -261,7 +300,11 @@ test("provider round-trips are budgeted per sweep, and the truncation is logged 
   );
 });
 
-test("mixed PAID and PENDING gaps are each alerted in their own shape", async () => {
+// One CODE, two readings. C5 asks for "one emitter, one exception code" — not for the
+// two conditions to become indistinguishable. The code and owner are shared; the
+// detail is what tells the reader whether the money is recorded and unexplained, or
+// moved and unrecorded, which are different jobs for the same person.
+test("mixed PAID and PENDING gaps each raise, and each says which it is", async () => {
   const checkDepositProviderEvidence = await load();
   state.gapRows = [
     { id: "dep_paid", pi: "pi_p", status: "PAID" },
@@ -272,8 +315,17 @@ test("mixed PAID and PENDING gaps are each alerted in their own shape", async ()
   const res = await checkDepositProviderEvidence();
   assert.equal(res.gaps, 1);
   assert.equal(res.strandedPending, 1);
-  assert.equal(state.createdNotifications.length, 2);
-  const titles = state.createdNotifications.map((n) => String(n.title));
-  assert.ok(titles.some((t) => /^Reconcile: PAID deposit lacks Stripe provider evidence/.test(t)));
-  assert.ok(titles.some((t) => /^Stripe webhook not delivering/.test(t)));
+  assert.equal(state.exceptions.length, 2);
+  assert.deepEqual(
+    state.exceptions.map((e) => e.code),
+    ["PAYMENT_WEBHOOK_MISSED", "PAYMENT_WEBHOOK_MISSED"],
+  );
+  assert.deepEqual(
+    state.exceptions.map((e) => e.idempotencyKey).sort(),
+    ["PAYMENT_WEBHOOK_MISSED:pi_p", "PAYMENT_WEBHOOK_MISSED:pi_q"],
+    "one row per PaymentIntent — never one row for both, and never two for one",
+  );
+  const details = state.exceptions.map((e) => String(e.detail));
+  assert.ok(details.some((d) => /is PAID and linked to Stripe PaymentIntent/.test(d)));
+  assert.ok(details.some((d) => /is still PENDING, but Stripe reports/.test(d)));
 });

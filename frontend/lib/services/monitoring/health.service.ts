@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { INVENTORY_HEALTH_P1_THRESHOLD, PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { logger } from "@/lib/logger";
 import {
   detectDeadCrons,
@@ -385,10 +386,20 @@ async function retrievePaymentIntentBounded(paymentIntentId: string) {
 //     invisible indefinitely: a live charge with no auction, no invitations and
 //     no trace in the ledger.
 //
-// It is deliberately TRUTHFUL and non-mutating: it raises per-deposit
-// SYSTEM_ALERTs for reconciliation review, never flips a deposit, and NEVER
-// fabricates a provider event from a deposit row (a PaymentProviderEvent
-// represents Stripe evidence, not an inference).
+// It is deliberately TRUTHFUL and non-mutating: it raises per-deposit exceptions
+// for reconciliation review, never flips a deposit, and NEVER fabricates a provider
+// event from a deposit row (a PaymentProviderEvent represents Stripe evidence, not
+// an inference).
+//
+// ONE RAIL (§13-D12, C5, DUP-03). This detector and the settlement reconciler in
+// `lib/services/payment/deposit-settlement.service.ts` find the SAME rows by the
+// same provider fact — a deposit whose PaymentIntent has no `payment_provider_events`
+// row — and each used to open its own alert. Both now raise
+// `PAYMENT_WEBHOOK_MISSED` keyed on the PAYMENT INTENT, so the second one to run
+// finds the existing row and adds nothing. That is what makes §13-D12's
+// post-completion check (c) — at most one open queue row per settled deposit —
+// hold, and it is why the key is the intent rather than the deposit id: the
+// reconciler knows the intent before it knows anything else about the row.
 // Deposits with NO PaymentIntent id are admin/manual by construction and are
 // excluded — they are not Stripe payments and carry no provider evidence to miss.
 // Sandbox mock intents are excluded for the same reason.
@@ -451,9 +462,9 @@ export async function checkDepositProviderEvidence(): Promise<{ gaps: number; st
       if (!piStatus || !MONEY_MOVED_PI_STATUSES.has(piStatus)) continue;
 
       strandedPending += 1;
-      await raiseEvidenceAlert(
+      await raiseEvidenceException(
         row.id,
-        `Stripe webhook not delivering — paid deposit stranded PENDING: ${row.id}`,
+        row.pi,
         `Deposit ${row.id} is still PENDING, but Stripe reports PaymentIntent ${row.pi} as "${piStatus}" — the buyer's money moved and the platform never learned. No payment_provider_events row records that PaymentIntent, so the webhook did not run: no auction was created, no dealers were invited, and nothing downstream fired. ` +
           `Check Stripe Dashboard → Developers → Webhooks: (1) an endpoint for POST /api/webhooks/stripe exists in LIVE mode on the production domain, (2) payment_intent.succeeded is subscribed, (3) the endpoint's signing secret matches STRIPE_WEBHOOK_SECRET in the production environment, (4) recent delivery attempts are 2xx — a 400 means the signing secret does not match, a 500 means STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET is unset, and no attempts at all means the endpoint is not registered or not reachable. ` +
           `Resolve the delivery problem and let Stripe redeliver — do NOT fabricate a provider event, and do NOT flip the deposit by hand before reconciling. Review via /admin/operations.`,
@@ -462,10 +473,10 @@ export async function checkDepositProviderEvidence(): Promise<{ gaps: number; st
     }
 
     gaps += 1;
-    await raiseEvidenceAlert(
+    await raiseEvidenceException(
       row.id,
-      `Reconcile: PAID deposit lacks Stripe provider evidence: ${row.id}`,
-      `Deposit ${row.id} is PAID and linked to Stripe PaymentIntent ${row.pi}, but no payment_provider_events row records that PaymentIntent. Either it was marked PAID outside the Stripe webhook, or a real Stripe event was never delivered/recorded. Reconcile against Stripe (read-only) before relying on the ledger — do NOT fabricate a provider event. Review via /admin/operations.`,
+      row.pi,
+      `Deposit ${row.id} is PAID and linked to Stripe PaymentIntent ${row.pi}, but no payment_provider_events row records that PaymentIntent. Either it was marked PAID outside the Stripe webhook (an admin override, or the settlement reconciler), or a real Stripe event was never delivered/recorded. Reconcile against Stripe (read-only) before relying on the ledger — do NOT fabricate a provider event.`,
     );
   }
 
@@ -479,6 +490,12 @@ export async function checkDepositProviderEvidence(): Promise<{ gaps: number; st
   if (unreconcilable > 0) {
     // A provider outage must not be silent either — but it is ONE condition, not
     // one per deposit, so it gets a single deduped alert.
+    //
+    // NOT folded onto the exception rail, deliberately. §13-D12/C5 fold the
+    // PER-DEPOSIT webhook-gap detector, which is what was duplicated; this is a
+    // different fact — "Stripe is unreachable" — with no deposit and no provider
+    // reference to key on. Raising it as PAYMENT_WEBHOOK_MISSED would put an
+    // availability alert under a money-gap code and give it an invented subject.
     await emitThrottledAlertOnce(
       "Cannot reconcile PENDING deposits against Stripe",
       unreconcilable,
@@ -489,20 +506,31 @@ export async function checkDepositProviderEvidence(): Promise<{ gaps: number; st
   return { gaps, strandedPending };
 }
 
-// One per-deposit reconciliation alert, deduped on its exact title so repeat
-// sweeps never duplicate it. Best-effort — alerting never fails the health cycle.
-async function raiseEvidenceAlert(depositId: string, title: string, body: string): Promise<void> {
+/**
+ * One per-INTENT reconciliation exception, on the single rail.
+ *
+ * WHAT THIS REPLACED. A `Notification` row of type `SYSTEM_ALERT`, deduped by reading
+ * back its own exact title before inserting. Two sweeps running concurrently both read
+ * "not found" and both inserted; the row carried `actionUrl: "/admin/operations"`, a
+ * page that renders no notifications; and it had no way to say §26 assigns this to
+ * FINANCE. `raiseException` fixes all three — a real unique index, a `queue_items` row
+ * the operations queue reads by construction, and `owner_role`.
+ *
+ * Keyed on the PaymentIntent so this detector and the settlement reconciler share one
+ * row rather than opening two for the same gap.
+ *
+ * Best-effort — alerting never fails the health cycle.
+ */
+async function raiseEvidenceException(depositId: string, intentId: string, detail: string): Promise<void> {
   try {
-    const existing = await prisma.notification.findFirst({
-      where: { title, type: "SYSTEM_ALERT" },
-      select: { id: true },
+    await raiseException({
+      code: "PAYMENT_WEBHOOK_MISSED",
+      depositId,
+      idempotencyKey: `PAYMENT_WEBHOOK_MISSED:${intentId}`,
+      detail,
     });
-    if (existing) return;
-    await prisma.notification.create({
-      data: { title, body, type: "SYSTEM_ALERT", actionUrl: "/admin/operations" },
-    }).catch(() => {});
   } catch (e) {
-    logger.warn(`[health] deposit-evidence alert failed for ${depositId} (best-effort):`, e);
+    logger.warn(`[health] deposit-evidence exception failed for ${depositId} (best-effort):`, e);
   }
 }
 

@@ -45,6 +45,12 @@ interface Ctrl {
   updates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   providerEventWrites: number;
   notifications: Array<Record<string, unknown>>;
+  exceptions: Array<Record<string, unknown>>;
+  effectsCalls: Array<Record<string, unknown>>;
+  /** Make the guarded PAID flip lose its race, as a concurrent webhook would. */
+  flipCount: number;
+  inTransaction: boolean;
+  effectsSawTransaction: boolean[];
   lastFindArgs: Record<string, unknown> | null;
 }
 let ctrl: Ctrl;
@@ -61,7 +67,7 @@ mock.module("@/lib/prisma", {
         },
         updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
           ctrl.updates.push(args);
-          return { count: 1 };
+          return { count: ctrl.flipCount };
         },
       },
       paymentProviderEvent: {
@@ -72,6 +78,47 @@ mock.module("@/lib/prisma", {
         findFirst: async () => null,
         create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.notifications.push(data); return {}; },
       },
+      // The settlement effect rides with the PAID flip in ONE transaction, so the
+      // fake has to be able to open one. It records that it was open, which is what
+      // the atomicity test below actually asserts.
+      $transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
+        ctrl.inTransaction = true;
+        try {
+          return await cb({
+            deposit: {
+              updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+                ctrl.updates.push(args);
+                return { count: ctrl.flipCount };
+              },
+            },
+          });
+        } finally {
+          ctrl.inTransaction = false;
+        }
+      },
+    },
+  },
+});
+
+// §13-D12: ONE rail. The reconciler used to write a `Notification` row deduped by
+// reading back its own title; it now raises through the single exception writer, on
+// a key built from the PaymentIntent so the read-only detector in health.service
+// collapses onto the same row instead of opening a second one.
+mock.module("@/lib/services/operations/queue-item.service", {
+  namedExports: {
+    raiseException: async (input: Record<string, unknown>) => {
+      ctrl.exceptions.push(input);
+      return { item: { id: "q1" }, created: true };
+    },
+  },
+});
+
+mock.module("@/lib/services/payment/settlement-effects.service", {
+  namedExports: {
+    applySettlementEffects: async (input: Record<string, unknown>) => {
+      ctrl.effectsCalls.push(input);
+      ctrl.effectsSawTransaction.push(ctrl.inTransaction);
+      return { vehicleRequestId: "vr_1", sourcingCaseId: "case_1", unlocked: true, runLegacyAuctionPath: true };
     },
   },
 });
@@ -108,6 +155,11 @@ beforeEach(() => {
     updates: [],
     providerEventWrites: 0,
     notifications: [],
+    exceptions: [],
+    effectsCalls: [],
+    flipCount: 1,
+    inTransaction: false,
+    effectsSawTransaction: [],
     lastFindArgs: null,
   };
   delete env().DEPOSIT_SETTLEMENT_RECONCILE_ENABLED;
@@ -336,7 +388,14 @@ test("one unreachable intent does not abort the sweep", async () => {
   assert.equal(res.errors, 1);
 });
 
-test("settling raises an operational alert — a poll-settled deposit means the webhook is down", async () => {
+// §13-D12 / C5 / DUP-03 — ONE rail.
+//
+// This used to assert a `Notification` row of type SYSTEM_ALERT, deduped by reading
+// back its own exact title. Three things travelled with that shape and all three are
+// gone: a read-then-write dedup two concurrent sweeps both lose, an actionUrl
+// (`/admin/operations`) pointing at a page that renders no notifications, and no
+// owner_role, so §26's assignment of this row to FINANCE could not be expressed.
+test("settling raises the webhook-gap EXCEPTION, not a notification", async () => {
   enable();
   ctrl.deposits = [pendingDeposit(PLAIN, "pi_ok")];
   ctrl.intents["pi_ok"] = { status: "succeeded" };
@@ -344,7 +403,53 @@ test("settling raises an operational alert — a poll-settled deposit means the 
   const { reconcileDepositSettlements } = await load();
   await reconcileDepositSettlements();
 
-  assert.equal(ctrl.notifications.length, 1);
-  assert.equal(ctrl.notifications[0].type, "SYSTEM_ALERT");
-  assert.equal(ctrl.notifications[0].buyerId, null, "ops-only: the buyer is never told their payment was rescued by a cron");
+  assert.equal(ctrl.exceptions.length, 1);
+  assert.equal(ctrl.exceptions[0].code, "PAYMENT_WEBHOOK_MISSED");
+  assert.equal(ctrl.exceptions[0].depositId, PLAIN);
+  assert.equal(
+    ctrl.exceptions[0].idempotencyKey,
+    "PAYMENT_WEBHOOK_MISSED:pi_ok",
+    "keyed on the PaymentIntent — that is what makes the read-only detector fold onto this row rather than open a second",
+  );
+  assert.equal(
+    ctrl.exceptions[0].buyerId,
+    undefined,
+    "ops-only: the buyer is never told their payment was rescued by a cron",
+  );
+  assert.equal(ctrl.notifications.length, 0, "§13-D12 check (d): no SYSTEM_ALERT for a reconciler-settled deposit");
+});
+
+// §5d "atomically". This reconciler exists to do the webhook's job when the webhook
+// did not run, so it has to do the WHOLE job — a status flip alone would leave a paid
+// buyer with no sourcing case and a request still at PAYMENT_REQUIRED.
+test("the settlement effect rides with the flip, inside the same transaction", async () => {
+  enable();
+  ctrl.deposits = [pendingDeposit(PLAIN, "pi_ok")];
+  ctrl.intents["pi_ok"] = { status: "succeeded" };
+
+  const { reconcileDepositSettlements } = await load();
+  await reconcileDepositSettlements();
+
+  assert.equal(ctrl.effectsCalls.length, 1);
+  assert.equal(ctrl.effectsCalls[0].depositId, PLAIN);
+  assert.deepEqual(
+    ctrl.effectsSawTransaction,
+    [true],
+    "a sourcing case that outlived a failed settlement would show a request being sourced for money that never arrived",
+  );
+});
+
+test("losing the flip race applies NO effects and is not counted as settled", async () => {
+  enable();
+  ctrl.flipCount = 0; // a concurrent webhook got there first
+  ctrl.deposits = [pendingDeposit(PLAIN, "pi_ok")];
+  ctrl.intents["pi_ok"] = { status: "succeeded" };
+
+  const { reconcileDepositSettlements } = await load();
+  const res = await reconcileDepositSettlements();
+
+  assert.equal(res.settled, 0);
+  assert.equal(res.unsettled, 1);
+  assert.equal(ctrl.effectsCalls.length, 0, "the winner applied its own effects — applying them twice would double-open");
+  assert.equal(ctrl.exceptions.length, 0, "and there is no webhook gap to report: the webhook is what beat us");
 });
