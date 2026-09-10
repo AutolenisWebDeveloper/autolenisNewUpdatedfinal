@@ -22,6 +22,7 @@ interface Ctrl {
   requestUpdates: Array<Record<string, unknown>>;
   requestUpdateCount: number;
   caseCalls: Array<{ requestId: string }>;
+  planElections: Array<Record<string, unknown>>;
 }
 let ctrl: Ctrl;
 
@@ -36,6 +37,18 @@ mock.module("@/lib/services/sourcing/sourcing-case.service", {
     openSourcingCase: async (requestId: string) => {
       ctrl.caseCalls.push({ requestId });
       return { caseId: "case_1", created: true };
+    },
+  },
+});
+
+// §23.1 — settlement binds the plan to the request. The rule itself is pinned in
+// `lib/services/buyer/__tests__/plan-snapshot.test.ts`; here it is recorded so the
+// settlement effect's own contract stays legible.
+mock.module("@/lib/services/buyer/plan-snapshot.service", {
+  namedExports: {
+    recordRequestPlanElection: async (input: Record<string, unknown>) => {
+      ctrl.planElections.push(input);
+      return { snapshot: null, boundSnapshotId: "snap_1" };
     },
   },
 });
@@ -57,6 +70,7 @@ function tx() {
     deposit: {
       updateMany: async (args: Record<string, unknown>) => { ctrl.depositUpdates.push(args); return { count: 1 }; },
     },
+    buyer: { findUnique: async () => ({ plan: "PREMIUM" }) },
     vehicleRequest: {
       findFirst: async () => ctrl.openRequest,
       updateMany: async (args: Record<string, unknown>) => {
@@ -72,7 +86,7 @@ function env(): Record<string, string | undefined> {
 }
 
 beforeEach(() => {
-  ctrl = { openRequest: null, depositUpdates: [], requestUpdates: [], requestUpdateCount: 1, caseCalls: [] };
+  ctrl = { openRequest: null, depositUpdates: [], requestUpdates: [], requestUpdateCount: 1, caseCalls: [], planElections: [] };
   delete env().SOURCING_CASE_REPLACES_AUCTION_LAUNCH;
   assert.equal(env().SOURCING_CASE_REPLACES_AUCTION_LAUNCH, undefined);
 });
@@ -193,4 +207,45 @@ test("no request anywhere means nothing is invented — and the legacy path stil
   assert.equal(res.sourcingCaseId, null);
   assert.equal(ctrl.caseCalls.length, 0, "attaching money to an arbitrary request is worse than not attaching it");
   assert.equal(res.runLegacyAuctionPath, true);
+});
+
+
+// ── §23.1 / §23.5 — the plan binds to the request at settlement ──────────────
+
+test("settlement binds a plan snapshot to the request, with what actually settled", async () => {
+  const { applySettlementEffects } = await load();
+  const res = await applySettlementEffects({ ...input, settledDepositCents: 9900 }, tx());
+
+  assert.equal(res.planSnapshotId, "snap_1");
+  assert.equal(ctrl.planElections.length, 1);
+  const e = ctrl.planElections[0]!;
+  assert.equal(e.vehicleRequestId, "vr_1");
+  assert.equal(e.touchpoint, "settlement", "§23.2a touchpoint 1 — the receipt line");
+  assert.equal(e.actor, "system:settlement");
+  assert.equal(e.settledDepositCents, 9900, "fact, not a projection");
+  assert.equal(e.settledPremiumCents, 0, "§23.4: $499 in one transaction is not offered");
+});
+
+// PAY-57. The snapshot records the ELECTION. Whether the buyer is entitled to Premium is
+// a different question with a different answer, read from the ledger — and at the
+// payment gate the $400 has not settled, so the answer is Standard.
+test("electing PREMIUM at settlement does not make the buyer Premium", async () => {
+  const { applySettlementEffects } = await load();
+  await applySettlementEffects(input, tx());
+
+  assert.equal(ctrl.planElections[0]!.plan, "PREMIUM", "the buyer's default is recorded as the election");
+  assert.equal(
+    ctrl.planElections[0]!.settledPremiumCents,
+    0,
+    "and nothing of the balance has settled — entitlement reads the ledger, not this row",
+  );
+});
+
+test("no request means no snapshot — nothing to bind an election to", async () => {
+  ctrl.openRequest = null;
+  const { applySettlementEffects } = await load();
+  const res = await applySettlementEffects({ ...input, vehicleRequestId: null }, tx());
+
+  assert.equal(res.planSnapshotId, null);
+  assert.equal(ctrl.planElections.length, 0);
 });

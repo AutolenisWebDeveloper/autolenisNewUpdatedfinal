@@ -49,8 +49,32 @@ mock.module("@prisma/client", {
   namedExports: { Prisma: { PrismaClientKnownRequestError: class extends Error {} } },
 });
 mock.module("@/lib/prisma", {
-  namedExports: { prisma: { serviceFeePayment: { findUnique: async () => null, create: async () => ({}) } } },
+  namedExports: {
+    prisma: {
+      serviceFeePayment: { findUnique: async () => null, create: async () => ({}) },
+      // The fee is per DEAL and the plan rules are per REQUEST, so pricing crosses
+      // this one join.
+      deal: { findUnique: async () => ({ vehicleRequestId: "vr_1" }) },
+    },
+  },
 });
+// PAY-52: the fee amount and the recorded credit are now the LEDGER's answer, not a
+// constant — $499 less whatever $99 actually settled and was not refunded, disputed or
+// charged back. The rule itself is pinned in
+// `lib/services/plan/__tests__/upgrade-window.test.ts`; here it is held to the ordinary
+// case so these tests stay about the duplicate-charge guard.
+mock.module("@/lib/services/plan/upgrade-window.service", {
+  namedExports: {
+    quotePremiumBalance: async () => ({
+      grossCents: 49900,
+      creditCents: 9900,
+      dueCents: 40000,
+      creditBasis: "settled_deposit",
+      explanation: "test quote",
+    }),
+  },
+});
+
 mock.module("@/lib/services/deal/deal.service", {
   namedExports: { advanceDealStatus: async () => {} },
 });
@@ -193,10 +217,23 @@ test("a first-time payer still gets a client secret", async () => {
   assert.equal(ctrl.createCalls.length, 1);
 });
 
-test("the deal-scoped idempotency key is preserved", async () => {
+// The key now carries the AMOUNT as well as the deal.
+//
+// Stripe holds an idempotency key for 24 hours and REJECTS a replay whose parameters
+// differ. So a key scoped to the deal alone fails outright for the one buyer whose price
+// legitimately changes inside that window — someone whose $99 is charged back between
+// two attempts, where §23.2 says Premium becomes $499 gross. With the amount in the key,
+// the same price still de-duplicates concurrent clicks and a changed price mints a new
+// intent instead of erroring.
+test("the idempotency key is scoped to the deal AND the amount", async () => {
   const createFeePaymentIntent = await load();
   await createFeePaymentIntent(DEAL_ID, BUYER_ID);
-  assert.equal(ctrl.createCalls[0].opts.idempotencyKey, `concierge-fee-${DEAL_ID}`);
+  assert.equal(ctrl.createCalls[0].opts.idempotencyKey, `concierge-fee-${DEAL_ID}-40000`);
+  assert.equal(
+    ctrl.createCalls[0].params.amount,
+    40000,
+    "and the amount is the quote's, not a constant",
+  );
 });
 
 test("the PI still carries the metadata the webhook resolves on", async () => {

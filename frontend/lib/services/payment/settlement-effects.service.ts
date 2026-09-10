@@ -30,6 +30,7 @@ import type { Prisma } from "@prisma/client";
 import { openSourcingCase } from "@/lib/services/sourcing/sourcing-case.service";
 import { sourcingCaseReplacesAuctionLaunch } from "@/lib/payments/settlement-flags";
 import { OPEN_REQUEST_STATUSES } from "@/lib/services/vehicle-request/open-request.service";
+import { recordRequestPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
 
 type Tx = Prisma.TransactionClient;
 
@@ -52,6 +53,8 @@ export interface SettlementEffectsInput {
   buyerId: string;
   /** From `deposits.vehicle_request_id`, when the intent was created with one. */
   vehicleRequestId: string | null;
+  /** What just settled. Recorded on the plan snapshot as fact, never as a projection. */
+  settledDepositCents?: number | null;
 }
 
 export interface SettlementEffectsResult {
@@ -59,6 +62,8 @@ export interface SettlementEffectsResult {
   sourcingCaseId: string | null;
   /** True when this call moved the request into ACTIVE_SOURCING. */
   unlocked: boolean;
+  /** The plan snapshot this settlement bound to the request (§23.1, §23.5). */
+  planSnapshotId: string | null;
   /**
    * True when the caller must ALSO run the legacy auction create/launch/invite, because
    * the flag is off. The caller does it rather than this module, because launching and
@@ -121,6 +126,7 @@ export async function applySettlementEffects(
       vehicleRequestId: null,
       sourcingCaseId: null,
       unlocked: false,
+      planSnapshotId: null,
       runLegacyAuctionPath: !flagOn,
     };
   }
@@ -164,10 +170,44 @@ export async function applySettlementEffects(
   // the case were gated too, the flip would be a cutover with no history behind it.
   const { caseId } = await openSourcingCase(requestId, tx);
 
+  // BIND THE PLAN TO THE REQUEST (§23.1, §23.5, PAY-56b, PAY-62).
+  //
+  // This is the request's first binding snapshot, and settlement is the right moment
+  // for it: §23.1 says "a new request means a new $99 and a fresh election", and this
+  // is where that $99 becomes real. `buyers.plan` is read as what §23.1 calls it — the
+  // buyer's DEFAULT — and recorded as the election for THIS request, with the amount
+  // that actually settled written alongside it.
+  //
+  // It carries touchpoint "settlement", which is §23.2a touchpoint 1: "a single line on
+  // the receipt and the sourcing-started screen". Recording the touchpoint is PAY-77 —
+  // "stamp the converting touchpoint onto the plan snapshot" — and this is the first
+  // one, whether or not it converts anything.
+  //
+  // Electing PREMIUM here does NOT make the buyer Premium. The snapshot is the
+  // ELECTION; `entitledPlanForRequest` reads the ledger for the ENTITLEMENT, and the
+  // $400 has not settled. PAY-57 is the whole reason those are two functions.
+  const buyer = await tx.buyer.findUnique({ where: { id: input.buyerId }, select: { plan: true } });
+  const { boundSnapshotId } = await recordRequestPlanElection(
+    {
+      buyerId: input.buyerId,
+      vehicleRequestId: requestId,
+      plan: buyer?.plan ?? "STANDARD",
+      touchpoint: "settlement",
+      actor: "system:settlement",
+      reason: "the $99 settled — §23.1 election bound to this request",
+      settledDepositCents: input.settledDepositCents ?? null,
+      // Nothing of the Premium balance has settled at the payment gate, by
+      // construction: §23.4 rules that "$499 in one transaction" is not offered.
+      settledPremiumCents: 0,
+    },
+    tx,
+  );
+
   return {
     vehicleRequestId: requestId,
     sourcingCaseId: caseId,
     unlocked: count > 0,
+    planSnapshotId: boundSnapshotId,
     runLegacyAuctionPath: !flagOn,
   };
 }

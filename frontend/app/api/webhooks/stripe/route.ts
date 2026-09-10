@@ -254,6 +254,7 @@ export async function POST(request: NextRequest) {
                 depositId: deposit.id,
                 buyerId: deposit.buyerId,
                 vehicleRequestId: deposit.vehicleRequestId,
+                settledDepositCents: deposit.amountCents,
               },
               tx,
             );

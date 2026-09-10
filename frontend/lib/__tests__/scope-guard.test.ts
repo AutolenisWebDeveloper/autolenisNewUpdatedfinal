@@ -63,7 +63,16 @@ const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string
     // with nothing writing it; this is the writer. It is a new directory rather than a
     // home inside `payment/` because Phase 5 builds the ladder, the band expansion and
     // the readiness checklist on top of this record, and they are sourcing, not payment.
-    serviceDirs: ["sourcing"],
+    serviceDirs: [
+      "sourcing",
+      // `plan` — §23.2's upgrade window and the $499-less-$99 quote, computed from the
+      // ledger of settled payments rather than from the `buyers.plan` flag. A directory
+      // rather than a home inside `payment/` because §23 is a product model — election
+      // versus entitlement, the window, downgrade and re-upgrade — that Phase 8's
+      // clearance close and Phase 10's cancellation both read. The parity ledger names
+      // `lib/services/plan/__tests__/upgrade-window.test.ts` for exactly this.
+      "plan",
+    ],
     libDirs: [],
     // Phase 3 adds no TABLE. Its one migration adds an enum LABEL —
     // `DepositStatus.DISPUTED` (control/E26-10) — which this guard does not track and
