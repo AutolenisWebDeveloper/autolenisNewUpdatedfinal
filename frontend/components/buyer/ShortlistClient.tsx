@@ -16,7 +16,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Trash2, ArrowRight, Car, Search } from "lucide-react";
+import { Trash2, ArrowRight, Car, Search, MapPin, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MAX_SHORTLIST_ITEMS, INVENTORY_LANES } from "@/lib/constants";
@@ -38,6 +38,15 @@ interface ShortlistVehicle {
   readinessState: string;
   /** Pre-filled Vehicle Request for an unavailable vehicle; null when it is still available. */
   similarRequestHref: string | null;
+  /**
+   * §22a (Phase 4): distance and freshness on every card.
+   *
+   * `distanceMiles` is a SNAPSHOT of how far the car was when the buyer saved it. It is null
+   * on entries that predate the column being written — all 15 in production — until the
+   * backfill on the geocode cron reaches them, and null means "we do not know", never "near".
+   */
+  distanceMiles: number | null;
+  freshness: "FRESH" | "STALE" | "EXPIRED";
 }
 
 interface ShortlistClientProps {
@@ -224,7 +233,27 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
                           {item.bodyType && (
                             <span className="text-xs text-slate-400">{item.bodyType}</span>
                           )}
+                          {/* §22a: distance on every card. Null is "we do not know" and says
+                              so — a blank would read as "near", which is the assumption the
+                              gate refuses to make. */}
+                          <span className="text-xs text-slate-500 inline-flex items-center gap-1" data-testid={`shortlist-distance-${i}`}>
+                            <MapPin size={10} aria-hidden="true" />
+                            {item.distanceMiles != null ? `${item.distanceMiles} mi away` : "distance unknown"}
+                          </span>
                         </div>
+                        {/* Freshness, worded as a fact about the listing rather than a warning
+                            about the buyer's choice. STALE keeps the car in the auction;
+                            EXPIRED is why it will be dropped when the request is built. */}
+                        {item.freshness === "STALE" && (
+                          <p className="text-xs text-amber-700 mt-1 inline-flex items-center gap-1" data-testid={`shortlist-stale-${i}`}>
+                            <Clock size={10} aria-hidden="true" /> Not seen on the market this week
+                          </p>
+                        )}
+                        {item.freshness === "EXPIRED" && (
+                          <p className="text-xs text-slate-500 mt-1 inline-flex items-center gap-1" data-testid={`shortlist-expired-${i}`}>
+                            <Clock size={10} aria-hidden="true" /> Not seen in over 30 days — we&rsquo;ll check before your auction opens
+                          </p>
+                        )}
                       </div>
                     </Link>
 

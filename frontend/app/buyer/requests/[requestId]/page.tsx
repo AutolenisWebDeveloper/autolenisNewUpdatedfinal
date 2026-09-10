@@ -9,6 +9,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, RefreshCw } from "lucide-react";
+import RequestElectionsClient from "@/components/buyer/RequestElectionsClient";
+import { OPEN_REQUEST_STATUSES } from "@/lib/services/vehicle-request/open-request.service";
 import { toBuyerLabel } from "@/lib/services/vehicle-request/vehicle-request.service";
 import { parseRequestNotes } from "@/lib/services/vehicle-request/notes-parser";
 import {
@@ -58,6 +60,16 @@ export default async function RequestDetailPage({ params }: Props) {
           {toBuyerLabel(req.status)}
         </Badge>
       </div>
+
+      {/* Stage 4 elections (§4c, §5a, §6.2). This is the destination ELIGIBILITY_STEP sends a
+          buyer to when the deposit is refused with ELECTIONS_REQUIRED, so the control has to be
+          here — a refusal that names a page with nothing on it is a dead end. */}
+      <RequestElectionsClient
+        requestId={req.id}
+        coBuyerElected={req.coBuyerElected}
+        tradeElected={req.tradeElected}
+        editable={OPEN_REQUEST_STATUSES.includes(req.status)}
+      />
 
       {/* Request details */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="request-details">

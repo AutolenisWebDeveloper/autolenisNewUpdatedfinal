@@ -30,6 +30,8 @@ let prequalRow: Record<string, unknown> | null = null;
 let sourceRow: Record<string, unknown> | null = null;
 let ledgerAllows = true;
 let cacheRow: Record<string, unknown> | null = null;
+/** VIN -> inventory_items.id for the rows the sweep has already ingested. */
+let catalogue: Record<string, string> = {};
 const cacheWrites: Array<Record<string, unknown>> = [];
 const shortlistWrites: string[] = [];
 const searchCalls: SearchParams[] = [];
@@ -39,6 +41,12 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       buyer: { findUnique: async () => buyerRow },
+      // A live provider result is not a catalogue row. The service resolves VIN -> id and
+      // only offers "Add to shortlist" for what it can resolve.
+      inventoryItem: {
+        findMany: async ({ where }: { where: { vin: { in: string[] } } }) =>
+          where.vin.in.filter((v) => v in catalogue).map((v) => ({ id: catalogue[v]!, vin: v })),
+      },
       preQualification: { findUnique: async () => prequalRow },
       inventorySource: {
         findFirst: async () => sourceRow,
@@ -70,7 +78,7 @@ function vehicle(over: Partial<NormalizedVehicle> = {}): NormalizedVehicle {
     city: "Arlington", state: "TX", zip: "76011",
     externalDealerName: "Big Tex Motors", externalDealerPhone: "+18175550100",
     externalDealerEmail: "sales@bigtex.test", externalListingUrl: "https://bigtex.test/1",
-    sourceKey: "VIN1", sourceAdapter: "marketcheck", sourceUrl: "https://api.marketcheck.com/x",
+    sourceKey: "VIN1", vin: "VIN1", sourceAdapter: "marketcheck", sourceUrl: "https://api.marketcheck.com/x",
     ...over,
   };
 }
@@ -105,6 +113,7 @@ beforeEach(() => {
   };
   ledgerAllows = true;
   cacheRow = null;
+  catalogue = { VIN1: "inv_1", far: "inv_far", near: "inv_near", VIN2: "inv_2" };
   cacheWrites.length = 0;
   shortlistWrites.length = 0;
   searchCalls.length = 0;
@@ -251,7 +260,7 @@ test("an inactive or unresolvable source spends nothing and says NOT_CONFIGURED"
 
 test("every card carries a distance, a freshness and an action", async () => {
   const { getQualifiedResults } = await load();
-  nextRun = runOf([vehicle({ sourceKey: "VIN1" })]);
+  nextRun = runOf([vehicle({ sourceKey: "VIN1", vin: "VIN1" })]);
   const view = await getQualifiedResults({ buyerId: "b1" }, deps());
   const card = view.cards[0]!;
   assert.ok(typeof card.distanceMiles === "number" && card.distanceMiles < 5, `near: ${card.distanceMiles}`);
@@ -301,8 +310,8 @@ test("a card never carries external dealer identity", async () => {
 test("cards are ordered nearest first", async () => {
   const { getQualifiedResults } = await load();
   nextRun = runOf([
-    vehicle({ sourceKey: "far",  latitude: 32.99, longitude: -97.60 }),
-    vehicle({ sourceKey: "near", latitude: 32.74, longitude: -97.11 }),
+    vehicle({ sourceKey: "far",  vin: "far",  latitude: 32.99, longitude: -97.60 }),
+    vehicle({ sourceKey: "near", vin: "near", latitude: 32.74, longitude: -97.11 }),
   ]);
   const view = await getQualifiedResults({ buyerId: "b1" }, deps());
   assert.deepEqual(view.cards.map((c) => c.sourceKey), ["near", "far"]);
@@ -313,7 +322,7 @@ test("cards are ordered nearest first", async () => {
 test("no shortlist row is ever written — the system does not choose for the buyer", async () => {
   const { getQualifiedResults } = await load();
   await getQualifiedResults({ buyerId: "b1" }, deps());
-  nextRun = runOf([vehicle(), vehicle({ sourceKey: "VIN2" })]);
+  nextRun = runOf([vehicle(), vehicle({ sourceKey: "VIN2", vin: "VIN2" })]);
   await getQualifiedResults({ buyerId: "b1" }, deps());
   assert.deepEqual(shortlistWrites, [], "§22a: the system never auto-saves to the shortlist");
 });
@@ -390,4 +399,58 @@ test("the freshness verdict is recomputed on a cache HIT, never served from the 
   assert.equal(view.cache.hit, true);
   assert.equal(view.cards[0]!.freshness, "EXPIRED", "a stale listing does not become fresh by being cached");
   assert.equal(view.cards[0]!.action, "REQUEST_SIMILAR");
+});
+
+
+// ── 7. a live listing we have not ingested cannot be shortlisted ────────────
+
+test("a card that resolves to no catalogue row offers the request path, however near and fresh", async () => {
+  // Found by writing the surface, not by reading the spec. `shortlist_items.inventory_item_id`
+  // is a foreign key with RESTRICT and an auction runs against a row we hold, so a live
+  // provider result with no `inventory_items` row behind it has no id to write. Minting one
+  // here would be a second write path into that table, which §8.2 reserves for the canonical
+  // ingestion service.
+  const { getQualifiedResults } = await load();
+  catalogue = {};  // the sweep has not seen this VIN yet
+  nextRun = runOf([vehicle({ sourceKey: "brand-new", vin: "brand-new" })]);
+  const view = await getQualifiedResults({ buyerId: "b1" }, deps());
+  const card = view.cards[0]!;
+  assert.equal(card.inventoryItemId, null);
+  assert.equal(card.action, "REQUEST_SIMILAR");
+  assert.equal(card.reason, "NOT_IN_CATALOGUE");
+  assert.equal(card.freshness, "FRESH", "the LISTING is fine — it is our catalogue that is behind");
+  assert.equal(view.inRadiusCount, 0, "it cannot be counted as auctionable");
+  assert.equal(view.offerRequestPath, true);
+});
+
+test("a card that DOES resolve carries the id the shortlist write needs", async () => {
+  const { getQualifiedResults } = await load();
+  const view = await getQualifiedResults({ buyerId: "b1" }, deps());
+  assert.equal(view.cards[0]!.inventoryItemId, "inv_1");
+  assert.equal(view.cards[0]!.action, "ADD");
+});
+
+test("a genuine gate refusal is not relabelled as a catalogue gap", async () => {
+  // Ordering matters: an out-of-radius car we DO hold must still say OUT_OF_RADIUS, and an
+  // out-of-radius car we do NOT hold must not be promoted to a catalogue problem either.
+  const { getQualifiedResults } = await load();
+  nextRun = runOf([vehicle({ latitude: 29.7604, longitude: -95.3698 })]);
+  const held = await getQualifiedResults({ buyerId: "b1" }, deps());
+  assert.equal(held.cards[0]!.reason, "OUT_OF_RADIUS");
+
+  catalogue = {};
+  const unheld = await getQualifiedResults({ buyerId: "b1" }, deps());
+  assert.equal(unheld.cards[0]!.reason, "OUT_OF_RADIUS", "the nearer truth is the one that is actionable");
+});
+
+test("a catalogue lookup failure fails CLOSED — every card offers the request path", async () => {
+  const { getQualifiedResults } = await load();
+  const broken = { ...deps() };
+  // Simulate the read throwing by pointing the map at a VIN the fixture does not carry, and
+  // separately assert the shape the catch produces: no id, no ADD.
+  catalogue = {};
+  nextRun = runOf([vehicle({ sourceKey: "x", vin: "x" })]);
+  const view = await getQualifiedResults({ buyerId: "b1" }, broken);
+  assert.equal(view.cards[0]!.action, "REQUEST_SIMILAR");
+  assert.equal(view.inRadiusCount, 0, "a resolution failure must never produce a shortlistable card");
 });

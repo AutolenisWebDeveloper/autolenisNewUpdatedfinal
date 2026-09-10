@@ -100,6 +100,21 @@ export interface QualifiedCriteria {
 export interface QualifiedCard {
   sourceKey: string;
   vin?: string;
+  /**
+   * The `inventory_items` row this listing corresponds to, matched on VIN, or null when the
+   * sweep has not ingested it yet.
+   *
+   * PROPERTY 6, and it was found by writing the surface rather than by reading the spec. A
+   * live provider result is not a row in our catalogue: `shortlist_items.inventory_item_id`
+   * is a foreign key with RESTRICT, `auction_vehicles` points at the same table, and an
+   * auction is run against a listing we hold. So a card we cannot resolve to a row CANNOT be
+   * shortlisted, however near and fresh it is — it gets the request path instead, which is
+   * the honest offer: we will go and get that car rather than pretend we already have it.
+   *
+   * Minting the row here instead would be a second write path into `inventory_items`, which
+   * §8.2 reserves for the canonical ingestion service (match-then-mint), so it is not done.
+   */
+  inventoryItemId: string | null;
   year: number;
   make: string;
   model: string;
@@ -113,7 +128,8 @@ export interface QualifiedCard {
   distanceMiles: number | null;
   freshness: Freshness;
   action: ShortlistAction;
-  reason: GateReason;
+  /** `NOT_IN_CATALOGUE` is this service's own reason; the rest are the gate's. */
+  reason: GateReason | "NOT_IN_CATALOGUE";
   /** Provider staleness signals, surfaced because §22a puts freshness on every card. */
   daysOnLot?: number;
   providerLastSeenAt?: Date;
@@ -231,7 +247,13 @@ function lastSeenOf(v: NormalizedVehicle, fetchedAt: Date): Date {
   return v.providerLastSeenAt ?? fetchedAt;
 }
 
-function toCard(v: NormalizedVehicle, buyerCoords: LatLng | null, fetchedAt: Date, now: Date): QualifiedCard {
+function toCard(
+  v: NormalizedVehicle,
+  buyerCoords: LatLng | null,
+  fetchedAt: Date,
+  now: Date,
+  inventoryItemId: string | null,
+): QualifiedCard {
   const raw = distanceMilesBetween(buyerCoords, v.latitude, v.longitude);
   const distanceMiles = raw === null ? null : Math.round(raw * 10) / 10;
   const gate = shortlistGate(
@@ -247,17 +269,46 @@ function toCard(v: NormalizedVehicle, buyerCoords: LatLng | null, fetchedAt: Dat
     { hasZip: buyerCoords !== null },
     now,
   );
+  // A card we cannot resolve to a catalogue row is never shortlistable, whatever the gate
+  // says: there is no id to write, and inventing one would put a car into an auction that
+  // nothing else in the system knows about.
+  const unresolved = inventoryItemId === null;
+  const action = unresolved ? ("REQUEST_SIMILAR" as const) : gate.action;
+  const reason = unresolved && gate.action === "ADD" ? ("NOT_IN_CATALOGUE" as const) : gate.reason;
+
   return {
     sourceKey: v.sourceKey,
     vin: v.vin,
+    inventoryItemId,
     year: v.year, make: v.make, model: v.model, trim: v.trim,
     mileage: v.mileage, priceCents: v.priceCents, images: v.images,
     city: v.city, state: v.state,
     distanceMiles,
-    freshness: gate.freshness, action: gate.action, reason: gate.reason,
+    freshness: gate.freshness, action, reason,
     daysOnLot: v.daysOnLot,
     providerLastSeenAt: v.providerLastSeenAt,
   };
+}
+
+/**
+ * Which of these listings do we already hold? Matched on VIN, which is the vehicle identity
+ * key the whole ingestion pipeline uses. One query for the page, not one per card.
+ */
+async function resolveCatalogueIds(vehicles: NormalizedVehicle[]): Promise<Map<string, string>> {
+  const vins = [...new Set(vehicles.map((v) => v.vin).filter((v): v is string => !!v))];
+  if (vins.length === 0) return new Map();
+  try {
+    const rows = await prisma.inventoryItem.findMany({
+      where: { vin: { in: vins } },
+      select: { id: true, vin: true },
+    });
+    return new Map(rows.filter((r) => r.vin).map((r) => [r.vin as string, r.id]));
+  } catch (e) {
+    // Fail CLOSED: with no resolution every card offers the request path, which is a worse
+    // experience but never a broken shortlist write.
+    logger.warn("[qualified-results] catalogue resolution failed; every card falls back to the request path:", e);
+    return new Map();
+  }
 }
 
 /** JSON round-trips Dates to strings. A cache hit must rebuild them or freshness misreads. */
@@ -343,7 +394,8 @@ export async function getQualifiedResults(
       if (row && row.expiresAt && row.expiresAt > now) {
         // The gate is recomputed, never cached: freshness moves with the clock and the buyer's
         // location is not part of what was stored.
-        return render(reviveVehicles(row.result), coords, new Date(row.fetchedAt), now, {
+        const cachedVehicles = reviveVehicles(row.result);
+        return render(cachedVehicles, coords, new Date(row.fetchedAt), now, await resolveCatalogueIds(cachedVehicles), {
           ...base,
           provider: { outcome: "CACHED", apiCallsUsed: 0, numFound: row.numFound },
           cache: { enabled: true, hit: true, key },
@@ -445,7 +497,7 @@ export async function getQualifiedResults(
     }
   }
 
-  return render(run.vehicles, coords, run.fetchedAt ?? now, now, {
+  return render(run.vehicles, coords, run.fetchedAt ?? now, now, await resolveCatalogueIds(run.vehicles), {
     ...base, marketKnown, provider: providerFacts, cache: cacheFacts,
   });
 }
@@ -455,9 +507,10 @@ function render(
   coords: LatLng,
   fetchedAt: Date,
   now: Date,
+  catalogueIds: Map<string, string>,
   over: Partial<QualifiedResultsView> & { provider: QualifiedResultsView["provider"]; cache: QualifiedResultsView["cache"] },
 ): QualifiedResultsView {
-  const cards = vehicles.map((v) => toCard(v, coords, fetchedAt, now));
+  const cards = vehicles.map((v) => toCard(v, coords, fetchedAt, now, (v.vin && catalogueIds.get(v.vin)) || null));
   // Nearest first. Unplaceable cars sort last — present, just not rankable.
   cards.sort((a, b) => (a.distanceMiles ?? Number.POSITIVE_INFINITY) - (b.distanceMiles ?? Number.POSITIVE_INFINITY));
   const inRadiusCount = cards.reduce((n, c) => n + (c.action === "ADD" ? 1 : 0), 0);
