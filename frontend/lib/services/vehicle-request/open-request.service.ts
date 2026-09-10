@@ -133,6 +133,12 @@ export type MergeableRequestData = Partial<
     | "consentSurface"
     | "consentIp"
     | "consentIpUnavailableReason"
+    // §5a's Stage 4 elections (Phase 4). Both are THREE-STATE booleans and the merge policy
+    // above already handles them correctly: `undefined` (the question was not asked on this
+    // form) is skipped, and an answer already held is never overwritten — including `false`,
+    // which is a recorded "no" and not an empty field.
+    | "coBuyerElected"
+    | "tradeElected"
   >
 >;
 

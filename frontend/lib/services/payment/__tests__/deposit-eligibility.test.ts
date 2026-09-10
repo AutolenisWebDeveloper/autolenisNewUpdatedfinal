@@ -37,6 +37,10 @@ function facts(over: Partial<EligibilityFacts> = {}): EligibilityFacts {
       makePreference: "Toyota",
       modelPreference: null,
       maxBudgetCents: 3_500_000,
+      // §5a's Stage 4 elections. The happy fixture answers both — including "no" to
+      // both, which is a complete answer.
+      coBuyerElected: false,
+      tradeElected: false,
     },
     otherOpenRequestIds: [],
     disclosuresAcceptedAt: PAST,
@@ -160,4 +164,41 @@ test("the co-buyer/trade elections clause is NOT checked here — it moved to Ph
       "and it must not be added here inert either, because a predicate that always passes " +
       "cannot be told apart from a missing one",
   );
+});
+
+
+// ── §5a: co-buyer and trade elections RECORDED (Phase 4) ────────────────────
+
+test("an unanswered election is named, and 'no' is a complete answer", () => {
+  // RECORDED, not true. A buyer buying alone with nothing to trade answers no twice and
+  // passes. NULL is the unasked state: both columns are nullable with no default precisely
+  // so a buyer who was never asked cannot be mistaken for one who declined.
+  const both = checkPaymentEligibility(facts({ request: { ...facts().request, coBuyerElected: null, tradeElected: null } }), INTENT);
+  assert.equal(both.eligible, false);
+  assert.equal(both.eligible === false && both.code, "ELECTIONS_REQUIRED");
+  assert.match(both.eligible === false ? both.missing : "", /co-buyer/);
+  assert.match(both.eligible === false ? both.missing : "", /trade-in/);
+
+  const tradeOnly = checkPaymentEligibility(facts({ request: { ...facts().request, coBuyerElected: true, tradeElected: null } }), INTENT);
+  assert.equal(tradeOnly.eligible === false && tradeOnly.code, "ELECTIONS_REQUIRED");
+  assert.equal(tradeOnly.eligible === false && tradeOnly.missing, "trade-in");
+
+  const declinedBoth = checkPaymentEligibility(facts({ request: { ...facts().request, coBuyerElected: false, tradeElected: false } }), INTENT);
+  assert.equal(declinedBoth.eligible, true, "'no' twice is a recorded answer, not a missing one");
+});
+
+test("the elections gate runs AFTER the criteria gate and BEFORE the request-conflict gate", () => {
+  // Order is the requirement: the first thing a buyer is told to fix must be the thing that
+  // has to be fixed first. A buyer with no budget AND no elections hears about the budget.
+  const noBudget = checkPaymentEligibility(
+    facts({ request: { ...facts().request, maxBudgetCents: null, coBuyerElected: null, tradeElected: null } }),
+    INTENT,
+  );
+  assert.equal(noBudget.eligible === false && noBudget.code, "VEHICLE_CRITERIA_INCOMPLETE");
+
+  const alsoConflicted = checkPaymentEligibility(
+    facts({ request: { ...facts().request, coBuyerElected: null, tradeElected: null }, otherOpenRequestIds: ["vr_2"] }),
+    INTENT,
+  );
+  assert.equal(alsoConflicted.eligible === false && alsoConflicted.code, "ELECTIONS_REQUIRED");
 });

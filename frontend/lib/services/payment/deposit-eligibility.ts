@@ -51,6 +51,7 @@ export type EligibilityFailureCode =
   | "LOCATION_REQUIRED"
   | "PREQUAL_REQUIRED"
   | "VEHICLE_CRITERIA_INCOMPLETE"
+  | "ELECTIONS_REQUIRED"
   | "REQUEST_CONFLICT"
   | "DISCLOSURE_REQUIRED";
 
@@ -74,6 +75,14 @@ export interface EligibilityFacts {
     makePreference: string | null;
     modelPreference: string | null;
     maxBudgetCents: number | null;
+    /**
+     * §5a's "co-buyer and trade elections recorded". THREE-STATE, and that is the whole
+     * point: `null` is "we have not asked", `false` is "the buyer said no". A boolean
+     * with a default would record every existing buyer as having answered a question
+     * nobody put to them.
+     */
+    coBuyerElected: boolean | null;
+    tradeElected: boolean | null;
   };
   /** Open Vehicle Requests for this buyer OTHER than the one being paid for. */
   otherOpenRequestIds: string[];
@@ -207,7 +216,31 @@ export function checkPaymentEligibility(
     );
   }
 
-  // 6. No conflicting open request.
+  // 6. Both Stage 4 elections recorded.
+  //
+  // §5a requires the eligibility recheck to confirm "co-buyer and trade elections
+  // recorded" — RECORDED, not true. A buyer buying alone with nothing to trade answers
+  // "no" twice and passes; a buyer who was never asked does not, because the answer
+  // changes who signs and what the deal is worth, and discovering it after the money has
+  // moved is how a deal stalls at e-sign with a required signer nobody collected.
+  //
+  // NULL is the unasked state. `co_buyer_elected` shipped with the Phase 1 wave and
+  // `trade_elected` with 20261112000000; both are nullable with no default for exactly
+  // this reason.
+  const missingElections = [
+    facts.request.coBuyerElected === null || facts.request.coBuyerElected === undefined ? "co-buyer" : null,
+    facts.request.tradeElected === null || facts.request.tradeElected === undefined ? "trade-in" : null,
+  ].filter(Boolean) as string[];
+  if (missingElections.length > 0) {
+    return fail(
+      "ELECTIONS_REQUIRED",
+      missingElections.join(", "),
+      `Tell us whether you have a ${missingElections.join(" and a ")} before paying — ` +
+        `both change who signs and what your deal is worth, and "no" is a perfectly good answer.`,
+    );
+  }
+
+  // 7. No conflicting open request.
   //
   // The database enforces one open request per buyer, so this is not the guard of last
   // resort — it exists so the buyer is TOLD, in the checkout, rather than meeting a
@@ -222,7 +255,7 @@ export function checkPaymentEligibility(
     );
   }
 
-  // 7. Acceptance of the payment and distance disclosures. INTENT gate only.
+  // 8. Acceptance of the payment and distance disclosures. INTENT gate only.
   if (opts.requireDisclosureAcceptance) {
     if (!facts.disclosuresAcceptedAt) {
       return fail(
@@ -332,6 +365,11 @@ export async function gatherAndCheckEligibility(input: {
         makePreference: true,
         modelPreference: true,
         maxBudgetCents: true,
+        // §5a elections. Narrowed like everything else here: an unnarrowed read raises
+        // P2022 in the window between an application deploy and its migration, and
+        // `trade_elected` is precisely such a column right now.
+        coBuyerElected: true,
+        tradeElected: true,
       },
     }),
     prisma.vehicleRequest.findMany({

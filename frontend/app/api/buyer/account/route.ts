@@ -5,6 +5,7 @@
 import { logger } from "@/lib/logger";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { anonymizeCoBuyersForBuyer } from "@/lib/services/buyer/co-buyer.service";
 import { createClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "@/lib/supabase";
 import { successResponse, errorResponse } from "@/lib/auth/api";
@@ -87,6 +88,13 @@ export async function DELETE() {
           purgedAt: new Date(),
         },
       });
+      // A co-buyer is a THIRD PARTY whose name, email, phone and address this buyer gave us.
+      // The hard-delete branch below removes them by cascade; this branch keeps the buyer row
+      // because a Deal, Deposit or Auction still points at it — and `deals.co_buyer_id` and
+      // `e_sign_envelopes.co_buyer_id` point at the co-buyer rows the same way, so deleting
+      // them would sever a retained deal's record of who signed it. They are anonymised
+      // exactly as the buyer is: the PII goes, the link and the signer flag stay.
+      await anonymizeCoBuyersForBuyer(buyer.id);
     } else {
       // No legal records — hard-delete the buyer row.
       // onDelete: Cascade in the schema removes buyer_preferences, saved_searches, etc.
