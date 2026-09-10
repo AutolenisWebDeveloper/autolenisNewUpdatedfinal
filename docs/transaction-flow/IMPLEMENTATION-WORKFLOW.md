@@ -508,7 +508,17 @@ pnpm exec prisma migrate resolve --applied 20261106000000_transaction_spine_enum
 pnpm exec prisma migrate resolve --applied 20261106000100_transaction_spine_foundation
 ```
 
-97 + 8 = **105**, which is the repository's migration-directory count (lock file excluded).
+97 + 8 = **105**, which was the repository's migration-directory count (lock file excluded) when
+this remedy was written.
+
+**CORRECTED 2026-09-10 (Phase 4).** 105 is no longer the current figure and reading it as one is
+how a verification passes for the wrong reason. Two further migrations landed after this remedy —
+`20261110000000_claim_token_purpose` and `20261111000000_deposit_status_disputed` — so production's
+ledger reads **107**, confirmed by the owner against `_prisma_migrations` on 2026-09-10. The
+repository carries **108** directories: the 107 plus Phase 4's
+`20261112000000_stage4_trade_election`, which is authored, proven and **not applied**. The arithmetic
+above is left as written because it is a true account of the eight-row remedy; it is not a standing
+assertion about the ledger's size.
 
 **`prisma migrate deploy` is NOT part of this remedy.** Because `resolve` only writes the ledger,
 `preflight.sql` is not a gate here — nothing is applied, so its two data-dependent preconditions
@@ -524,7 +534,9 @@ in exactly that shape from the 2026-08-31/09-01 reconciliation.
 `migration_name, started_at, finished_at, rolled_back_at, applied_steps_count` from
 `_prisma_migrations`, restricted to the eight names listed in §6.5a and ordered by `migration_name`.
 PASS is: **eight rows**, every `finished_at` set, every `rolled_back_at` NULL. Then
-`SELECT count(*) FROM _prisma_migrations` must read **105**.
+`SELECT count(*) FROM _prisma_migrations` must read **107** (corrected from 105 in Phase 4 — see the
+note in §6.5a; it becomes **108** once `20261112000000_stage4_trade_election` is applied, and not
+before).
 
 **Half 2 — the physical schema.** Both proof files, each in the sanctioned read-only shape, must
 report **zero** `MISSING` rows:
@@ -540,7 +552,8 @@ EXTENDED types plus `QueueOwnerRole`, but checks the other eight types CREATE'd 
 existence only. Because each `CREATE TYPE` in `20261106000100` sits behind its own
 `to_regtype(…) IS NULL` guard, a type that already exists with a partial label set has its CREATE
 skipped silently — no error, and no statement that could fail. Proved on a throwaway loopback
-PostgreSQL 16.13 built by applying all 105 migrations in order: against a database seeded with a
+PostgreSQL 16.13 built by applying all 105 migrations that existed at the time, in order: against a
+database seeded with a
 two-label `AuctionInvitationStatus`, `verify.sql` reports `TOTAL 399` and **passes**, while
 `enum-census.sql` reports 9 `MISSING` rows (8 labels plus the cardinality) out of `CHECKED 117`.
 Against a correctly built database both report zero `MISSING`.
@@ -1827,6 +1840,16 @@ bullets, §2-D7, §7.4, the `PAYMENT_WEBHOOK_MISSED` code and the JSON path in D
 and seven rows in the parity source tables with §10 regenerated from them. Its own hash is therefore
 new and is reported in the pull request rather than pinned here.
 
+**Re-verified at the close of Phase 4 (2026-09-10).** `sha256sum` over both governing files at the
+Phase 4 close commit returns the same two values recorded in §1 — `a8f68aef…bf62` for the Markdown
+and `8c268f91…ff89` for the HTML — so neither specification moved while this phase was implemented,
+and every §-citation in the Phase 4 record refers to the text §1 verified. This document itself DID
+change during Phase 4, deliberately and only where the phase was authorised to correct it: the
+stale ledger count in §6.5a/§6.5b (105 → 107, and 108 once Phase 4's migration is applied), the
+three MarketCheck Appendix rows §8.1 row 4 marks "re-verified", and the new §8.2 Phase 4 — AS BUILT
+section carrying the before → after capability map. Its own hash is therefore new and is reported in
+the phase report and the pull request rather than pinned here.
+
 **Not applicable to this phase, stated rather than skipped.** Production migration: this phase applies
 none and requires none to be applied. Its own merge, however, **is** gated on Phase 1's wave being
 applied and verified in both halves — see §8.1a.2 for why, and the phase report for which changes
@@ -1940,6 +1963,142 @@ fail without it.
 
 - **Owner-gated:** **§13-D8** (MarketCheck terms — gates the cache table and any rooftop minting) and **§13-D16** (approved-amount filtering on the buyer search).
 - **Rollback:** The adapter changes are additive fields and stricter parsing; reverting the commit restores the previous adapter. The cache table, if D8 permits it, is a pure read-through — dropping it degrades to live queries. No inventory row is deleted; the qualified-results service is new and unreferenced until its surface ships.
+
+#### Phase 4 — AS BUILT (2026-09-10)
+
+Implemented on `claude/txflow-04-inventory`. This section records how the phase was actually
+implemented where that differs from how it was planned. Everything below was executed and its
+output seen in the implementing session unless it is labelled NOT VERIFIED.
+
+##### What the phase found before it built anything
+
+Three things were true of production when this phase opened, and none of them was in the plan:
+
+1. **The daily sweep was failing every morning and the cron log said COMPLETED.**
+   `withCronRun` wrote COMPLETED whenever `work()` resolved, and the inventory sweep reports its
+   own failure *inside* a resolved result — so `classifyYield` correctly downgraded the run to
+   FAILED and the log then threw the verdict away. `detectFailedCrons` filters on
+   `CronJobLog.status` and therefore saw nothing to report. Same defect class as the 191-run
+   silent freeze, one layer up. Fixed: `withCronRun` takes an optional `assess` callback and
+   `assessSyncRun` classifies every outcome deliberately; a failed-by-assessment run keeps its
+   payload, because the diagnostic is the point.
+
+2. **ZIP 76011 — `inventory_sources.center_zip`, the market production actually sweeps — was not
+   in the static ZIP table.** `geocodeZip` falls back to a cache and then to Google, and with no
+   Google key provisioned it returned null. Every buyer in the served market therefore got
+   NEED_ZIP on the qualified-results view and NO_ZIP on every shortlist add, with no way forward.
+   Reproduced end to end against a real database by the new five-cap concurrency suite before it
+   was fixed. Added, with a test pinning that the configured market cannot silently become
+   unplaceable again. **The static table is the fallback, not the design**: provisioning
+   `GOOGLE_GEOCODING_API_KEY` is what stops the next market needing this edit.
+
+3. **A live provider result is not a row in our catalogue.** Found by writing the buyer surface,
+   not by reading the specification. `shortlist_items.inventory_item_id` is a foreign key with
+   RESTRICT and an auction runs against a listing we hold, so a qualified-results card the sweep
+   has not ingested has no id to write. The service resolves VIN → `inventory_items.id` in one
+   query and a card that resolves to nothing offers the request path instead — however near and
+   fresh it is. Minting the row there would be a second write path into `inventory_items`, which
+   this phase's own scope reserves for the canonical ingestion service.
+
+##### Before → after capability map
+
+Every route, control and workflow the batch touched, with a disposition. Counts reconcile: 24 in,
+24 out — 18 KEPT, 3 EXTENDED, 1 MOVED, 1 REGROUPED, 1 RETIRED-BY-REPLACEMENT, 0 REMOVED.
+
+| Capability | Disposition | Note |
+| --- | --- | --- |
+| `GET /api/buyer/search` — every filter (q, make, model, year, price, mileage, condition, body, transmission, drivetrain, fuel, features, sort, limit) | **KEPT** | all 14 unchanged |
+| `GET /api/buyer/search` — `hasLocalDealerInventory` empty-state probe | **KEPT** | unchanged |
+| `GET /api/buyer/search` — `radiusMiles` as a client-supplied **filter** | **REGROUPED** | it was applied twice (a bounding box in the WHERE, then `d !== null && d <= radius`) and silently dropped every listing with a null coordinate — which was all of them. Distance is now a label and a sort order; the 100-mile line is policy and decides the card's ACTION. The buyer can still sort by distance and every card shows its miles. NOT `REMOVED`: nothing a buyer could see or reach is gone. |
+| Buyer search UI — radius `<select>` | **REGROUPED** | replaced by a statement of the policy on the same surface. A control that no longer filters is a lie. |
+| Buyer search UI — "Shortlist" button | **EXTENDED** | now renders the server's `action`; out-of-radius/stale/unavailable/unplaceable cards offer "Find one like this", pre-filled |
+| `POST/GET/DELETE /api/buyer/shortlist` | **KEPT** | same routes, same codes; DELETE additionally accepts `itemId` |
+| `shortlist.service.addToShortlist` — throwing contract | **MOVED** | returns a result carrying the gate's reason code. A caller cannot turn `throw new Error("Shortlist limited to 5 items")` into `SHORTLIST_FULL` without matching on prose. |
+| `shortlist.service` — the UNGATED second writer | **RETIRED BY REPLACEMENT** | it applied the cap and nothing else, so a caller reaching it bypassed radius and freshness entirely. Its callers now reach the one gated writer. No capability is lost; a bypass is. |
+| Shortlist page — availability handling, activation gate, remove control | **KEPT** | unchanged |
+| Shortlist page — card content | **EXTENDED** | distance and freshness on every card |
+| Admin inventory search tool | **EXTENDED** | routed through `MarketCheckAdapter`; the apigee client is retired. Same inputs, same audit row, plus `providerOutcome` and a truthful FAILED status |
+| `MarketCheckAdapter.search` | **EXTENDED** | include flags, `mc_dealership` ids, `dealer.website`, radius rejection, 422 classification, throttle headers |
+| `runInventorySync` / the two inventory crons | **KEPT** | same schedule, same budget, plus a truthful cron log |
+| Stale-sweep dealer emails | **MOVED** | from the direct Resend rail to the §27 outbox dispatcher, with day-scoped idempotency and a registered state recheck. The retired call keyed on `Date.now()`, which is no idempotency at all |
+| `ensureAuctionVehicleFromRequest` | **EXTENDED** | writes `vehicleRequestId`; it read the request and discarded its id |
+| `sweepLineageOrphans` | **EXTENDED** | new `auctionVehicle` class and an `only` option |
+| `checkPaymentEligibility` — 7 existing gates | **KEPT** | order unchanged |
+| `checkPaymentEligibility` — `ELECTIONS_REQUIRED` | **NEW** | §5a's "co-buyer and trade elections recorded" |
+| Public wizard — the co-buyer and trade questions | **KEPT** | already asked; their answers now also reach the columns the deposit gate reads |
+| `submitTradeIn` (standalone trade tool) | **KEPT** | untouched; the Stage 4 packet shares its table |
+| Account deletion — hard and soft paths | **KEPT** | plus co-buyer anonymisation on the soft path |
+| Public catalogue and detail pages | **KEPT** | already gated in an earlier phase |
+| Buyer qualified-results view (QUAL) | **NEW** | |
+| Stage 4 elections surface | **NEW** | |
+
+##### Corrections to the Appendix's MarketCheck rows (§8.1 row 4: "Appendix (re-verified)")
+
+| # | Was | Now |
+| --- | --- | --- |
+| 2 | "PARTIAL (adapter) — never drops a listing over the configured radius" | **CORRECTED.** The adapter rejects `dist > radiusMiles` before `normalize()` and reports `outOfRadiusDropped` separately, so `rawListings` stays an honest count of what the provider sent |
+| 3 | "Which plan the production key is on: UNVERIFIED (§13-D8)" | **STILL UNVERIFIED**, and now consequential in a second place: §13-D8 also gates the criteria-hash cache, which is built and left OFF |
+| 5 | "Material adapter defect: reads `mc_rooftop_id`/`mc_dealer_id` from `listing.dealer`, where they do not exist; `dealer.website` discarded" | **CORRECTED.** Ids are read from `mc_dealership`, `dealer` and `mc_dealership` are merged as siblings, `dealer.website` is persisted and is the rooftop join key, and the unit fixture that encoded the wrong shape is re-fixtured to the live payload |
+
+##### Built, and where it lives
+
+| Item | Where |
+| --- | --- |
+| §9 adapter corrections | `lib/services/inventory/adapters/marketcheck.adapter.ts` |
+| Run-size anomaly → Ops exception; budget alert before the ceiling | `orchestrator.ts`, `inventory-budget-alert.service.ts` |
+| Cron truthfulness | `cron-monitor.service.ts` (`assess`), `orchestrator.assessSyncRun` |
+| Admin search tool through the adapter | `app/api/admin/inventory/search-tool/run/route.ts` |
+| Rooftop resolution on the provider's own ids | `listing-rooftop-resolution.service.ts` |
+| Live qualified results | `lib/services/inventory/qualified-results.service.ts`, `app/api/buyer/qualified-results/` |
+| One gated shortlist writer; distance written and backfilled | `lib/services/shortlist/shortlist.service.ts`, the geocode-backfill cron |
+| Candidate model and revalidation | `lib/services/shortlist/candidate.service.ts` |
+| Co-buyer capture | `lib/services/buyer/co-buyer.service.ts`, `app/api/buyer/requests/[requestId]/co-buyer/` |
+| Trade packet and its edit path | `lib/services/trade-in/trade-in.service.ts`, `app/api/buyer/requests/[requestId]/trade/` |
+| `ELECTIONS_REQUIRED` | `lib/services/payment/deposit-eligibility.ts` |
+| Buyer surfaces | `components/buyer/{RequestElectionsClient,QualifiedResultsClient,shortlist-copy}.tsx`, `BuyerSearchClient.tsx`, `ShortlistClient.tsx` |
+| The migration | `frontend/prisma/migrations/20261112000000_stage4_trade_election/` — **authored and proven, NOT applied** |
+| The catalogue purge | `docs/transaction-flow/phase-4-proof/catalogue-purge-{establish,delete}.sql` — **owner-run, not applied** |
+
+##### Deferred, with the reason — not silently dropped
+
+| Item | Why |
+| --- | --- |
+| **R58's over-ceiling flag** ("this is $X above your approved amount") | Owner ruling 2026-09-10: an assumed tax rate producing a number a buyer reads as real is a claim we cannot support. `revalidateCandidate` therefore also does not drop a candidate for a price rise — that would be the stronger version of the same unsupportable arithmetic |
+| **The criteria-hash cache** | §13-D8 (MarketCheck terms) is unanswered. Built, wired, and OFF behind `INVENTORY_QUERY_CACHE`, so the answer is a flag flip. It needs no migration: `inventory_query_cache` already exists in production's physical schema and had no readers and no writers |
+| **`CURRENT_PHASE` in the lineage registry** | Still 2. Raising it to 4 also activates the `deposit` and `auction` classes, whose deferral is the open owner ruling `control/L3-01`. Phase 4's own class is reachable without that bump via `sweepLineageOrphans({ only: ["auctionVehicle"], includeDeferred: true })` |
+| **"DRAFT until Stage 4 exit"** | Not built. §5a places the elections gate at the deposit, and `ELECTIONS_REQUIRED` implements it there. Forcing a request to stay DRAFT until the elections are answered would block the public intake funnel at a point no cited section asks for, and `abandonStaleDrafts` would then stamp completed requests abandoned at 14 days |
+| **`auction_vehicles.auction_id` is NOT NULL** | Reported, not worked around. A candidate row cannot exist before an auction does, and the auction is created at deposit settlement (Stage 5) — so at Stage 4 the SHORTLIST is the candidate set and `promoteShortlistToCandidates` materialises it the moment an auction exists. Making the column nullable is a schema change this phase was not scoped for |
+| **`SuppressionService.isSmsSuppressed` fails open** | Queued, not built, on the owner's explicit instruction: live TCPA exposure, its own batch |
+| **The `next` dependency-audit failure** | Two critical advisories (GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4), both patched in `>=16.3.3`. Pre-existing on `main`, which pins the same `16.2.9`; reported on the pull request rather than absorbed into a phase batch |
+
+##### Verification
+
+`pnpm exec tsc --noEmit` clean · `pnpm lint` 0 errors (127 warnings, the unchanged baseline) ·
+`pnpm test:all` **4267 tests, 0 failures** · `pnpm test:coverage-check` both invariants OK ·
+`pnpm build` compiled successfully · `pnpm test:concurrency` 5/5 against a real loopback
+PostgreSQL, including the five-cap trigger holding at exactly five under eight concurrent inserts
+across three rounds · `docs/transaction-flow/phase-4-proof/run-proof.sh` 8 steps exit 0 ·
+`catalogue-purge-rehearsal.sh` 11 steps exit 0.
+
+**NOT VERIFIED**, named rather than skipped: authenticated browser E2E (there is no legitimate
+non-production authenticated environment); `pnpm test:visual` and the Playwright buyer journey;
+**PostgreSQL 17.6** — every database proof ran on 16.13 and is reported DEGRADED, because this
+environment's network policy denies every postgresql.org host; the purge, the diagnostic and the
+migration against production, all of which are owner-run under the per-run protocol; and the live
+sweep's actual failure cause, which `sweep-failure-diagnostic.sql` query 2 settles.
+
+##### The live sweep failure, as far as the record can take it
+
+`calls_used_this_cycle` is month-to-date, not per-run, so "9 of 400" across ten daily runs is
+approximately one call per run — the walk dying on page 0 — not one run of nine. `last_run_status`
+is written from the adapter outcome *after* `classifyYield`, and the deployed adapter treats every
+422 as `NUM_FOUND_REACHED` with no error recorded, so a 422 on page 0 lands ZERO_RESULTS rather than
+FAILED. FAILED with nothing fetched therefore points **away** from a 422 and toward a non-transient,
+non-422 HTTP status — 400, 401, 403 or 404 — which that path does record verbatim. The 422
+classification shipped here makes the three 422 classes distinguishable from now on; it does not
+diagnose this failure retroactively, and the evidence says it is not one of them. Query 3 of the
+diagnostic settles the calls-per-run question from `inventory_sync_runs` rather than from arithmetic
+on a month counter.
 
 #### Phase 5 — Dealer sourcing, invitations, launch readiness, identity firewall
 - Sourcing case service (server-side 100→150→250 ladder; band-by-band expansion; buyer authorisation
