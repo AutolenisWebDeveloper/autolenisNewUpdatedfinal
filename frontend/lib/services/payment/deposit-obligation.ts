@@ -136,6 +136,30 @@ export type DepositObligation =
  * `FAILED` is INCLUDED, and that is the point of money-path defect 1: a row the old
  * behaviour pushed there on a decline still has a live intent at Stripe, and minting
  * a second intent for it is precisely the double-charge this module prevents.
+ *
+ * ─── THIS ARRAY IS A DEPLOY-ORDER CONSTRAINT. READ BEFORE ADDING A LABEL. ───
+ *
+ * Every string here is sent to PostgreSQL as an enum literal, in a READ predicate, on a
+ * path that runs for every buyer who opens checkout (see `findExistingDepositObligation`
+ * below and its three callers). A label that the deployed database's `DepositStatus`
+ * type does not yet contain makes that query raise `22P02 invalid_text_representation`
+ * — and because the predicate is unconditional, the failure is not scoped to rows in
+ * the new state. It is every checkout, immediately, for everyone.
+ *
+ * So adding a label here couples the application deploy to a migration: the migration
+ * must land FIRST, always, with no exceptions and no "it is additive so either order is
+ * fine". That reasoning is about writes. This is a read.
+ *
+ * `DISPUTED` is the worked example. Its migration
+ * (`prisma/migrations/20261111000000_deposit_status_disputed/`) originally documented
+ * itself as "additive and safe in either order" because its author reasoned only about
+ * which code writes the label. This line is why that was wrong; the correction and the
+ * full reasoning are in that directory's `ORDERING.md`.
+ *
+ * NOTHING CATCHES THIS FOR YOU. CI's migration job applies the chain to an EMPTY
+ * database, so the label always exists by the time any query runs there. The mismatch
+ * exists only in the window between a production deploy and a production migration,
+ * which is exactly the window no automated check in this repository looks at.
  */
 const OBLIGATION_BEARING = ["PENDING", "PAID", "FAILED", "DISPUTED"] as const;
 
