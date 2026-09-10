@@ -212,6 +212,56 @@ export function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult
   return "NOT_CONFIGURED";
 }
 
+/**
+ * Every provenance and location column an ingest writes, in one place.
+ *
+ * WHY A HELPER AND NOT THREE COPIES. The orchestrator has three write paths — VIN-upsert
+ * create, VIN-upsert update, and the no-VIN create — and this list was repeated verbatim in
+ * all three. That is the shape a field goes missing in: add a column, remember two of the
+ * three, and only the rows that took the forgotten path are wrong. Phase 4 adds seven fields
+ * at once, which makes the risk concrete rather than theoretical.
+ *
+ * Spread it; do not copy it.
+ */
+function provenanceFields(vehicle: NormalizedVehicle) {
+  return {
+    externalDealerName: vehicle.externalDealerName,
+    externalDealerPhone: vehicle.externalDealerPhone,
+    externalDealerCity: vehicle.externalDealerCity,
+    externalDealerState: vehicle.externalDealerState,
+    externalDealerStreet: vehicle.externalDealerStreet,
+    externalDealerZip: vehicle.externalDealerZip,
+    externalDealerEmail: vehicle.externalDealerEmail,
+    externalDealerType: vehicle.externalDealerType,
+    // Phase 4: the rooftop graph's strongest key. `DealerRooftop.websiteHost` is @unique and
+    // `dealer_rooftops` carries no phone or email column at all, so this is THE join key —
+    // and it was discarded at the adapter's type boundary until now.
+    externalDealerWebsite: vehicle.externalDealerWebsite,
+    // Four distinct identifier spaces, not four names for one. Only `mcRooftopId` is the
+    // rooftop-level key; `mcWebsiteId` is what the provider calls `dealer.id`.
+    mcRooftopId: vehicle.mcRooftopId,
+    mcDealerId: vehicle.mcDealerId,
+    mcLocationId: vehicle.mcLocationId,
+    mcWebsiteId: vehicle.mcWebsiteId,
+    mcCategory: vehicle.mcCategory,
+    // Phase 4: the listing-VERSION key, the provider's own freshness clock, and the
+    // provider's default staleness metric. `providerLastSeenAt` is what the 7-day note and
+    // the 30-day shortlist block should read — `lastSeenAt` records when OUR sweep last ran,
+    // and the two diverge exactly when a sweep stops, which is the case those rules exist for.
+    listingId: vehicle.listingId,
+    providerLastSeenAt: vehicle.providerLastSeenAt,
+    daysOnLot: vehicle.daysOnLot,
+    // The item's OWN geography. Declared since the model was written, never populated —
+    // so distance was NULL on every row and the public ZIP+radius filter matched nothing.
+    city: vehicle.city,
+    state: vehicle.state,
+    zip: vehicle.zip,
+    latitude: vehicle.latitude,
+    longitude: vehicle.longitude,
+    externalListingUrl: vehicle.externalListingUrl,
+  };
+}
+
 export async function runInventorySync(params: SearchParams = {}, mode: "full" | "priority" = "full"): Promise<OrchestratorRunResult> {
   const startedAt = new Date();
 
@@ -350,24 +400,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           lastSeenAt: new Date(),
           sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
           priceHistory,
-          externalDealerName: vehicle.externalDealerName,
-          externalDealerPhone: vehicle.externalDealerPhone,
-          externalDealerCity: vehicle.externalDealerCity,
-          externalDealerState: vehicle.externalDealerState,
-          externalDealerStreet: vehicle.externalDealerStreet,
-          externalDealerZip: vehicle.externalDealerZip,
-          externalDealerEmail: vehicle.externalDealerEmail,
-          externalDealerType: vehicle.externalDealerType,
-          mcRooftopId: vehicle.mcRooftopId,
-          mcDealerId: vehicle.mcDealerId,
-          // The item's OWN geography. Declared since the model was written, never populated —
-          // so distance was NULL on every row and the public ZIP+radius filter matched nothing.
-          city: vehicle.city,
-          state: vehicle.state,
-          zip: vehicle.zip,
-          latitude: vehicle.latitude,
-          longitude: vehicle.longitude,
-          externalListingUrl: vehicle.externalListingUrl,
+          ...provenanceFields(vehicle),
         },
         update: {
           priceCents: vehicle.priceCents,
@@ -381,22 +414,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           // Refresh the dealer object on every sighting. A rooftop that moves, corrects its
           // address, or changes hands would otherwise keep its first-seen coordinates forever,
           // and every distance shown for its cars would stay quietly wrong.
-          externalDealerName: vehicle.externalDealerName,
-          externalDealerPhone: vehicle.externalDealerPhone,
-          externalDealerCity: vehicle.externalDealerCity,
-          externalDealerState: vehicle.externalDealerState,
-          externalDealerStreet: vehicle.externalDealerStreet,
-          externalDealerZip: vehicle.externalDealerZip,
-          externalDealerEmail: vehicle.externalDealerEmail,
-          externalDealerType: vehicle.externalDealerType,
-          mcRooftopId: vehicle.mcRooftopId,
-          mcDealerId: vehicle.mcDealerId,
-          city: vehicle.city,
-          state: vehicle.state,
-          zip: vehicle.zip,
-          latitude: vehicle.latitude,
-          longitude: vehicle.longitude,
-          externalListingUrl: vehicle.externalListingUrl,
+          ...provenanceFields(vehicle),
         },
         // Narrowed: an unnarrowed upsert returns every declared column and raises P2022 while
         // this migration is unapplied — which would abort ingestion outright.
@@ -420,22 +438,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           lastSeenAt: new Date(),
           sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
           priceHistory: [{ price: vehicle.priceCents, date: new Date().toISOString() }],
-          externalDealerName: vehicle.externalDealerName,
-          externalDealerPhone: vehicle.externalDealerPhone,
-          externalDealerCity: vehicle.externalDealerCity,
-          externalDealerState: vehicle.externalDealerState,
-          externalDealerStreet: vehicle.externalDealerStreet,
-          externalDealerZip: vehicle.externalDealerZip,
-          externalDealerEmail: vehicle.externalDealerEmail,
-          externalDealerType: vehicle.externalDealerType,
-          mcRooftopId: vehicle.mcRooftopId,
-          mcDealerId: vehicle.mcDealerId,
-          city: vehicle.city,
-          state: vehicle.state,
-          zip: vehicle.zip,
-          latitude: vehicle.latitude,
-          longitude: vehicle.longitude,
-          externalListingUrl: vehicle.externalListingUrl,
+          ...provenanceFields(vehicle),
         },
         select: { id: true },
       }).catch(() => null); // Ignore duplicates

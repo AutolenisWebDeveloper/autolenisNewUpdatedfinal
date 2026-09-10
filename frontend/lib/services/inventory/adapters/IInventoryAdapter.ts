@@ -24,10 +24,27 @@ export interface NormalizedVehicle {
   externalDealerType?: string;
   externalListingUrl?: string;
 
-  // The provider's own dealership identifiers. Strongest available join key when the
-  // name/address text is noisy, and the route from a swept listing to a rooftop we own.
+  // The provider's own dealership identifiers, and the route from a swept listing to a
+  // rooftop we own. FOUR distinct spaces, not four names for one thing:
+  //   website -> dealer -> location -> rooftop -> group
+  // Only `mcRooftopId` is the rooftop-level join key. `mcWebsiteId` is what the provider
+  // calls `dealer.id`; conflating the two is how a website id ended up in a dealer-id
+  // column on every row ingested before Phase 4.
   mcRooftopId?: string;
   mcDealerId?: string;
+  mcLocationId?: string;
+  mcWebsiteId?: string;
+  /** "Dealer" | "Retailer" | "Dealership Group" | "Aggregator" | "Marketing" | "Financing". */
+  mcCategory?: string;
+  /** `DealerRooftop.websiteHost` is @unique and the table has no phone or email column. */
+  externalDealerWebsite?: string;
+
+  /** The provider's listing-VERSION key. Changes when price or miles change; VIN is identity. */
+  listingId?: string;
+  /** When the PROVIDER last saw it — distinct from when OUR sweep last saw it. */
+  providerLastSeenAt?: Date;
+  /** Days active at the CURRENT dealer (`dos_active`), the provider's default staleness metric. */
+  daysOnLot?: number;
 
   // The listing's own location — the dealership physically holding the car. Written to
   // InventoryItem.city/state/zip/latitude/longitude, which were declared but never populated:
@@ -66,14 +83,18 @@ export type AdapterOutcome =
 
 /** Why a paginated walk stopped. Recorded on the run for operator diagnosis. */
 export type StopReason =
-  | "PAGE_CAP"            // spent the per-sweep call grant
-  | "PROVIDER_CEILING"    // start reached the provider's 500-row deep-paging limit
-  | "NUM_FOUND_REACHED"   // collected everything the provider said existed
-  | "SHORT_PAGE"          // a page returned fewer rows than asked — end of the result set
-  | "NO_NEW_KEYS"         // a page contributed zero new sourceKeys (start being ignored)
-  | "BUDGET_EXHAUSTED"    // the monthly ledger refused the next call
-  | "DEADLINE"            // wall-clock guard, before the platform function limit
-  | "PROVIDER_ERROR";     // non-OK HTTP response
+  | "PAGE_CAP"                 // spent the per-sweep call grant
+  | "PROVIDER_CEILING"         // reached the plan's deep-paging limit (a 422, by message)
+  | "NUM_FOUND_REACHED"        // collected everything the provider said existed
+  | "SHORT_PAGE"               // a page returned fewer rows than asked — end of the result set
+  | "NO_NEW_KEYS"              // a page contributed zero new sourceKeys (start being ignored)
+  | "BUDGET_EXHAUSTED"         // the monthly ledger refused the next call
+  | "DEADLINE"                 // wall-clock guard, before the platform function limit
+  // The provider refused the query itself. Both are 422s and both used to be recorded as
+  // NUM_FOUND_REACHED — i.e. as a clean, complete, empty market, which §22a L1079 forbids.
+  | "PROVIDER_INVALID_QUERY"   // bad input, e.g. a ZIP the provider does not know
+  | "PROVIDER_RADIUS_REFUSED"  // OUR configured radius exceeds what the plan allows
+  | "PROVIDER_ERROR";          // any other non-OK HTTP response
 
 export interface AdapterRunResult {
   adapter: string;
@@ -100,8 +121,25 @@ export interface AdapterRunResult {
   numFound?: number | null;
   /** Why the walk stopped. */
   stopReason?: StopReason | null;
-  /** Largest `dist` seen — the cheapest proof the radius config actually took effect. */
+  /**
+   * Largest `dist` among the listings KEPT — the cheapest proof the radius held. Reporting
+   * the largest seen would defeat the point once out-of-radius rows are rejected.
+   */
   maxDistMiles?: number | null;
+  /**
+   * Listings the provider returned beyond the radius we asked for. Non-zero means the
+   * provider is not honouring `radius`, which is a provider or configuration defect and
+   * not a market condition.
+   */
+  outOfRadiusDropped?: number;
+  /** What a 429 said about coming back. Advisory; header names are UNVERIFIED. */
+  throttle?: {
+    observed: boolean;
+    retryAfterSeconds?: number;
+    quotaRemaining?: number;
+    quotaLimit?: number;
+    rateLimitRemaining?: number;
+  };
   /** Whether config came from the DB row or the env fallback. */
   configSource?: "row" | "env";
   /** Resolved market, for the run record. */
@@ -125,6 +163,18 @@ export interface SearchParams {
   yearMax?: number;
   /** Integer minor units. Converted to dollars only at the provider URL boundary. */
   priceMaxCents?: number;
+  /**
+   * Integer minor units. A buyer's genuine floor; when absent the adapter still sends a
+   * sentinel of $1 so it never spends a call on listings normalize() must discard.
+   */
+  priceMinCents?: number;
+  /** Mileage ceiling. §4a's "acceptable mileage". */
+  milesMax?: number;
+  /** "used" | "new" | "certified". §22a: filter to the buyer's condition preference. */
+  carType?: string;
+  /** Provider sort field, e.g. "dist" | "price" | "miles". */
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
   zip?: string;
   radius?: number;
 
