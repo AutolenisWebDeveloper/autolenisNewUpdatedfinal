@@ -2,10 +2,18 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { lookupZip, haversineMiles, boundingBox } from "@/lib/utils/zip-coords";
+import { haversineMiles, boundingBox } from "@/lib/utils/zip-coords";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
+import { gateCatalogue, SHORTLIST_RADIUS_MILES } from "@/lib/services/shortlist/shortlist-radius";
+import { APPROVED_AMOUNT_HEADROOM } from "@/lib/services/inventory/qualified-results.service";
+import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
 
 export const dynamic = "force-dynamic";
+
+// With a ZIP, distance ranking happens in memory, so the window has to cover the market rather
+// than a page of it. 500 is the provider's own deep-paging ceiling and therefore the largest
+// catalogue one market's sweep can produce.
+const RANKING_WINDOW = 500;
 
 function inventoryPriority(item: {
   dealerId?: string | null;
@@ -42,9 +50,20 @@ export async function GET(request: NextRequest) {
   // ZIP: use query param if provided, else fall back to buyer's profile zip
   const paramZip = searchParams.get("zip")?.trim().slice(0, 5) ?? "";
   const zip = paramZip || (buyer.zip ?? "");
-  const paramRadius = searchParams.get("radiusMiles") ? parseFloat(searchParams.get("radiusMiles")!) : null;
-  // Default to 50 miles when a zip is present
-  const radiusMiles = paramRadius ?? (zip ? 50 : null);
+  // RADIUS IS NOT A CLIENT PARAMETER AND NOT A FILTER (§22a; Phase 4).
+  //
+  // It used to be both: `radiusMiles` defaulted to 50, went into a bounding box in the WHERE,
+  // and was then applied AGAIN as `filter(d !== null && d <= radiusMiles)`. Two consequences,
+  // both silent. Every listing with a null coordinate was dropped — and the adapter had never
+  // written a coordinate, so entering a ZIP emptied the catalogue. And a car 60 miles away
+  // disappeared instead of offering the custom-request path.
+  //
+  // The 100-mile figure is AUTOLENIS POLICY (shortlist-radius.ts). It decides what ACTION a
+  // card offers, never whether the card is rendered. `radiusMiles` on the query string is
+  // therefore ignored; the row count out equals the row count in, and distance is a label and
+  // a sort order. The public catalogue was corrected the same way — this brings the
+  // authenticated surface into line with it.
+  const radiusMiles = SHORTLIST_RADIUS_MILES;
 
   // Hard-enforce prequal budget ceiling server-side — never client-controlled.
   //
@@ -68,8 +87,19 @@ export async function GET(request: NextRequest) {
   // User-requested price max is capped at the approved ceiling (or stands alone
   // when there is no approved ceiling to cap it against).
   const paramPriceMax = searchParams.get("priceMax") ? Math.round(parseFloat(searchParams.get("priceMax")!) * 100) : null;
-  const priceCap = maxBudgetCents !== null
-    ? (paramPriceMax !== null ? Math.min(paramPriceMax, maxBudgetCents) : maxBudgetCents)
+  // §13-D16, owner ruling 2026-09-10: the SEARCH ceiling is the approved amount plus 10%.
+  // An approval is an out-the-door number; the sticker price a buyer negotiates from sits below
+  // it by tax, title and fees, so filtering at the bare approved amount hides cars the buyer can
+  // actually transact on. `maxBudgetCents` below still reports the APPROVAL, unchanged — the
+  // headroom is how we search, not a larger number we tell the buyer they are approved for.
+  //
+  // R58's "this is $X over your approved amount" flag is deliberately NOT built: an assumed tax
+  // rate producing a number a buyer reads as real is a claim we cannot support (same ruling).
+  const priceCeilingCents = maxBudgetCents !== null
+    ? Math.round(maxBudgetCents * APPROVED_AMOUNT_HEADROOM)
+    : null;
+  const priceCap = priceCeilingCents !== null
+    ? (paramPriceMax !== null ? Math.min(paramPriceMax, priceCeilingCents) : priceCeilingCents)
     : paramPriceMax;
 
   const where: Prisma.InventoryItemWhereInput = { isActive: true };
@@ -107,14 +137,14 @@ export async function GET(request: NextRequest) {
     where.features = { hasSome: featureList };
   }
 
+  // Placing the ZIP goes through the geocoder (static table -> cached Google -> Google,
+  // fail-closed), not the 128-entry static table alone: that table does not contain 76011, the
+  // market production is configured for, so a direct lookup returned no centre for the buyers
+  // most likely to be searching. No bounding box goes into the WHERE — see the radius note.
   let center: { lat: number; lng: number } | null = null;
-  if (zip && radiusMiles && radiusMiles > 0) {
-    center = lookupZip(zip);
-    if (center) {
-      const box = boundingBox(center, radiusMiles);
-      where.latitude  = { gte: box.minLat, lte: box.maxLat };
-      where.longitude = { gte: box.minLng, lte: box.maxLng };
-    }
+  if (zip) {
+    const placed = await geocodeZip(zip);
+    if (placed) center = { lat: placed.lat, lng: placed.lng };
   }
 
   // Sort ordering
@@ -123,7 +153,7 @@ export async function GET(request: NextRequest) {
   else if (sort === "price-desc") orderBy = { priceCents: "desc" };
   else if (sort === "mileage")    orderBy = { mileage: "asc" };
 
-  const fetchTake = center ? Math.max(limit * 4, 200) : limit;
+  const fetchTake = center ? RANKING_WINDOW : limit;
   const vehiclesRaw = await prisma.inventoryItem.findMany({
     where,
     take: fetchTake,
@@ -133,31 +163,38 @@ export async function GET(request: NextRequest) {
       mileage: true, priceCents: true, lane: true, images: true,
       latitude: true, longitude: true,
       dealerId: true, sourceAdapter: true, createdAt: true,
+      // Gate inputs. Availability and freshness decide the ACTION on a card, never whether the
+      // card is rendered.
+      isActive: true, lastSeenAt: true, addedByAdminId: true,
     },
   });
 
-  let vehicles = vehiclesRaw.map(v => {
-    let d: number | null = null;
-    if (center && v.latitude !== null && v.longitude !== null) {
-      d = haversineMiles(center, { lat: Number(v.latitude), lng: Number(v.longitude) });
-    }
-    return { ...v, distanceMiles: d !== null ? Math.round(d * 10) / 10 : null };
-  });
+  // Distance, freshness and a per-card action. `gateCatalogue` has NO filter: the row count out
+  // equals the row count in, and an out-of-radius, stale or unplaceable car offers the
+  // custom-request path instead of vanishing.
+  const { gated, inRadiusCount, hasZip } = gateCatalogue(vehiclesRaw, center);
 
-  if (center && radiusMiles) {
-    vehicles = vehicles.filter(v => v.distanceMiles !== null && v.distanceMiles <= radiusMiles);
-    if (sort === "distance") {
-      vehicles.sort((a, b) => (a.distanceMiles ?? 1e9) - (b.distanceMiles ?? 1e9));
-    } else if (sort === "newest") {
-      // Tier-first (dealer → admin → market), then closest within tier
+  let vehicles = gated.map(g => ({
+    ...g.row,
+    distanceMiles: g.distanceMiles,
+    freshness: g.gate.freshness,
+    action: g.gate.action,
+    actionReason: g.gate.reason,
+  }));
+
+  if (center) {
+    // gateCatalogue has already ordered nearest-first; only a different explicit sort re-orders.
+    if (sort === "newest") {
       vehicles.sort((a, b) => {
         const pa = inventoryPriority(a);
         const pb = inventoryPriority(b);
         if (pa !== pb) return pa - pb;
         return (a.distanceMiles ?? 1e9) - (b.distanceMiles ?? 1e9);
       });
+    } else if (sort !== "distance" && sort !== "relevance") {
+      const rank = new Map(vehiclesRaw.map((it, i) => [it.id, i]));
+      vehicles.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
     }
-    vehicles = vehicles.slice(0, limit);
   } else {
     if (sort === "newest") {
       // Tier-first (dealer → admin → market), then most recent within tier
@@ -170,8 +207,8 @@ export async function GET(request: NextRequest) {
     } else if (sort === "relevance") {
       vehicles.sort((a, b) => inventoryPriority(a) - inventoryPriority(b));
     }
-    vehicles = vehicles.slice(0, limit);
   }
+  vehicles = vehicles.slice(0, limit);
 
   // Detect if any dealer inventory exists near the buyer's ZIP
   // Used to render the correct empty state in the UI
@@ -209,9 +246,20 @@ export async function GET(request: NextRequest) {
     vehicles: serialized,
     count: serialized.length,
     budgetGuarded: maxBudgetCents !== null,
+    /** The APPROVAL. Unchanged: the headroom below is how we search, not what we tell them. */
     maxBudgetCents,
+    /** What the search actually filtered at — the approval plus the §13-D16 headroom. */
+    priceCeilingCents,
+    headroom: APPROVED_AMOUNT_HEADROOM,
     activeZip: zip || null,
+    hasZip,
+    /** How many the buyer could actually shortlist. Drives the empty state, never the grid. */
+    inRadiusCount,
+    /** LEAD with the custom-request path when nothing reachable came back. */
+    offerRequestPath: hasZip && inRadiusCount === 0,
     hasLocalDealerInventory,
+    /** AutoLenis policy, reported so a surface never has to guess it. Not a filter. */
+    radiusMiles: SHORTLIST_RADIUS_MILES,
     radiusApplied: center ? radiusMiles : null,
   });
 }

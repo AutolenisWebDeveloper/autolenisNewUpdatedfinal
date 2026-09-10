@@ -62,13 +62,18 @@ mock.module("@/lib/auth/api", {
   },
 });
 
-async function search(query = ""): Promise<{
+interface SearchBody {
   budgetGuarded: boolean;
+  /** The APPROVAL. */
   maxBudgetCents: number | null;
-}> {
+  /** What the search filtered at — the approval plus the §13-D16 headroom. */
+  priceCeilingCents: number | null;
+}
+
+async function search(query = ""): Promise<SearchBody> {
   const { GET } = await import("@/app/api/buyer/search/route");
   const res = await GET(new NextRequest(`https://app.test/api/buyer/search${query}`));
-  const body = (await res.json()) as { data: { budgetGuarded: boolean; maxBudgetCents: number | null } };
+  const body = (await res.json()) as { data: SearchBody };
   return body.data;
 }
 
@@ -141,12 +146,18 @@ test("anomalous APPROVED row with a zero amount ⇒ no $0 ceiling is enforced", 
 
 // ── The approved path must be entirely unchanged ─────────────────────────────
 
-test("valid APPROVED prequal ⇒ ceiling enforced server-side (unchanged)", async () => {
+test("valid APPROVED prequal ⇒ ceiling enforced server-side, at the ruled headroom", async () => {
+  // CHANGED BY A RULING, NOT WEAKENED. §13-D16 (owner, 2026-09-10): the SEARCH ceiling is the
+  // approved amount plus 10%, because an approval is an out-the-door number and the sticker
+  // price a buyer negotiates from sits below it by tax, title and fees. The property this test
+  // has always held — that the server, not the client, decides the ceiling — is unchanged and
+  // is asserted below.
   prequalRow = { decision: "APPROVED", expiresAt: FUTURE, maxOtdAmountCents: 7_500_000 };
   const data = await search();
-  assert.equal(data.maxBudgetCents, 7_500_000);
+  assert.equal(data.maxBudgetCents, 7_500_000, "the reported figure is the APPROVAL, not the search ceiling");
+  assert.equal(data.priceCeilingCents, 8_250_000);
   assert.equal(data.budgetGuarded, true);
-  assert.equal(priceCeiling(), 7_500_000, "the approved ceiling is applied to the query");
+  assert.equal(priceCeiling(), 8_250_000, "the approved ceiling plus headroom is applied to the query");
 });
 
 test("a client-supplied priceMax can lower, but never raise, the approved ceiling", async () => {
@@ -154,8 +165,8 @@ test("a client-supplied priceMax can lower, but never raise, the approved ceilin
   await search("?priceMax=999999");
   assert.equal(
     priceCeiling(),
-    7_500_000,
-    "a client must never be able to exceed the approved budget",
+    8_250_000,
+    "a client must never be able to exceed the server's ceiling",
   );
 
   capturedWhere = null;
