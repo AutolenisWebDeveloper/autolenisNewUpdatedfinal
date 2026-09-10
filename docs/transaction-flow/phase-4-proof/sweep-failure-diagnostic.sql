@@ -18,46 +18,109 @@
 -- run of nine — but "therefore" is doing too much work there, and query 3 settles it from
 -- `inventory_sync_runs.api_calls_used` instead of from arithmetic.
 --
--- ── WHAT `FAILED` ALREADY RULES OUT UNDER THE DEPLOYED CODE ─────────────────────────────
+-- ── ANSWERED, 2026-09-10, BY THE OWNER RUNNING THIS FILE ───────────────────────
+--
+-- Query 2 returned eight consecutive daily runs, 2026-09-03 through 2026-09-10, identical:
+--
+--   status FAILED · api_calls_used 1 · vehicles_fetched 0 · health 0 · seconds 0
+--   error "normalization dropped 50 of 50 listings (missing year/make/model/price)"
+--
+-- The provider is answering and returning 50 listings per call. All 50 are unusable because
+-- `normalize()` derives year/make/model from `listing.build` (marketcheck.adapter.ts:646-648)
+-- and the DEPLOYED adapter never asks for it. Zero normalized, so zero fetched, so FAILED.
+--
+-- THE FIX IS ON THE PHASE 4 BRANCH: `include_build_object: "true"`, with its two siblings, at
+-- marketcheck.adapter.ts:610. `origin/main` sends none of the three. Merging Phase 4 repairs
+-- this sweep; nothing else needs to change.
+--
+-- ── THE INFERENCE THIS FILE MADE, AND WHY IT WAS WRONG ───────────────────────────
+--
+-- Kept rather than deleted, because the shape of the error is worth more than the conclusion.
 --
 -- `inventory_sources.last_run_status` is written from the adapter outcome AFTER classifyYield
 -- (orchestrator.ts:553), so FAILED is reachable two ways, and only two:
 --
 --   (a) a hard adapter failure — a non-transient HTTP status on page 0; or
 --   (b) a yield downgrade — which needs either a known num_found (coverage gate) or at least
---       25 raw listings (normalization gate). A run that fetched nothing reaches neither.
+--       25 raw listings (normalization gate).
 --
--- The deployed adapter treats EVERY 422 as `NUM_FOUND_REACHED` and breaks the walk with no
--- error recorded (origin/main marketcheck.adapter.ts:226). A 422 on page 0 therefore lands
--- ZERO_RESULTS, not FAILED. So if `api_calls_used = 1` and `status = FAILED`, the failure is
--- NOT a 422 of any kind: it is a non-transient, non-422 HTTP status — 400, 401, 403 or 404 —
--- and query 2's `error` column names it verbatim, because that path DOES record one
--- ("MarketCheck HTTP <status> on page <n> (start=<n>)").
+-- That much was right. The next step was not: this file reasoned that one call could not reach
+-- (b) and therefore had to be (a) — a 401, 403, 400 or 404 — and ranked a rejected credential
+-- first. The step it skipped is that ONE CALL RETURNS ROWS. `rows_per_call` is 50, so a single
+-- page clears NORMALIZE_MIN_RAW = 25 on its own and the normalization gate fires on call one.
+-- "One call" was read as "fetched nothing" when it means "fetched one page of fifty".
 --
--- Which is worth stating plainly: the Phase 4 fix makes the three 422 classes distinguishable
--- from each other FROM NOW ON, and it is what would tell a bad ZIP from a pagination cap from
--- a radius overrun. It does not diagnose this failure retroactively, and the evidence above
--- points away from a 422 being what is happening. Query 2 is what decides it.
+-- The walk then STOPS at page 0 precisely because nothing normalized, so the shape is
+-- permanently one call — never two or more. The table below said `>=2` for this row; that was
+-- the same mistake in the other direction and is corrected.
 --
--- ── READING THE OUTPUT ──────────────────────────────────────────────────────────────────
+-- The deployed adapter also treats EVERY 422 as `NUM_FOUND_REACHED` and breaks the walk with no
+-- error recorded (origin/main marketcheck.adapter.ts:226), so a 422 on page 0 lands ZERO_RESULTS
+-- rather than FAILED. That part of the ruling-out holds, and the Phase 4 fix is what makes the
+-- three 422 classes — a bad ZIP, a pagination cap, a radius overrun — distinguishable from each
+-- other from now on. It was never going to name THIS failure, which is not a 422.
+--
+-- ── READING THE OUTPUT ────────────────────────────────────────────────
 --
 --   status   calls  error                                       what it is
 --   ------------------------------------------------------------------------------------
+--   FAILED     1    normalization dropped 50 of 50 listings     THE OBSERVED FAILURE. The
+--                                                               include-flag defect: the walk
+--                                                               dies on page 0 because nothing
+--                                                               normalized, so it is always
+--                                                               exactly one call
 --   FAILED     1    MarketCheck HTTP 401 on page 0 (start=0)    credential rejected
 --   FAILED     1    MarketCheck HTTP 403 on page 0 (start=0)    plan/entitlement refusal
 --   FAILED     1    MarketCheck HTTP 400 on page 0 (start=0)    malformed query
 --   FAILED     1    MarketCheck HTTP 404 on page 0 (start=0)    endpoint moved
---   FAILED    >=2   short run: received N of M expected         coverage downgrade
---   FAILED    >=2   normalization dropped N of M listings       response shape changed —
---                                                               the include-flag defect
---   DEFERRED   1    MarketCheck HTTP 429 on page 0 (start=0)    throttled
+--   FAILED    >=1   short run: received N of M expected         coverage downgrade. One call
+--                                                               when the first page is short,
+--                                                               more when the walk continued
+--   DEFERRED   1    MarketCheck HTTP 429 on page 0 (start=0)    throttled. 191 consecutive
+--                                                               runs of this, 2026-08-24 to
+--                                                               08-31 — the silent freeze,
+--                                                               with its actual error
 --   ZERO_RESULTS 1  (null)                                      a 422 swallowed as
 --                                                               NUM_FOUND_REACHED — this is
 --                                                               the shape the fix replaces
+--   COMPLETED  0    (null), vehicles_fetched > 0                A DEALER JSON FEED. The work
+--                                                               happened; the 0 is a false
+--                                                               zero. See the note below
 --   NOT_CONFIGURED 0 no market configured / source is inactive  config gap, no call made
 --
 -- A FAILED row whose `error` is NULL would mean neither path wrote one, which the code has no
 -- branch for; report it rather than reconciling it.
+
+-- ── THE 83 ZERO-CALL "COMPLETED" RUNS, 08-31 TO 09-02 — ANSWERED ────────────────
+--
+-- Owner question, 2026-09-10: "Either a cache path is writing inventory_sync_runs rows as if it
+-- were a sync, or something is reporting success for work it did not do. Find out which."
+--
+-- NEITHER. The work happened and the vehicles are real; the zero is an accounting artefact.
+--
+--   * There is exactly ONE writer of `inventory_sync_runs` in the repository —
+--     orchestrator.ts:529. No cache path writes this table. (`grep -rn inventorySyncRun`
+--     over app/ lib/ scripts/, excluding tests, returns that one line.)
+--   * It writes `apiCallsUsed: r.apiCallsUsed ?? 0` (orchestrator.ts:536), and `apiCallsUsed`
+--     is OPTIONAL on the adapter contract (IInventoryAdapter.ts:113).
+--   * `CustomFeedAdapter.search()` performs a real `fetch()` against the dealer feed URL
+--     (custom.adapter.ts:53) and returns the parsed vehicles (custom.adapter.ts:72-79) — and
+--     never sets `apiCallsUsed`. The `?? 0` turns "the adapter did not say" into a recorded 0.
+--   * `MarketCheckAdapter` cannot produce this shape: both early returns that set
+--     `apiCallsUsed: 0` also return `vehicles: []` (marketcheck.adapter.ts:325-331, 340-347),
+--     and the path that returns vehicles reports the real count (:515).
+--   * `outcomeToStatus(SUCCESS) -> COMPLETED` and the health score is 100 for any outcome that
+--     is not FAILED/DEFERRED/NOT_CONFIGURED (orchestrator.ts:65, :541).
+--
+-- So the 83 rows are dealer JSON feed syncs that fetched and ingested 20-43 vehicles each. The
+-- window fits: they sit immediately after the 191-run 429 storm ended on 08-31, when MarketCheck
+-- was the source that was not producing and the feeds were.
+--
+-- It IS the same family as the cron log saying COMPLETED over a failed sweep — a column that
+-- reads as a fact and is not one — but it under-reports work rather than over-reporting it, so
+-- no run claimed a success it did not earn. REPORTED, NOT FIXED HERE, per the owner's
+-- instruction. The fix is one line: have `CustomFeedAdapter` report the call it makes, so the
+-- run-size anomaly and the budget alert this phase built read a true number for every source.
 
 \echo '=== 1. the source row: configuration and the month-to-date ledger ==='
 SELECT id, type, name, is_active,

@@ -40,7 +40,9 @@ export const SHORTLIST_REFUSALS: Record<string, string> = {
   UNAVAILABLE:
     "This vehicle is no longer available. Start a vehicle request and we will find one like it near you.",
   NOT_FOUND: "This vehicle is no longer listed. Start a vehicle request and we will find one like it near you.",
-  SHORTLIST_FULL: `Your shortlist holds ${MAX_SHORTLIST_ITEMS} vehicles. Remove one to add another.`,
+  SHORTLIST_FULL:
+    `${MAX_SHORTLIST_ITEMS} of ${MAX_SHORTLIST_ITEMS} saved. Remove one to add another — `
+    + `anything sold or expired is marked on your shortlist and can go first.`,
   ALREADY_IN_SHORTLIST: "This vehicle is already on your shortlist.",
   OK: "",
 };
@@ -54,10 +56,12 @@ export type AddToShortlistResult =
 /**
  * How many of these shortlist entries point at a vehicle that is still on the market.
  *
- * The cap must count AVAILABLE candidates, not rows. ShortlistItem.inventoryItemId has no
- * foreign key and the stale sweep deactivates listings, so a buyer whose saved cars have
- * sold would otherwise be told their shortlist is full while holding zero usable
- * candidates — locked out of adding the replacement for the car that just sold.
+ * NOT THE CAP'S COUNTER — see `addToShortlist`. Owner ruling 2026-09-10 settled that: the cap
+ * counts ROWS, because `shortlist_items_enforce_cap_trg` counts rows and a friendly gate that
+ * disagrees with the authority behind it is worse than a strict one. This function survives for
+ * READINESS, which is a different question: a buyer whose every saved car has sold is genuinely
+ * not ready to open an auction, however many rows they hold, and `getShortlistReadiness` is
+ * right to say so.
  */
 export async function countAvailableItems(
   items: Array<{ inventoryItemId: string }>,
@@ -149,9 +153,20 @@ export async function addToShortlist(buyerId: string, inventoryItemId: string): 
   if (shortlist.items.some(i => i.inventoryItemId === inventoryItemId)) {
     return refuse("ALREADY_IN_SHORTLIST");
   }
-  // The cap counts AVAILABLE candidates, not rows: five dead entries would otherwise report
-  // "5 of 5 full" while the auction has zero candidates in it.
-  if (await countAvailableItems(shortlist.items) >= MAX_SHORTLIST_ITEMS) {
+  // ROWS, NOT AVAILABLE ROWS — and this counted available ones until the owner ruled on
+  // 2026-09-10. The independent review found the contradiction: `shortlist_items_enforce_cap_trg`
+  // does `count(*)` with no availability predicate (Phase 1 wave `migration.sql:1261-1278`),
+  // so a buyer holding five rows of which four point at deactivated listings passed this gate
+  // and was then refused by the trigger with a message nobody wrote for them.
+  //
+  // Two other repairs were considered and rejected by the ruling: a migration altering a Phase 1
+  // enforcement object (disproportionate to a counting mismatch) and pruning the dead rows
+  // automatically (deleting something a buyer chose, unasked). Counting rows makes the friendly
+  // gate honest — "5 of 5 saved, remove one to add another" — and the shortlist page already
+  // marks the dead ones and offers a remove control, so the buyer can see which to drop.
+  //
+  // The trigger stays the authority it was built to be; this agrees with it.
+  if (shortlist.items.length >= MAX_SHORTLIST_ITEMS) {
     return refuse("SHORTLIST_FULL");
   }
 

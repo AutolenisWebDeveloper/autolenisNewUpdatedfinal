@@ -91,17 +91,60 @@ test("five LIVE vehicles fill the shortlist", async () => {
   assert.equal(created.length, 0, "nothing is written on a refusal");
 });
 
-test("REPRODUCTION: three of five sold — the buyer can still add a replacement", async () => {
+test("three of five sold: the cap still counts ROWS, and says so", async () => {
+  // THIS TEST ASSERTED THE OPPOSITE UNTIL 2026-09-10, and the reversal is an owner ruling,
+  // not a weakened assertion.
+  //
+  // The old behaviour — counting available candidates — was written to stop a buyer whose
+  // saved cars had sold from being locked out. It did not achieve that. The independent
+  // review found that `shortlist_items_enforce_cap_trg` does `count(*)` with no availability
+  // predicate (Phase 1 wave `migration.sql:1261-1278`), so this gate waved the add through and
+  // the trigger refused it two statements later with a P0001 the buyer never asked for. The
+  // lock-out was not prevented; it was moved somewhere with worse copy.
+  //
+  // The owner ruled on the three available repairs: a migration altering a Phase 1 enforcement
+  // object is disproportionate to a counting mismatch; pruning the dead rows automatically
+  // deletes something a buyer chose; so the service agrees with the trigger and the copy names
+  // the number the buyer can act on. The dead rows are visibly dead on the shortlist page and
+  // carry a remove control, which is where the buyer resolves it.
   inventory = { v0: LIVE, v1: SOLD, v3: SOLD, v4: LIVE };  // v2's row is gone entirely
   shortlistItems = ["v0", "v1", "v2", "v3", "v4"].map((v, i) => ({ id: `s${i}`, inventoryItemId: v }));
 
   const { countAvailableItems, addToShortlist } = await load();
   assert.equal(shortlistItems.length, 5, "five rows exist");
-  assert.equal(await countAvailableItems(shortlistItems), 2, "but only two are available");
+  assert.equal(await countAvailableItems(shortlistItems), 2, "and only two are available");
 
   inventory.v_new = LIVE;
+  const refused = await addToShortlist("b1", "v_new");
+  assert.equal(refused.ok, false, "five rows is five rows — the trigger would refuse it anyway");
+  assert.equal(refused.ok === false && refused.code, "SHORTLIST_FULL");
+  assert.equal(created.length, 0, "nothing is written on a refusal");
+  // The copy has to point at the resolution, or a truthful refusal is still a dead end.
+  const message = refused.ok === false ? refused.message : "";
+  assert.match(message, /5 of 5 saved/, "names the count the buyer can act on");
+  assert.match(message, /sold or expired/, "and points at the rows to remove first");
+});
+
+test("the cap agrees with the trigger even when EVERY saved car is dead", async () => {
+  // The strictest case, and the one the old behaviour was written for. It is still a refusal:
+  // the database would refuse it, so the friendly gate says so first, in words.
+  inventory = { v0: SOLD, v1: SOLD, v2: SOLD, v3: SOLD, v4: SOLD, v_new: LIVE };
+  shortlistItems = ["v0", "v1", "v2", "v3", "v4"].map((v, i) => ({ id: `s${i}`, inventoryItemId: v }));
+  const { addToShortlist } = await load();
+  const refused = await addToShortlist("b1", "v_new");
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.code, "SHORTLIST_FULL");
+  assert.equal(created.length, 0);
+});
+
+test("four rows still admits a fifth, whatever their availability", async () => {
+  // The cap is not stricter than five. A row count of four accepts an add even when every one
+  // of those four is dead — the refusal above is about the NUMBER, not about the condition.
+  inventory = { v0: SOLD, v1: SOLD, v2: SOLD, v3: SOLD, v_new: LIVE };
+  shortlistItems = ["v0", "v1", "v2", "v3"].map((v, i) => ({ id: `s${i}`, inventoryItemId: v }));
+  const { addToShortlist } = await load();
   const added = await addToShortlist("b1", "v_new");
-  assert.equal(added.ok, true, "the add must succeed — the cap counts candidates, not corpses");
+  assert.equal(added.ok, true);
   assert.equal(created.length, 1);
 });
 
@@ -134,15 +177,19 @@ test("a zero-priced listing does not count — there is nothing to quote", async
 //
 // The cap is enforced twice, in two languages, on two different scopes:
 //
-//   application  MAX_SHORTLIST_ITEMS in lib/constants.ts, counting AVAILABLE items
+//   application  MAX_SHORTLIST_ITEMS in lib/constants.ts, counting ROWS
 //   database     shortlist_items_enforce_cap() and auction_vehicles_enforce_cap()
 //                in 20261106000100_transaction_spine_foundation, counting ROWS
 //                under a FOR UPDATE lock on the parent
 //
-// Two layers is deliberate -- the application count is what the buyer is TOLD
-// (it discounts sold cars, so a buyer holding five dead entries is not locked
-// out), and the trigger is what is TRUE under concurrency, because both write
-// paths are read-then-write with no transaction and lose the race. But nothing
+// BOTH COUNT ROWS as of the owner ruling on 2026-09-10. The application count
+// used to discount sold cars, on the theory that a buyer holding five dead
+// entries should not be locked out -- but the trigger counts rows regardless,
+// so that buyer was refused anyway, one statement later and with no message
+// written for them. Two layers is still deliberate: the application count is
+// what the buyer is TOLD, and the trigger is what is TRUE under concurrency,
+// because both write paths are read-then-write with no transaction and lose
+// the race. They must now agree on the predicate as well as the number. Nothing
 // tied the two numbers together: `MAX_SHORTLIST_ITEMS = 5` and the trigger's
 // hard-coded `IF existing >= 5` could drift apart in either direction, and the
 // symptom of drift is either a cap the buyer can exceed or a P0001 the UI has

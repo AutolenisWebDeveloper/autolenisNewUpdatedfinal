@@ -141,9 +141,21 @@ export default function BuyerSearchClient({
   const [fuelType,     setFuelType]    = useState(sp.get("fuelType")     ?? "");
   // Pre-fill with buyer's profile ZIP when no custom zip is set in URL
   const [zip,          setZip]         = useState(sp.get("zip")          ?? buyerZip ?? "");
-  // Default to 50 mi only when we're falling back to the buyer's profile ZIP (not a URL-param zip)
-  // `radiusMiles` is gone as a filter and as a URL parameter (§22a; Phase 4). The server
-  // ignores it: the 100-mile line is policy and decides the card's ACTION, not the result set.
+  // `radiusMiles` is gone as a FILTER (§22a; Phase 4): the server ignores it, because the
+  // 100-mile line is AutoLenis policy and decides the card's ACTION, not the result set.
+  //
+  // It is still READ here, and only here, to be disclosed. Owner ruling 2026-09-10 signing off
+  // the removal: "silently returning a different result set than the URL requested is the
+  // defect class this program exists to eliminate. Ignore the parameter AND have the results
+  // header state the radius in force, so a bookmark carrying radiusMiles=25 reads 'within 100
+  // miles' rather than quietly lying." Nothing branches on this value — it is never sent, never
+  // filtered on, and never compared for equality with the policy in a way that changes results.
+  const requestedRadius = (() => {
+    const raw = sp.get("radiusMiles");
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  })();
   const [sort,         setSort]        = useState(sp.get("sort")         ?? "newest");
   const [features,     setFeatures]    = useState<string[]>(() => {
     const f = sp.get("features"); return f ? f.split(",").filter(Boolean) : [];
@@ -214,6 +226,15 @@ export default function BuyerSearchClient({
     setSearchError(null);
     try {
       const params = new URLSearchParams(sp.toString());
+      // STRIPPED AT THE BOUNDARY, not merely ignored at the far end. This forwards the whole
+      // query string, so a bookmark carrying `radiusMiles=25` was still being SENT to
+      // /api/buyer/search — the route drops it on the floor (proven by
+      // app/api/buyer/search/__tests__/no-radius-drop.test.ts), so behaviour was correct, but
+      // "the server happens to ignore it" is a weaker guarantee than "it is not sent". Deleting
+      // it here makes the removal structural: no future change to the route can start honouring
+      // a parameter this surface no longer transmits. The value is still read from `sp` for the
+      // disclosure line — see `requestedRadius`.
+      params.delete("radiusMiles");
       params.set("limit", "48");
       const data = await api.get<SearchResult>(`/api/buyer/search?${params.toString()}`);
       setVehicles(data.vehicles);
@@ -592,9 +613,24 @@ export default function BuyerSearchClient({
           {inRadiusCount !== null && policyRadius !== null && vehicles.length > 0 && (
             <span data-testid="in-radius-count">
               {" · "}
-              <strong className="text-slate-700">{inRadiusCount}</strong> we can bring to auction
+              <strong className="text-slate-700">{inRadiusCount}</strong> within{" "}
+              <strong className="text-slate-700">{policyRadius} miles</strong>, which we can bring
+              to auction
             </span>
           )}
+        </p>
+      )}
+
+      {/* THE URL ASKED FOR A DIFFERENT RADIUS AND WE DID NOT HONOUR IT — said out loud.
+          A bookmark or a shared link carrying `radiusMiles=25` used to filter; it no longer
+          does, and a buyer who cannot see that is being shown a result set that does not match
+          the request they made. The parameter is still ignored — this only explains why. */}
+      {!loading && !searchError && requestedRadius !== null && policyRadius !== null &&
+       requestedRadius !== policyRadius && (
+        <p className="text-xs text-slate-500 mb-4 -mt-2" data-testid="radius-param-ignored">
+          Your link asked for {requestedRadius} miles. AutoLenis auctions run within{" "}
+          <strong className="text-slate-700">{policyRadius} miles</strong>, so that is the range
+          shown — cars further away are still listed, we just cannot bring them to auction.
         </p>
       )}
 
