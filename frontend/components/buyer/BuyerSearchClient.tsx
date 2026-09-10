@@ -658,7 +658,7 @@ export default function BuyerSearchClient({
                         EXPIRED is why the action changed, so it is worded as a fact about the
                         listing rather than as a refusal. */}
                     {v.freshness === "STALE" && (
-                      <p className="text-xs text-amber-700 mt-1 flex items-center gap-1" data-testid={`stale-note-${i}`}>
+                      <p className="text-xs text-al-warning mt-1 flex items-center gap-1" data-testid={`stale-note-${i}`}>
                         <Clock size={10} aria-hidden="true" /> Not seen on the market this week
                       </p>
                     )}

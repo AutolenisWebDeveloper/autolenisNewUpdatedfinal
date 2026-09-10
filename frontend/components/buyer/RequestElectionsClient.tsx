@@ -231,7 +231,7 @@ export default function RequestElectionsClient(props: Props) {
 
   if (loadError) {
     return (
-      <div className="bg-white border border-al-danger/30 rounded-xl p-5 mb-4" role="alert" data-testid="elections-load-error">
+      <div className="bg-al-danger-subtle border border-al-danger/30 rounded-xl p-5 mb-4" role="alert" data-testid="elections-load-error">
         <p className="text-sm text-slate-800 font-medium mb-2">{loadError}</p>
         <Button size="sm" variant="secondary" onClick={() => void load()}>Try again</Button>
       </div>
@@ -244,7 +244,7 @@ export default function RequestElectionsClient(props: Props) {
     <div data-testid="stage4-elections">
       {pending && (
         <div
-          className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 text-sm text-amber-800 flex gap-2"
+          className="bg-al-warning-subtle border border-al-warning/25 rounded-xl p-4 mb-4 text-sm text-al-warning-fg flex gap-2"
           role="status"
           data-testid="elections-pending-banner"
         >
@@ -271,7 +271,7 @@ export default function RequestElectionsClient(props: Props) {
         }} />}
 
         {coElected === true && coBuyer && !coForm && (
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm" data-testid="co-buyer-summary">
+          <div className="rounded-lg bg-al-bg p-3 text-sm" data-testid="co-buyer-summary">
             <p className="font-medium text-slate-900">
               {coBuyer.legalFirstName} {coBuyer.legalLastName}
               {coBuyer.role && <span className="text-slate-500 font-normal"> · {label(coBuyer.role)}</span>}
@@ -320,7 +320,7 @@ export default function RequestElectionsClient(props: Props) {
         }} />}
 
         {trElected === true && packet && !trForm && (
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm" data-testid="trade-summary">
+          <div className="rounded-lg bg-al-bg p-3 text-sm" data-testid="trade-summary">
             <p className="font-medium text-slate-900">
               {packet.year} {packet.make} {packet.model}{packet.trim ? ` ${packet.trim}` : ""}
             </p>
@@ -380,7 +380,7 @@ function CoBuyerForm({
 
   return (
     <form
-      className="rounded-lg border border-slate-200 p-3 space-y-3"
+      className="border-t border-slate-100 pt-4 mt-1 space-y-3"
       data-testid="co-buyer-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -391,12 +391,12 @@ function CoBuyerForm({
         });
       }}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Text id="cb-first" label="Legal first name" value={first} onChange={setFirst} required disabled={busy} />
         <Text id="cb-last" label="Legal last name" value={last} onChange={setLast} required disabled={busy} />
       </div>
       <p className="text-xs text-slate-500 -mt-1">As it appears on their ID — it is the name on the contract.</p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Text id="cb-email" label="Email" type="email" value={email} onChange={setEmail} disabled={busy} placeholder="so they can sign" />
         <Text id="cb-phone" label="Phone" type="tel" value={phone} onChange={setPhone} disabled={busy} placeholder="or a number" />
       </div>
@@ -473,7 +473,7 @@ function TradeForm({
 
   return (
     <form
-      className="rounded-lg border border-slate-200 p-3 space-y-3"
+      className="border-t border-slate-100 pt-4 mt-1 space-y-3"
       data-testid="trade-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -487,12 +487,12 @@ function TradeForm({
         });
       }}
     >
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <Text id="tr-year" label="Year" type="number" value={year} onChange={setYear} required disabled={busy} />
         <Text id="tr-make" label="Make" value={make} onChange={setMake} required disabled={busy} />
         <Text id="tr-model" label="Model" value={model} onChange={setModel} required disabled={busy} />
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <Text id="tr-trim" label="Trim" value={trim} onChange={setTrim} disabled={busy} />
         <Text id="tr-mileage" label="Mileage" type="number" value={mileage} onChange={setMileage} disabled={busy} />
         <label htmlFor="tr-condition" className="block">
@@ -505,7 +505,7 @@ function TradeForm({
         </label>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label htmlFor="tr-loan" className="block">
           <span className="block text-xs text-slate-500 mb-1">Do you still owe on it?</span>
           <select id="tr-loan" value={loanStatus} disabled={busy} onChange={(e) => setLoanStatus(e.target.value)}

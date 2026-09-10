@@ -245,7 +245,7 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
                             about the buyer's choice. STALE keeps the car in the auction;
                             EXPIRED is why it will be dropped when the request is built. */}
                         {item.freshness === "STALE" && (
-                          <p className="text-xs text-amber-700 mt-1 inline-flex items-center gap-1" data-testid={`shortlist-stale-${i}`}>
+                          <p className="text-xs text-al-warning mt-1 inline-flex items-center gap-1" data-testid={`shortlist-stale-${i}`}>
                             <Clock size={10} aria-hidden="true" /> Not seen on the market this week
                           </p>
                         )}
