@@ -304,3 +304,29 @@ test("the elections a public form already asks reach the columns the deposit gat
   assert.doesNotMatch(src, /coBuyerElected:\s*input\.coBuyer\s*\?\?/, "the election must stay three-state");
   assert.doesNotMatch(src, /tradeElected:\s*input\.hasTradeIn\s*\?\?/, "the election must stay three-state");
 });
+
+test("GET and PUT on the trade route return the SAME disclaimer shape, version included", async () => {
+  // Found by review on the PR. GET returned `disclaimer: { text, version }` and PUT returned a
+  // bare string, so the two methods on one route disagreed about their own contract — and the
+  // half PUT dropped was the VERSION, which is the only field that records WHICH appraisal
+  // disclaimer the buyer was actually shown (§6.2). A client storing PUT's answer kept the
+  // words and lost the provenance, and a packet edit is exactly when the words can change.
+  //
+  // Source-scanned rather than invoked: this file's harness mocks the services, not the route,
+  // and the defect is in the response literal itself. Comments are stripped first so the rule
+  // cannot be satisfied by prose describing it.
+  const src = (require("node:fs") as typeof import("node:fs"))
+    .readFileSync(`${process.cwd()}/app/api/buyer/requests/[requestId]/trade/route.ts`, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  const responses = [...src.matchAll(/successResponse\(\{[\s\S]*?\}\)/g)].map((m) => m[0]);
+  const withDisclaimer = responses.filter((r) => /disclaimer/.test(r));
+  assert.ok(withDisclaimer.length >= 2, `expected GET and PUT to both return a disclaimer; found ${withDisclaimer.length}`);
+
+  for (const r of withDisclaimer) {
+    assert.match(r, /disclaimer:\s*\{/, "the disclaimer must be the structured shape, never a bare string");
+    assert.match(r, /text:\s*TRADE_APPRAISAL_DISCLAIMER/, "carrying the text");
+    assert.match(r, /version:\s*TRADE_PACKET_DISCLAIMER_VERSION/, "and the version §6.2 records");
+  }
+});

@@ -100,5 +100,13 @@ export async function PUT(request: NextRequest, { params }: Props) {
   if (!result.ok) {
     return errorResponse(result.code, result.message, result.code === "REQUEST_NOT_FOUND" ? 404 : 400);
   }
-  return successResponse({ elected: result.elected, packet: result.packet, disclaimer: TRADE_APPRAISAL_DISCLAIMER });
+  // THE SAME SHAPE GET RETURNS, and the version is the reason it matters rather than tidiness.
+  // PUT returned a bare string while GET returns `{ text, version }`, so a client that stored
+  // what PUT handed back lost `TRADE_PACKET_DISCLAIMER_VERSION` — the one field §6.2 needs to
+  // record WHICH appraisal disclaimer the buyer was shown. Found by review on the PR.
+  return successResponse({
+    elected: result.elected,
+    packet: result.packet,
+    disclaimer: { text: TRADE_APPRAISAL_DISCLAIMER, version: TRADE_PACKET_DISCLAIMER_VERSION },
+  });
 }

@@ -61,7 +61,7 @@ mock.module("@/lib/auth/api", {
 });
 
 interface Card { id: string; distanceMiles: number | null; action: string; actionReason: string; freshness: string }
-interface Body { vehicles: Card[]; count: number; inRadiusCount: number; hasZip: boolean; radiusMiles: number; offerRequestPath: boolean }
+interface Body { vehicles: Card[]; count: number; inRadiusCount: number; hasZip: boolean; radiusMiles: number; offerRequestPath: boolean; activeZip: string | null }
 
 async function search(query = ""): Promise<Body> {
   const { GET } = await import("@/app/api/buyer/search/route");
@@ -154,3 +154,49 @@ test("cards are ordered nearest first", async () => {
   const body = await search();
   assert.deepEqual(body.vehicles.map((v) => v.id), ["near", "far"]);
 });
+
+// ── the supplied ZIP must be VALIDATED before it displaces the profile one ──────────────
+//
+// Found by review on the PR. `const zip = paramZip || (buyer.zip ?? "")` treated ANY non-empty
+// string as a location: `?zip=abcde` beat a perfectly good profile ZIP, `geocodeZip` then failed
+// closed on it, and the buyer got center=null — no distance ranking, hasZip false, every card
+// reduced to NEED_ZIP — while the response echoed the garbage back as `activeZip`. Following a
+// malformed link cost a buyer the ZIP they already had on file.
+
+test("a MALFORMED ?zip does not displace the buyer's profile ZIP", async () => {
+  rows = [row({ id: "nearby" })];
+  const body = await search("?zip=abcde");
+  assert.equal(body.activeZip, "76011", "the profile ZIP survives a garbage parameter");
+  assert.equal(body.hasZip, true, "and the buyer keeps distance ranking");
+  assert.deepEqual(geocodeCalls, ["76011"], "the garbage value is never sent to the geocoder");
+  assert.equal(body.vehicles[0]!.action, "ADD", "a nearby car is still shortlistable");
+});
+
+test("an OVER-LONG ?zip is rejected, not truncated into a different place", async () => {
+  // `.slice(0, 5)` used to turn "123456" into "12345" — a real ZIP, somewhere else entirely.
+  // Silently searching a different city than the one asked for is worse than not searching.
+  rows = [row({ id: "nearby" })];
+  const body = await search("?zip=123456");
+  assert.equal(body.activeZip, "76011");
+  assert.deepEqual(geocodeCalls, ["76011"], "12345 is never looked up");
+});
+
+test("an EMPTY ?zip falls through to the profile rather than blanking it", async () => {
+  rows = [row({ id: "nearby" })];
+  const body = await search("?zip=");
+  assert.equal(body.activeZip, "76011");
+  assert.equal(body.hasZip, true);
+});
+
+test("a WELL-FORMED ?zip still outranks the profile — the capability is preserved", async () => {
+  // The validation must not become a filter of its own: a buyer searching another market is
+  // making a deliberate request, and it still wins. 77002 is not in the harness geocoder, so
+  // this also pins the fail-CLOSED half: unplaceable means no distance, never a substituted one.
+  rows = [row({ id: "nearby" })];
+  const body = await search("?zip=77002");
+  assert.equal(body.activeZip, "77002", "the buyer's explicit choice is honoured");
+  assert.deepEqual(geocodeCalls, ["77002"], "and it is the value actually placed");
+  assert.equal(body.hasZip, false, "unplaceable fails closed rather than falling back silently");
+  assert.equal(body.vehicles[0]!.action, "NEED_ZIP");
+});
+

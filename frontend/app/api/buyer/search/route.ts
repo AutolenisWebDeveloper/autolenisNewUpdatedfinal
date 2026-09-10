@@ -47,9 +47,27 @@ export async function GET(request: NextRequest) {
   const sort = searchParams.get("sort") ?? "newest";
   const features = searchParams.get("features") ?? "";
 
-  // ZIP: use query param if provided, else fall back to buyer's profile zip
-  const paramZip = searchParams.get("zip")?.trim().slice(0, 5) ?? "";
-  const zip = paramZip || (buyer.zip ?? "");
+  // ZIP: VALIDATED, not merely truncated — and this was the defect, found by review on the PR.
+  //
+  // `?zip=abcde` used to win this fallback outright: any non-empty string is truthy, so it beat
+  // a perfectly good `buyer.zip`. `geocodeZip` then fails closed on it, so `center` came back
+  // null and the buyer got no distance ranking, `hasZip: false`, and every card reduced to
+  // NEED_ZIP — while line ~254 reported the garbage back to them as `activeZip`. Following a
+  // malformed link cost a buyer the ZIP they already had on file.
+  //
+  // `.slice(0, 5)` was its own hazard: it silently turned "123456" into "12345", searching a
+  // DIFFERENT place than the one asked for rather than rejecting the input.
+  //
+  // Same shape as `placeBuyer` in qualified-results.service.ts, deliberately — the two Phase 4
+  // surfaces must agree on what placing a buyer means. A well-formed supplied ZIP outranks the
+  // stored one; a malformed one is not a location request at all and falls through to the
+  // profile; neither being placeable leaves `zip` empty, which is the honest NEED_ZIP state.
+  const suppliedZip = searchParams.get("zip")?.trim() ?? "";
+  const storedZip = buyer.zip?.trim() ?? "";
+  const zip =
+    (/^\d{5}$/.test(suppliedZip) ? suppliedZip : null) ??
+    (/^\d{5}$/.test(storedZip) ? storedZip : null) ??
+    "";
   // RADIUS IS NOT A CLIENT PARAMETER AND NOT A FILTER (§22a; Phase 4).
   //
   // It used to be both: `radiusMiles` defaulted to 50, went into a bounding box in the WHERE,
