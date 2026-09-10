@@ -2,6 +2,13 @@
 
 **One migration. Not applied by this branch, and not applicable by it.**
 
+> **Since applied.** The owner applied `20261111000000_deposit_status_disputed` to production at
+> `2026-09-10T04:15:47Z` and verified both halves — `DepositStatus` now carries five labels, and
+> the ledger row shows `applied_steps_count` 1 — two minutes before the Phase 3 merge. Owner-supplied
+> and owner-verified; not re-derived by any Claude session, none of which held a production
+> credential. The statements below describe the branch as authored and remain accurate as history;
+> they are no longer a description of production's current state.
+
 Phase 3 adds exactly one piece of schema: the enum label `DepositStatus.DISPUTED`. Everything else
 the phase needs already shipped in the Phase 1 wave — `deposits.vehicle_request_id`, the
 dispute/refund hold triple (`disputed_at`, `hold_reason`, `hold_released_at`), `plan_snapshots`,

@@ -105,6 +105,10 @@ the public root. No authenticated page was exercised in a browser.
 
 ## Deploy order is a constraint, not a preference
 
+*(Honoured. The migration was applied at `2026-09-10T04:15:47Z` and the Phase 3 merge landed at
+`04:17Z` — migration first, by two minutes. Owner-supplied and owner-verified against production;
+no Claude session held a credential or ran anything against it.)*
+
 `DepositStatus.DISPUTED` appears in a **read** predicate that runs on every checkout:
 `OBLIGATION_BEARING` (`frontend/lib/services/payment/deposit-obligation.ts:164`) is spread
 unconditionally into `status: { in: [...] }` at `:195`, and the three callers of

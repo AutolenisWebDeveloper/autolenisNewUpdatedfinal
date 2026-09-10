@@ -35,6 +35,26 @@ export type DepositStatus = "PENDING" | "PAID" | "FAILED" | "REFUNDED" | "DISPUT
 /** Every label, in `pg_enum` order. Kept exported so tests can iterate exhaustively. */
 export const DEPOSIT_STATUSES = ["PENDING", "PAID", "REFUNDED", "FAILED", "DISPUTED"] as const;
 
+// ADDING A LABEL HERE COUPLES THE APPLICATION DEPLOY TO A MIGRATION. READ THIS FIRST.
+//
+// This file is where you land first when extending `DepositStatus` — enum, matrix,
+// predecessor sets — and it is the file with the least obvious reason to mention
+// deployment, which is exactly why the warning belongs here.
+//
+// Nothing in THIS file reaches PostgreSQL: the sets below are in-memory. But they are
+// dereferenced into query predicates elsewhere (`REFUND_FROM` and `DISPUTE_WON_FROM` in
+// `services/payment/fulfillment-hold.service.ts` and the Stripe webhook, and
+// `OBLIGATION_BEARING` in `services/payment/deposit-obligation.ts`, which sits on the
+// buyer checkout path). A predicate carrying a label the deployed database does not have
+// raises `22P02 invalid_text_representation` and fails the WHOLE query, for every caller
+// that reaches it — not only for rows in the new state.
+//
+// So: apply the migration, verify both halves, then deploy. Never the reverse, and never
+// "it is additive so either order is fine" — that reasoning is about writes, and a
+// predicate is a read. The worked example, including how that wrong conclusion was
+// reached once already, is in
+// `prisma/migrations/20261111000000_deposit_status_disputed/ORDERING.md`.
+
 // Terminal states never transition out. `REFUNDED` is the only one: the money went
 // back, and no later event can make that untrue. `DISPUTED` is explicitly NOT
 // terminal — a dispute resolves in one direction or the other and the row must be

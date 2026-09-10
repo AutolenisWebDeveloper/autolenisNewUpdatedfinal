@@ -139,12 +139,19 @@ export type DepositObligation =
  *
  * ─── THIS ARRAY IS A DEPLOY-ORDER CONSTRAINT. READ BEFORE ADDING A LABEL. ───
  *
- * Every string here is sent to PostgreSQL as an enum literal, in a READ predicate, on a
- * path that runs for every buyer who opens checkout (see `findExistingDepositObligation`
- * below and its three callers). A label that the deployed database's `DepositStatus`
- * type does not yet contain makes that query raise `22P02 invalid_text_representation`
- * — and because the predicate is unconditional, the failure is not scoped to rows in
- * the new state. It is every checkout, immediately, for everyone.
+ * Every string here is sent to PostgreSQL as an enum literal, in a READ predicate. A
+ * label the deployed database's `DepositStatus` type does not yet contain makes that
+ * query raise `22P02 invalid_text_representation` — and because the label is in the
+ * PREDICATE rather than in the data, the failure is not scoped to rows in the new
+ * state. The whole query fails, for every caller that reaches it.
+ *
+ * Who that is, sized honestly: `findExistingDepositObligation` below has three callers
+ * — buyer checkout and the two admin deposit routes. The buyer route reaches it only
+ * after the entry throttle, the limiter, the open-request check and the §5a transition
+ * gate, so the blast radius is every ELIGIBLE buyer with an open request who was about
+ * to pay, including one who merely opened the checkout page (it fires this call as a
+ * probe on mount). Not literally everyone — and still far wider than "disputed
+ * deposits", which is the mistake this note exists to stop.
  *
  * So adding a label here couples the application deploy to a migration: the migration
  * must land FIRST, always, with no exceptions and no "it is additive so either order is

@@ -157,15 +157,20 @@ for the new transition. Never reorder existing values.
 > predicate on the buyer checkout path. Deploying first would have `22P02`'d every
 > buyer who merely opened the checkout page.
 >
-> **Never edit an applied migration, not even to fix a comment.**
-> `_prisma_migrations.checksum` is `sha256(migration.sql)` — proven against this
-> project's live ledger in `docs/plans/MIGRATION-LEDGER-RECONCILIATION.md` §7.3,
-> which reproduced the stored value for 61 of 67 rows. The six that failed were
-> exactly the migrations edited after being recorded; that halted a migrate run on
-> 2026-08-31 and needed a hand-reviewed ledger realignment to repair. Put the
-> correction in a NEW companion file in the same directory, as that `ORDERING.md`
-> does — `prisma migrate deploy` reads only `migration.sql` per directory, and
-> `rollback.sql` already proves companions are safe there.
+> **Never edit a migration that has shipped — applied or not.** You cannot
+> reliably know which, and `CLAUDE.md`'s rule is unqualified for that reason.
+> `_prisma_migrations.checksum` is `sha256(migration.sql)`, proven against this
+> project's live ledger in `docs/plans/MIGRATION-LEDGER-RECONCILIATION.md` §7.3:
+> recomputing it reproduced the stored value for 61 of 67 recorded rows, and the
+> six that failed were exactly the migrations edited after being recorded — the
+> ledger left holding "a fossil of the pre-edit file". Those six made a planned
+> reconciliation's post-condition unachievable before it began (§7.1), Prisma
+> ships no CLI command to repair a stale checksum (§7.6), and **they are still
+> unrepaired** (§7.8 — no `prisma migrate` command has been run against
+> production from a Claude session; the repair SQL is proposed, not applied).
+> Put the correction in a NEW companion file in the same directory, as that
+> `ORDERING.md` does — `prisma migrate deploy` reads only `migration.sql` per
+> directory, and `rollback.sql` already proves companions are safe there.
 
 **Backfill.** Idempotent and resumable, batched by PK range or `updated_at`,
 throttled, with progress logging. Provide a manual re-run endpoint/script.

@@ -1,11 +1,18 @@
 # ORDERING — a correction to this migration's own header
 
 **This file corrects `migration.sql` in this directory. Where the two disagree, this file is
-right.** The header sentence quoted below was wrong, and it was wrong in the direction that
-gets someone hurt: it understated a hard ordering constraint as an optional one.
+right.** The header sentence quoted below was wrong, and it was wrong in the direction that gets
+someone hurt: it understated a hard ordering constraint as an optional one.
 
-`migration.sql` is not edited, and the reason is in *Why this is a separate file* at the
-bottom. Read that before "just fixing the comment".
+`migration.sql` is not edited. See *Why this is a separate file* at the bottom before "just
+fixing the comment".
+
+> **State of this migration.** It **has been applied to production**, at
+> `2026-09-10T04:15:47Z`, two minutes before the Phase 3 merge. Owner-supplied and verified by
+> the owner against production; not re-derived here, and no session that wrote this file held a
+> production credential. Several artifacts around it still read "WRITTEN BUT NOT APPLIED"
+> (`migration.sql:3`, `docs/transaction-flow/phase-3-proof/README.md:3`) — they were true when
+> written and are now stale. Trust the ledger row and `pg_enum`, not the prose.
 
 ---
 
@@ -18,21 +25,22 @@ bottom. Read that before "just fixing the comment".
 > that does write it fails with 22P02 invalid_text_representation until the label lands.
 > Apply the migration first.
 
-Three things are wrong with it.
-
-**It is not safe in either order.** Deploying the application before this migration breaks
-every buyer at checkout.
+**It is not safe in either order.** Deploying the application before this migration would have
+broken checkout.
 
 **It reasons only about writes.** "A deployment that does not yet know the label simply never
 writes it" is true and irrelevant. The label also travels on a **read**.
 
-**Its contrast with its siblings is backwards.** It says the weak constraint is "not true of
-most of this wave's siblings". The immediate sibling,
-`20261110000000_claim_token_purpose/migration.sql:41-46`, reasons correctly about reads and
-states the order as a requirement. That one got it right. This one did not.
+**It exempts itself from a rule it states correctly.** Read carefully, "which is not true of
+most of this wave's siblings" says the *siblings* are order-dependent — and they are. The
+immediate sibling, `20261110000000_claim_token_purpose/migration.sql:41-46`, states its own
+constraint accurately and defers to the runbook. The error is not the observation about the
+siblings; it is the self-exemption, claimed by the one migration in the wave whose label sits in
+the hottest read predicate of the set.
 
-The sentence also contradicts itself: it claims either order is safe and then instructs
-"Apply the migration first". If either order were safe there would be no order to state.
+It also contradicts itself: it claims either order is safe and then instructs "Apply the
+migration first". If either order were safe there would be no order to state. Reaching the right
+conclusion from a wrong premise is worse than silence, because the next reader can reverse it.
 
 ## Why the order is a requirement — the read predicate
 
@@ -43,7 +51,7 @@ The sentence also contradicts itself: it claims either order is safe and then in
 const OBLIGATION_BEARING = ["PENDING", "PAID", "FAILED", "DISPUTED"] as const;
 ```
 
-It is spread, unconditionally, into a query predicate:
+It is spread, with no flag or branch, into a query predicate:
 
 ```ts
 // lib/services/payment/deposit-obligation.ts:195, inside db.deposit.findMany
@@ -52,153 +60,186 @@ status: { in: [...OBLIGATION_BEARING] },
 
 Prisma emits `WHERE status IN ($1,$2,$3,$4)` with each value bound and cast to
 `"DepositStatus"`. Against a database whose type has only the four original labels, the fourth
-bind raises **`22P02 invalid_text_representation`** — and because the predicate is
-unconditional, the failure is not scoped to rows in the new state. It is the whole query, for
-every caller, immediately.
-
-There is no feature flag, branch, environment check or fallback around it.
+bind raises **`22P02 invalid_text_representation`** — the same mechanism Phase 1 already
+recorded at `docs/transaction-flow/phase-1-proof/preflight.sql:83-90`. And because the label is
+in the predicate rather than in the data, the failure is not scoped to rows in the new state: it
+is the whole query, for every caller that reaches it.
 
 ## What breaks, exactly
 
-`findExistingDepositObligation` is called from three places, all unconditionally:
+`findExistingDepositObligation` has three callers:
 
 | Caller | Reached by |
 | --- | --- |
-| `app/api/buyer/deposit/create-intent/route.ts:217` | every buyer at checkout |
+| `app/api/buyer/deposit/create-intent/route.ts:217` | a buyer at checkout |
 | `app/api/admin/payments/deposit/create-intent/route.ts:62` | an admin issuing a $99 |
 | `app/api/admin/payments/deposit/send-link/route.ts:60` | an admin mailing a payment link |
 
-The buyer path is the severe one, and it is worse than "a buyer who tries to pay". The
-checkout page fires a probe on mount — `app/buyer/deposit/page.tsx:259` calls
-`postCreateIntent(false, token)` from its effect — so the query runs for **every buyer who
-merely opens `/buyer/deposit`**, before they touch anything.
+**Sized precisely, because overstating it is its own failure.** The buyer route is not reached by
+everyone who loads the page. Four exits precede the obligation query: the entry throttle
+(`:38`), the per-call limiter (`:140-141`), `REQUEST_REQUIRED` when the buyer has no open request
+(`:166`), and the §5a transition gate (`:183`). So the 500 lands on **every eligible buyer with
+an open request who was about to pay** — which is the population that matters, and it is still
+far wider than "disputed deposits".
 
-The remaining sites that name the label are narrower, and none of them would have surfaced the
-problem first:
+It is also not limited to buyers who click. The checkout page fires the same call as a probe on
+mount (`app/buyer/deposit/page.tsx:259`), so an eligible buyer who merely opened `/buyer/deposit`
+would have hit it.
 
-| Site | Reached by |
-| --- | --- |
-| `lib/services/payment/fulfillment-hold.service.ts:109-110` | the **write**, on `charge.dispute.created` |
-| `lib/services/payment/fulfillment-hold.service.ts:270` (`DISPUTE_WON_FROM`) | `charge.dispute.closed`, won |
-| `lib/services/payment/fulfillment-hold.service.ts:320` (`REFUND_FROM`) | `charge.dispute.closed`, lost |
-| `app/api/webhooks/stripe/route.ts:946` (`REFUND_FROM`) | `charge.refunded` |
-| `lib/services/payment/refund.service.ts:113` (`REFUND_FROM`) | the admin refund route |
+The remaining sites that put the label in front of PostgreSQL are narrower, and none of them
+would have surfaced the problem first:
 
-That distribution is exactly why the header's author reached the wrong conclusion: every
-*obvious* use of `DISPUTED` really is a webhook-only write. The hot-path read is the one that
-does not look like a dispute feature at all.
+| Site | Kind | Reached by |
+| --- | --- | --- |
+| `lib/services/payment/fulfillment-hold.service.ts:125` | the **write** (`status: "DISPUTED"`) | `charge.dispute.created` |
+| `lib/services/payment/fulfillment-hold.service.ts:270` (`DISPUTE_WON_FROM`) | predicate | `charge.dispute.closed`, won |
+| `lib/services/payment/fulfillment-hold.service.ts:320` (`REFUND_FROM`) | predicate | `charge.dispute.closed`, lost |
+| `app/api/webhooks/stripe/route.ts:946` (`REFUND_FROM`) | predicate | `charge.refunded` |
+| `lib/services/payment/refund.service.ts:113` (`REFUND_FROM`) | predicate | three admin routes **and** the `refund_deposit` AI action intent |
+
+*(The refund predicate's four call paths: `admin/payments/deposit/[depositId]/refund/route.ts:50`,
+`admin/deals/[dealId]/action/route.ts:261`, `admin/auctions/[auctionId]/action/route.ts:176`, and
+`processRefund` at `refund.service.ts:180`, which the AI action-intent catalogue names as the
+canonical service. Still narrow — but it is not "the admin refund route" alone.)*
+
+Two further sites name the label and **never send it to PostgreSQL**, which is worth stating so
+an auditor does not have to re-derive it: `lib/payments/deposit-state.ts` (the enum's canonical
+module — `DEPOSIT_STATUSES` at `:36`, the transition matrix, and the per-event predecessor sets;
+all in-memory), and `app/admin/payments/deposits/page.tsx:21`, whose filter chips are applied in
+JavaScript over rows already fetched.
+
+That distribution is exactly why the header's author reached the wrong conclusion. Every
+*obvious* use of `DISPUTED` really is a webhook-only write. The hot-path read does not look like
+a dispute feature at all.
 
 **The reverse order is safe**, and that half of the header was right. An application that
-predates this phase neither sends the label nor can receive it — nothing writes it, so no row
-can carry it — and the label sits inert until the code that uses it ships.
-
-## Nothing in CI catches this
-
-The `Migration chain (empty DB -> schema)` job runs `pnpm exec prisma migrate deploy` against a
-**fresh, empty** PostgreSQL service container. The chain is always fully applied before any
-query runs there, so the mismatch cannot occur.
-
-The mismatch exists only in the window between a production application deploy and a production
-migration. No automated check in this repository looks at that window. The only thing standing
-in it is the runbook order in `docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` §8.1a.2 — and
-a comment like the one above, which is why a comment that understates the constraint is a real
-defect and not a wording quibble.
+predates this phase neither sends the label nor can receive it — nothing writes it, so no row can
+carry it — and the label sits inert until the code that uses it ships.
 
 ## The same query carries a second ordering hazard, of a different class
 
-Worth knowing, because it changes what "check the predicate" means in practice.
+The `findMany` at `lib/services/payment/deposit-obligation.ts:192` — the same call whose predicate
+is quoted above — has **no `select`** and no `include`. Prisma's default read therefore selects
+every scalar the `Deposit` model declares in `schema.prisma`, not just the columns this function
+reads. So the query is also coupled to every *column* migration on `deposits`, and a column the
+deployed database lacks fails earlier and differently: **`42703 undefined_column`**, before the
+enum bind is reached.
 
-The `findMany` at `lib/services/payment/deposit-obligation.ts:192` (the same call whose predicate is quoted above) has **no `select`**. Prisma's
-default read therefore selects every scalar the `Deposit` model declares in `schema.prisma` — not
-just the columns this function reads. So the same hot-path query is also coupled to every
-*column* migration on `deposits`, and a column the deployed database lacks fails earlier and
-differently: **`42703 undefined_column`**, before the enum bind is ever reached.
+That is precisely the mechanism the sibling migration documented, and it is why a `select` on a
+hot query is a deploy-order control and not only a performance one.
 
-That is precisely the mechanism the sibling migration
-(`20261110000000_claim_token_purpose/migration.sql:41-46`) documented correctly, and it is the
-reason a `select` on a hot query is a deploy-order control and not just a performance one.
+**On reading the baseline as production state — don't.** The physical-schema snapshot under
+`docs/transaction-flow/phase-1-proof/production-baseline/` was synthesised on 2026-09-03
+(`00-header.sql:3`) and shows `deposits` without the Phase 1 columns (`14-tables-e.sql:318-328`).
+That is what production looked like that day, not what it looks like now, and reading it as
+current state produces a confidently wrong answer.
 
-**This is not a claim about production's current state.** The physical-schema baseline under
-`docs/transaction-flow/phase-1-proof/production-baseline/` is a snapshot synthesised on
-2026-09-03 and does not show the Phase 1 wave's `deposits` columns. It is stale for that
-purpose: this repository has 107 migration directories and production's ledger holds 107 rows,
-so the whole chain — the Phase 1 wave included — is recorded as applied. Reading the baseline as
-current production state is an easy mistake and produces the wrong conclusion; the ledger is the
-authority on what is applied, and the baseline is the authority only on what the schema looked
-like on the day it was taken.
+Nor is the ledger the authority to reach for instead. This project's defining incident is
+migrations physically applied with **no** ledger row — `CLAUDE.md` puts it as "out-of-band DDL is
+how six migrations went unrecorded". **The physical schema is the authority on what is applied;
+the ledger is known to trail it, and both are checked** (`phase-3-proof/README.md:63`: both
+halves, because neither alone is sufficient).
+
+## Nothing in CI catches the ordering hazard
+
+The `Migration chain (empty DB -> schema)` job runs `prisma migrate deploy` against a **fresh,
+empty** PostgreSQL service container, asserting zero `public` tables first. The chain is always
+fully applied before any query runs there, so the mismatch cannot occur. The `ci` job runs the
+suite against a placeholder DSN.
+
+The mismatch exists only in the window between a production application deploy and a production
+migration, and no job in this repository observes that window. What stands in it is the runbook
+order in `docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` §8.1a.2, and comments like the one
+above — which is why a comment that understates the constraint is a real defect and not a wording
+quibble.
 
 ## The correct rule, stated generally
 
-> A migration that adds an enum label is **not** order-independent merely because it is
-> additive. If any application code names the new label in a **query predicate**, the
-> migration must be applied before the deploy, without exception. Check for reads, not just
-> writes — a predicate is a read, and it fails for everyone, not only for rows in the new
-> state.
+> A migration that adds an enum label is **not** order-independent merely because it is additive.
+> If any application code names the new label in a **query predicate**, the migration must be
+> applied before the deploy, without exception. Check for reads, not just writes — a predicate is
+> a read, and it fails for every caller that reaches it, not only for rows in the new state.
 
-This is now recorded in two places a future author will actually hit: at the definition of
-`OBLIGATION_BEARING` itself (`lib/services/payment/deposit-obligation.ts`), and in the "Add a
-status value" workflow of `.claude/skills/autolenis-supabase-postgres/SKILL.md`.
+This is recorded in three places a future author will actually hit, in the order they hit them:
+
+1. `lib/payments/deposit-state.ts`, beside `DEPOSIT_STATUSES` — the file you edit *first* when
+   adding a `DepositStatus` label, and the one with least obvious reason to mention deployment.
+2. `lib/services/payment/deposit-obligation.ts`, at the definition of `OBLIGATION_BEARING` — the
+   array that actually creates the coupling.
+3. `.claude/skills/autolenis-supabase-postgres/SKILL.md`, "Add a status value" — the curated
+   workflow, for a label anywhere in the schema.
 
 ## A second, smaller correction — `rollback.sql:17-19`
 
-`rollback.sql` says a row left at `DISPUTED` when the reverted code ships means "every read of
-it raises 22P02 on the way into the old enum's TypeScript union."
+`rollback.sql` says a row left at `DISPUTED` when the reverted code ships means "every read of it
+raises 22P02 on the way into the old enum's TypeScript union."
 
-**The substance is right and the instruction stands**: move those rows to `PAID` before
-deploying reverted code. **The error code is misattributed.** `22P02
-invalid_text_representation` is what PostgreSQL raises when an unknown label is sent *to* it.
-Reading a row whose stored label the database still recognises produces no PostgreSQL error at
-all; the failure happens client-side, when the Prisma client — regenerated from a
-four-label enum — deserializes a value its union does not contain. Same outcome, different
-layer, and worth knowing when you are reading a stack trace at 2am to decide which side is
-broken.
+**The substance is right and the instruction stands**: move those rows to `PAID` before deploying
+reverted code. **The error code is misattributed.** `22P02 invalid_text_representation` is what
+PostgreSQL raises when an unknown label is sent *to* it. Reading a row whose stored label the
+database still recognises produces no PostgreSQL error at all; the failure happens client-side,
+when the Prisma client — regenerated from a four-label enum — decodes a value its union does not
+contain. Same outcome, different layer, and worth knowing when you are reading a stack trace at
+2am to decide which side is broken.
 
-*(Reasoned from the semantics of the two layers, not executed against a live rollback. The
-instruction it qualifies is unaffected either way.)*
+*(Reasoned from the semantics of the two layers. The exact client-side error code was not
+confirmed against a live database. The instruction it qualifies is unaffected either way.)*
 
 ## Why this is a separate file, and not an edit to `migration.sql`
 
-**Because `migration.sql` has been applied to production, and Prisma fingerprints it.**
+**Two independent reasons. Either alone is sufficient.**
 
-Production's ledger table carries a checksum column —
-`checksum character varying(64) NOT NULL`, per the committed physical-schema baseline at
-`docs/transaction-flow/phase-1-proof/production-baseline/10-tables-a.sql:2`. It holds
-`sha256(migration.sql)`, recorded when the migration was applied. That is not an inference:
-`docs/plans/MIGRATION-LEDGER-RECONCILIATION.md:462` states it, and §7.3 proves it against this
-project's own live ledger — recomputing `sha256(migration.sql)` reproduced the stored value for
-**61 of the 67** rows then recorded.
+**1. `CLAUDE.md` forbids it, without qualification:** never edit an existing file under
+`frontend/prisma/migrations/**`. That rule does not turn on whether the file has been applied,
+and it is enforced by a PreToolUse guard.
 
-**And the six that did not match are the whole argument.** Every one of them was a migration
-whose repository file had been edited *after* it was recorded, leaving the ledger holding, in
-that document's words, "a fossil of the pre-edit file". That is not a hypothetical cost. It
-halted a migrate run on 2026-08-31, and repairing it took a dedicated reconciliation plan and a
-hand-reviewed `UPDATE` against `_prisma_migrations`
-(`docs/plans/sql/003_migration_ledger_reconciliation.sql`).
+**2. This one has been applied, so it is now fingerprinted.** Production's ledger carries
+`checksum character varying(64) NOT NULL`
+(`docs/transaction-flow/phase-1-proof/production-baseline/10-tables-a.sql:3`), holding
+`sha256(migration.sql)` as of apply time. Editing a byte changes the digest, and the value
+recorded in production stops describing the file in the repository.
 
-Editing so much as a comment in `migration.sql` changes those bytes and therefore the digest,
-and the value recorded in production no longer describes the file in the repository. Doing it to
-*fix a comment about ordering discipline* would be the seventh instance of the same mistake, in
-the file least able to afford it.
+That the checksum is `sha256(migration.sql)` is not an inference:
+`docs/plans/MIGRATION-LEDGER-RECONCILIATION.md:462` states it, and §7.3 proved it against this
+project's live ledger — recomputing the digest reproduced the stored value for **61 of the 67**
+rows recorded at the time.
 
-`CLAUDE.md` states the rule without qualification: **never edit an existing file under
-`frontend/prisma/migrations/**`.** Adding a *new* file there is ordinary work, and this
-directory already demonstrates that a non-`migration.sql` companion is safe — `rollback.sql`
-has always sat beside it, in this directory and seven others, with the CI migration job green.
-`prisma migrate deploy` reads `migration.sql` from each directory and ignores everything else.
+**And the six that did not match are the argument.** Every one was a migration whose repository
+file had been edited *after* it was recorded, leaving the ledger holding, in that document's
+words, "a fossil of the pre-edit file". Their consequence is concrete and current: §7.1 records
+that they made the planned reconciliation sequence's stated post-condition **already unachievable
+before it began**, and §7.6 that Prisma ships no CLI command to repair a stale checksum.
 
-So the correction lands here, in the migration's own directory, where the person who opens this
-migration will find it, and the fingerprinted file is left exactly as production recorded it.
+**They are still unrepaired.** §7.8 is explicit that no `prisma migrate` command was run — not
+`resolve`, not `deploy`, not `status` — that the six were not repaired, and that the
+`migrate status` / `migrate deploy` consequences in that document are themselves labelled **NOT
+VERIFIED**, for want of a production credential. `docs/plans/sql/003_migration_ledger_reconciliation.sql`
+is a *proposed* repair awaiting an owner with a real DSN, not a repair that happened.
 
-**To confirm this from the production side** (a read-only query, permitted under the per-run
-protocol):
+So: six live stale checksums, no tool to fix them, and a reconciliation still outstanding.
+Editing this migration to correct its own comment *about ordering discipline* would make seven.
+
+**A new file here is safe.** `prisma migrate deploy` reads only `migration.sql` per directory;
+`prisma/__tests__/migration-chain.test.ts:26-31,100-112` enumerates **directories** and requires
+a `migration.sql` in each, so a `.md` inside an existing directory trips nothing; and
+`rollback.sql` already sits beside `migration.sql` here and in seven other directories with the
+migration CI job green.
+
+**If the header itself should be changed anyway**, that is the owner's call, and it should be
+paired with a ledger checksum realignment rather than done alone — otherwise it creates the
+seventh fossil while fixing a comment about not creating fossils.
+
+### Checking the fingerprint
+
+A read-only query, permitted under the per-run protocol:
 
 ```sql
-SELECT migration_name, checksum
+SELECT migration_name, checksum, finished_at, applied_steps_count
   FROM _prisma_migrations
  WHERE migration_name = '20261111000000_deposit_status_disputed';
 ```
 
-Compare it to the file:
+and against the file:
 
 ```
 sha256sum frontend/prisma/migrations/20261111000000_deposit_status_disputed/migration.sql
@@ -210,7 +251,13 @@ At the time this file was written that command returned:
 c91b2b173069c7fc771307131f873cd571d67fd6d8c4bc9971eb0f71758cea2a
 ```
 
-The two should be equal, and should stay equal for the life of this migration. If they ever
-diverge, someone edited an applied migration and the ledger is now a fossil — §7.3 of the
-reconciliation plan is the procedure for that, and the repair is an owner-approved realignment,
-never a re-apply.
+Expected: one row, `applied_steps_count` 1, and the two digests equal. They should stay equal for
+the life of this migration.
+
+- **Digests differ** → someone edited an applied migration. §7.3 of the reconciliation plan is the
+  procedure; the repair is an owner-approved realignment, never a re-apply.
+- **Zero rows** → do **not** reach for `migrate resolve --applied`. Recording it as applied
+  without running the `ALTER TYPE` leaves `pg_enum` with four labels while `migrate status`
+  reports clean — which manufactures the exact 22P02-on-every-checkout this file exists to
+  prevent, with the one detector silenced. Check `pg_enum` for the label first, and treat a
+  present label with an absent row as the recorded incident class it is.
