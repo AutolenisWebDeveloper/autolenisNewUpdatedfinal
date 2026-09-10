@@ -157,10 +157,15 @@ for the new transition. Never reorder existing values.
 > predicate on the buyer checkout path. Deploying first would have `22P02`'d every
 > buyer who merely opened the checkout page.
 >
-> **Never edit an applied migration to fix its comment.** `_prisma_migrations`
-> records a SHA-256 of `migration.sql`; changing a byte desynchronises it from
-> production. Put the correction in a new companion file in the same directory, as
-> that `ORDERING.md` does.
+> **Never edit an applied migration, not even to fix a comment.**
+> `_prisma_migrations.checksum` is `sha256(migration.sql)` — proven against this
+> project's live ledger in `docs/plans/MIGRATION-LEDGER-RECONCILIATION.md` §7.3,
+> which reproduced the stored value for 61 of 67 rows. The six that failed were
+> exactly the migrations edited after being recorded; that halted a migrate run on
+> 2026-08-31 and needed a hand-reviewed ledger realignment to repair. Put the
+> correction in a NEW companion file in the same directory, as that `ORDERING.md`
+> does — `prisma migrate deploy` reads only `migration.sql` per directory, and
+> `rollback.sql` already proves companions are safe there.
 
 **Backfill.** Idempotent and resumable, batched by PK range or `updated_at`,
 throttled, with progress logging. Provide a manual re-run endpoint/script.

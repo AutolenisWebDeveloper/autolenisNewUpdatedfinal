@@ -162,10 +162,23 @@ instruction it qualifies is unaffected either way.)*
 
 Production's ledger table carries a checksum column —
 `checksum character varying(64) NOT NULL`, per the committed physical-schema baseline at
-`docs/transaction-flow/phase-1-proof/production-baseline/10-tables-a.sql:2`. That is a 64-character
-hex digest: a SHA-256 of the migration file's bytes, recorded when the migration was applied.
+`docs/transaction-flow/phase-1-proof/production-baseline/10-tables-a.sql:2`. It holds
+`sha256(migration.sql)`, recorded when the migration was applied. That is not an inference:
+`docs/plans/MIGRATION-LEDGER-RECONCILIATION.md:462` states it, and §7.3 proves it against this
+project's own live ledger — recomputing `sha256(migration.sql)` reproduced the stored value for
+**61 of the 67** rows then recorded.
+
+**And the six that did not match are the whole argument.** Every one of them was a migration
+whose repository file had been edited *after* it was recorded, leaving the ledger holding, in
+that document's words, "a fossil of the pre-edit file". That is not a hypothetical cost. It
+halted a migrate run on 2026-08-31, and repairing it took a dedicated reconciliation plan and a
+hand-reviewed `UPDATE` against `_prisma_migrations`
+(`docs/plans/sql/003_migration_ledger_reconciliation.sql`).
+
 Editing so much as a comment in `migration.sql` changes those bytes and therefore the digest,
-and the value recorded in production no longer describes the file in the repository.
+and the value recorded in production no longer describes the file in the repository. Doing it to
+*fix a comment about ordering discipline* would be the seventh instance of the same mistake, in
+the file least able to afford it.
 
 `CLAUDE.md` states the rule without qualification: **never edit an existing file under
 `frontend/prisma/migrations/**`.** Adding a *new* file there is ordinary work, and this
@@ -185,12 +198,19 @@ SELECT migration_name, checksum
  WHERE migration_name = '20261111000000_deposit_status_disputed';
 ```
 
-At the time this file was written, the repository's `migration.sql` hashed to:
+Compare it to the file:
+
+```
+sha256sum frontend/prisma/migrations/20261111000000_deposit_status_disputed/migration.sql
+```
+
+At the time this file was written that command returned:
 
 ```
 c91b2b173069c7fc771307131f873cd571d67fd6d8c4bc9971eb0f71758cea2a
 ```
 
-If the recorded checksum matches, the file is untouched since it was applied — which is the
-state it should stay in. If someone later edits `migration.sql` anyway, that is the query that
-will tell you.
+The two should be equal, and should stay equal for the life of this migration. If they ever
+diverge, someone edited an applied migration and the ledger is now a fossil — §7.3 of the
+reconciliation plan is the procedure for that, and the repair is an owner-approved realignment,
+never a re-apply.
