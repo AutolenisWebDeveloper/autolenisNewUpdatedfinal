@@ -87,6 +87,13 @@ function listingFactsFor(id: string, v: NormalizedVehicle): ListingDealerFacts {
     externalDealerZip: v.externalDealerZip ?? null,
     externalDealerCity: v.externalDealerCity ?? null,
     externalDealerState: v.externalDealerState ?? null,
+    // Phase 4: the two keys that make a listing resolvable to a rooftop we own.
+    // `externalDealerWebsite` is the one that works TODAY — websiteHost is @unique on the
+    // rooftop and dealer_rooftops has no phone or email column. `mcRooftopId` is exact but
+    // currently matches nothing: all 1,422 rooftops carry it NULL, and filling that side is
+    // gated on §13-D8.
+    externalDealerWebsite: v.externalDealerWebsite ?? null,
+    mcRooftopId: v.mcRooftopId ?? null,
   };
 }
 

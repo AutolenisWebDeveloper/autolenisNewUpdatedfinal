@@ -23,11 +23,16 @@ const ARLINGTON: RooftopRow = {
   id: "rt_1", displayName: "Arlington Auto Group", websiteHost: "arlingtonautogroup.com",
   phoneKey: "+18175550142", nameZipKey: "arlington auto group|76011",
   nameCityStateKey: "arlington auto group|arlington|tx",
+  // NULL, exactly as production is: all 1,422 dealer_rooftops rows carry mc_rooftop_id
+  // NULL today. The exact-match branch is therefore inert until the rooftop half is
+  // filled, which §13-D8 gates — and the fixture says so rather than pretending otherwise.
+  mcRooftopId: null,
 };
 const FORTWORTH: RooftopRow = {
   id: "rt_2", displayName: "Fort Worth Motors", websiteHost: "fwmotors.com",
   phoneKey: "+18175559999", nameZipKey: "fort worth motors|76102",
   nameCityStateKey: "fort worth motors|fort worth|tx",
+  mcRooftopId: null,
 };
 
 function listing(over: Partial<ListingDealerFacts> = {}): ListingDealerFacts {
@@ -111,7 +116,7 @@ test("a listing with no dealer facts is skipped without querying identity", asyn
 test("sparse facts do not collapse onto each other — null keys never match", async () => {
   const sparseRooftop: RooftopRow = {
     id: "rt_sparse", displayName: "X", websiteHost: null, phoneKey: null,
-    nameZipKey: null, nameCityStateKey: null,
+    nameZipKey: null, nameCityStateKey: null, mcRooftopId: null,
   };
   const d = deps([sparseRooftop]);
   const r = await resolveListingRooftops(
@@ -159,5 +164,92 @@ test("an empty batch does no work at all", async () => {
     linkListing: async () => {},
   });
   assert.equal(loads, 0, "no listings means no query");
-  assert.deepEqual(r, { resolved: 0, unmatched: 0, ambiguous: 0, skipped: 0, failed: 0, created: 0 });
+  assert.deepEqual(r, {
+    resolved: 0, byRooftopId: 0, byIdentity: 0,
+    unmatched: 0, ambiguous: 0, skipped: 0, failed: 0, created: 0,
+  });
+});
+
+// ── The two keys Phase 4 added ─────────────────────────────────────────────
+
+test("the provider's rooftop id is an EXACT match and short-circuits the fuzzy scan", async () => {
+  // Same identifier space on both sides, so there is nothing to weigh. It is checked before
+  // the identity keys and cannot be ambiguous.
+  const withId: RooftopRow = { ...ARLINGTON, id: "rt_exact", mcRooftopId: "573299" };
+  const d = deps([withId, FORTWORTH]);
+  const r = await resolveListingRooftops(
+    [listing({
+      mcRooftopId: "573299",
+      // Deliberately contradictory fuzzy facts. If the exact key did not win, these would
+      // match nothing and the listing would be unmatched.
+      externalDealerName: "Some Other Name Entirely",
+      externalDealerPhone: null, externalDealerZip: null,
+      externalDealerCity: null, externalDealerState: null,
+    })],
+    d,
+  );
+  assert.equal(r.resolved, 1);
+  assert.equal(r.byRooftopId, 1);
+  assert.equal(r.byIdentity, 0);
+  assert.deepEqual(d.linked, [{ id: "inv_1", rooftopId: "rt_exact" }]);
+});
+
+test("a listing whose rooftop id matches NOTHING we own falls through to the fuzzy keys", async () => {
+  // A rooftop outside the graph. Phase 5's problem (and §13-D8's, since minting from
+  // listing data is what the terms question gates) — but the same dealership may already
+  // be in the graph under a name discovery found, so the fuzzy path must still run.
+  const d = deps([ARLINGTON]);
+  const r = await resolveListingRooftops([listing({ mcRooftopId: "999999" })], d);
+  assert.equal(r.resolved, 1, "matched on the identity keys instead");
+  assert.equal(r.byRooftopId, 0);
+  assert.equal(r.byIdentity, 1);
+});
+
+test("the listing's website resolves the rooftop — the key that works TODAY", async () => {
+  // websiteHost is @unique on dealer_rooftops and the table has no phone or email column,
+  // so this is the highest-precision key the fuzzy path has. It was hard-coded null before
+  // Phase 4, with a comment saying listings carry no website — true only because the
+  // adapter discarded dealer.website at its type boundary.
+  const d = deps([ARLINGTON, FORTWORTH]);
+  const r = await resolveListingRooftops(
+    [listing({
+      externalDealerWebsite: "https://www.arlingtonautogroup.com/inventory",
+      externalDealerName: null, externalDealerPhone: null,
+      externalDealerZip: null, externalDealerCity: null, externalDealerState: null,
+    })],
+    d,
+  );
+  assert.equal(r.resolved, 1, "the host alone is enough");
+  assert.equal(r.byIdentity, 1);
+  assert.deepEqual(d.linked, [{ id: "inv_1", rooftopId: "rt_1" }]);
+});
+
+test("a website that matches no rooftop leaves the listing unlinked, never guessed", async () => {
+  const d = deps([ARLINGTON]);
+  const r = await resolveListingRooftops(
+    [listing({
+      externalDealerWebsite: "unknown-dealer.example",
+      externalDealerName: null, externalDealerPhone: null,
+      externalDealerZip: null, externalDealerCity: null, externalDealerState: null,
+    })],
+    d,
+  );
+  assert.equal(r.resolved, 0);
+  assert.equal(r.unmatched, 1);
+  assert.deepEqual(d.linked, []);
+});
+
+test("MATCH-never-MINT still holds for every new key", async () => {
+  // The invariant the whole service exists to keep. dealer_rooftops is the prospecting
+  // system's entity graph, populated by discovery -> verification -> dedup -> ingestion;
+  // creating a rooftop from third-party listing text would fill the outreach pipeline with
+  // dealerships nobody verified and bypass the one sanctioned write path.
+  const d = deps([]);
+  const r = await resolveListingRooftops(
+    [listing({ mcRooftopId: "573299", externalDealerWebsite: "brand-new.example" })],
+    d,
+  );
+  assert.equal(r.created, 0, "always 0 — asserted rather than assumed");
+  assert.equal(r.resolved, 0);
+  assert.deepEqual(d.linked, []);
 });

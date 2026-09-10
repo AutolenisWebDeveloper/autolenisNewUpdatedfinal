@@ -107,3 +107,93 @@ PROOF_PORT=5432 PROOF_USER=pgtest ./run-proof.sh
 ```
 
 Loopback only, and it refuses any database name it did not create. It never reads a production DSN.
+
+---
+
+# The catalogue purge (owner-run, not a migration)
+
+Three SQL files, plus the harness that proves them. **None of this is a migration and none of it
+runs from a deploy.** It is DML against business tables, which the per-run protocol authorizes
+only for the owner, one approved run at a time.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `catalogue-purge-establish.sql` | 9909 | `ffb242497f75d4f07c14f8069f565531b7073376585306356954b804e9b7cc62` |
+| `catalogue-purge-delete.sql` | 17220 | `a7717ccad1a92bbd9bdb53454dd71db912f205b13d2500c9230589abf0dc7087` |
+| `sweep-failure-diagnostic.sql` | 7831 | `6dbb442d5e5d6db4a6d6f567e29b58d66a26930e9165202c4f30d627b91cad42` |
+| `catalogue-purge-rehearsal.sh` | 19338 | `35e28fd74385145aa13d57eab5daefb227403374e3293c136ada18761c7e8d6c` |
+
+## Why
+
+Read-only census, owner-run 2026-09-10: all 221 `inventory_items` carry no city, state or zip
+(207 NULL, 14 empty string), no `rooftop_id` and no `mc_rooftop_id`; the newest was created
+2026-09-02 and last updated 09-03; every one was swept before `center_zip` became 76011.
+
+Those are one fact, not four. With no geography `distanceMilesBetween` returns null, so
+`shortlistGate` fails closed with `DISTANCE_UNKNOWN` and offers `REQUEST_SIMILAR`. Not one of the
+221 can be shortlisted by anyone, and none can resolve to a rooftop. Fixing the adapter fixes
+every sweep after it deploys and does nothing for these rows; leaving them makes the catalogue
+half correct and half inert with nothing on the buyer's side telling the two apart.
+
+## What blocks a delete, read from the physical schema
+
+`pg_constraint.confdeltype` on the restored production schema, asserted by the rehearsal
+(step 2) rather than read from migration source:
+
+| Reference | Action | Effect |
+| --- | --- | --- |
+| `shortlist_items.inventory_item_id` | `r` RESTRICT | **blocks** — 15 rows |
+| `auction_vehicles.inventory_item_id` | `a` NO ACTION | **blocks** — 3 rows, not named in the brief |
+| `vehicle_requests.inventory_item_id` | `n` SET NULL | silently changes a business record |
+| `vehicle_match_scores` · `inventory_price_alerts` · `inventory_quality_scores` · `vehicle_request_match_results` | none | orphans nothing will clean |
+
+The two that block are not routed around: the rows they point at are **retained**. Deleting one
+removes something a buyer chose, and those rows are already inert and already handled — Phase 4's
+`revalidateCandidate` drops a candidate that fails revalidation on location, with a reason, in
+front of the buyer. The SET NULL is performed explicitly instead of by the FK, because
+`updated_at` is maintained by Prisma's `@updatedAt` and an FK-driven change would leave the row
+claiming it had not changed. The four soft references are deleted in the same transaction.
+
+## Order of operations
+
+Run the purge **after** a successful sweep, never before. New rows are VIN-keyed and insert
+alongside the old, so there is no window in which the catalogue is empty. The delete script
+enforces it: with no geocoded active listing present it refuses, and `-v allow_empty_catalogue=1`
+is the deliberate override.
+
+```bash
+# 1 — establish. Read-only, operation class 3.
+psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction \
+  -c "SET TRANSACTION READ ONLY" -f catalogue-purge-establish.sql
+
+# 2 — delete. Owner-run DML. `expected_deletes` is query 4's `deletable`.
+psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 \
+  -v expected_deletes=<N> -f catalogue-purge-delete.sql
+```
+
+`defective_not_selected` in query 4 is step 2's rollback condition computed in advance. If it is
+anything but 0, step 2 refuses; report the number rather than widening the predicates.
+
+## Proof
+
+`./catalogue-purge-rehearsal.sh` — 11 steps, exit 0, PostgreSQL 16.13 (**DEGRADED**, as above).
+It restores production's physical schema, seeds a synthetic replica of the census, and proves:
+the FK topology the scripts were written against; the establish script running inside a
+server-enforced read-only transaction; four refusals (no `expected_deletes`; a count that does
+not reconcile; no geocoded listing present; a row that shares the defect but escapes a
+predicate — that last one rolls back rather than half-applying); the real delete removing exactly
+203 listings; 15 shortlisted and 3 candidate listings retained; 4 requests cleared and evented;
+the four soft references cut selectively in both directions; zero orphans; and a second run
+refusing rather than silently doing nothing.
+
+The seed is modelled on the census. It is **not** a copy of production data, so it proves the SQL,
+not the row contents.
+
+## No `audit_logs` row
+
+`audit_logs.action` is the `AdminActionType` enum and has no `DELETE` member. Writing
+`STATUS_CHANGE` would put a false statement in the audit trail to satisfy a convention, and adding
+an enum member is DDL that belongs in a migration. The record is instead: the run output (which
+names every deleted id, and which the per-run protocol already requires be reported in full) and a
+`vehicle_request_events` row per cleared request, where `event_type` is a free string and can say
+what actually happened.
