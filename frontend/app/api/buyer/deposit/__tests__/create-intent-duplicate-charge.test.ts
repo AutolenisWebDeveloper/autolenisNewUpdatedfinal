@@ -48,6 +48,9 @@ interface Ctrl {
   enrollCalls: number;
   /** False models the CHECKOUT PROBE — a call carrying no disclosure version. */
   disclosuresAccepted: boolean;
+  /** Which limiter each call consulted, in order. */
+  limiterKinds: string[];
+  paymentRequiredCalls: number;
 }
 let ctrl: Ctrl;
 
@@ -118,7 +121,13 @@ mock.module("@/lib/stripe", {
 });
 
 mock.module("@/lib/security/rate-limit", {
-  namedExports: { limitPaymentIntent: async () => ({ ok: true }), clientIpKey: () => "ip" },
+  namedExports: {
+    limitPaymentIntent: async () => { ctrl.limiterKinds.push("intent"); return { ok: true }; },
+    // The checkout PROBE (a call with no disclosure version) is rate-limited as the
+    // read it is, not against the 10/hour card-testing budget a mint uses.
+    limitGeneral: async () => { ctrl.limiterKinds.push("general"); return { ok: true }; },
+    clientIpKey: () => "ip",
+  },
 });
 mock.module("@/lib/services/prequal/prequal.service", {
   namedExports: { isPrequalValid: () => true },
@@ -142,7 +151,7 @@ mock.module("@/lib/services/vehicle-request/open-request.service", {
   },
 });
 mock.module("@/lib/services/vehicle-request/vehicle-request.service", {
-  namedExports: { enterPaymentRequired: async () => true },
+  namedExports: { enterPaymentRequired: async () => { ctrl.paymentRequiredCalls += 1; return true; } },
 });
 mock.module("@/lib/services/payment/deposit-eligibility", {
   namedExports: {
@@ -167,11 +176,14 @@ async function load() {
   return (await import("@/app/api/buyer/deposit/create-intent/route")).POST;
 }
 
-function req(): NextRequest {
+// The route decides probe-vs-mint from the BODY — a call with no disclosure version
+// cannot mint, which is what makes it usable as a read. So the tests send the version
+// exactly when they mean "the buyer accepted".
+function req(body: Record<string, unknown> = {}): NextRequest {
   return new NextRequest("https://autolenis.com/api/buyer/deposit/create-intent", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   });
 }
 
@@ -184,12 +196,15 @@ interface RouteResult {
 
 async function post(): Promise<RouteResult> {
   const POST = await load();
-  return (await POST(req())) as unknown as RouteResult;
+  const body = ctrl.disclosuresAccepted ? { disclosuresVersion: "2026-09-09-draft" } : {};
+  return (await POST(req(body))) as unknown as RouteResult;
 }
 
 beforeEach(() => {
   ctrl = {
     disclosuresAccepted: true,
+    limiterKinds: [],
+    paymentRequiredCalls: 0,
     existingDeposit: null,
     retrievedPi: { status: "requires_payment_method", client_secret: "cs_reusable", metadata: {} },
     createCalls: [],
@@ -410,4 +425,30 @@ test("ACCEPT: the same buyer, with the version, gets the intent", async () => {
   const res = await post();
   assert.equal(res.ok, true);
   assert.equal(ctrl.createCalls.length, 1);
+});
+
+
+// The PROBE is a READ, and must cost like one (found by the independent review).
+//
+// `limitPaymentIntent` is a card-testing guard at 10/hour per buyer AND per source IP.
+// Charging a page LOAD against it meant five reload-and-accept cycles locked a buyer out
+// of their own checkout, and a shared office IP tripped sooner. Moving a DRAFT request to
+// PAYMENT_REQUIRED on a page view was the second cost: it silently suppresses the §6.4
+// draft-recovery series for a buyer who looked at checkout once and never paid.
+test("a probe does not spend the payment-intent budget and does not move the request", async () => {
+  ctrl.disclosuresAccepted = false;
+  ctrl.existingDeposit = null;
+  await post();
+
+  assert.deepEqual(ctrl.limiterKinds, ["general", "general"], "buyer and IP, both as reads");
+  assert.equal(ctrl.paymentRequiredCalls, 0, "a page render is not a buyer acting");
+});
+
+test("an accept spends the real budget and moves the request", async () => {
+  ctrl.disclosuresAccepted = true;
+  ctrl.existingDeposit = null;
+  await post();
+
+  assert.deepEqual(ctrl.limiterKinds, ["intent", "intent"], "minting is what the card-testing guard is for");
+  assert.equal(ctrl.paymentRequiredCalls, 1);
 });

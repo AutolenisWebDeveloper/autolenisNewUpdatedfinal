@@ -100,7 +100,13 @@ mock.module("@/lib/services/payment/deposit-eligibility", {
   },
 });
 mock.module("@/lib/security/rate-limit", {
-  namedExports: { limitPaymentIntent: async () => ({ ok: true }), clientIpKey: () => "ip" },
+  namedExports: {
+    limitPaymentIntent: async () => ({ ok: true }),
+    // The checkout PROBE (a call with no disclosure version) is rate-limited as the
+    // read it is, not against the 10/hour card-testing budget a mint uses.
+    limitGeneral: async () => ({ ok: true }),
+    clientIpKey: () => "ip",
+  },
 });
 mock.module("@/lib/services/crm/lifecycle-scheduler", {
   namedExports: { scheduleLifecycleWorkload: async () => {} },
@@ -212,3 +218,4 @@ test("no open request is refused before anything is minted", async () => {
   assert.equal(res.code, "REQUEST_REQUIRED");
   assert.equal(ctrl.createArgs.length, 0, "the $99 activates sourcing for a SPECIFIC request");
 });
+

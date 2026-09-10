@@ -227,6 +227,16 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
   const existing = await prisma.serviceFeePayment.findUnique({ where: { dealId } });
   if (existing) return existing;
   const payment = await writeServiceFeePayment(dealId, paymentIntentId);
+  // THE AMOUNT ACTUALLY CHARGED, from the row that just recorded it.
+  //
+  // Found by the independent review: this stamped the $400 CONSTANT while the charge
+  // became variable in this phase. For a buyer whose $99 was refunded or charged back
+  // the credit basis is broken, `quotePremiumBalance` prices Premium at $499 gross and
+  // Stripe takes $499 — and `deals.fee_amount_cents` still said 40000. The two ledgers
+  // then disagreed by $99 on exactly the deals where the deposit contributed nothing,
+  // so a revenue report summing deposits plus this column under-counted by the same $99
+  // twice over.
+  const chargedCents = payment?.netAmountCents ?? PREMIUM_FEE_REMAINING_CENTS;
   // Route through the guarded seam. Recording FEE_PAID is enough: the seam settles
   // the rest of the ladder on arrival (→ INSURANCE_PENDING, and on into the
   // insurance gate when proof is already on file). force is used because fee
@@ -234,11 +244,13 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
   await advanceDealStatus(dealId, "FEE_PAID", {
     actorRole: "SYSTEM",
     force: true,
-    // feeAmountCents = amount actually charged for the fee (net of the $99
-    // deposit credit). ServiceFeePayment above retains the gross/credit/net
-    // breakdown; the deal ledger field is the captured charge so revenue
-    // reports (which sum deposits + fees) never double-count the deposit.
-    data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: paymentIntentId },
+    // feeAmountCents = amount actually charged for the fee, which is the gross less
+    // whatever $99 genuinely settled — $400 in the ordinary case and $499 where the
+    // credit basis is broken. `ServiceFeePayment` above retains the full
+    // gross/credit/net breakdown; this column is the captured charge, so revenue
+    // reports (which sum deposits + fees) never double-count the deposit and never
+    // under-count a deal whose deposit went back.
+    data: { feePaidAt: new Date(), feeAmountCents: chargedCents, stripeFeePIId: paymentIntentId },
   });
   return payment;
 }

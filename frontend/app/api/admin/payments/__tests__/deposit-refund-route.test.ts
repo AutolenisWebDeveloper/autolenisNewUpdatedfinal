@@ -37,8 +37,12 @@ mock.module("@/lib/prisma", {
     prisma: {
       deposit: {
         findUnique: async () => ctrl.deposit,
+        // The FIRST updateMany is the status flip. §5d's fulfilment hold now runs on
+        // the admin path too and issues a second one (stamping `disputed_at` /
+        // `hold_reason`), so recording only the latest would assert against the hold's
+        // where-clause and never see the flip's guard at all.
         updateMany: async ({ where }: { where: Record<string, unknown> }) => {
-          ctrl.flipWhere = where;
+          if (ctrl.flipWhere === null) ctrl.flipWhere = where;
           return { count: ctrl.flipCount };
         },
       },

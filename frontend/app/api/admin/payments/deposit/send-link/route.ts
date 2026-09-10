@@ -14,6 +14,7 @@ import {
   findExistingDepositObligation,
   blocksNewIntent,
 } from "@/lib/services/payment/deposit-obligation";
+import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
 
 const schema = z.object({
   buyerId: z.string().min(1),
@@ -45,7 +46,21 @@ export async function POST(request: NextRequest) {
   //
   // The shared check asks Stripe, which is what §5d requires: our own column can say
   // PENDING for a payment that settled days ago behind a missed webhook.
-  const obligation = await findExistingDepositObligation({ buyerId });
+  // REQUEST-SCOPED, exactly as the buyer route is.
+  //
+  // Found by the independent review: these two called the shared check with the buyer
+  // alone. `OBLIGATION_BEARING` includes PAID, so for a repeat buyer whose FIRST request
+  // was completed and paid, Stripe reports that old intent as succeeded, the check
+  // returns SETTLED, and both admin routes answer ALREADY_PAID — permanently. An admin
+  // could never issue or mail a $99 for any buyer's second request, while the buyer's
+  // own route worked, because only that one passed the request. §23.1 is explicit that
+  // "a new request means a new $99", and the shared check documents the scoping as
+  // required; two of its three callers simply did not supply it.
+  const openRequest = await findOpenRequest(buyerId);
+  const obligation = await findExistingDepositObligation({
+    buyerId,
+    vehicleRequestId: openRequest?.id ?? null,
+  });
 
   if (blocksNewIntent(obligation)) {
     if (obligation.kind === "SETTLED") {

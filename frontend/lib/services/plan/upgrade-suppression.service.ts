@@ -11,12 +11,19 @@
 // WHAT THIS PHASE OWNS, and what it does not. §8.2's Phase 3 bullet names four
 // guardrails and excludes a fifth by name:
 //
-//   PAY-71  two emails, then silence; declined twice → never asked again.
+//   PAY-71  two emails, then silence; declined twice → never asked again. The RULE is
+//           here and the COUNTS are the caller's — see `SuppressionInput` for why, and
+//           for the throw that stops an email touchpoint being asked without them.
 //   PAY-72  never sold on fear.
 //   PAY-74  suppressed on do-not-contact, dispute, chargeback, cancellation in
 //           progress, and existing Premium.
-//   PAY-77  measure impressions, dismissals and conversions per touchpoint, and stamp
-//           the converting touchpoint onto the plan snapshot.
+//   PAY-77  the converting touchpoint is stamped onto the plan snapshot —
+//           `plan_snapshots.touchpoint`, written by `recordRequestPlanElection`, and the
+//           §23.2a vocabulary is `UPGRADE_TOUCHPOINTS` below. The impression/dismissal
+//           COUNTERS are not built: the only touchpoint this phase ships is touchpoint 1
+//           (the receipt and the sourcing-started screen), and the four that follow —
+//           and therefore everything there is to count — belong to later phases. Stated
+//           rather than stubbed.
 //
 //   PAY-73  suppression while the transaction sits in an EXCEPTION state is NOT this
 //           phase: E26-45, T35 and the Phase 10 scope own it, and the unqualified
@@ -85,9 +92,17 @@ export interface SuppressionInput {
   touchpoint: UpgradeTouchpoint;
   /**
    * How many upgrade EMAILS have already been sent for this request, and how many times
-   * the buyer has declined. Passed in rather than counted here: the caller owns the
-   * measurement surface (PAY-77), and a predicate that both counts and decides has two
-   * reasons to change.
+   * the buyer has declined.
+   *
+   * Passed in rather than counted here, because the caller owns the measurement surface
+   * and a predicate that both counts and decides has two reasons to change.
+   *
+   * OPTIONAL IN THE TYPE, REQUIRED AT RUNTIME FOR AN EMAIL TOUCHPOINT. Defaulting a
+   * missing count to zero would make §23.2b's "never a third" a ceiling that can never
+   * be reached — a predicate that always passes, which is worse than one that is not
+   * there, because the next reader cannot tell which it is. The two touchpoints this
+   * phase ships are in-app, where the count is genuinely irrelevant; the first EMAIL
+   * caller will be told, by a throw, that it has to supply one.
    */
   emailsSent?: number;
   declines?: number;
@@ -239,15 +254,20 @@ export async function isUpgradePromptSuppressed(
       detail: `the buyer has declined ${input.declines} times — §23.2b: not asked again`,
     };
   }
-  if (
-    EMAIL_TOUCHPOINTS.includes(input.touchpoint) &&
-    (input.emailsSent ?? 0) >= MAX_UPGRADE_EMAILS
-  ) {
-    return {
-      suppressed: true,
-      reason: "asked_enough",
-      detail: `${input.emailsSent} upgrade emails have already been sent — §23.2b: never a third`,
-    };
+  if (EMAIL_TOUCHPOINTS.includes(input.touchpoint)) {
+    if (input.emailsSent === undefined) {
+      throw new Error(
+        `isUpgradePromptSuppressed("${input.touchpoint}"): an email touchpoint must supply emailsSent. ` +
+          `Defaulting it would make §23.2b's two-emails-then-silence a ceiling that can never be reached.`,
+      );
+    }
+    if (input.emailsSent >= MAX_UPGRADE_EMAILS) {
+      return {
+        suppressed: true,
+        reason: "asked_enough",
+        detail: `${input.emailsSent} upgrade emails have already been sent — §23.2b: never a third`,
+      };
+    }
   }
 
   return { suppressed: false };

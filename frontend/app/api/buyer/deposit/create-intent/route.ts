@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { enrollDepositReminders } from "@/lib/services/payment/deposit-reminder.service";
-import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
+import { limitPaymentIntent, limitGeneral, clientIpKey } from "@/lib/security/rate-limit";
 import { cancelPreCheckoutTouches } from "@/lib/services/crm/lifecycle-touch-drain.service";
 import { logger } from "@/lib/logger";
 import {
@@ -20,13 +20,6 @@ import { getRequestUser } from "@/lib/auth/api";
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
-
-  // Card-testing guard: throttle intent creation per buyer and per source IP.
-  // Fails CLOSED on limiter-store outage (see lib/security/rate-limit.ts).
-  for (const key of [`deposit:buyer:${buyer.id}`, `deposit:ip:${clientIpKey(request.headers)}`]) {
-    const rl = await limitPaymentIntent(key);
-    if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
-  }
 
   // Concierge convergence path: when a reviewToken is supplied, this deposit
   // unlocks an admin-curated set of dealer offers (System B) rather than
@@ -67,6 +60,35 @@ export async function POST(request: NextRequest) {
       conciergeVehicleOfferId = review.vehicleOfferId;
       conciergeReviewToken = reviewToken;
     }
+  }
+
+  // IS THIS A PROBE?
+  //
+  // A call carrying no disclosure version cannot mint — the §5b gate below sits
+  // immediately before the mint and refuses it — so the checkout uses exactly that call
+  // to ask what the buyer's situation is on load. Naming the shape here is what lets the
+  // two costs a MINT carries be skipped for a READ:
+  //
+  //   1. THE PAYMENT-INTENT LIMITER. `limitPaymentIntent` is a card-testing guard at
+  //      10/hour per buyer AND per source IP. Charging a page LOAD against it meant five
+  //      reload-and-accept cycles locked a buyer out of their own checkout, and a shared
+  //      office IP tripped sooner. A probe is rate-limited as the read it is.
+  //   2. THE PAYMENT_REQUIRED TRANSITION. Moving a DRAFT request to PAYMENT_REQUIRED on
+  //      a page view is a state change nobody asked for, and it silently suppresses the
+  //      §6.4 draft-recovery series (whose recheck stops the moment a request leaves
+  //      DRAFT) for a buyer who looked at checkout once and never paid.
+  //
+  // The concierge path is NOT a probe: it has no §5a recheck and no disclosure gate, so
+  // a call with a reviewToken mints whether or not a version is present.
+  const isProbe = acceptedDisclosuresVersion === null && conciergeReviewToken === null;
+
+  // Card-testing guard: throttle intent creation per buyer and per source IP.
+  // Fails CLOSED on limiter-store outage (see lib/security/rate-limit.ts).
+  for (const key of [`deposit:buyer:${buyer.id}`, `deposit:ip:${clientIpKey(request.headers)}`]) {
+    const rl = isProbe
+      ? await limitGeneral(`deposit-probe:${key}`, { tokens: 60, window: "10 m" })
+      : await limitPaymentIntent(key);
+    if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
   }
 
   // §5a ELIGIBILITY RECHECK, and the PAYMENT_REQUIRED transition it gates.
@@ -121,7 +143,11 @@ export async function POST(request: NextRequest) {
     // PAY-10b: eligibility passing is what moves the request into PAYMENT_REQUIRED.
     // Guarded by the source status set so a request that has moved on — settled,
     // cancelled, already sourcing — is not dragged backwards by a stale checkout tab.
-    await enterPaymentRequired(openRequest.id);
+    //
+    // NOT on a probe. The transition belongs to a buyer ACTING, not to a page rendering
+    // — see the note on `isProbe` above for what a page-view transition did to the
+    // draft-recovery series.
+    if (!isProbe) await enterPaymentRequired(openRequest.id);
   }
 
   // MONEY-PATH DEFECT 4. This used to be a point lookup on the single newest
@@ -301,6 +327,28 @@ export async function POST(request: NextRequest) {
       const reviewMatches =
         !conciergeReviewToken || existingPi.metadata?.reviewToken === conciergeReviewToken;
       if (isReusable && existingPi.client_secret && typeMatches && reviewMatches) {
+        // RECORD THE ACCEPTANCE BEFORE RETURNING.
+        //
+        // Found by the independent review: this branch returned the client secret and
+        // never wrote the version, while the upsert below — the only writer — is
+        // downstream of it. So when legal returns approved wording and
+        // `DISCLOSURES_VERSION` bumps, a buyer with a live intent who reads the NEW text
+        // and accepts it gets the existing secret and a deposit row still stamped with
+        // the OLD version. The stored record of what they agreed to would be the wrong
+        // wording, which is the one thing the version mechanism exists to prevent.
+        if (acceptedDisclosuresVersion) {
+          await prisma.deposit.updateMany({
+            where: { id: existingDeposit.id },
+            // ONLY the acceptance. Stamping `vehicleRequestId` onto an existing row here
+            // would be the re-parent §3 forbids and the build-failing ratchet holds at
+            // zero; the link is written in the upsert's `create` block, where giving a
+            // NEW row its parent is what §3 requires.
+            data: {
+              disclosuresAcceptedAt: new Date(),
+              disclosuresVersion: acceptedDisclosuresVersion,
+            },
+          });
+        }
         return successResponse({ clientSecret: existingPi.client_secret });
       }
       // MONEY-PATH DEFECT 1, the second half. This condition used to be

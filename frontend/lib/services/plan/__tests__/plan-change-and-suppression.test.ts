@@ -161,6 +161,18 @@ test("a third EMAIL is never sent", async () => {
   assert.equal((d as { reason: string }).reason, "asked_enough");
 });
 
+// An email touchpoint with no count would make the ceiling unreachable — a predicate
+// that always passes, which is worse than one that is not there because the next reader
+// cannot tell which it is. The first email caller is told so by a throw rather than
+// discovering it in production.
+test("an email touchpoint that omits the count is REFUSED, not defaulted to zero", async () => {
+  const { isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS } = await suppression();
+  await assert.rejects(
+    () => isUpgradePromptSuppressed({ ...INPUT, touchpoint: UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE_EMAIL }),
+    /must supply emailsSent/,
+  );
+});
+
 test("the ceiling is on EMAILS — the in-app option stays quietly available", async () => {
   const { isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS } = await suppression();
   const inApp = { ...INPUT, touchpoint: UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE, emailsSent: 2 };

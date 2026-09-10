@@ -103,13 +103,31 @@ export async function applyFulfillmentHold(
   if (input.trigger === "dispute") {
     const flipped = await db.deposit.updateMany({
       where: { id: input.depositId, status: { in: [...DISPUTE_FROM] } },
-      data: { status: "DISPUTED", disputedAt: new Date(), holdReason: holdReason },
+      // `hold_released_at` is CLEARED, and that is not tidiness.
+      //
+      // Found by the independent review. Stripe retries a failed `charge.dispute.created`
+      // for days, so it can arrive AFTER a `charge.dispute.closed{won}` was processed.
+      // `DISPUTE_FROM` includes PAID, so the row correctly flips back to DISPUTED — and
+      // if the release stamp survived, the status would say DISPUTED while
+      // `depositNotOnHold()` said "not on hold". Worse, `settledDepositCentsForRequest`
+      // requires PAID, so the Premium credit would vanish and the upgrade window shut
+      // permanently, with no further `dispute.closed` coming to undo it.
+      //
+      // A hold is being APPLIED, so the fact that a previous one was released is no
+      // longer true. Clearing it keeps the stored state and the derived predicate saying
+      // the same thing.
+      data: {
+        status: "DISPUTED",
+        disputedAt: new Date(),
+        holdReason: holdReason,
+        holdReleasedAt: null,
+      },
     });
     disputed = flipped.count > 0;
   } else {
     await db.deposit.updateMany({
       where: { id: input.depositId, disputedAt: null },
-      data: { disputedAt: new Date(), holdReason: holdReason },
+      data: { disputedAt: new Date(), holdReason: holdReason, holdReleasedAt: null },
     });
   }
 

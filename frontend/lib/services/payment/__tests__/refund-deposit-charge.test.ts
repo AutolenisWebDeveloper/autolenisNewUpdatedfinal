@@ -18,8 +18,21 @@ interface Ctrl {
   flipWhere: Record<string, unknown> | null;
   intentStatus: string;
   retrieved: string[];
+  /** §5d fulfilment holds this primitive applied. */
+  holds: Array<Record<string, unknown>>;
+  holdThrows: boolean;
 }
 let ctrl: Ctrl;
+
+mock.module("@/lib/services/payment/fulfillment-hold.service", {
+  namedExports: {
+    applyFulfillmentHold: async (input: Record<string, unknown>) => {
+      if (ctrl.holdThrows) throw new Error("hold write failed");
+      ctrl.holds.push(input);
+      return { disputed: false, touchesCancelled: 0, outboxCancelled: 0 };
+    },
+  },
+});
 
 mock.module("@/lib/services/payment/stripe.service", {
   namedExports: {
@@ -43,9 +56,10 @@ mock.module("@/lib/prisma", {
     prisma: {
       deposit: {
         updateMany: async ({ where }: { where: Record<string, unknown> }) => {
-          ctrl.flipWhere = where;
+          if (ctrl.flipWhere === null) ctrl.flipWhere = where;
           return { count: ctrl.flipCount };
         },
+        findUnique: async () => ({ buyerId: "buyer_1", vehicleRequestId: "vr_1" }),
       },
     },
   },
@@ -63,6 +77,8 @@ beforeEach(() => {
     flipWhere: null,
     intentStatus: "succeeded",
     retrieved: [],
+    holds: [],
+    holdThrows: false,
   };
 });
 
@@ -150,5 +166,49 @@ test("the flip is matrix-scoped and admits a lost dispute", async () => {
     ["DISPUTED", "PAID"],
     "a dispute the platform loses returns the funds and Stripe reports the charge refunded, so the " +
       "row must be able to follow it — while PENDING and REFUNDED stay unreachable",
+  );
+});
+
+// §5d / §26 — THE HOLD IS THE PRIMITIVE'S JOB TOO, not only the webhook's.
+//
+// Found by the independent review. This primitive flips the row to REFUNDED itself, so
+// when Stripe later delivers `charge.refunded` the webhook's own matrix-scoped flip
+// matches zero rows, `refundApplied` is false, and its `applyFulfillmentHold` call is
+// skipped. The effect was that §26's "hold fulfillment; stop unsent outreach" held for
+// provider-initiated refunds and was silently skipped for every ADMIN refund — no hold
+// stamped, no outreach cancelled, no Finance exception raised.
+test("a successful refund applies the fulfilment hold", async () => {
+  ctrl.intentStatus = "succeeded";
+  ctrl.flipCount = 1;
+  const { refundDepositCharge } = await load();
+  const res = await refundDepositCharge({ id: "dep_1", stripePaymentIntentId: "pi_live" }, "buyer request");
+
+  assert.equal(res.outcome, "REFUNDED");
+  assert.equal(ctrl.holds.length, 1, "the admin path must not be the one that skips the hold");
+  assert.equal(ctrl.holds[0]!.trigger, "refund");
+  assert.equal(ctrl.holds[0]!.depositId, "dep_1");
+});
+
+test("a refund that changed nothing applies NO hold", async () => {
+  ctrl.intentStatus = "succeeded";
+  ctrl.flipCount = 0; // already REFUNDED — the matrix refused the flip
+  const { refundDepositCharge } = await load();
+  const res = await refundDepositCharge({ id: "dep_1", stripePaymentIntentId: "pi_live" }, "buyer request");
+
+  assert.equal(res.outcome, "ALREADY_REFUNDED");
+  assert.deepEqual(ctrl.holds, [], "the hold follows the money, not the call");
+});
+
+test("a hold failure never turns a real refund into a reported failure", async () => {
+  ctrl.intentStatus = "succeeded";
+  ctrl.flipCount = 1;
+  ctrl.holdThrows = true;
+  const { refundDepositCharge } = await load();
+  const res = await refundDepositCharge({ id: "dep_1", stripePaymentIntentId: "pi_live" }, "buyer request");
+
+  assert.equal(
+    res.outcome,
+    "REFUNDED",
+    "money moved; reporting otherwise would invite a second refund. The webhook's own call is the second chance.",
   );
 });

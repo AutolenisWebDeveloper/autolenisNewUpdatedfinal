@@ -43,6 +43,21 @@ export const DISCLOSURES_VERSION = "2026-09-09-draft";
 /** True once legal has signed the wording off (§13-D48). Flip WITH the version bump. */
 export const DISCLOSURES_LEGAL_APPROVED = false;
 
+// The flag and the version must agree, and this is what makes the flag do something
+// rather than describe something. An operator reading `deposits.disclosures_version`
+// can tell approved wording from drafted wording FROM THE STORED STRING — no lookup, no
+// memory of which era was which — and that only holds if the two can never drift.
+//
+// Flipping the flag without bumping the version, or bumping to a non-draft version while
+// the flag is false, fails the import and therefore the build.
+if (DISCLOSURES_LEGAL_APPROVED === DISCLOSURES_VERSION.includes("draft")) {
+  throw new Error(
+    `deposit-disclosures: DISCLOSURES_LEGAL_APPROVED is ${DISCLOSURES_LEGAL_APPROVED} while ` +
+      `DISCLOSURES_VERSION is "${DISCLOSURES_VERSION}". Unapproved wording must carry "draft" in the ` +
+      `version and approved wording must not — the stored version is how an operator tells them apart.`,
+  );
+}
+
 export interface Disclosure {
   /** Stable id — used by tests and by the acceptance UI, never shown to the buyer. */
   id: string;

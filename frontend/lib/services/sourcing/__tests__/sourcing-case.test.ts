@@ -101,3 +101,39 @@ test("a non-unique error is rethrown", async () => {
   const { openSourcingCase } = await load();
   await assert.rejects(() => openSourcingCase("vr_1", db()));
 });
+
+// BLOCKER, found by the independent review: the P2002 recovery below runs INSIDE the
+// settlement transaction, and the create-then-catch-then-re-read idiom is broken there.
+// PostgreSQL aborts the whole transaction on a constraint violation and Prisma issues no
+// savepoints, so the re-read throws 25P02 on an aborted transaction — and
+// `lib/prisma-savepoint.ts` records the worse variant measured on PG16, where the outer
+// `$transaction` RESOLVES while Postgres turns the COMMIT into a ROLLBACK and the caller
+// is handed ids for rows that were never written.
+//
+// The redelivery this recovery exists for is a redelivery inside the money transaction,
+// so the unguarded version failed exactly when it was needed.
+test("the insert is SAVEPOINTED, so a P2002 leaves the transaction usable", async () => {
+  const scoped: string[] = [];
+  const { openSourcingCase } = await load();
+
+  // A handle that looks like a TRANSACTION client (no `$transaction`) and can run raw
+  // SQL — the shape `withSavepoint` acts on.
+  const tx = {
+    $executeRawUnsafe: async (sql: string) => { scoped.push(sql.split(" ")[0]!); return 0; },
+    sourcingCase: {
+      create: async () => { throw Object.assign(new Error("unique"), { code: "P2002" }); },
+      findUnique: async () => ({ id: "case_existing" }),
+    },
+  };
+
+  const res = await openSourcingCase("vr_1", tx as never);
+
+  assert.equal(res.caseId, "case_existing");
+  assert.equal(res.created, false);
+  assert.deepEqual(
+    scoped,
+    ["SAVEPOINT", "ROLLBACK"],
+    "the failed insert is rolled back to its savepoint, which is what leaves the surrounding " +
+      "settlement transaction able to commit",
+  );
+});

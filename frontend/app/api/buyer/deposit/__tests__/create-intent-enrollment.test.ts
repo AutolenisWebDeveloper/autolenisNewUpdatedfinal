@@ -94,6 +94,8 @@ mock.module("@/lib/stripe", {
 mock.module("@/lib/security/rate-limit", {
   namedExports: {
     limitPaymentIntent: async () => ({ ok: true }),
+    // The checkout PROBE (no disclosure version) is rate-limited as a read.
+    limitGeneral: async () => ({ ok: true }),
     clientIpKey: () => "ip",
   },
 });

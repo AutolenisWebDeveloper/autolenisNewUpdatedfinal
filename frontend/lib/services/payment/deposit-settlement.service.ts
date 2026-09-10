@@ -232,7 +232,7 @@ export async function reconcileDepositSettlements(opts?: {
       createdAt: { lt: cutoff },
       id: { notIn: excluded },
     },
-    select: { id: true, stripePaymentIntentId: true, status: true, buyerId: true, vehicleRequestId: true },
+    select: { id: true, stripePaymentIntentId: true, status: true, buyerId: true, vehicleRequestId: true, amountCents: true },
     orderBy: { createdAt: "asc" },
     take: limit,
   });
@@ -326,6 +326,11 @@ export async function reconcileDepositSettlements(opts?: {
             depositId: deposit.id,
             buyerId: deposit.buyerId,
             vehicleRequestId: deposit.vehicleRequestId,
+            // The same fact the webhook records. Leaving it null here produced a
+            // `plan_snapshots` row whose money field read "nothing settled" for a
+            // settlement that had just happened — and the field's own contract is
+            // "what had ACTUALLY settled at this moment. Never a projection."
+            settledDepositCents: deposit.amountCents,
           },
           tx,
         );

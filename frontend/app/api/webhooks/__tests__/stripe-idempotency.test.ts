@@ -14,7 +14,7 @@ import { NextRequest } from "next/server";
 type EventRow = { eventId: string; eventType: string; processed: boolean };
 type DepositRow = {
   id: string; buyerId: string; stripePaymentIntentId: string | null;
-  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED" | "DISPUTED";
 };
 type AuctionRow = { id: string; buyerId: string; depositId: string; status: string };
 
@@ -162,8 +162,9 @@ let launches = 0;
 mock.module("@/lib/services/auction/auction.service", {
   namedExports: { launchAuction: async () => { launches += 1; } },
 });
+let invites = 0;
 mock.module("@/lib/services/auction/dealer-invitation.service", {
-  namedExports: { inviteDealersToAuction: async () => {} },
+  namedExports: { inviteDealersToAuction: async () => { invites += 1; } },
 });
 mock.module("@/lib/services/deal/deal.service", {
   namedExports: { advanceDealStatus: async () => {} },
@@ -206,6 +207,7 @@ beforeEach(() => {
   failAuctionCreate = false;
   launches = 0;
   reminderCancels = 0;
+  invites = 0;
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -233,11 +235,39 @@ test("replay of a processed event is a duplicate ack with zero side effects", as
   assert.equal(reminderCancels, 1, "reminder suppression is not re-run on replay (exactly once)");
 });
 
-test("out-of-order: late success never resurrects a REFUNDED deposit", async () => {
+// THIS TEST USED TO ASSERT ONLY THE STATUS, and that is how the defect hid.
+//
+// The `updateMany` is correctly scoped by `SETTLE_FROM`, so the status was always
+// right — and the code that followed read the deposit and carried on REGARDLESS of
+// whether the flip had matched anything. For a deposit refunded before a late
+// `payment_intent.succeeded` arrived, everything downstream still ran: the request
+// unlocked, a sourcing case opened, a plan snapshot recorded 9900 cents of settled
+// deposit for money that had gone back, an auction was created, dealers were invited
+// and the buyer was emailed "Auction activated!". A green status assertion sat on top
+// of all of it.
+//
+// So the assertions are the SIDE EFFECTS now, not the column.
+test("out-of-order: a late success on a REFUNDED deposit changes NOTHING", async () => {
   db.deposits[0].status = "REFUNDED";
   const res = await deliver("evt_2", "payment_intent.succeeded", DEPOSIT_SUCCEEDED);
-  assert.equal(res.status, 200);
+
+  assert.equal(res.status, 200, "acknowledged — retrying cannot fix an out-of-order delivery");
   assert.equal(db.deposits[0].status, "REFUNDED", "REFUNDED must not become PAID");
+  assert.equal(db.auctions.length, 0, "and no auction may be created for money that went back");
+  assert.equal(launches, 0, "nor launched");
+  assert.equal(invites, 0, "nor may a dealer be invited");
+  assert.equal(db.notifications.length, 0, "and the buyer is never told their auction is active");
+  assert.equal(reminderCancels, 0, "nothing downstream of the flip may run at all");
+});
+
+test("out-of-order: a late success on a DISPUTED deposit changes nothing either", async () => {
+  db.deposits[0].status = "DISPUTED";
+  const res = await deliver("evt_2b", "payment_intent.succeeded", DEPOSIT_SUCCEEDED);
+
+  assert.equal(res.status, 200);
+  assert.equal(db.deposits[0].status, "DISPUTED", "a redelivered success must never clear a live dispute");
+  assert.equal(db.auctions.length, 0, "and sourcing must not start spending against a contested charge");
+  assert.equal(launches, 0);
 });
 
 test("out-of-order: late failure never downgrades a PAID deposit", async () => {

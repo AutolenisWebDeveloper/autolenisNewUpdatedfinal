@@ -40,7 +40,9 @@ import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
  * The named failures. §5a's "named, not generic" is the whole requirement, and PAY-09
  * makes the checkout client route each of these to the step that fixes it — so adding
  * a code here without adding it to that map leaves a buyer stuck on a message with
- * nowhere to go. The map is exhaustive over this union by type, so the compiler says so.
+ * nowhere to go. That map is `ELIGIBILITY_STEP` in `app/buyer/deposit/page.tsx`, typed
+ * as a total `Record` over this union, so adding a code without a destination fails the
+ * build rather than shipping a dead end.
  */
 export type EligibilityFailureCode =
   | "ACCOUNT_INACTIVE"

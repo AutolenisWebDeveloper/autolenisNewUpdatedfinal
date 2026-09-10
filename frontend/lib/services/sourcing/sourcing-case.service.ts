@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";
 import { initializeCheckpoints } from "@/lib/services/vehicle-request/vehicle-request-due-diligence.service";
+import { withSavepoint } from "@/lib/prisma-savepoint";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -59,17 +60,34 @@ export async function openSourcingCase(
   db: Db = prisma,
 ): Promise<OpenSourcingCaseResult> {
   try {
-    const created = await db.sourcingCase.create({
-      data: {
-        id: randomUUID(),
-        vehicleRequestId,
-        status: SOURCING_CASE_STATUS.ACTIVE_SOURCING,
-        // `band` defaults to "100" in the schema, which is the first rung of the
-        // 100 → 150 → 250 ladder §6a describes. Left to the default rather than
-        // restated, so there is one place that decides where sourcing starts.
-      },
-      select: { id: true },
-    });
+    // SAVEPOINTED, and this is not optional here.
+    //
+    // The create-then-catch-P2002-then-re-read idiom is correct on the top-level
+    // client, where each statement is its own transaction. Handed a TRANSACTION client
+    // — which this function requires, because §5d makes the settlement atomic — it is
+    // broken: PostgreSQL aborts the whole transaction on a constraint violation and
+    // Prisma issues no savepoints of its own, so the re-read below throws 25P02 on an
+    // aborted transaction. `lib/prisma-savepoint.ts` records the worse variant measured
+    // on PostgreSQL 16: the outer `$transaction` can RESOLVE while Postgres turns the
+    // COMMIT into a ROLLBACK, and the caller is handed ids for rows that were never
+    // written.
+    //
+    // The redelivery this recovery exists for is exactly a redelivery INSIDE the money
+    // transaction, so the unguarded version failed precisely when it was needed. Five
+    // other services already wrap the same idiom this way.
+    const created = await withSavepoint(db, () =>
+      db.sourcingCase.create({
+        data: {
+          id: randomUUID(),
+          vehicleRequestId,
+          status: SOURCING_CASE_STATUS.ACTIVE_SOURCING,
+          // `band` defaults to "100" in the schema, which is the first rung of the
+          // 100 → 150 → 250 ladder §6a describes. Left to the default rather than
+          // restated, so there is one place that decides where sourcing starts.
+        },
+        select: { id: true },
+      }),
+    );
 
     // S6-29a: the due-diligence checkpoints are seeded WITH the case, in the same
     // transaction. Seeding them afterwards would mean a case could exist with nothing

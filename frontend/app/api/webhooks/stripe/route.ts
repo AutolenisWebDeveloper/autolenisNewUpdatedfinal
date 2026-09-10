@@ -241,7 +241,37 @@ export async function POST(request: NextRequest) {
               },
             });
             if (!deposit) {
-              return { deposit: null, createdAuction: null, isNewAuction: false, effects: null };
+              return { deposit: null, createdAuction: null, isNewAuction: false, effects: null, notSettleable: false };
+            }
+
+            // THE FLIP'S RESULT GATES EVERYTHING BELOW IT.
+            //
+            // The `updateMany` above is correctly scoped by `SETTLE_FROM`, so it cannot
+            // resurrect a REFUNDED or DISPUTED row — but the code that followed it read
+            // the deposit and carried on REGARDLESS of whether the flip matched
+            // anything. A late `payment_intent.succeeded` for a deposit that had since
+            // been refunded therefore left the status correctly REFUNDED and then
+            // applied every side effect anyway: the request unlocked to ACTIVE_SOURCING,
+            // a sourcing case opened, a plan snapshot written recording 9900 cents of
+            // settled deposit for money that had gone back, "Auction activated!" sent,
+            // an auction created and dealers invited. A dispute arriving before a
+            // retried success produced the same run against a contested charge.
+            //
+            // The settlement reconciler already guards this way and the webhook did
+            // not, which is the disagreement that hid it.
+            //
+            // The test is the row's STATE, not the update count. Count is 0 both for a
+            // deposit that must not settle and for one the reconciler already settled
+            // through the same intent — and the second is a legitimate redelivery whose
+            // effects are all idempotent, so refusing on count alone would leave a
+            // reconciler-settled buyer without a receipt.
+            if (deposit.status !== "PAID") {
+              logger.warn(
+                `[stripe/webhook] payment_intent.succeeded for ${pi.id} left deposit ${deposit.id} ` +
+                  `at ${deposit.status} — the transition matrix refused it. No settlement effects, no ` +
+                  `auction, no email. This is a late or out-of-order delivery, not an unroutable payment.`,
+              );
+              return { deposit, createdAuction: null, isNewAuction: false, effects: null, notSettleable: true };
             }
 
             // §5d, the settlement side effect: attach the payment to the Vehicle
@@ -266,7 +296,7 @@ export async function POST(request: NextRequest) {
             // fact is COUNTED. §8.4's thirty-days-of-zero removal clock starts when
             // Phase 5 flips the flag, not at Phase 3 acceptance (§13-D52).
             if (!effects.runLegacyAuctionPath) {
-              return { deposit, createdAuction: null, isNewAuction: false, effects };
+              return { deposit, createdAuction: null, isNewAuction: false, effects, notSettleable: false };
             }
 
             // Auction.depositId is unique — re-use if a prior partial run created it.
@@ -288,7 +318,7 @@ export async function POST(request: NextRequest) {
                 data: { buyerId: deposit.buyerId, title: "Auction activated!", body: "Your $99 deposit was received. Your private auction is being prepared.", type: "AUCTION_STARTED" },
               });
             }
-            return { deposit, createdAuction, isNewAuction: !existingAuction, effects };
+            return { deposit, createdAuction, isNewAuction: !existingAuction, effects, notSettleable: false };
           }, {
             // Bound the row-lock hold and connection acquisition so a burst of
             // concurrent Stripe redeliveries on the same deposit can't exhaust
@@ -303,10 +333,17 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ received: true, duplicate: true });
           }
 
-          const { deposit, createdAuction, isNewAuction, effects } = outcome;
+          const { deposit, createdAuction, isNewAuction, effects, notSettleable } = outcome;
+          // `routed` says the platform KNEW what this payment was, not that it acted on
+          // it. A refused late delivery is routed — the deposit was found — so it must
+          // not raise PAYMENT_UNROUTABLE, which is §26's "money we cannot name".
           routed = deposit !== null;
           const existingAuction = isNewAuction ? null : createdAuction;
-          if (deposit) {
+          // Every post-commit effect below — the reminder cancellations, the auction
+          // launch, the dealer invitations, the receipt, the GHL sync — is gated with
+          // the in-transaction work by the same fact. Splitting the gate would put the
+          // emails back on a path the money did not take.
+          if (deposit && !notSettleable && effects) {
             // Post-commit effects: idempotent or best-effort; failures are
             // alerted via logger.error → Sentry rather than retried by Stripe
             // (the money state above has already committed).

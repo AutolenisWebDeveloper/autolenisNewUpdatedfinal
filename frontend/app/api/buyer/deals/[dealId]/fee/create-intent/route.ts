@@ -28,11 +28,17 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
   // §23.2 / PAY-58 — THE UPGRADE WINDOW, and the gate this route did not have.
   //
-  // This route had no plan check of any kind. Both admin twins refuse a non-Premium
-  // buyer (`concierge-fee/create-intent`, `concierge-fee/send-link`), and only the UI
-  // kept a Standard buyer away from here — so a Standard buyer who POSTed directly
-  // received a $400 client secret for a plan they had not elected and a window that had
-  // never opened.
+  // This route had no gate of any kind. Both admin twins refuse a non-Premium buyer
+  // (`concierge-fee/create-intent`, `concierge-fee/send-link`), and only the UI kept a
+  // Standard buyer away from here — so a buyer who POSTed directly received a $400
+  // client secret with nothing checked at all, including whether the $99 the balance is
+  // a balance OF had ever settled.
+  //
+  // The gate is the WINDOW, not the plan flag, and that is deliberate: §23.2 makes
+  // paying the balance the act that buys Premium, and election is free by the owner's
+  // 2026-07 decision. So "this buyer has not elected Premium" is not a reason to refuse
+  // a buyer who is trying to pay for it — "there is no settled $99 behind this request"
+  // is.
   //
   // The window is the right gate rather than a plan-flag check, and it is stricter in
   // both directions: it requires a settled, unrefunded, undisputed $99 (the credit basis

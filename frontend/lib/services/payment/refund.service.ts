@@ -113,6 +113,47 @@ export async function refundDepositCharge(
     where: { id: deposit.id, status: { in: [...REFUND_FROM] } },
     data: { status: "REFUNDED", refundedAt: new Date() },
   });
+
+  // §5d / §26 — THE HOLD BELONGS HERE, not only on the webhook.
+  //
+  // Found by the independent review, and the reasoning is worth keeping: this primitive
+  // flips the row to REFUNDED itself, so by the time Stripe delivers `charge.refunded`
+  // the webhook's own matrix-scoped flip matches ZERO rows, `refundApplied` is false,
+  // and its `applyFulfillmentHold` call is skipped. The result was that §26's "hold
+  // fulfillment; stop unsent outreach" was honoured for provider-initiated refunds and
+  // silently skipped for every ADMIN refund — which is the common path. No hold stamped,
+  // no outreach cancelled, and no Finance exception raised at all.
+  //
+  // Applying it here makes the two paths converge instead of racing: whichever runs
+  // first stamps the hold and cancels the rails, and the other finds the work done —
+  // `applyFulfillmentHold` guards its stamp on `disputedAt: null`, `cancelByKey` only
+  // touches unsent rows, and the exception is keyed on the provider reference.
+  //
+  // Best-effort by design: a refund that MOVED MONEY must be reported as REFUNDED even
+  // if the hold write fails. The failure is loud, and the webhook's own call is the
+  // second chance.
+  if (flipped.count > 0) {
+    try {
+      const row = await prisma.deposit.findUnique({
+        where: { id: deposit.id },
+        select: { buyerId: true, vehicleRequestId: true },
+      });
+      if (row) {
+        const { applyFulfillmentHold } = await import("@/lib/services/payment/fulfillment-hold.service");
+        await applyFulfillmentHold({
+          depositId: deposit.id,
+          buyerId: row.buyerId,
+          vehicleRequestId: row.vehicleRequestId,
+          trigger: "refund",
+          providerRef: stripeRefundId ?? intentId,
+          reason,
+        });
+      }
+    } catch (err) {
+      logger.error(`[refund] fulfilment hold failed after refunding deposit ${deposit.id}:`, err);
+    }
+  }
+
   return { outcome: flipped.count > 0 ? "REFUNDED" : "ALREADY_REFUNDED", stripeRefundId };
 }
 

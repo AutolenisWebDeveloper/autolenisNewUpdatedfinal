@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Shield, Sparkles, Loader2, Check } from "lucide-react";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { DEPOSIT_DISCLOSURES, DISCLOSURES_VERSION } from "@/lib/payments/deposit-disclosures";
+import type { EligibilityFailureCode } from "@/lib/services/payment/deposit-eligibility";
 
 import PreIntelligencePanel from "@/components/buyer/PreIntelligencePanel";
 import PaymentUnsettledNotice from "@/components/buyer/PaymentUnsettledNotice";
@@ -83,6 +84,35 @@ function DepositForm({
     </form>
   );
 }
+
+/**
+ * §5a / PAY-09 — THE CODE → STEP MAP.
+ *
+ * "Any failure returns the buyer to the exact missing requirement — named, not
+ * generic." The server has always sent the code and the named item; this page handled
+ * five codes and dropped every other one into "Unable to initialize payment. Please try
+ * again." with a Try Again button that reloads and fails identically. A buyer with no
+ * ZIP code, an unverified email or an incomplete request met a dead end that told them
+ * nothing and offered them nothing — which is the opposite of what §5a asks for, and the
+ * §13-D10 buyers land here by construction.
+ *
+ * TYPED AS A TOTAL RECORD over the union on purpose: adding an eligibility code without
+ * giving the buyer somewhere to go now fails the build rather than shipping another dead
+ * end.
+ */
+const ELIGIBILITY_STEP: Record<EligibilityFailureCode | "REQUEST_REQUIRED", { href: string; cta: string }> = {
+  ACCOUNT_INACTIVE: { href: "/buyer/dashboard", cta: "Go to your dashboard" },
+  EMAIL_UNVERIFIED: { href: "/buyer/profile", cta: "Verify your email" },
+  ONBOARDING_REQUIRED: { href: "/buyer/onboarding", cta: "Finish setting up your account" },
+  LOCATION_REQUIRED: { href: "/buyer/profile", cta: "Add your location" },
+  PREQUAL_REQUIRED: { href: "/buyer/prequal", cta: "Complete prequalification" },
+  VEHICLE_CRITERIA_INCOMPLETE: { href: "/buyer/requests", cta: "Complete your request" },
+  REQUEST_CONFLICT: { href: "/buyer/requests", cta: "Review your open requests" },
+  REQUEST_REQUIRED: { href: "/request-a-car", cta: "Start a vehicle request" },
+  // The buyer is already here, and the gate above is what fixes it. There is nowhere
+  // else to send them, so the CTA returns them to the disclosures on this page.
+  DISCLOSURE_REQUIRED: { href: "/buyer/deposit", cta: "Read the terms again" },
+};
 
 /**
  * §5b — the seven things a buyer must be shown before they pay.
@@ -171,6 +201,8 @@ export default function DepositPage() {
   const [creating, setCreating] = useState(false);
   /** Our own books say this deposit is PAID. No card form, ever. */
   const [alreadyPaid, setAlreadyPaid] = useState(false);
+  /** §5a: where to send the buyer to fix the exact thing that is missing (PAY-09). */
+  const [errorStep, setErrorStep] = useState<{ href: string; cta: string } | null>(null);
   // Concierge convergence: when the buyer arrives from a "?offer=<reviewToken>"
   // vehicle-offer review link, this deposit unlocks an admin-curated set of
   // dealer offers (converted to a CLOSED auction on settle) instead of launching
@@ -217,6 +249,7 @@ export default function DepositPage() {
   function postCreateIntent(withVersion: boolean, token: string | null) {
     if (withVersion) setCreating(true);
     setError(null);
+    setErrorStep(null);
     fetch("/api/buyer/deposit/create-intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -269,6 +302,12 @@ export default function DepositPage() {
           setError("These offers were sent to a different account. Please sign in with the email the offers were sent to.");
         } else if (d.error?.code === "REVIEW_EXPIRED" || d.error?.code === "REVIEW_NOT_FOUND") {
           setError("This offer review link is no longer valid. Please contact AutoLenis support.");
+        } else if (d.error?.code && d.error.code in ELIGIBILITY_STEP) {
+          // §5a: the server named the missing requirement. Say what it is and give the
+          // buyer the one control that fixes it.
+          const step = ELIGIBILITY_STEP[d.error.code as keyof typeof ELIGIBILITY_STEP];
+          setError(d.error.message ?? "Something is missing before you can pay.");
+          setErrorStep(step);
         } else {
           setError("Unable to initialize payment. Please try again.");
         }
@@ -429,7 +468,16 @@ export default function DepositPage() {
           {error && (
             <div className="text-center py-8">
               <p className="text-sm text-red-600 mb-4" data-testid="deposit-init-error">{error}</p>
-              <Button variant="secondary" onClick={() => window.location.reload()} data-testid="deposit-retry-btn">Try Again</Button>
+              {errorStep ? (
+                <Button
+                  onClick={() => router.push(errorStep.href)}
+                  data-testid="deposit-fix-step-btn"
+                >
+                  {errorStep.cta}
+                </Button>
+              ) : (
+                <Button variant="secondary" onClick={() => window.location.reload()} data-testid="deposit-retry-btn">Try Again</Button>
+              )}
             </div>
           )}
           {clientSecret && (

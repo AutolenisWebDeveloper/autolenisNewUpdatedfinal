@@ -36,7 +36,17 @@ export async function GET(request: NextRequest) {
     // Settlement first: a deposit settled here becomes activation's input below.
     // A settlement failure must not prevent activation from converging deposits
     // that are ALREADY paid, so it is reported rather than thrown.
-    const settlement = await reconcileDepositSettlements();
+    // Reported rather than thrown, which the comment above has always claimed and the
+    // code did not do: an awaited call with no guard meant one failed `findMany` in
+    // stage 1 skipped stage 2 entirely, stranding deposits that were ALREADY paid and
+    // had nothing to do with the failure.
+    let settlement: Awaited<ReturnType<typeof reconcileDepositSettlements>>;
+    try {
+      settlement = await reconcileDepositSettlements();
+    } catch (err) {
+      logger.error("[deposit-activation-reconcile] settlement stage failed; activation still runs:", err);
+      settlement = { scanned: 0, settled: 0, unsettled: 0, errors: 1, skipped: "settlement_stage_threw" };
+    }
     const activation = await reconcileStuckActivations();
     return { settlement, activation };
   });
