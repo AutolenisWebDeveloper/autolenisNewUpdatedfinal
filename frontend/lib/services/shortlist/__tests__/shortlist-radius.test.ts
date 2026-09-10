@@ -1,14 +1,15 @@
 // The radius and freshness gates apply to the shortlist ACTION, never to display.
 //
 // Transaction-flow spec s22a: the catalogue is served from inventory_items and every listing
-// stays visible to every buyer. What changes past 100 miles -- the data provider's radius
-// restriction -- is which ACTION the card offers, not whether the card exists.
+// stays visible to every buyer. What changes past 100 miles -- AutoLenis's own policy ceiling,
+// not a provider limit -- is which ACTION the card offers, not whether the card exists.
 //
 //   npx tsx --test --experimental-test-module-mocks \
 //     lib/services/shortlist/__tests__/shortlist-radius.test.ts
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   SHORTLIST_RADIUS_MILES,
   STALE_FLAG_WINDOW_MS,
@@ -37,8 +38,75 @@ function listing(over: Partial<ListingGateFacts> = {}): ListingGateFacts {
 
 // ── the ceiling itself ───────────────────────────────────────────────────────
 
-test("the shortlist ceiling is the provider's 100 mile restriction", () => {
+test("the shortlist ceiling is 100 miles of AUTOLENIS POLICY, not a provider restriction", () => {
   assert.equal(SHORTLIST_RADIUS_MILES, 100);
+});
+
+// ── the ceiling's REASON, which is the requirement ───────────────────────────
+//
+// s22a's rule is not "the number is 100". It is "the number is 100 BECAUSE AutoLenis
+// decided so, and a change of provider, plan or technical limit never moves it". Those
+// are different requirements and only the second one is at risk: the constant was
+// already correct while the comment above it said the provider's cap was the reason.
+// Nothing an engineer can RUN distinguishes the two today -- MarketCheck's package cap
+// is also 100 (probed live 2026-09-10: radius=250 -> HTTP 422 "Subscribed package
+// radius limit of 100 miles exceeded") -- so the prose is the only carrier of the
+// distinction, and prose decays silently. These two tests are what stop it.
+
+test("the policy ceiling is stated as policy, and is not attributed to the provider", () => {
+  const src = readFileSync(new URL("../shortlist-radius.ts", import.meta.url), "utf8");
+  const header = src.slice(0, src.indexOf("export const SHORTLIST_RADIUS_MILES"));
+
+  assert.match(
+    header,
+    /AUTOLENIS POLICY/,
+    "s22a L1067: 'The 100-mile ceiling is AutoLenis policy ... Policy is decided here, not on an " +
+      "invoice.' The header must say so, because the constant alone cannot."
+  );
+
+  // The exact sentence that was there before Phase 4, and the shape of any sentence
+  // that would reintroduce the same inversion. A header may DISCUSS the provider cap
+  // -- it does, to say the two are separate -- but it may not give it as the reason.
+  const inverted = /capped at 100 miles,?\s+because that is the data provider|because that is the (?:data )?provider'?s? radius restriction/i;
+  assert.doesNotMatch(
+    header,
+    inverted,
+    "The ceiling's rationale has been inverted back to 'the provider's restriction'. That reading is " +
+      "what makes an engineer raise this constant the day the sourcing ladder reaches 250 miles. The " +
+      "provider cap is a SEPARATE constant (MAX_RADIUS_MILES in inventory-source-config.service.ts) " +
+      "with a separate reason."
+  );
+});
+
+test("the policy ceiling does not derive from the provider's ceiling", () => {
+  // The structural half of the same rule, and the half that cannot be talked around:
+  // if this file ever derives its number from lib/services/inventory, the policy IS
+  // the provider's cap by construction and no header can prevent it.
+  //
+  // Comments are stripped first. The rule is about CODE — the header deliberately
+  // discusses the provider's constant, in order to say that nothing here reads it,
+  // and a scan that could not tell those apart would forbid the very sentence that
+  // documents the separation.
+  const src = readFileSync(new URL("../shortlist-radius.ts", import.meta.url), "utf8");
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  const imports = [...code.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]!);
+  assert.deepEqual(
+    imports.filter((i) => i.includes("services/inventory")),
+    [],
+    "shortlist-radius.ts must not import from lib/services/inventory: the provider cap must not leak " +
+      "into a path that does not answer to the provider."
+  );
+  assert.doesNotMatch(
+    code,
+    /\bMAX_RADIUS_MILES\b/,
+    "SHORTLIST_RADIUS_MILES must be an independent literal, never derived from the provider's cap."
+  );
+  assert.match(
+    code,
+    /export const SHORTLIST_RADIUS_MILES = 100;/,
+    "The ceiling must stay a plain literal. Computing it from anything is how it stops being policy."
+  );
 });
 
 test("windows are 7 days for the stale flag and 30 for eligibility", () => {

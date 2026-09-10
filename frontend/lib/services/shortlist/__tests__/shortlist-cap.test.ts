@@ -105,3 +105,67 @@ test("a zero-priced listing does not count — there is nothing to quote", async
   const { countAvailableItems } = await load();
   assert.equal(await countAvailableItems(shortlistItems), 0);
 });
+
+// ── the cap value itself, pinned across BOTH layers ─────────────────────────
+//
+// The cap is enforced twice, in two languages, on two different scopes:
+//
+//   application  MAX_SHORTLIST_ITEMS in lib/constants.ts, counting AVAILABLE items
+//   database     shortlist_items_enforce_cap() and auction_vehicles_enforce_cap()
+//                in 20261106000100_transaction_spine_foundation, counting ROWS
+//                under a FOR UPDATE lock on the parent
+//
+// Two layers is deliberate -- the application count is what the buyer is TOLD
+// (it discounts sold cars, so a buyer holding five dead entries is not locked
+// out), and the trigger is what is TRUE under concurrency, because both write
+// paths are read-then-write with no transaction and lose the race. But nothing
+// tied the two numbers together: `MAX_SHORTLIST_ITEMS = 5` and the trigger's
+// hard-coded `IF existing >= 5` could drift apart in either direction, and the
+// symptom of drift is either a cap the buyer can exceed or a P0001 the UI has
+// no message for. Migrations are immutable once applied, so the constant is the
+// side that must move -- and this test is what makes moving it deliberate.
+//
+// The two triggers count DIFFERENT scopes and that is also deliberate:
+// shortlist_items per SHORTLIST (one per buyer, schema.prisma:419 buyerId
+// @unique), auction_vehicles per VEHICLE REQUEST. They can legitimately
+// disagree; what they may not do is disagree about the NUMBER.
+
+test("MAX_SHORTLIST_ITEMS equals the literal both database triggers enforce", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { MAX_SHORTLIST_ITEMS } = await import("@/lib/constants");
+
+  const migration = readFileSync(
+    new URL(
+      "../../../../prisma/migrations/20261106000100_transaction_spine_foundation/migration.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  const triggers = [
+    { fn: "shortlist_items_enforce_cap", scope: "shortlist" },
+    { fn: "auction_vehicles_enforce_cap", scope: "vehicle request" },
+  ] as const;
+
+  for (const { fn, scope } of triggers) {
+    const start = migration.indexOf(`FUNCTION "${fn}"`);
+    assert.notEqual(
+      start,
+      -1,
+      `${fn}() is gone from the wave. Enforcement object 2 is the DB-level cap; if it moved to a ` +
+        "later migration, point this test at that file rather than deleting the assertion.",
+    );
+    const body = migration.slice(start, migration.indexOf("$fn$ LANGUAGE plpgsql", start));
+    const guard = /IF\s+existing\s*>=\s*(\d+)\s+THEN/.exec(body);
+    assert.ok(guard, `${fn}() no longer guards on a numeric literal — this test can no longer read the cap.`);
+
+    assert.equal(
+      Number(guard[1]),
+      MAX_SHORTLIST_ITEMS,
+      `The application cap (MAX_SHORTLIST_ITEMS = ${MAX_SHORTLIST_ITEMS}) and the ${scope} trigger ` +
+        `(${fn}, >= ${guard[1]}) disagree. s22a caps the shortlist at five candidates in both layers. ` +
+        "The migration is immutable once applied, so the constant is the side that moves — and a new " +
+        "forward migration is the only way to change the trigger.",
+    );
+  }
+});
