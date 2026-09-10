@@ -14,6 +14,18 @@ export interface DepositConfirmationEmailProps {
   depositId: string;
   depositDate: string;
   auctionsUrl: string;
+  /**
+   * §23.2a TOUCHPOINT 1 — "a single line on the receipt and the sourcing-started
+   * screen. Named, not pushed — the buyer is still waiting to see whether the auction
+   * produces anything."
+   *
+   * ONE LINE, and the caller decides whether there is one at all: §23.2b suppresses the
+   * ask on a do-not-contact flag, a dispute, a chargeback, a cancellation in progress or
+   * an existing Premium plan, and the price comes from the settled ledger rather than a
+   * constant. Both of those are the caller's to establish, so this renders what it is
+   * given and adds nothing when given nothing.
+   */
+  premiumLine?: string | null;
 }
 
 export function renderDepositConfirmationEmail({
@@ -21,6 +33,7 @@ export function renderDepositConfirmationEmail({
   depositId,
   depositDate,
   auctionsUrl,
+  premiumLine,
 }: DepositConfirmationEmailProps): string {
   const ref = depositId.slice(-8).toUpperCase();
   return `<!DOCTYPE html>
@@ -83,6 +96,10 @@ export function renderDepositConfirmationEmail({
                   </td>
                 </tr>
               </table>
+              ${premiumLine
+                ? `<!-- §23.2a touchpoint 1: one line, named rather than pushed -->
+              <p style="margin:0 0 20px 0;color:#6B7280;font-size:13px;line-height:1.6;">${premiumLine}</p>`
+                : ""}
               <!-- What happens next -->
               <p style="margin:0 0 12px 0;font-weight:bold;color:#333333;">What happens next</p>
               <p style="margin:0 0 20px 0;color:#555555;font-size:14px;">Dealers have 48 hours to submit competitive offers. You'll receive an email as soon as your options are ready.</p>

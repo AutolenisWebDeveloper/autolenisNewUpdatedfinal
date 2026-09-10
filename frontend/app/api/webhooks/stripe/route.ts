@@ -390,8 +390,49 @@ export async function POST(request: NextRequest) {
             }
 
             if (buyerEmail && !existingAuction) {
+              // §23.2a TOUCHPOINT 1 — "a single line on the receipt and the
+              // sourcing-started screen. Named, not pushed."
+              //
+              // Composed here rather than in the template because both halves are facts
+              // the template cannot know: whether §23.2b permits the ask at all, and
+              // what the balance actually is once the settled ledger has been read. A
+              // suppressed buyer gets no line, not a greyed-out one.
+              //
+              // Best-effort, and silence on failure: a receipt that goes out without an
+              // upsell line is a receipt; one held back because an upsell could not be
+              // priced is a missing receipt for money that moved.
+              let premiumLine: string | null = null;
               try {
-                await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id);
+                if (effects.vehicleRequestId) {
+                  const { isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS } = await import(
+                    "@/lib/services/plan/upgrade-suppression.service"
+                  );
+                  const decision = await isUpgradePromptSuppressed({
+                    vehicleRequestId: effects.vehicleRequestId,
+                    buyerId: deposit.buyerId,
+                    touchpoint: UPGRADE_TOUCHPOINTS.RECEIPT,
+                  });
+                  if (!decision.suppressed) {
+                    const { quotePremiumBalance } = await import(
+                      "@/lib/services/plan/upgrade-window.service"
+                    );
+                    const quote = await quotePremiumBalance(effects.vehicleRequestId);
+                    premiumLine =
+                      `Premium adds a named concierge who coordinates the rest of your purchase. ` +
+                      `It is $${(quote.grossCents / 100).toFixed(0)} in total` +
+                      (quote.creditCents > 0
+                        ? `, less the $${(quote.creditCents / 100).toFixed(0)} you have just paid — ` +
+                          `$${(quote.dueCents / 100).toFixed(0)} whenever you want it.`
+                        : `.`) +
+                      ` There is nothing to decide now.`;
+                  }
+                }
+              } catch (e) {
+                logger.error("[stripe/webhook] premium receipt line failed (receipt still sends):", e);
+              }
+
+              try {
+                await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id, premiumLine);
               } catch (e) {
                 logger.error("[stripe/webhook] deposit confirmation email failed:", e);
               }

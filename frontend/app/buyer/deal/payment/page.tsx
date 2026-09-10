@@ -7,8 +7,9 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Shield, Sparkles } from "lucide-react";
-import { PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import FeePaymentForm from "@/components/buyer/FeePaymentForm";
+import { quotePremiumBalance } from "@/lib/services/plan/upgrade-window.service";
 
 export const dynamic = "force-dynamic";
 
@@ -22,18 +23,19 @@ export default async function DealPaymentPage() {
 
   if (!deal) return <div className="p-8 text-[#4B5563]" data-testid="payment-no-deal">No active deal.</div>;
 
-  // The "$99 already credited" line used to be printed from the constant with no
-  // deposit ever checked, so a buyer who never paid one was shown a credit they
-  // had not earned. Read the real record and only claim the credit when it
-  // exists. NOTE: the amount actually charged is decided server-side by
-  // /api/buyer/deals/[dealId]/fee/create-intent and is unchanged here — this
-  // only stops the page asserting a credit it cannot evidence.
-  const paidDeposit = await prisma.deposit.findFirst({
-    where: { buyerId: buyer.id, status: "PAID" },
-    orderBy: { createdAt: "desc" },
-    select: { amountCents: true },
-  });
-  const depositCreditCents = paidDeposit?.amountCents ?? 0;
+  // THE PAGE AND THE CHARGE NOW READ ONE RULE.
+  //
+  // The "$99 already credited" line was first printed from the constant with no deposit
+  // checked at all, then corrected to a buyer-scoped `status: "PAID"` lookup. That
+  // correction was right in direction and still disagreed with the server in three ways:
+  // it was scoped to the BUYER rather than to this request (§23.1 — a new request means
+  // a new $99), it counted a deposit under a dispute or chargeback hold, and it was a
+  // second implementation of a rule the ledger already owns.
+  //
+  // `quotePremiumBalance` is that rule, and the fee intent is priced from the same call,
+  // so the number shown and the number charged cannot drift.
+  const quote = deal.vehicleRequestId ? await quotePremiumBalance(deal.vehicleRequestId) : null;
+  const depositCreditCents = quote?.creditCents ?? 0;
 
   const isPremium = buyer.plan === "PREMIUM";
 
@@ -86,8 +88,10 @@ export default async function DealPaymentPage() {
     );
   }
 
-  // ─── PREMIUM plan: $499 less $99 Auction Access Deposit credit = $400 due ───────────────
-  const netFeeCents = PREMIUM_FEE_REMAINING_CENTS;
+  // ─── PREMIUM plan: $499 less the settled $99 = the balance due ───────────────
+  // From the quote when this deal carries a request; the constant is the pre-Phase-3
+  // fallback for a deal that predates `deals.vehicle_request_id`.
+  const netFeeCents = quote?.dueCents ?? PREMIUM_FEE_REMAINING_CENTS;
 
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deal-payment-page">
@@ -102,7 +106,7 @@ export default async function DealPaymentPage() {
               {depositCreditCents > 0 ? "AutoLenis Service Fee (total)" : "AutoLenis Service Fee"}
             </span>
             <span className="font-semibold text-[#111827]">
-              ${(depositCreditCents > 0 ? PREMIUM_FEE_CENTS : netFeeCents) / 100}
+              ${(quote?.grossCents ?? netFeeCents) / 100}
             </span>
           </div>
           {/* Only claimed when a PAID deposit actually exists — this line used
