@@ -160,6 +160,13 @@ export async function quotePremiumBalance(
   const creditCents = await settledDepositCentsForRequest(vehicleRequestId, db);
 
   if (creditCents <= 0) {
+    // WHERE THIS PRICE IS ACTUALLY REACHABLE, since the question is a fair one: not from
+    // the buyer's own route. `isUpgradeWindowOpen` shuts on the same read that zeroes
+    // the credit, so a buyer whose $99 was refunded or charged back is refused before
+    // they can be quoted. It is reachable through the ADMIN concierge-fee routes, which
+    // take payment without the window, and that is the case §23.2's "Premium is $499
+    // gross" is written for: an admin taking the balance from someone with no credit
+    // basis must charge the whole thing.
     return {
       grossCents: PREMIUM_FEE_CENTS,
       creditCents: 0,

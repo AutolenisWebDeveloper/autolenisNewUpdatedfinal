@@ -329,6 +329,14 @@ export interface EntitledPlan {
  * buyer, not an unpaid Premium one, and §23.2 is explicit that the unpaid balance never
  * gates the transaction.
  *
+ * COULD A STANDARD DEAL CARRY ONE? Not from any path that exists now: both admin
+ * concierge-fee routes refuse a non-Premium buyer, and the buyer's own fee route is
+ * gated on the §23.2 upgrade window. A HISTORICAL row is possible and this session
+ * cannot read production to rule it out — such a deal would read as entitled Premium
+ * here, which is the generous direction (service already paid for) rather than the
+ * dangerous one (service delivered unpaid). Named so it is a known reading rather than
+ * a surprise.
+ *
  * REPORTED, NOT WORKED AROUND: `service_fee_payments` has no reversal or refund column,
  * so a REFUNDED $400 still reads as settled here. The §23.3 post-settlement downgrade is
  * a manual Finance review that produces a Stripe refund and, today, no ledger fact this
