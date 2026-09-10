@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
+import { depositNotOnHold } from "@/lib/payments/deposit-state";
 
 // ---------------------------------------------------------------------------
 // $99 PRE-ACTIVATION COST GATE — the single authoritative predicate.
@@ -12,9 +13,16 @@ import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 //
 // This is the ONE shared gate used by pre-payment cost guards. "Paid" means the
 // buyer has a Deposit whose status the Stripe webhook has authoritatively flipped
-// to PAID (never a client-reported status, never a PENDING intent). It is the
-// same fact `lib/qstash/state.hasPaidDeposit` reads; this module is the canonical
-// name for the invariant so guards read as intent, not as an ad-hoc query.
+// to PAID (never a client-reported status, never a PENDING intent) AND which is not
+// under a dispute/refund hold.
+//
+// `lib/qstash/state.hasPaidDeposit` reads a SIMILAR fact and is deliberately left
+// alone. It answers a different question — "has this buyer converted, so stop
+// chasing them?" — and for a disputed deposit the right answer to that is still
+// YES, stop chasing. Folding it onto this gate would make the reminder series start
+// dunning a buyer whose payment is under dispute, which is the opposite of what the
+// hold exists to do. Two predicates that agree today on every row but one are not
+// duplicates; they are two questions.
 //
 // Cost-free internal processing that uses data AutoLenis already owns (e.g.
 // dealer DISCOVERY writing prospect rows) is allowed pre-payment; only the
@@ -23,16 +31,39 @@ import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 // ---------------------------------------------------------------------------
 
 /**
- * True iff the buyer has an authoritative PAID $99 deposit — the boundary that
- * unlocks cost-bearing / dealer-facing fulfillment. A missing buyer id (e.g. an
- * anonymous lead that cannot have paid) is never unlocked.
+ * True iff the buyer has an authoritative PAID $99 deposit that is NOT ON HOLD —
+ * the boundary that unlocks cost-bearing / dealer-facing fulfillment. A missing
+ * buyer id (e.g. an anonymous lead that cannot have paid) is never unlocked.
+ *
+ * THE HOLD CLAUSE IS WHAT MAKES §26's DISPUTE ROW MEAN ANYTHING (PAY-38b). Before
+ * Phase 3 this predicate read `status: "PAID"` alone. A deposit could carry
+ * `disputed_at` — set by the refund trigger, or left behind by a status flip that
+ * lost its race — and still answer "unlocked", so dealer outreach, paid enrichment
+ * and the AI action gate would all keep spending against a charge the buyer was
+ * contesting. The hold is derived (`disputed_at IS NOT NULL AND hold_released_at
+ * IS NULL`) and `depositNotOnHold()` is its negation, defined once in
+ * `lib/payments/deposit-state.ts` so the gate cannot drift from the writer.
+ *
+ * A dispute the platform WINS releases the hold (`hold_released_at` is stamped and
+ * the status returns to PAID), and this predicate then answers true again.
+ *
+ * NOT scoped to a Vehicle Request. PAY-30 would narrow it to
+ * `(vehicleRequestId, PAID, unrefunded, undisputed)` — correct, and deliberately
+ * NOT done here, because no caller at Phase 3 has a Vehicle Request to pass: the
+ * three consumers (post-intake outreach, dealer-opportunity fan-out, the AI action
+ * policy) hold a buyer id only, and `BuyerOpportunity` has a one-to-MANY relation
+ * to requests rather than a single link. Adding a parameter nothing supplies would
+ * ship a narrowing that never narrows, which is worse than not having it: the next
+ * reader cannot tell whether it is enforced. The VR-bearing callers arrive with
+ * Phase 5's sourcing-case and invitation services (PAY-40), and that is where the
+ * scoping belongs. Reported, not silently skipped.
  */
 export async function isFulfillmentUnlocked(
   buyerId: string | null | undefined,
 ): Promise<boolean> {
   if (!buyerId) return false;
   const paid = await prisma.deposit.findFirst({
-    where: { buyerId, status: "PAID" },
+    where: { buyerId, status: "PAID", ...depositNotOnHold() },
     select: { id: true },
   });
   return paid !== null;

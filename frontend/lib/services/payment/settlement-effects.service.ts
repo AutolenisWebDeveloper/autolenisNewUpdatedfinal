@@ -25,7 +25,6 @@
 // that takes it writes a LEGACY_PATH_WRITE row. See lib/payments/settlement-flags.ts
 // for what flipping it on before Phase 5 would do to a paying buyer.
 
-import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";
 import { openSourcingCase } from "@/lib/services/sourcing/sourcing-case.service";

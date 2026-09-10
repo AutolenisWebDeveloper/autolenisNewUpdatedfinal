@@ -5,6 +5,19 @@ import { prisma } from "@/lib/prisma";
 // reminder. Each guard re-reads live DB state on every QStash delivery.
 
 // Buyer has activated their auction by paying the $99 deposit.
+//
+// DELIBERATELY NOT `isFulfillmentUnlocked` (lib/services/payment/fulfillment-gate.ts),
+// which since Phase 3 also requires the deposit not to be under a dispute/refund hold.
+// The two predicates answer different questions and disagree on exactly one row shape:
+//
+//   • "may we spend money / face dealers for this buyer?"  → a hold must say NO.
+//   • "has this buyer converted, so stop chasing them?"    → a hold still says YES.
+//
+// Routing this onto the hold-aware gate would restart the $99 reminder series against
+// a buyer whose payment is under dispute — dunning someone for money they are actively
+// contesting, which is the precise harm the hold exists to prevent. PAY-30 calls this a
+// duplicate to retire; once the hold exists it is not one, and that is reported rather
+// than quietly done.
 export async function hasPaidDeposit(buyerId: string): Promise<boolean> {
   const deposit = await prisma.deposit.findFirst({
     where: { buyerId, status: "PAID" },
@@ -23,8 +36,10 @@ export async function hasPaidDeposit(buyerId: string): Promise<boolean> {
 //   • no PENDING deposit remains — the competitive intent was cancelled, expired,
 //     or otherwise abandoned/failed (nothing left to complete → not eligible).
 //     If the buyer later restarts checkout, create-intent re-enrolls idempotently.
-//     DepositStatus is PENDING | PAID | REFUNDED | FAILED, so REFUNDED and FAILED
-//     stop the chain by virtue of leaving PENDING — widening the status filter
+//     DepositStatus is PENDING | PAID | REFUNDED | FAILED | DISPUTED (Phase 3 added
+//     DISPUTED), so REFUNDED, FAILED and DISPUTED all stop the chain by virtue of
+//     leaving PENDING — which is the right answer for a disputed row too: a buyer
+//     whose payment is being contested must not be chased for it. Widening the filter
 //     below would silently un-stop them (a test pins that filter for exactly this
 //     reason).
 //   • the buyer has been administratively halted — suspended, disabled, archived

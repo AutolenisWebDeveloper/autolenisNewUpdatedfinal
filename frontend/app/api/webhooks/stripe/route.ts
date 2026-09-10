@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger";
 import { applySettlementEffects } from "@/lib/services/payment/settlement-effects.service";
 import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
+import { applyFulfillmentHold, releaseFulfillmentHold, recordDisputeLost } from "@/lib/services/payment/fulfillment-hold.service";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
@@ -168,7 +169,14 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
-        const { buyerId, type } = pi.metadata;
+        // `buyerId` is deliberately NOT destructured here. Every branch below resolves
+        // the buyer from the DEPOSIT row it acted on (`deposit.buyerId`) rather than from
+        // provider metadata, because the admin send-link path mints a Checkout Session
+        // whose PaymentIntent carries no `buyerId` at all — reading it from metadata
+        // would be null for exactly the payments an admin took by hand. The concierge-fee
+        // branch reads `pi.metadata.buyerId` explicitly, under its own name, where that
+        // is the correct source.
+        const { type } = pi.metadata;
         // Set true only by a branch that matched this payment's type AND resolved
         // the row it is meant to act on. Left false, this is a real charge that
         // changed nothing — the failure mode a bare 200 hides best.
@@ -780,12 +788,17 @@ export async function POST(request: NextRequest) {
 
         const deposit = await prisma.deposit.findFirst({
           where:  { stripePaymentIntentId: piId },
-          select: { id: true, status: true, buyerId: true },
+          select: { id: true, status: true, buyerId: true, vehicleRequestId: true },
         });
 
-        // Transition matrix: REFUNDED is reachable from PAID or DISPUTED — the second
-        // being a dispute the platform lost, where the funds are withdrawn and Stripe
-        // reports the charge as refunded. The updateMany
+        // Transition matrix: REFUNDED is reachable from PAID or DISPUTED. The DISPUTED
+        // edge is here because a lost dispute leaves the deposit in that state and the
+        // money does go back — but the branch that RULES on a lost dispute is
+        // `charge.dispute.closed`, not this one. Whether Stripe also emits a refund
+        // event for a lost dispute is a claim about provider behaviour this session
+        // could not verify against a live account, so neither path depends on the other:
+        // both are idempotent, and whichever arrives second finds the row already
+        // REFUNDED and changes nothing. The updateMany
         // WHERE enforces the edge atomically (count 1 = we performed the refund,
         // count 0 = disallowed/already-settled → skip side effects). This closes
         // the check-then-write race a findFirst+update leaves open.
@@ -795,6 +808,21 @@ export async function POST(request: NextRequest) {
               data:  { status: "REFUNDED", refundedAt: new Date() },
             })).count === 1
           : false;
+
+        // §5d: a refund places fulfilment on hold and stops all unsent outreach — the
+        // same clause as a dispute, and previously honoured for neither. Applied on the
+        // refund actually landing, not on the event arriving, so a redelivery does not
+        // re-cancel and re-raise.
+        if (deposit && refundApplied) {
+          await applyFulfillmentHold({
+            depositId: deposit.id,
+            buyerId: deposit.buyerId,
+            vehicleRequestId: deposit.vehicleRequestId,
+            trigger: "refund",
+            providerRef: charge.id,
+            reason: charge.refunds?.data?.[0]?.reason ?? null,
+          });
+        }
 
         if (deposit && refundApplied) {
           await prisma.notification.create({
@@ -908,6 +936,37 @@ export async function POST(request: NextRequest) {
           ? dispute.charge
           : dispute.charge.id;
 
+        // §26: "Payment disputed or refunded | Finance | Hold fulfillment; stop unsent
+        // outreach." Before Phase 3 this branch wrote an audit row and nothing else —
+        // best-effort, with a swallowed catch — so a contested charge changed no state,
+        // stopped no outreach and told nobody, while sourcing carried on spending money
+        // on it. The audit row is kept below; it is no longer the whole response.
+        if (piId) {
+          const disputed = await prisma.deposit.findFirst({
+            where: { stripePaymentIntentId: piId },
+            select: { id: true, buyerId: true, vehicleRequestId: true },
+          });
+          if (disputed) {
+            await applyFulfillmentHold({
+              depositId: disputed.id,
+              buyerId: disputed.buyerId,
+              vehicleRequestId: disputed.vehicleRequestId,
+              trigger: "dispute",
+              providerRef: dispute.id,
+              reason: dispute.reason ?? null,
+            });
+          } else {
+            // A dispute against a charge we cannot resolve to a deposit is the §26
+            // "never absorbed" case wearing a different hat, and it is the more
+            // alarming direction: money is being clawed back from an obligation we
+            // cannot name.
+            await raiseUnroutablePaymentException(
+              { id: piId, metadata: {} } as Stripe.PaymentIntent,
+              `a dispute (${dispute.id}) was filed against it but no deposit carries this PaymentIntent`,
+            );
+          }
+        }
+
         await prisma.adminAuditLog.create({
           data: {
             action:     "STRIPE_DISPUTE_CREATED",
@@ -926,6 +985,83 @@ export async function POST(request: NextRequest) {
             },
           },
         }).catch((err: unknown) => logger.error("[stripe/webhook] dispute audit log failed:", err));
+        break;
+      }
+
+      // The other half of the hold. Without it, `charge.dispute.created` would be a
+      // one-way door: every disputed deposit would sit at DISPUTED for ever, its Finance
+      // exception open, its buyer told "your payment is under review" indefinitely — even
+      // for the disputes the platform WINS, which is most of them.
+      //
+      // Stripe closes a dispute with one of three outcomes and they are not symmetrical:
+      //   • won            — the charge stands. Release the hold, deposit back to PAID.
+      //   • lost           — the money is withdrawn. REFUNDED, and the hold STAYS on.
+      //   • warning_closed — an early-fraud warning that never became a formal dispute.
+      //                      No ruling was made, so nothing here rules either.
+      //
+      // The `lost` branch is handled HERE rather than left to `charge.refunded`. Whether
+      // Stripe also emits a refund event for a lost dispute is a claim about provider
+      // behaviour this session cannot verify against a live account, and a money path
+      // that depends on an unverified provider assumption is exactly the shape of the
+      // defects this phase exists to fix. Both branches are idempotent, so if a refund
+      // event does also arrive it finds the row already REFUNDED and changes nothing.
+      case "charge.dispute.closed": {
+        const dispute = event.data.object as Stripe.Dispute;
+        const charge  = await getStripe().charges.retrieve(dispute.charge as string);
+        const piId    = typeof charge.payment_intent === "string"
+          ? charge.payment_intent
+          : charge.payment_intent?.id;
+
+        const deposit = piId
+          ? await prisma.deposit.findFirst({
+              where: { stripePaymentIntentId: piId },
+              select: { id: true, buyerId: true, vehicleRequestId: true },
+            })
+          : null;
+
+        if (deposit && dispute.status === "won") {
+          await releaseFulfillmentHold(deposit.id, dispute.id);
+        } else if (deposit && dispute.status === "lost") {
+          await recordDisputeLost({
+            depositId:        deposit.id,
+            buyerId:          deposit.buyerId,
+            vehicleRequestId: deposit.vehicleRequestId,
+            providerRef:      dispute.id,
+          });
+        } else if (deposit) {
+          // warning_closed, or a status Stripe adds later. The hold stays and the Finance
+          // exception stays open, because "we do not recognise this outcome" is a reason
+          // to leave a human in the loop, not a reason to guess at one.
+          logger.warn(
+            `[stripe/webhook] dispute ${dispute.id} closed with status "${dispute.status}" — ` +
+              `no ruling applied to deposit ${deposit.id}; the fulfilment hold and its Finance ` +
+              `exception both stand`,
+          );
+        } else if (piId) {
+          logger.warn(
+            `[stripe/webhook] dispute ${dispute.id} closed ("${dispute.status}") for PaymentIntent ` +
+              `${piId}, which no deposit carries — the created event already raised the unroutable ` +
+              `exception; nothing to release`,
+          );
+        }
+
+        await prisma.adminAuditLog.create({
+          data: {
+            action:     "STRIPE_DISPUTE_CLOSED",
+            entityType: "Payment",
+            entityId:   dispute.id,
+            adminId:    "system",
+            adminEmail: "system@autolenis.com",
+            metadata: {
+              disputeId:       dispute.id,
+              paymentIntentId: piId ?? null,
+              depositId:       deposit?.id ?? null,
+              amount:          dispute.amount,
+              reason:          dispute.reason,
+              status:          dispute.status,
+            },
+          },
+        }).catch((err: unknown) => logger.error("[stripe/webhook] dispute-closed audit log failed:", err));
         break;
       }
     }

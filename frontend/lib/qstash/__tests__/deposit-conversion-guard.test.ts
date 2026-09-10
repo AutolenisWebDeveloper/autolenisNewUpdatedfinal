@@ -73,7 +73,7 @@ test("an unpaid PENDING deposit on an active buyer does NOT stop the chain", asy
 });
 
 // ── Terminal deposit states, pinned BY NAME ────────────────────────────────
-// DepositStatus is PENDING | PAID | REFUNDED | FAILED. There is deliberately no
+// DepositStatus is PENDING | PAID | REFUNDED | FAILED | DISPUTED. There is deliberately no
 // CANCELLED member: an abandoned checkout leaves the row PENDING (which is what
 // the chain chases), so "cancelled" is not a deposit state this guard can see.
 

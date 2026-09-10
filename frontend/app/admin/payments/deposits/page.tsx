@@ -15,7 +15,10 @@ interface SP {
   searchParams: Promise<{ status?: string; q?: string }>;
 }
 
-const STATUSES = ["ALL", "PENDING", "PAID", "REFUNDED", "FAILED"] as const;
+// Every DepositStatus label, so a status that exists in the database is always
+// reachable from this filter. DISPUTED arrived with Phase 3; leaving it out would
+// have made disputed deposits findable only by scrolling "ALL".
+const STATUSES = ["ALL", "PENDING", "PAID", "REFUNDED", "FAILED", "DISPUTED"] as const;
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", {

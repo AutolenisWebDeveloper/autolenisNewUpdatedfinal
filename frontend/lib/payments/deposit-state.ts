@@ -130,3 +130,26 @@ for (const [name, from, to] of [
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// THE FULFILMENT HOLD — one definition, because it is DERIVED rather than stored.
+//
+// The Phase 1 wave's own migration comment rules it: a deposit is on hold when
+// `disputed_at IS NOT NULL AND hold_released_at IS NULL`. A fourth stored column
+// (the `dispute_hold_at` that B3/V18 name and that was never created) would be a
+// second spelling of the same fact and could disagree with it.
+//
+// This is the NEGATION — "not on hold" — because that is the shape every caller
+// needs: a query for deposits that may unlock fulfilment. Written once here so the
+// gate, the fee credit and the upgrade window cannot drift into three different
+// readings of the same rule. It is a plain object literal, not a Prisma type, so
+// this module stays free of a database import.
+// ---------------------------------------------------------------------------
+export function depositNotOnHold(): {
+  OR: [{ disputedAt: null }, { holdReleasedAt: { not: Date | null } }];
+} {
+  // A FUNCTION, not a shared constant: a Prisma `where` fragment is spread into a
+  // caller's object and Prisma's own types demand a mutable array, so a shared
+  // literal would be both readonly-hostile and aliasable by every call site.
+  return { OR: [{ disputedAt: null }, { holdReleasedAt: { not: null } }] };
+}

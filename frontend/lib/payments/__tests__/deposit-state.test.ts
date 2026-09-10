@@ -27,6 +27,7 @@ import {
   DISPUTE_FROM,
   REFUND_FROM,
   DISPUTE_WON_FROM,
+  depositNotOnHold,
 } from "../deposit-state";
 
 test("permitted edges", () => {
@@ -112,4 +113,38 @@ test("per-event predecessor sets are narrower than the matrix, and never wider",
   );
   assert.deepEqual([...SETTLE_FROM].sort(), ["FAILED", "PENDING"]);
   assert.deepEqual([...DEAD_INTENT_FROM], ["PENDING"]);
+});
+
+// ── The fulfilment hold ─────────────────────────────────────────────────────
+//
+// The hold is DERIVED, per the Phase 1 wave's own migration comment: a deposit is on
+// hold when `disputed_at IS NOT NULL AND hold_released_at IS NULL`. `depositNotOnHold()`
+// is that rule's negation, and it lives here — beside the matrix — because three
+// separate consumers read it (the fulfilment gate, the Premium fee credit, the upgrade
+// window) and three hand-written spellings would eventually disagree.
+
+test("depositNotOnHold is exactly the negation of the derived hold rule", () => {
+  const { OR } = depositNotOnHold();
+  assert.deepEqual(OR, [{ disputedAt: null }, { holdReleasedAt: { not: null } }]);
+});
+
+test("depositNotOnHold returns a fresh object each call", () => {
+  const a = depositNotOnHold();
+  const b = depositNotOnHold();
+  assert.notEqual(a, b, "a shared literal spread into a caller's where-clause is aliasable by every call site");
+  assert.notEqual(a.OR, b.OR);
+});
+
+// A truth table over the four reachable combinations, evaluated the way Prisma would.
+test("the four hold states resolve as the rule says", () => {
+  const t = new Date();
+  const notOnHold = (row: { disputedAt: Date | null; holdReleasedAt: Date | null }) =>
+    depositNotOnHold().OR.some((c) =>
+      "disputedAt" in c ? row.disputedAt === c.disputedAt : row.holdReleasedAt !== c.holdReleasedAt.not,
+    );
+
+  assert.equal(notOnHold({ disputedAt: null, holdReleasedAt: null }), true, "never disputed");
+  assert.equal(notOnHold({ disputedAt: t, holdReleasedAt: null }), false, "disputed, hold live — THE held case");
+  assert.equal(notOnHold({ disputedAt: t, holdReleasedAt: t }), true, "dispute won, hold released");
+  assert.equal(notOnHold({ disputedAt: null, holdReleasedAt: t }), true, "released with no dispute — not a hold");
 });
