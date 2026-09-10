@@ -272,12 +272,41 @@ export interface GatherEligibilityInput {
  * are about to mint a PaymentIntent want the second; the transition itself wants the
  * first. Running both from one set of facts is what stops them disagreeing.
  */
+/** The two verdicts §5a and §5b ask for, from one read. See the note below. */
+export interface EligibilityGates {
+  /** The six §5a conditions. Passing this moves the request to PAYMENT_REQUIRED. */
+  transition: EligibilityResult;
+  /** The six, plus acceptance of the CURRENT disclosures. Passing this permits a mint. */
+  intent: EligibilityResult;
+}
+
+/**
+ * BOTH gates, from ONE gather.
+ *
+ * §5a's conditions and §5b's disclosure acceptance are two different questions asked
+ * at two different moments, and collapsing them into one verdict put the checkout in
+ * an impossible position:
+ *
+ *   • `transition` — the six §5a conditions. Passing this is what moves the request to
+ *     PAYMENT_REQUIRED (PAY-10b). It says the buyer may REACH checkout.
+ *   • `intent` — the same six, plus acceptance of the current disclosures. Passing
+ *     this is what permits a PaymentIntent to be minted (PAY-08).
+ *
+ * Why the split has to be visible to the caller rather than hidden here: a buyer who
+ * has ALREADY been charged loads the checkout page with nothing accepted yet. With one
+ * combined verdict the route answered "accept the disclosures first" and never reached
+ * the existing-obligation check — so the page could not tell that buyer they had
+ * already paid, and would have shown them a card form. The obligation check has to sit
+ * BETWEEN the two gates, which means the caller needs them separately.
+ *
+ * Both verdicts come from one database read, so the split costs nothing.
+ */
 export async function gatherAndCheckEligibility(input: {
   buyerId: string;
   requestId: string;
   acceptedDisclosuresVersion: string | null;
   emailConfirmedAt: Date | null;
-}): Promise<EligibilityResult & { code?: EligibilityFailureCode; message?: string; missing?: string }> {
+}): Promise<EligibilityGates> {
   const [buyer, request, otherOpen] = await Promise.all([
     prisma.buyer.findUnique({
       where: { id: input.buyerId },
@@ -319,19 +348,24 @@ export async function gatherAndCheckEligibility(input: {
   if (!buyer) throw new Error(`gatherAndCheckEligibility: buyer ${input.buyerId} not found`);
   if (!request) throw new Error(`gatherAndCheckEligibility: request ${input.requestId} not found`);
 
-  return checkPaymentEligibility(
-    {
-      buyer,
-      emailConfirmedAt: input.emailConfirmedAt,
-      prequal: buyer.preQualification ?? null,
-      request,
-      otherOpenRequestIds: otherOpen.map((r) => r.id),
-      // Acceptance is captured at the moment the PaymentIntent is requested, which is
-      // what PAY-08's "PI not created until acceptance" means. There is no earlier row
-      // to read it from, because the deposit may not exist yet.
-      disclosuresAcceptedAt: input.acceptedDisclosuresVersion ? new Date() : null,
-      disclosuresVersion: input.acceptedDisclosuresVersion,
-    },
-    { requireDisclosureAcceptance: true, currentDisclosuresVersion: DISCLOSURES_VERSION },
-  );
+  const facts: EligibilityFacts = {
+    buyer,
+    emailConfirmedAt: input.emailConfirmedAt,
+    prequal: buyer.preQualification ?? null,
+    request,
+    otherOpenRequestIds: otherOpen.map((r) => r.id),
+    // Acceptance is captured at the moment the PaymentIntent is requested, which is
+    // what PAY-08's "PI not created until acceptance" means. There is no earlier row
+    // to read it from, because the deposit may not exist yet.
+    disclosuresAcceptedAt: input.acceptedDisclosuresVersion ? new Date() : null,
+    disclosuresVersion: input.acceptedDisclosuresVersion,
+  };
+
+  return {
+    transition: checkPaymentEligibility(facts, { requireDisclosureAcceptance: false }),
+    intent: checkPaymentEligibility(facts, {
+      requireDisclosureAcceptance: true,
+      currentDisclosuresVersion: DISCLOSURES_VERSION,
+    }),
+  };
 }

@@ -93,6 +93,26 @@ test.describe("deposit truthfulness", () => {
     }
   });
 
+  // §5b — the seven disclosures, and the gate they form.
+  //
+  // These are asserted on the PAGE rather than only in `deposit-disclosures.test.ts`
+  // because the module test proves the list exists and this proves a buyer sees it.
+  // A disclosure that is defined and never rendered is not a disclosure.
+  test("all seven §5b disclosures are shown, and no card form precedes them", async ({ page }) => {
+    authOnly();
+    await gotoOk(page, "/buyer/deposit");
+
+    await expect(page.getByTestId("deposit-disclosures")).toBeVisible();
+    await expect(page.getByTestId("deposit-disclosure-list").locator("li")).toHaveCount(7);
+
+    // The acceptance control is present and the payment surface is ABSENT — not
+    // merely disabled. A PaymentIntent does not exist yet, and the server is what
+    // enforces that; this checks the page agrees.
+    await expect(page.getByTestId("deposit-accept-disclosures-btn")).toBeVisible();
+    await expect(page.getByTestId("deposit-payment-form")).toHaveCount(0);
+    await expect(page.getByTestId("deposit-submit-btn")).toHaveCount(0);
+  });
+
   test("the verifying page refuses to claim success without a payment reference", async ({ page }) => {
     authOnly();
     await gotoOk(page, "/buyer/deposit/success");

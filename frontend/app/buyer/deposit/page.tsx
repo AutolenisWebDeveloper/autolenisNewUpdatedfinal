@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { Button } from "@/components/ui/button";
-import { Shield, Sparkles, Loader2 } from "lucide-react";
+import { Shield, Sparkles, Loader2, Check } from "lucide-react";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
+import { DEPOSIT_DISCLOSURES, DISCLOSURES_VERSION } from "@/lib/payments/deposit-disclosures";
 
 import PreIntelligencePanel from "@/components/buyer/PreIntelligencePanel";
 import PaymentUnsettledNotice from "@/components/buyer/PaymentUnsettledNotice";
@@ -83,6 +84,72 @@ function DepositForm({
   );
 }
 
+/**
+ * §5b — the seven things a buyer must be shown before they pay.
+ *
+ * The WORDS come from `lib/payments/deposit-disclosures.ts` and are never written
+ * here. §13-D48 exists because they were written twice before: this page said the $99
+ * was "refundable on request" while the confirmation email said it was "credited
+ * toward your concierge fee", and both contradicted §23.1. Copy that lives in two
+ * files gets corrected in one, so this renders the list and owns none of it.
+ *
+ * ACCEPTANCE GATES THE PAYMENT INTENT, not the PAYMENT_REQUIRED transition. §5a's
+ * seven eligibility conditions decide whether a buyer may reach checkout at all;
+ * whether they have READ the disclosures is a different question, answered at the
+ * moment money is about to move. That split is why the intent is created on the
+ * button below rather than on mount, which is where it used to be created — before
+ * the buyer had seen a single one of these.
+ *
+ * The version travels with the acceptance. `DISCLOSURES_VERSION` is stored on the
+ * deposit, and the server refuses an acceptance naming a different one, so when legal
+ * returns approved wording (§13-D48) bumping the constant re-asks every buyer instead
+ * of treating agreement to these words as agreement to those.
+ */
+function DisclosureGate({
+  accepted,
+  pending,
+  onAccept,
+}: {
+  accepted: boolean;
+  pending: boolean;
+  onAccept: () => void;
+}) {
+  return (
+    <div
+      className="bg-white border border-[#E5E7EB] rounded-xl p-5 mb-6"
+      data-testid="deposit-disclosures"
+    >
+      <h2 className="text-sm font-semibold text-[#111827] mb-3">Before you pay, please read this</h2>
+      <ul className="space-y-2.5" data-testid="deposit-disclosure-list">
+        {DEPOSIT_DISCLOSURES.map((d) => (
+          <li key={d.id} className="flex gap-2.5 text-xs text-[#4B5563] leading-relaxed" data-disclosure-id={d.id}>
+            <Check size={14} className="text-[#50D14E] shrink-0 mt-0.5" aria-hidden="true" />
+            <span>{d.text}</span>
+          </li>
+        ))}
+      </ul>
+
+      {!accepted && (
+        <Button
+          className="w-full mt-5"
+          size="lg"
+          onClick={onAccept}
+          disabled={pending}
+          data-testid="deposit-accept-disclosures-btn"
+        >
+          {pending ? "One moment…" : "I've read this — continue to payment"}
+        </Button>
+      )}
+      {accepted && (
+        <p className="text-xs text-[#1A6B18] mt-4 flex items-center gap-1.5" data-testid="deposit-disclosures-accepted">
+          <Check size={12} aria-hidden="true" />
+          Recorded with your payment.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function DepositPage() {
   const router = useRouter();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -97,6 +164,13 @@ export default function DepositPage() {
     { paymentIntentId: string | null; intentStatus: string | null } | null
   >(null);
   const [plan, setPlan] = useState<"STANDARD" | "PREMIUM">("STANDARD");
+  // §5b: the buyer has read the seven disclosures. Nothing is charged, and no
+  // PaymentIntent is even created, until this is true.
+  const [accepted, setAccepted] = useState(false);
+  /** A create-intent call is in flight. Separate from `loading`, which is page setup. */
+  const [creating, setCreating] = useState(false);
+  /** Our own books say this deposit is PAID. No card form, ever. */
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
   // Concierge convergence: when the buyer arrives from a "?offer=<reviewToken>"
   // vehicle-offer review link, this deposit unlocks an admin-curated set of
   // dealer offers (converted to a CLOSED auction on settle) instead of launching
@@ -118,12 +192,40 @@ export default function DepositPage() {
       })
       .catch(() => { /* default to STANDARD */ });
 
+    // PROBE. The same endpoint, called WITHOUT the disclosure version.
+    //
+    // A call with no version cannot mint: the server checks §5a, moves the request to
+    // PAYMENT_REQUIRED, runs the provider-side existing-obligation check, and only
+    // then asks whether the disclosures were accepted. So this load answers the one
+    // question the page must know before it renders anything — has this buyer already
+    // been charged? — and can never create a PaymentIntent while doing it.
+    //
+    // That question has to be answered on LOAD rather than on accept, because a buyer
+    // whose money has already moved must never be shown a card form or a "Total
+    // charged today" summary. Minting used to happen here, which is what made the
+    // answer available; the probe is what keeps it available now that it does not.
+    postCreateIntent(false, token);
+  }, []);
+
+  /**
+   * Ask the server for a PaymentIntent, or (with `withVersion` false) merely for the
+   * buyer's situation.
+   *
+   * `token` is passed explicitly rather than read from state because the mount probe
+   * runs in the same tick as `setReviewToken` and would otherwise see null.
+   */
+  function postCreateIntent(withVersion: boolean, token: string | null) {
+    if (withVersion) setCreating(true);
+    setError(null);
     fetch("/api/buyer/deposit/create-intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Concierge deposits carry the review token so the server binds this
       // deposit to the offers and stamps the concierge PI metadata.
-      body: JSON.stringify(token ? { reviewToken: token } : {}),
+      body: JSON.stringify({
+        ...(token ? { reviewToken: token } : {}),
+        ...(withVersion ? { disclosuresVersion: DISCLOSURES_VERSION } : {}),
+      }),
     })
       .then(r => r.json())
       .then((d: {
@@ -137,6 +239,20 @@ export default function DepositPage() {
       }) => {
         if (d.success && d.data) {
           setClientSecret(d.data.clientSecret);
+          setAccepted(true);
+        } else if (d.error?.code === "DISCLOSURE_REQUIRED") {
+          // On the PROBE this is the expected answer and means "nothing is owed, the
+          // buyer just has not accepted yet" — the disclosure gate renders and waits.
+          // On the ACCEPT call it means the server's wording moved on since this page
+          // loaded (legal-approved copy landing mid-session, §13-D48); reloading
+          // fetches the new text, and accepting the old one would record agreement to
+          // words that are no longer shown.
+          if (withVersion) {
+            setError("These terms have just been updated. Please reload the page and read them again before paying.");
+          }
+        } else if (d.error?.code === "ALREADY_PAID") {
+          // Our own books say PAID. Not an error to retry, and never a card form.
+          setAlreadyPaid(true);
         } else if (d.error?.code === "CHARGE_UNSETTLED") {
           // The buyer's money already moved — the server refused to mint a
           // second PaymentIntent. Record the facts; the render path below turns
@@ -158,8 +274,11 @@ export default function DepositPage() {
         }
       })
       .catch(() => setError("Unable to connect to payment service."))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        setCreating(false);
+        setLoading(false);
+      });
+  }
 
   // Confirmation handed off to the server — show a neutral, truthful
   // interstitial while the verifying page loads. It claims nothing about the
@@ -190,6 +309,24 @@ export default function DepositPage() {
   // verifying page uses, not by a second interpretation of Stripe's statuses
   // written here: `recordedStatus` is null because our side has recorded nothing
   // — that is precisely why the server refused to create another intent.
+  // Our own books say PAID. This is not "unsettled" — there is nothing in flight and
+  // nothing to re-check at Stripe — so it gets its own, plainer answer rather than
+  // being pushed through the unsettled notice, whose copy ("it isn't recorded on our
+  // side yet") would be false here.
+  if (alreadyPaid) {
+    return (
+      <div className="p-6 md:p-8 max-w-lg" data-testid="deposit-already-paid-block">
+        <h1 className="text-xl font-bold text-[#111827] mb-2">You&apos;ve already paid this.</h1>
+        <p className="text-sm text-[#4B5563] mb-5">
+          Your ${DEPOSIT_AMOUNT_CENTS / 100} is recorded against your vehicle request. Please do not pay again.
+        </p>
+        <Button onClick={() => router.push("/buyer/billing")} data-testid="deposit-already-paid-billing-btn">
+          View your billing
+        </Button>
+      </div>
+    );
+  }
+
   if (unsettled) {
     const outcome = classifyPaymentConfirmation({
       intentStatus: unsettled.intentStatus,
@@ -275,13 +412,6 @@ export default function DepositPage() {
         </p>
       </div>
 
-      {loading && <div className="h-32 bg-slate-100 rounded-lg animate-pulse" />}
-      {error && (
-        <div className="text-center py-8">
-          <p className="text-sm text-red-600 mb-4" data-testid="deposit-init-error">{error}</p>
-          <Button variant="secondary" onClick={() => window.location.reload()} data-testid="deposit-retry-btn">Try Again</Button>
-        </div>
-      )}
       {!stripePromise ? (
         <div className="text-center py-8" data-testid="stripe-unavailable">
           <p className="text-sm text-red-600 font-medium">
@@ -289,7 +419,20 @@ export default function DepositPage() {
           </p>
           <p className="text-xs text-[#6B7280] mt-1">Please contact support.</p>
         </div>
-      ) : (clientSecret && (
+      ) : (
+        <>
+          {/* §5b. Rendered BEFORE the card form and before any PaymentIntent exists,
+              because a disclosure shown after the money moves is not a disclosure. */}
+          <DisclosureGate accepted={accepted} pending={creating} onAccept={() => postCreateIntent(true, reviewToken)} />
+
+          {loading && <div className="h-32 bg-slate-100 rounded-lg animate-pulse" />}
+          {error && (
+            <div className="text-center py-8">
+              <p className="text-sm text-red-600 mb-4" data-testid="deposit-init-error">{error}</p>
+              <Button variant="secondary" onClick={() => window.location.reload()} data-testid="deposit-retry-btn">Try Again</Button>
+            </div>
+          )}
+          {clientSecret && (
         <Elements stripe={stripePromise} options={{ clientSecret }}>
           <DepositForm
             clientSecret={clientSecret}
@@ -306,7 +449,9 @@ export default function DepositPage() {
             }}
           />
         </Elements>
-      ))}
+          )}
+        </>
+      )}
     </div>
   );
 }

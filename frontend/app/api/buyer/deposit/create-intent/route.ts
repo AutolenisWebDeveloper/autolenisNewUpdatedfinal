@@ -14,7 +14,7 @@ import {
 import { DEAD_INTENT_FROM } from "@/lib/payments/deposit-state";
 import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
 import { enterPaymentRequired } from "@/lib/services/vehicle-request/vehicle-request.service";
-import { gatherAndCheckEligibility } from "@/lib/services/payment/deposit-eligibility";
+import { gatherAndCheckEligibility, type EligibilityResult } from "@/lib/services/payment/deposit-eligibility";
 import { getRequestUser } from "@/lib/auth/api";
 
 export async function POST(request: NextRequest) {
@@ -82,6 +82,10 @@ export async function POST(request: NextRequest) {
   // it was defending ("paying the deposit launches the auction" stops being true), and
   // shortlist candidates are Phase 4's subject. Recorded rather than silently removed.
   let openRequest: { id: string } | null = null;
+  // The SECOND gate, held until the mint. See the note at the check site below and
+  // the one on `gatherAndCheckEligibility`. Null on the concierge path, which has no
+  // §5a recheck at all.
+  let intentGate: EligibilityResult | null = null;
   if (!conciergeReviewToken) {
     openRequest = await findOpenRequest(buyer.id);
     if (!openRequest) {
@@ -103,13 +107,16 @@ export async function POST(request: NextRequest) {
         ? new Date(sessionUser.email_confirmed_at)
         : null,
     });
-    if (!gate.eligible) {
+    if (!gate.transition.eligible) {
       // §5a: "Any failure returns the buyer to the exact missing requirement — named,
       // not generic." The code and the named item both travel, so the checkout client
       // can route the buyer to the step that fixes it (PAY-09) rather than showing a
       // dead end.
-      return errorResponse(gate.code, gate.message, 400, { missing: gate.missing });
+      return errorResponse(gate.transition.code, gate.transition.message, 400, {
+        missing: gate.transition.missing,
+      });
     }
+    intentGate = gate.intent;
 
     // PAY-10b: eligibility passing is what moves the request into PAYMENT_REQUIRED.
     // Guarded by the source status set so a request that has moved on — settled,
@@ -192,6 +199,33 @@ export async function POST(request: NextRequest) {
   // bookkeeping, and it must never stop a buyer paying.
   if (obligation.kind === "NONE" && obligation.deadDepositIds.length > 0) {
     await retireDeadDeposits(obligation.deadDepositIds);
+  }
+
+  // §5b — DISCLOSURE ACCEPTANCE, checked HERE and not with §5a, because the two
+  // questions are asked at different moments (PAY-08).
+  //
+  // §5a decides whether the buyer may REACH checkout, and passing it is what moved
+  // the request to PAYMENT_REQUIRED above. Whether they have READ the seven
+  // disclosures decides whether a PaymentIntent may exist, and that is now.
+  //
+  // THE ORDER IS LOAD-BEARING, not a tidy-up. A buyer who has ALREADY been charged
+  // opens the checkout with nothing accepted. When this check sat with §5a, that
+  // buyer was answered "accept the disclosures first" and the existing-obligation
+  // check above was never reached — so the page could not learn they had already
+  // paid, and would have rendered a card form and a "Total charged today" summary to
+  // someone whose money had already moved. That is the exact failure
+  // `deposit-charge-unsettled-block` exists to prevent, and an E2E test pins it.
+  //
+  // It also gives the checkout a probe it can trust: a call with NO version can never
+  // mint, so the page asks this endpoint what the buyer's situation is on load, and
+  // asks again with the version once they accept.
+  //
+  // The concierge path has no §5a recheck and therefore no `intentGate`. Deliberate:
+  // three of the seven disclosures are about how far we widen the dealer search, and
+  // a concierge buyer is paying for offers that are already curated. Showing them
+  // those three would be telling them something untrue about their own purchase.
+  if (intentGate && !intentGate.eligible) {
+    return errorResponse(intentGate.code, intentGate.message, 400, { missing: intentGate.missing });
   }
 
   // The row this request should attach to, if any. IN_FLIGHT carries a live intent to

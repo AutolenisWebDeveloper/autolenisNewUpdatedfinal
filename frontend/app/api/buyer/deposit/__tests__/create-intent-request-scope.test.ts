@@ -22,6 +22,13 @@ const REQUEST_ID = "vr_scoped_1";
 
 interface Ctrl {
   openRequest: { id: string } | null;
+  /**
+   * The §5a verdict. The route now receives TWO verdicts from one gather — the
+   * transition gate (six conditions) and the intent gate (those plus disclosure
+   * acceptance) — because the existing-obligation check sits between them. This fake
+   * derives both from one setting: the disclosure half is exercised by
+   * `deposit-eligibility.test.ts`, not here.
+   */
   eligibility: { eligible: boolean; code?: string; message?: string; missing?: string };
   paymentRequiredCalls: string[];
   createArgs: Array<{ params: Record<string, unknown>; opts: Record<string, unknown> }>;
@@ -88,7 +95,9 @@ mock.module("@/lib/services/vehicle-request/vehicle-request.service", {
   },
 });
 mock.module("@/lib/services/payment/deposit-eligibility", {
-  namedExports: { gatherAndCheckEligibility: async () => ctrl.eligibility },
+  namedExports: {
+    gatherAndCheckEligibility: async () => ({ transition: ctrl.eligibility, intent: ctrl.eligibility }),
+  },
 });
 mock.module("@/lib/security/rate-limit", {
   namedExports: { limitPaymentIntent: async () => ({ ok: true }), clientIpKey: () => "ip" },

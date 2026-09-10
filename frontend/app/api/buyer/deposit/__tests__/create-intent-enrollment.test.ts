@@ -134,7 +134,13 @@ mock.module("@/lib/services/vehicle-request/vehicle-request.service", {
   namedExports: { enterPaymentRequired: async () => true },
 });
 mock.module("@/lib/services/payment/deposit-eligibility", {
-  namedExports: { gatherAndCheckEligibility: async () => ({ eligible: true }) },
+  namedExports: {
+    // Two verdicts from one gather: §5a decides the PAYMENT_REQUIRED transition,
+    // §5a-plus-disclosures decides whether a PaymentIntent may be minted. The
+    // existing-obligation check sits BETWEEN them, which is why the route needs
+    // them separately and why this fake returns both.
+    gatherAndCheckEligibility: async () => ({ transition: { eligible: true }, intent: { eligible: true } }),
+  },
 });
 
 mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } } });
