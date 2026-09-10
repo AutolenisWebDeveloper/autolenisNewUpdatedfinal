@@ -87,13 +87,49 @@ export async function startCronRun(cronName: string) {
 
 export type CronRunOutcome<T> = { ok: true; result: T } | { ok: false; error: unknown };
 
+export interface CronRunOptions<T> {
+  /**
+   * Decide whether a RESOLVED result is nonetheless a failed run.
+   *
+   * WHY THIS EXISTS. Until Phase 4, `withCronRun` wrote COMPLETED whenever `work()`
+   * resolved, full stop. A job that ran to completion and reported its OWN failure inside
+   * the returned payload was logged green — and `detectFailedCrons` filters on
+   * `CronJobLog.status`, so nothing downstream could see it either.
+   *
+   * That is not hypothetical. At the time this was written, production's
+   * `inventory_sources` read `last_run_status = FAILED` with `vehicles_last_count = 0` and
+   * a last run at 2026-09-10T08:00:07 — the sweep failing every day — while the cron log
+   * said COMPLETED. It is the same defect class as the 191-run silent freeze that motivated
+   * the yield gate, one layer up: the gate correctly downgrades the run to FAILED and the
+   * log then discards the verdict.
+   *
+   * OPT-IN, DELIBERATELY. 138 call sites use this wrapper and "what counts as failure"
+   * differs for each; a heuristic over the returned shape would silently reclassify jobs
+   * nobody examined. So the assessor is explicit, and the crons whose §26 rows require a
+   * failed run to BE a failed run pass one. The general gap — every other cron can still
+   * resolve with a failure inside its payload — is reported, not silently half-fixed.
+   *
+   * Returning `null` or omitting it means "the resolution speaks for itself".
+   */
+  assess?: (result: T) => { failed: boolean; error?: string } | null;
+}
+
 /**
  * Wrap a cron's WORK so every invocation is recorded in CronJobLog
  * (RUNNING → COMPLETED/FAILED). Monitoring is BEST-EFFORT: a cron_job_logs DB
  * error never fails the actual cron — the wrapped work still runs and its
  * result/throw is returned unchanged. Callers keep their own HTTP response shape.
+ *
+ * `opts.assess` lets a job whose failure lives INSIDE its resolved result be logged as
+ * FAILED. Note it changes the LOG only: the return value stays `{ ok: true, result }`,
+ * because `ok` means "work() did not throw" and 138 callers branch on it for their HTTP
+ * shape. The log is what was lying; the control flow was not.
  */
-export async function withCronRun<T>(cronName: string, work: () => Promise<T>): Promise<CronRunOutcome<T>> {
+export async function withCronRun<T>(
+  cronName: string,
+  work: () => Promise<T>,
+  opts: CronRunOptions<T> = {},
+): Promise<CronRunOutcome<T>> {
   let logId: string | null = null;
   try {
     const log = await startCronRun(cronName);
@@ -106,6 +142,25 @@ export async function withCronRun<T>(cronName: string, work: () => Promise<T>): 
     const result = await work();
     if (logId) {
       const payload = result && typeof result === "object" ? (result as Record<string, unknown>) : { value: result };
+      // A resolved-but-failed run. Recorded as FAILED, and the payload is KEPT — the
+      // diagnostic a failing job produced is exactly what an operator needs, and losing it
+      // on the way to the honest status would trade one blindness for another.
+      let verdict: { failed: boolean; error?: string } | null = null;
+      try {
+        verdict = opts.assess ? opts.assess(result) : null;
+      } catch (e) {
+        // An assessor that throws must not turn a successful run into a crash.
+        logger.warn(`[cron-monitor] assess() threw for ${cronName}; recording COMPLETED:`, e);
+      }
+      if (verdict?.failed) {
+        const build = getCronBuildIdentity();
+        try {
+          await failCronRun(logId, verdict.error ?? `${cronName} reported a failed run`, build, payload);
+        } catch (e) {
+          logger.warn(`[cron-monitor] failCronRun failed for ${cronName}:`, e);
+        }
+        return { ok: true, result };
+      }
       // Stamped onto the PERSISTED payload only. `result` is returned to the
       // caller untouched below because routes spread it straight into their HTTP
       // body (esign-artifact-reconcile does `{ success: true, ...run.result }`),
@@ -140,16 +195,40 @@ export async function completeCronRun(logId: string, result: Record<string, unkn
   return prisma.cronJobLog.update({ where: { id: logId }, data: { status: CronJobStatus.COMPLETED, result: result as object, completedAt: new Date(), duration } });
 }
 
-export async function failCronRun(logId: string, error: string, build?: CronBuildIdentity | null) {
+export async function failCronRun(
+  logId: string,
+  error: string,
+  build?: CronBuildIdentity | null,
+  /**
+   * The work's own payload, when there is one. A run that RESOLVED with a failure inside
+   * it produced diagnostics; a thrown run did not, which is why this stays optional and
+   * the previous shape is unchanged when it is omitted.
+   */
+  result?: Record<string, unknown>,
+) {
+  const merged =
+    result || build
+      ? { ...(result ?? {}), ...(build ? { build } : {}) }
+      : undefined;
+  // DURATION, like `completeCronRun`. This used to be omitted, which was survivable while
+  // FAILED meant "threw" — but this batch makes a sweep that RESOLVES with a failure inside
+  // it record FAILED, and those runs were previously recorded COMPLETED **with** a duration.
+  // Leaving it unset would have quietly turned the Operations table's duration column into
+  // `—` (app/admin/operations/page.tsx:498) for exactly the runs an operator is looking at.
+  // A row that cannot be read is not a lost duration, so this is best-effort in the same
+  // shape as the complete path.
+  const log = await prisma.cronJobLog.findUnique({ where: { id: logId }, select: { startedAt: true } });
+  const duration = log ? Date.now() - log.startedAt.getTime() : undefined;
   return prisma.cronJobLog.update({
     where: { id: logId },
     data: {
       status: CronJobStatus.FAILED,
       error,
       completedAt: new Date(),
-      // Only when there is something to say — a failed run off Vercel keeps the
-      // null `result` it has always had.
-      ...(build ? { result: { build } as object } : {}),
+      ...(duration !== undefined ? { duration } : {}),
+      // Only when there is something to say — a failed run off Vercel with no payload keeps
+      // the null `result` it has always had.
+      ...(merged ? { result: merged as object } : {}),
     },
   });
 }

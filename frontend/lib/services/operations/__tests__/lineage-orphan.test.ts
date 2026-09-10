@@ -24,6 +24,7 @@ const db = {
   contractVersions: new Map<string, { id: string; dealId: string }>(),
   pickups: new Map<string, { id: string; dealId: string }>(),
   deposits: new Map<string, { id: string; vehicleRequestId: string | null; buyerId: string }>(),
+  auctionVehicles: new Map<string, { id: string; vehicleRequestId: string | null; auctionId: string; candidateStatus: string }>(),
   vehicleRequestOffers: new Map<string, { id: string }>(),
   buyers: new Map<string, { id: string }>(),
   /** Set by any test that wants to prove nothing wrote to a swept table. */
@@ -34,6 +35,8 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown>): 
   for (const [k, v] of Object.entries(where)) {
     if (v && typeof v === "object" && "in" in (v as Record<string, unknown>)) {
       if (!(v as { in: unknown[] }).in.includes(row[k])) return false;
+    } else if (v && typeof v === "object" && "not" in (v as object)) {
+      if (row[k] === (v as { not: unknown }).not) return false;
     } else if (row[k] !== v) return false;
   }
   return true;
@@ -42,7 +45,10 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown>): 
 function readOnlyModel(store: Map<string, Record<string, unknown>>, name: string) {
   return {
     findUnique: async ({ where }: { where: { id: string } }) => store.get(where.id) ?? null,
-    findMany: async ({ take }: { take?: number }) => [...store.values()].slice(0, take ?? 500),
+    // `where` is honoured: the candidate sweep excludes DROPPED rows, and a double that
+    // ignored the filter would report the exclusion as working when it is not.
+    findMany: async ({ take, where }: { take?: number; where?: Record<string, unknown> }) =>
+      [...store.values()].filter((r) => (where ? matches(r, where) : true)).slice(0, take ?? 500),
     // Present so a re-parent attempt is observable rather than a crash.
     update: async () => {
       db.writesToSweptTables.push(name);
@@ -95,6 +101,7 @@ mock.module("@/lib/prisma", {
       contractVersion: readOnlyModel(db.contractVersions as never, "contractVersion"),
       pickup: readOnlyModel(db.pickups as never, "pickup"),
       deposit: readOnlyModel(db.deposits as never, "deposit"),
+      auctionVehicle: readOnlyModel(db.auctionVehicles as never, "auctionVehicle"),
       vehicleRequestOffer: readOnlyModel(db.vehicleRequestOffers as never, "vehicleRequestOffer"),
       buyer: readOnlyModel(db.buyers as never, "buyer"),
     },
@@ -114,6 +121,7 @@ beforeEach(() => {
   db.contractVersions.clear();
   db.pickups.clear();
   db.deposits.clear();
+  db.auctionVehicles.clear();
   db.vehicleRequestOffers.clear();
   db.buyers.clear();
   db.writesToSweptTables = [];
@@ -229,4 +237,64 @@ test("by default the sweep skips the classes whose parent this phase defers", as
   assert.ok(report.skipped.includes("auction"));
   assert.ok(report.skipped.includes("deposit"));
   assert.equal(db.queue.size, 0, "the owner rules control/L3-01 before historical rows are swept");
+});
+
+
+// ── PHASE 4: the candidate class ────────────────────────────────────────────
+
+test("a candidate with no Vehicle Request is an orphan, and `only` sweeps it alone", async () => {
+  // Production's three `auction_vehicles` rows all carry vehicle_request_id NULL, because
+  // `ensureAuctionVehicleFromRequest` read the request and discarded its id. The ruling on them
+  // is: leave them in place, with an exception raised. This is that, runnable — and it must not
+  // drag in the deposit and auction classes, whose deferral is an open owner ruling.
+  const { sweepLineageOrphans } = await lineage();
+  db.auctions.set("a1", { id: "a1", vehicleRequestId: null, buyerId: "b1" });
+  db.deposits.set("d1", { id: "d1", vehicleRequestId: null, buyerId: "b1" });
+  db.auctionVehicles.set("av1", { id: "av1", vehicleRequestId: null, auctionId: "a1", candidateStatus: "ACTIVE" });
+
+  const report = await sweepLineageOrphans({ only: ["auctionVehicle"], includeDeferred: true });
+
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.findings[0]!.recordClass, "auctionVehicle");
+  assert.equal(report.findings[0]!.reason, "MISSING");
+  assert.equal(report.findings[0]!.parentKind, "vehicleRequest");
+  assert.equal(db.queue.size, 1, "no deposit or auction exception was raised");
+  assert.deepEqual(db.writesToSweptTables, [], "the orphaned candidates are left exactly as they are");
+  assert.equal(db.auctionVehicles.get("av1")?.vehicleRequestId, null);
+});
+
+test("a valid AUCTION does not excuse a missing request", async () => {
+  // `parents` is an alternatives list. Naming `auction` beside `vehicleRequest` would let a
+  // candidate with a live auction and no request pass — which is the entire population this
+  // class exists to find.
+  const { LINEAGE_SPECS } = await lineage();
+  assert.deepEqual([...LINEAGE_SPECS.auctionVehicle.parents], ["vehicleRequest"]);
+});
+
+test("a candidate whose request resolves is not flagged", async () => {
+  const { sweepLineageOrphans } = await lineage();
+  db.vehicleRequests.set("vr1", { id: "vr1" });
+  db.auctions.set("a1", { id: "a1", vehicleRequestId: "vr1", buyerId: "b1" });
+  db.auctionVehicles.set("av1", { id: "av1", vehicleRequestId: "vr1", auctionId: "a1", candidateStatus: "ACTIVE" });
+  const report = await sweepLineageOrphans({ only: ["auctionVehicle"], includeDeferred: true });
+  assert.deepEqual(report.findings, []);
+});
+
+test("a DROPPED candidate is not swept — it is a record of a decision, not a live child", async () => {
+  const { sweepLineageOrphans } = await lineage();
+  db.auctions.set("a1", { id: "a1", vehicleRequestId: null, buyerId: "b1" });
+  db.auctionVehicles.set("av1", { id: "av1", vehicleRequestId: null, auctionId: "a1", candidateStatus: "DROPPED" });
+  const report = await sweepLineageOrphans({ only: ["auctionVehicle"], includeDeferred: true });
+  assert.deepEqual(report.findings, [], "raising an exception for a dropped row asks an operator to fix history");
+  assert.equal(report.scanned.auctionVehicle, 0);
+});
+
+test("the candidate class is registered as required from Phase 4, and is deferred until then", async () => {
+  const { LINEAGE_SPECS, CURRENT_PHASE, sweepLineageOrphans } = await lineage();
+  assert.equal(LINEAGE_SPECS.auctionVehicle.requiredFromPhase, 4);
+  assert.ok(CURRENT_PHASE < 4, "bumping CURRENT_PHASE also activates deposit and auction — that is control/L3-01, the owner's");
+  db.auctionVehicles.set("av1", { id: "av1", vehicleRequestId: null, auctionId: "a1", candidateStatus: "ACTIVE" });
+  const report = await sweepLineageOrphans({ only: ["auctionVehicle"] });
+  assert.ok(report.skipped.includes("auctionVehicle"));
+  assert.equal(db.queue.size, 0);
 });

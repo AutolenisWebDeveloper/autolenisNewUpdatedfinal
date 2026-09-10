@@ -9,9 +9,23 @@
 //
 // One primitive, two thresholds — the exhausted alert the orchestrator already raised is now a
 // level of this, not a second copy of the dedup logic.
+//
+// PHASE 4: THE ALERT IS AN EXCEPTION, NOT A NOTIFICATION. §26 requires every exception to name
+// an owner, a buyer-visible status, a required action, a deadline and a return point, and to be
+// written to `queue_items` — and E26-17 ("Provider budget ceiling -> alert before ceiling") is
+// one of the 48. This service used to write a bare `Notification` with `type: "SYSTEM_ALERT"`,
+// which carries none of those five and lands in a table nothing routes from. It now raises
+// INVENTORY_PROVIDER_BUDGET_CEILING through the single §26 writer, and its own local
+// `createAlert` — one of the two duplicate helpers in control/DUP-11 — is gone.
+//
+// The dedup semantics are UNCHANGED. The old key was the alert title, which carried both the
+// level and the cycle key; the new one is an explicit idempotency key carrying the same two
+// facts, which `raiseException` treats as strict once-ever. WARNING and EXHAUSTED remain
+// different events, both worth seeing, neither repeating every sweep, and both re-arming when
+// the cycle rolls.
 
 import { logger } from "@/lib/logger";
-import { prisma as defaultPrisma } from "@/lib/prisma";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 /** Warn once the cycle has spent this share of its budget. */
 export const BUDGET_WARNING_RATIO = 0.8;
@@ -26,9 +40,19 @@ export interface BudgetSnapshot {
   cycleKey: string;
 }
 
+/**
+ * The raise, injectable so the decision can be tested without a database.
+ *
+ * One function, not the old find/create PAIR: deduplication is `raiseException`'s own
+ * responsibility now (it is keyed, indexed and race-safe via a P2002 catch), so a separate
+ * `findAlert` here would be a second, weaker copy of a rule the writer already enforces.
+ */
 export interface AlertDeps {
-  findAlert: (title: string) => Promise<{ id: string } | null>;
-  createAlert: (a: { title: string; body: string; type: string }) => Promise<void>;
+  raise: (input: {
+    code: string;
+    idempotencyKey: string;
+    detail: string;
+  }) => Promise<{ created: boolean }>;
 }
 
 /**
@@ -75,15 +99,13 @@ function bodyFor(level: BudgetAlertLevel, snap: BudgetSnapshot): string {
 }
 
 const defaultDeps: AlertDeps = {
-  findAlert: (title) =>
-    defaultPrisma.notification.findFirst({
-      where: { title, type: "SYSTEM_ALERT" },
-      select: { id: true },
-    }),
-  createAlert: async (a) => {
-    await defaultPrisma.notification.create({
-      data: { title: a.title, body: a.body, type: "SYSTEM_ALERT" },
+  raise: async (input) => {
+    const { created } = await raiseException({
+      code: input.code,
+      idempotencyKey: input.idempotencyKey,
+      detail: input.detail,
     });
+    return { created };
   },
 };
 
@@ -105,16 +127,23 @@ export async function raiseBudgetAlert(
   // Return before touching the store: a healthy budget must not cost a query every sweep.
   if (!level) return "skipped";
 
-  const findAlert = deps.findAlert ?? defaultDeps.findAlert;
-  const createAlert = deps.createAlert ?? defaultDeps.createAlert;
-  const title = titleFor(level, snap.cycleKey);
+  const raise = deps.raise ?? defaultDeps.raise;
+  // Both facts in the key, exactly as the retired title carried them: the LEVEL, because a
+  // warning and an exhaustion are different events and both should be seen; and the CYCLE,
+  // so each re-arms when the month rolls over.
+  const idempotencyKey = `INVENTORY_PROVIDER_BUDGET_CEILING:${level}:${snap.cycleKey}`;
 
   try {
-    if (await findAlert(title)) return "duplicate";
-    await createAlert({ title, body: bodyFor(level, snap), type: "SYSTEM_ALERT" });
-    logger.warn(`[inventory-budget] ${title}`);
+    const { created } = await raise({
+      code: "INVENTORY_PROVIDER_BUDGET_CEILING",
+      idempotencyKey,
+      detail: `${titleFor(level, snap.cycleKey)}. ${bodyFor(level, snap)}`,
+    });
+    if (!created) return "duplicate";
+    logger.warn(`[inventory-budget] ${titleFor(level, snap.cycleKey)}`);
     return "raised";
   } catch (err) {
+    // Never throws. This is accounting; it must not be able to break ingestion.
     logger.warn("[inventory-budget] alert write failed:", err);
     return "failed";
   }

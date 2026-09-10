@@ -19,7 +19,7 @@
     "test:buyer-contracts": "tsx --test --experimental-test-module-mocks app/buyer/contracts/__tests__/*.test.ts",
     "test:security": "tsx --test --experimental-test-module-mocks lib/security/__tests__/*.test.ts lib/__tests__/role-boundary-frozen.test.ts lib/__tests__/scope-guard.test.ts app/api/admin/__tests__/*.test.ts",
     "test:auth": "tsx --test --experimental-test-module-mocks lib/auth/__tests__/*.test.ts",
-    "test:concurrency": "tsx --test lib/services/deal/__tests__/destructive/select-offer-concurrency.test.ts",
+    "test:concurrency": "tsx --test lib/services/deal/__tests__/destructive/select-offer-concurrency.test.ts lib/services/shortlist/__tests__/destructive/shortlist-cap-concurrency.test.ts",
     "test:parity-ledger": "tsx --test scripts/__tests__/parity-ledger.test.ts",
     "test:matrix": "tsx scripts/run-test-matrix.ts",
     "test:matrix-runner": "tsx --test scripts/__tests__/run-test-matrix.test.ts",

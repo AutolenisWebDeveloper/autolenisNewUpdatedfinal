@@ -310,3 +310,62 @@ registerStateRecheck(PHASE_2_TEMPLATES.PREQUAL_EXPIRED, skipIfPrequalRenewed);
 for (const key of Object.values(DEPOSIT_REMINDER_TEMPLATES)) {
   registerStateRecheck(key, skipIfDepositResolvedOrRequestClosed);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — the two dealer notices the stale sweep sends.
+//
+// They were the last direct `sendIdempotent` calls on a scheduled path
+// (jobs/I-22). §27 requires every transactional message to dispatch through the
+// durable outbox, and the direct rail applies NO suppression — so a dealer who
+// bounced or unsubscribed was re-emailed on every sweep, nightly, forever.
+// ---------------------------------------------------------------------------
+
+/** Template keys the inventory stale sweep enqueues. */
+export const INVENTORY_DEALER_TEMPLATES = {
+  STALE_LISTING_REMOVAL: "dealer_stale_listing_removal",
+  INVENTORY_SYNC_FAILURE: "dealer_inventory_sync_failure",
+} as const;
+
+/**
+ * A terminated dealer does not need a listing-hygiene notice.
+ *
+ * NOT `alwaysSend`. The deactivation itself cannot un-happen, which is the tempting
+ * argument for sending regardless — but the RECIPIENT can stop being someone we write to
+ * between the sweep enqueueing and the outbox draining, and that is precisely the state
+ * §27's recheck exists to re-read.
+ */
+const skipIfDealerNoLongerActive: StateRecheckFn = async (ctx) => {
+  if (!ctx.recipientId) return { proceed: true };
+  const dealer = await ctx.db.dealer.findUnique({
+    where: { id: ctx.recipientId },
+    select: { status: true },
+  });
+  if (!dealer) return { proceed: false, reason: "dealer no longer exists" };
+  if (dealer.status !== "ACTIVE") return { proceed: false, reason: `dealer is ${dealer.status}` };
+  return { proceed: true };
+};
+
+/**
+ * The feed recovered between the sweep and the drain — so the failure notice has become
+ * false. The canonical shape of a §27 recheck: re-read the fact the message asserts.
+ */
+const skipIfFeedRecovered: StateRecheckFn = async (ctx) => {
+  if (!ctx.recipientId) return { proceed: true };
+  const dealer = await ctx.db.dealer.findUnique({
+    where: { id: ctx.recipientId },
+    select: { status: true },
+  });
+  if (!dealer) return { proceed: false, reason: "dealer no longer exists" };
+  if (dealer.status !== "ACTIVE") return { proceed: false, reason: `dealer is ${dealer.status}` };
+  // The same 24-hour window the sweep used to decide the feed had gone dark. Recomputed
+  // here rather than carried on the payload, because the point is to read live state.
+  const cutoff = new Date(Date.now() - 24 * 3600_000);
+  const fresh = await ctx.db.inventoryItem.count({
+    where: { dealerId: ctx.recipientId, lastSeenAt: { gte: cutoff } },
+  });
+  if (fresh > 0) return { proceed: false, reason: "the feed delivered fresh listings after this was queued" };
+  return { proceed: true };
+};
+
+registerStateRecheck(INVENTORY_DEALER_TEMPLATES.STALE_LISTING_REMOVAL, skipIfDealerNoLongerActive);
+registerStateRecheck(INVENTORY_DEALER_TEMPLATES.INVENTORY_SYNC_FAILURE, skipIfFeedRecovered);

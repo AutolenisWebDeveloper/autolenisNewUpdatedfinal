@@ -518,7 +518,13 @@ export default function RequestVehicleFormClient() {
         apr: apr || undefined,
         preApprovalExpiry: preApprovalExpiry || undefined,
       }),
-      hasTradeIn: hasTradeIn ?? false,
+      // THREE-STATE, and the `?? false` that used to be here defeated it one layer above the
+      // route. Step 4's validator returns true when `hasTradeIn` is null, so a buyer can skip
+      // the trade question entirely — and `?? false` then recorded a "no" they never gave,
+      // straight into `vehicle_requests.trade_elected`. ELECTIONS_REQUIRED would never fire,
+      // and the deal would reach financing carrying an answer nobody asked for. `undefined`
+      // leaves the column NULL, which is what "not asked" means.
+      hasTradeIn: hasTradeIn ?? undefined,
       ...(hasTradeIn && {
         tradeYear: tradeYear || undefined,
         tradeMake: tradeMake || undefined,

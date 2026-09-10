@@ -3,16 +3,33 @@
 // The single gate deciding what ACTION a listing card offers. It never decides whether the
 // card is rendered.
 //
-// Transaction-flow spec s22a: the catalogue is swept on a schedule and served from
-// inventory_items, and no buyer action triggers a third-party API call. Two ceilings exist and
-// they are deliberately different:
+// Transaction-flow spec s22a. Two ceilings exist and they are deliberately different:
 //
-//   SHORTLIST is inventory-backed and capped at 100 miles, because that is the data provider's
-//     radius restriction -- we simply have no catalogue beyond it.
-//   SOURCING is rooftop-backed (dealer_rooftops), runs its own radius ladder, and is NOT bounded
-//     by this constant. See lib/services/auction/coverage.service.ts. Nothing here may be
-//     imported there, and this file deliberately imports nothing from lib/services/inventory --
-//     the provider cap must not leak into a path that does not answer to the provider.
+//   SHORTLIST and qualified results are capped at 100 miles because that is AUTOLENIS POLICY.
+//     s22a is explicit: "The 100-mile ceiling is AutoLenis policy ... The provider must support
+//     that policy, but a change of provider, plan or technical limit never moves the AutoLenis
+//     radius on its own. Policy is decided here, not on an invoice."
+//   SOURCING is rooftop-backed (dealer_rooftops), runs its own 100 -> 150 -> 250 ladder, and is
+//     NOT bounded by this constant. See lib/services/auction/coverage.service.ts. Nothing here
+//     may be imported there, and this file deliberately imports nothing from
+//     lib/services/inventory -- so the provider's cap cannot leak into a path that does not
+//     answer to the provider.
+//
+// THIS HEADER USED TO GIVE THE OPPOSITE REASON, AND THAT WAS THE DEFECT (fixed in Phase 4).
+// It attributed the ceiling to the aggregator's own radius limit. The constant was already in
+// the right place and correctly isolated, so every parity check passed; only the stated REASON
+// was inverted. That matters because the two are indistinguishable by observation today: the
+// aggregator's package limit happens to be 100 as well (probed live 2026-09-10 -- a 250-mile
+// query returns HTTP 422 naming the subscribed package's limit), so nothing an engineer can RUN
+// tells them which number they are looking at. The next person told the sourcing ladder now
+// reaches 250 miles would have read that header and raised this constant. For a requirement
+// whose entire content is WHY a value is what it is, the header is part of the implementation --
+// and __tests__/shortlist-radius.test.ts asserts it, in both directions.
+//
+// The aggregator's own limit is a SEPARATE constant with a separate reason, in
+// lib/services/inventory/inventory-source-config.service.ts. Nothing here reads it. If it ever
+// drops below this policy, that is an operations failure to surface, not a licence to lower the
+// policy.
 //
 // The previous behaviour was the inverse of this design: the public catalogue applied
 // `?zip=&radiusMiles=` as a WHERE and dropped every row outside it (and every row with null
@@ -21,7 +38,10 @@
 
 import { haversineMiles } from "@/lib/utils/zip-coords";
 
-/** The data provider's radius restriction. Shortlist only; sourcing is not bound by it. */
+/**
+ * AutoLenis policy (s22a). Shortlist and qualified results only; sourcing is not bound by it,
+ * and no provider limit moves it. See the header for why the distinction is load-bearing.
+ */
 export const SHORTLIST_RADIUS_MILES = 100;
 
 /** Not seen in this long -> show a stale flag. Display-level warning; the action survives. */

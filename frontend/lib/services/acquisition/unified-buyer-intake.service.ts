@@ -100,6 +100,13 @@ export interface UnifiedIntakeInput {
 
   // Trade-in
   hasTradeIn?: boolean;
+  /**
+   * §5a's co-buyer election. The public wizard has always ASKED this ("Will anyone else be on
+   * the loan?") and the answer went only to BuyerOpportunity — so `co_buyer_elected`, the
+   * column the deposit gate reads, stayed NULL for every buyer who had already answered.
+   * Undefined means the form did not ask; false is a recorded "no".
+   */
+  coBuyer?: boolean;
   tradeInDetails?: Record<string, unknown>;
 
   // Financing
@@ -211,6 +218,11 @@ export interface PromoteOpportunityInput {
   sourceUrl?: string | null;
   landingSource?: string | null;
   referrer?: string | null;
+
+  // §5a Stage 4 elections (Phase 4). Three-state on purpose: `undefined` means this entry
+  // point did not ask, and NULL in the column is what `ELECTIONS_REQUIRED` fires on.
+  coBuyer?: boolean;
+  hasTradeIn?: boolean;
 
   // ── Phase 2 ───────────────────────────────────────────────────────────────
   authenticatedBuyerId?: string | null;
@@ -670,6 +682,11 @@ async function promoteOpportunityInTx(
     consentSurface: consent.consentSurface,
     consentIp: consent.consentIp,
     consentIpUnavailableReason: consent.consentIpUnavailableReason,
+    // §5a Stage 4 elections, carried from the form that already asks them. `undefined` is
+    // preserved deliberately: a form that did not ask must leave the column NULL, because
+    // `ELECTIONS_REQUIRED` distinguishes "not asked" from "said no".
+    coBuyerElected: input.coBuyer,
+    tradeElected: input.hasTradeIn,
   };
 
   // §5 rule 5 — one open request per buyer, under the Phase 1 partial unique index,

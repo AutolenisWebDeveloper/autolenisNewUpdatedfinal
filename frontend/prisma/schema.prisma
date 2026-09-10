@@ -1349,6 +1349,13 @@ model VehicleRequest {
   requiredFeatures               String[]                 @map("required_features")
   state                          String?
   statedBudgetCents              Int?                     @map("stated_budget_cents")
+  // Phase 4 (20261112000000_stage4_trade_election). The trade half of §5a's
+  // "co-buyer and trade elections recorded", shaped identically to `coBuyerElected`
+  // above. Three-state on purpose: NULL is "not asked yet", which is what
+  // ELECTIONS_REQUIRED fires on. Mirrored to `VehicleRequestFinancing.tradeIn`, which
+  // stays the legacy read; see the migration header for why that field cannot be the
+  // election on its own.
+  tradeElected                   Boolean?                 @map("trade_elected")
   utmContent                     String?                  @map("utm_content")
   zip                            String?
   // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.

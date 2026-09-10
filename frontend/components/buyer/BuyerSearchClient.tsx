@@ -8,6 +8,9 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+// Shared with the qualified-results view so the same car is never described two ways.
+import { CARD_REFUSAL, findOneLikeThisHref } from "@/components/buyer/shortlist-copy";
 import { ALL_MAKES } from "@/components/public/InventorySearchClient";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
@@ -26,7 +29,6 @@ const MILEAGE_OPTIONS = [
   { value: "75000", label: "Under 75k" },
   { value: "100000", label: "Under 100k" },
 ];
-const RADIUS_OPTIONS = [10, 25, 50, 100, 200];
 const FEATURE_OPTIONS = [
   "Sunroof", "Navigation", "Backup Camera", "Heated Seats",
   "Apple CarPlay", "Android Auto", "Blind Spot Monitor",
@@ -60,6 +62,11 @@ interface Vehicle {
   lane: string;
   images: string[];
   distanceMiles?: number | null;
+  // §22a (Phase 4). Distance is a label and a sort order; what changes past the policy
+  // radius is the ACTION on the card. The server decides all three — the UI renders them.
+  freshness?: "FRESH" | "STALE" | "EXPIRED";
+  action?: "ADD" | "REQUEST_SIMILAR" | "NEED_ZIP";
+  actionReason?: string;
 }
 
 interface SearchResult {
@@ -70,6 +77,15 @@ interface SearchResult {
   activeZip: string | null;
   hasLocalDealerInventory?: boolean | null;
   radiusApplied?: number | null;
+  /** AutoLenis policy, reported by the server so this surface never has to guess it. */
+  radiusMiles?: number;
+  hasZip?: boolean;
+  /** How many of the results the buyer could actually shortlist. */
+  inRadiusCount?: number;
+  /** Lead with the custom-request path: nothing reachable came back. */
+  offerRequestPath?: boolean;
+  /** The approval plus the §13-D16 headroom — what the search actually filtered at. */
+  priceCeilingCents?: number | null;
 }
 
 interface Toast {
@@ -125,10 +141,21 @@ export default function BuyerSearchClient({
   const [fuelType,     setFuelType]    = useState(sp.get("fuelType")     ?? "");
   // Pre-fill with buyer's profile ZIP when no custom zip is set in URL
   const [zip,          setZip]         = useState(sp.get("zip")          ?? buyerZip ?? "");
-  // Default to 50 mi only when we're falling back to the buyer's profile ZIP (not a URL-param zip)
-  const [radiusMiles,  setRadiusMiles] = useState(
-    sp.get("radiusMiles") ?? (buyerZip && !sp.get("zip") ? "50" : "")
-  );
+  // `radiusMiles` is gone as a FILTER (§22a; Phase 4): the server ignores it, because the
+  // 100-mile line is AutoLenis policy and decides the card's ACTION, not the result set.
+  //
+  // It is still READ here, and only here, to be disclosed. Owner ruling 2026-09-10 signing off
+  // the removal: "silently returning a different result set than the URL requested is the
+  // defect class this program exists to eliminate. Ignore the parameter AND have the results
+  // header state the radius in force, so a bookmark carrying radiusMiles=25 reads 'within 100
+  // miles' rather than quietly lying." Nothing branches on this value — it is never sent, never
+  // filtered on, and never compared for equality with the policy in a way that changes results.
+  const requestedRadius = (() => {
+    const raw = sp.get("radiusMiles");
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  })();
   const [sort,         setSort]        = useState(sp.get("sort")         ?? "newest");
   const [features,     setFeatures]    = useState<string[]>(() => {
     const f = sp.get("features"); return f ? f.split(",").filter(Boolean) : [];
@@ -139,6 +166,11 @@ export default function BuyerSearchClient({
   const [vehicles,      setVehicles]      = useState<Vehicle[]>([]);
   const [totalShown,    setTotalShown]    = useState(0);
   const [hasLocalDealerInventory, setHasLocalDealerInventory] = useState<boolean | null>(null);
+  // §22a: how many results the buyer can actually shortlist, and the POLICY radius. Both come
+  // from the server — a surface that computed either itself could disagree with the gate.
+  const [inRadiusCount, setInRadiusCount] = useState<number | null>(null);
+  const [policyRadius, setPolicyRadius] = useState<number | null>(null);
+  const [offerRequestPath, setOfferRequestPath] = useState(false);
   const [shortlisted,   setShortlisted]   = useState<Set<string>>(new Set());
   const [shortlistCount, setShortlistCount] = useState(0);
   const [toasts,        setToasts]        = useState<Toast[]>([]);
@@ -164,7 +196,7 @@ export default function BuyerSearchClient({
     const fields: Record<string, string> = {
       q, make, model, yearMin, yearMax, priceMin, priceMax,
       mileageMax, condition, bodyType, transmission, drivetrain,
-      fuelType, zip, radiusMiles, sort, features: features.join(","),
+      fuelType, zip, sort, features: features.join(","),
       ...overrides,
     };
     for (const [k, v] of Object.entries(fields)) {
@@ -172,7 +204,7 @@ export default function BuyerSearchClient({
     }
     return next;
   }, [q, make, model, yearMin, yearMax, priceMin, priceMax, mileageMax, condition,
-      bodyType, transmission, drivetrain, fuelType, zip, radiusMiles, sort, features]);
+      bodyType, transmission, drivetrain, fuelType, zip, sort, features]);
 
   const apply = useCallback((overrides: Record<string, string> = {}) => {
     startTransition(() =>
@@ -184,7 +216,7 @@ export default function BuyerSearchClient({
     setQ(""); setMake(""); setModel(""); setYearMin(""); setYearMax("");
     setPriceMin(""); setPriceMax(""); setMileageMax(""); setCondition("");
     setBodyType(""); setTransmission(""); setDrivetrain(""); setFuelType("");
-    setZip(""); setRadiusMiles(""); setFeatures([]); setSort("newest");
+    setZip(""); setFeatures([]); setSort("newest");
     startTransition(() => router.push(pathname, { scroll: false }));
   }
 
@@ -194,11 +226,23 @@ export default function BuyerSearchClient({
     setSearchError(null);
     try {
       const params = new URLSearchParams(sp.toString());
+      // STRIPPED AT THE BOUNDARY, not merely ignored at the far end. This forwards the whole
+      // query string, so a bookmark carrying `radiusMiles=25` was still being SENT to
+      // /api/buyer/search — the route drops it on the floor (proven by
+      // app/api/buyer/search/__tests__/no-radius-drop.test.ts), so behaviour was correct, but
+      // "the server happens to ignore it" is a weaker guarantee than "it is not sent". Deleting
+      // it here makes the removal structural: no future change to the route can start honouring
+      // a parameter this surface no longer transmits. The value is still read from `sp` for the
+      // disclosure line — see `requestedRadius`.
+      params.delete("radiusMiles");
       params.set("limit", "48");
       const data = await api.get<SearchResult>(`/api/buyer/search?${params.toString()}`);
       setVehicles(data.vehicles);
       setTotalShown(data.count);
       setHasLocalDealerInventory(data.hasLocalDealerInventory ?? null);
+      setInRadiusCount(data.inRadiusCount ?? null);
+      setPolicyRadius(data.radiusMiles ?? null);
+      setOfferRequestPath(data.offerRequestPath ?? false);
     } catch (err) {
       setSearchError(apiErrorMessage(err, "We couldn't load search results. Please check your connection and try again."));
     } finally {
@@ -274,7 +318,7 @@ export default function BuyerSearchClient({
   if (transmission) chips.push({ key: "transmission", label: transmission, clear: () => { setTransmission(""); apply({ transmission: "" }); } });
   if (drivetrain)  chips.push({ key: "drivetrain",  label: drivetrain,  clear: () => { setDrivetrain("");  apply({ drivetrain:  "" }); } });
   if (fuelType)    chips.push({ key: "fuelType",    label: fuelType,    clear: () => { setFuelType("");    apply({ fuelType:    "" }); } });
-  if (zip)         chips.push({ key: "zip",         label: `${zip}${radiusMiles ? ` · ${radiusMiles}mi` : ""}`, clear: () => { setZip(""); setRadiusMiles(""); apply({ zip: "", radiusMiles: "" }); } });
+  if (zip)         chips.push({ key: "zip",         label: zip, clear: () => { setZip(""); apply({ zip: "" }); } });
   if (features.length > 0) chips.push({ key: "features", label: `${features.length} feature${features.length === 1 ? "" : "s"}`, clear: () => { setFeatures([]); apply({ features: "" }); } });
 
   const activeCount = chips.length;
@@ -486,7 +530,7 @@ export default function BuyerSearchClient({
             drivetrain={drivetrain} setDrivetrain={setDrivetrain}
             fuelType={fuelType} setFuelType={setFuelType}
             features={features} toggleFeature={toggleFeature}
-            zip={zip} setZip={setZip} radiusMiles={radiusMiles} setRadiusMiles={setRadiusMiles}
+            zip={zip} setZip={setZip} policyRadius={policyRadius}
             locating={locating} useMyLocation={useMyLocation}
             sort={sort} setSort={setSort}
             inputCls={inputCls} labelCls={labelCls} isPending={isPending}
@@ -521,7 +565,7 @@ export default function BuyerSearchClient({
                 drivetrain={drivetrain} setDrivetrain={setDrivetrain}
                 fuelType={fuelType} setFuelType={setFuelType}
                 features={features} toggleFeature={toggleFeature}
-                zip={zip} setZip={setZip} radiusMiles={radiusMiles} setRadiusMiles={setRadiusMiles}
+                zip={zip} setZip={setZip} policyRadius={policyRadius}
                 locating={locating} useMyLocation={useMyLocation}
                 sort={sort} setSort={setSort}
                 inputCls={inputCls} labelCls={labelCls}
@@ -566,7 +610,52 @@ export default function BuyerSearchClient({
         <p className="text-sm text-slate-500 mb-4" data-testid="results-count">
           Showing {vehicles.length} vehicle{vehicles.length !== 1 ? "s" : ""}
           {budgetDollars !== null ? " within your budget" : ""}
+          {inRadiusCount !== null && policyRadius !== null && vehicles.length > 0 && (
+            <span data-testid="in-radius-count">
+              {" · "}
+              <strong className="text-slate-700">{inRadiusCount}</strong> within{" "}
+              <strong className="text-slate-700">{policyRadius} miles</strong>, which we can bring
+              to auction
+            </span>
+          )}
         </p>
+      )}
+
+      {/* THE URL ASKED FOR A DIFFERENT RADIUS AND WE DID NOT HONOUR IT — said out loud.
+          A bookmark or a shared link carrying `radiusMiles=25` used to filter; it no longer
+          does, and a buyer who cannot see that is being shown a result set that does not match
+          the request they made. The parameter is still ignored — this only explains why. */}
+      {!loading && !searchError && requestedRadius !== null && policyRadius !== null &&
+       requestedRadius !== policyRadius && (
+        <p className="text-xs text-slate-500 mb-4 -mt-2" data-testid="radius-param-ignored">
+          Your link asked for {requestedRadius} miles. AutoLenis auctions run within{" "}
+          <strong className="text-slate-700">{policyRadius} miles</strong>, so that is the range
+          shown — cars further away are still listed, we just cannot bring them to auction.
+        </p>
+      )}
+
+      {/* §22a: thin or zero reachable results LEAD with the custom-request path. The grid still
+          renders underneath — those cars are examples of what is out there, and hiding them
+          would turn "nothing near you" into "nothing at all", which is a different claim. */}
+      {!loading && !searchError && offerRequestPath && vehicles.length > 0 && (
+        <div
+          className="bg-al-primary-subtle border border-al-primary/20 rounded-xl p-4 mb-6 flex flex-wrap items-center gap-3 justify-between"
+          data-testid="offer-request-path"
+        >
+          <div className="text-sm text-slate-800">
+            <p className="font-semibold">
+              {inRadiusCount === 0
+                ? "None of these are close enough to bring to auction."
+                : "Only a few of these are close enough to bring to auction."}
+            </p>
+            <p className="text-slate-600 mt-0.5">
+              Tell us what you want and we will go and find it — dealers near you compete for it.
+            </p>
+          </div>
+          <Button size="sm" href="/buyer/requests/new" data-testid="offer-request-path-cta">
+            Request this car
+          </Button>
+        </div>
       )}
 
       {/* Vehicle grid */}
@@ -601,22 +690,63 @@ export default function BuyerSearchClient({
                     <h3 className="font-semibold text-slate-900 text-sm">{v.year} {v.make} {v.model}</h3>
                     {v.trim && <p className="text-xs text-slate-500 mt-0.5">{v.trim}</p>}
                     {v.mileage !== null && v.mileage !== undefined && <p className="text-xs text-slate-400 mt-0.5">{v.mileage.toLocaleString()} miles</p>}
-                    <div className="flex items-center justify-between mt-3">
+                    {/* §22a: freshness on every card. STALE is a note that keeps the action;
+                        EXPIRED is why the action changed, so it is worded as a fact about the
+                        listing rather than as a refusal. */}
+                    {v.freshness === "STALE" && (
+                      <p className="text-xs text-al-warning mt-1 flex items-center gap-1" data-testid={`stale-note-${i}`}>
+                        <Clock size={10} aria-hidden="true" /> Not seen on the market this week
+                      </p>
+                    )}
+                    {v.freshness === "EXPIRED" && (
+                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-1" data-testid={`expired-note-${i}`}>
+                        <Clock size={10} aria-hidden="true" /> Not seen in over 30 days
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between mt-3 gap-2">
                       <p className="text-lg font-bold text-al-primary">${(v.priceCents / 100).toLocaleString()}</p>
-                      <button
-                        onClick={(e) => { void addToShortlist(e, v.id); }}
-                        disabled={added || shortlistCount >= 5}
-                        data-testid={`shortlist-add-btn-${i}`}
-                        className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
-                          added              ? "bg-green-100 text-green-700" :
-                          shortlistCount >= 5 ? "bg-slate-100 text-slate-400 cursor-not-allowed" :
-                                               "bg-al-primary/10 text-al-primary hover:bg-al-primary hover:text-white"
-                        }`}
-                      >
-                        <Heart size={12} fill={added ? "currentColor" : "none"} />
-                        {added ? "Added" : "Shortlist"}
-                      </button>
+                      {/* THE ACTION IS THE SERVER'S. The card renders `action`; it does not
+                          re-derive it. A UI that decided for itself would disagree with the
+                          gate the moment either changed, and the buyer would meet a refusal
+                          on a button we had offered them. */}
+                      {v.action === "REQUEST_SIMILAR" ? (
+                        <Link
+                          href={findOneLikeThisHref(v)}
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`find-similar-btn-${i}`}
+                          title={CARD_REFUSAL[v.actionReason ?? ""] ?? "We cannot bring this one to auction"}
+                          className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors
+                                     bg-slate-100 text-slate-700 hover:bg-al-primary hover:text-white
+                                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-primary focus-visible:ring-offset-2"
+                        >
+                          <Search size={12} aria-hidden="true" /> Find one like this
+                        </Link>
+                      ) : v.action === "NEED_ZIP" ? (
+                        <span className="text-xs text-slate-500" data-testid={`need-zip-note-${i}`}>
+                          Add your ZIP
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => { void addToShortlist(e, v.id); }}
+                          disabled={added || shortlistCount >= 5}
+                          data-testid={`shortlist-add-btn-${i}`}
+                          className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors
+                                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-primary focus-visible:ring-offset-2 ${
+                            added              ? "bg-green-100 text-green-700" :
+                            shortlistCount >= 5 ? "bg-slate-100 text-slate-400 cursor-not-allowed" :
+                                                 "bg-al-primary/10 text-al-primary hover:bg-al-primary hover:text-white"
+                          }`}
+                        >
+                          <Heart size={12} fill={added ? "currentColor" : "none"} />
+                          {added ? "Added" : "Shortlist"}
+                        </button>
+                      )}
                     </div>
+                    {v.action === "REQUEST_SIMILAR" && v.actionReason && CARD_REFUSAL[v.actionReason] && (
+                      <p className="text-xs text-slate-500 mt-1.5" data-testid={`refusal-reason-${i}`}>
+                        {CARD_REFUSAL[v.actionReason]}
+                      </p>
+                    )}
                   </div>
                 </Card>
               </Link>
@@ -629,7 +759,7 @@ export default function BuyerSearchClient({
         <NoInventoryState
           hasLocalDealerInventory={hasLocalDealerInventory}
           buyerZip={zip || buyerZip || null}
-          radiusMiles={radiusMiles ? parseInt(radiusMiles) : null}
+          radiusMiles={policyRadius}
         />
       )}
     </div>
@@ -655,7 +785,7 @@ interface FilterPanelProps {
   fuelType: string; setFuelType: (v: string) => void;
   features: string[]; toggleFeature: (f: string) => void;
   zip: string; setZip: (v: string) => void;
-  radiusMiles: string; setRadiusMiles: (v: string) => void;
+  policyRadius: number | null;
   locating: boolean; useMyLocation: () => void;
   sort: string; setSort: (v: string) => void;
   inputCls: string; labelCls: string;
@@ -793,12 +923,18 @@ function FilterPanel(p: FilterPanelProps) {
               {p.locating ? <Loader2 size={13} className="animate-spin" /> : <Crosshair size={13} />}
             </button>
           </div>
-          {p.zip.length === 5 && (
-            <select data-testid="filter-radius" className="w-full mt-2 px-3 py-2 border border-[#E5E7EB] rounded-lg text-xs"
-              value={p.radiusMiles} onChange={e => p.setRadiusMiles(e.target.value)}>
-              <option value="">Default (50 mi)</option>
-              {RADIUS_OPTIONS.map(r => <option key={r} value={r}>{r} miles</option>)}
-            </select>
+          {/* THE RADIUS SELECTOR IS GONE, and this is the capability it became.
+              §22a: the 100-mile ceiling is AutoLenis POLICY — it decides whether we can bring
+              a car to auction, not which cars you may look at. It was a filter here, applied
+              twice, and it silently dropped every listing with no coordinates (which was all
+              of them) the moment a ZIP was entered. Distance is now a label and a sort order;
+              the ACTION on each card is what changes past the line. Stating the policy is
+              honest where a control that no longer filters would be a lie. */}
+          {p.zip.length === 5 && p.policyRadius !== null && (
+            <p className="mt-2 text-xs text-slate-500" data-testid="radius-policy-note">
+              We can bring cars within <strong>{p.policyRadius} miles</strong> of you to auction.
+              Anything further still shows — we&rsquo;ll find one like it nearby.
+            </p>
           )}
         </div>
         {/* Sort (drawer only) */}
@@ -910,8 +1046,12 @@ function NoInventoryState({
           </svg>
         </a>
 
+        {/* NOT "expand your search radius". There is no radius control any more — it was
+            removed in Phase 4 because the 100-mile line is policy, not a filter — and copy
+            that sends a buyer to look for one is copy that wastes their time at exactly the
+            moment they have found nothing. */}
         <p className="text-xs text-[#6B7280] mt-6">
-          Or try expanding your search radius in the filters above
+          Cars further away still show here — we just cannot bring them to auction.
         </p>
       </div>
     );
@@ -923,7 +1063,8 @@ function NoInventoryState({
       data-testid="no-results"
     >
       <p className="text-lg font-medium text-slate-600 mb-2">No vehicles found</p>
-      <p className="text-sm">Try adjusting your filters or expanding your search radius</p>
+      {/* Same correction as the geo empty state above: the radius control is gone. */}
+      <p className="text-sm">Try adjusting your filters, or ask us to find one for you</p>
       <a
         href="/buyer/requests/new"
         className="inline-flex items-center gap-1.5 mt-6 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors"

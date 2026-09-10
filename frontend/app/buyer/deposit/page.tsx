@@ -107,6 +107,9 @@ const ELIGIBILITY_STEP: Record<EligibilityFailureCode | "REQUEST_REQUIRED", { hr
   LOCATION_REQUIRED: { href: "/buyer/profile", cta: "Add your location" },
   PREQUAL_REQUIRED: { href: "/buyer/prequal", cta: "Complete prequalification" },
   VEHICLE_CRITERIA_INCOMPLETE: { href: "/buyer/requests", cta: "Complete your request" },
+  // Both elections are captured on the request detail surface, which is also where the
+  // trade packet and the co-buyer form live — so one destination fixes either half.
+  ELECTIONS_REQUIRED: { href: "/buyer/requests", cta: "Answer the co-buyer and trade questions" },
   REQUEST_CONFLICT: { href: "/buyer/requests", cta: "Review your open requests" },
   REQUEST_REQUIRED: { href: "/request-a-car", cta: "Start a vehicle request" },
   // SHADOWED BY DESIGN, and the only entry that is.

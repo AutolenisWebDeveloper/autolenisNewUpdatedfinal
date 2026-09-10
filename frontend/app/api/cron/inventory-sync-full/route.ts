@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
-import { runInventorySync } from "@/lib/services/inventory/orchestrator";
+import { runInventorySync, assessSyncRun } from "@/lib/services/inventory/orchestrator";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Cron: /api/cron/inventory-sync-full — Schedule: 0 8 * * * (once daily, 08:00 UTC)
@@ -25,7 +25,11 @@ export async function GET(request: NextRequest) {
   const cronAuth = authorizeCronRequest(request);
   if (cronAuth) return cronAuth;
 
-  const run = await withCronRun("inventory-sync-full", () => runInventorySync({}, "full"));
+  // `assess` is what stops a FAILED sweep being logged COMPLETED. See assessSyncRun's
+  // header: production was recording exactly that, daily, at the time this was written.
+  const run = await withCronRun("inventory-sync-full", () => runInventorySync({}, "full"), {
+    assess: assessSyncRun,
+  });
   if (!run.ok) return NextResponse.json({ success: false, error: String(run.error) }, { status: 500 });
 
   const result = run.result;

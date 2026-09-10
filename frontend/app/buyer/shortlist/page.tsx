@@ -10,6 +10,7 @@ import {
   isShortlistItemAvailable,
   buildSimilarRequestHref,
 } from "@/lib/services/shortlist/shortlist-availability";
+import { freshnessOf } from "@/lib/services/shortlist/shortlist-radius";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,8 @@ export default async function ShortlistPage() {
         images: [] as string[],
         readinessState: item.readinessState,
         similarRequestHref: null,
+        distanceMiles: item.distanceMiles ?? null,
+        freshness: "EXPIRED" as const,
       };
     }
 
@@ -78,6 +81,11 @@ export default async function ShortlistPage() {
       bodyType: inv.bodyType ?? null,
       images: inv.images as string[],
       readinessState: item.readinessState,
+      // §22a: distance and freshness on every card. `distance_miles` is the SNAPSHOT taken
+      // when the buyer chose the car (Phase 4 writes it at insert and backfills the rows that
+      // predate it); `revalidateCandidate` is what re-checks it when the request is built.
+      distanceMiles: item.distanceMiles ?? null,
+      freshness: freshnessOf(inv.lastSeenAt),
       // Only the unavailable ones need the escape hatch; building it for available cars
       // would put a "find another one" CTA on a car the buyer can still have.
       similarRequestHref: available ? null : buildSimilarRequestHref({

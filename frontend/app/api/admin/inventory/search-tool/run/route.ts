@@ -1,5 +1,31 @@
 // POST /api/admin/inventory/search-tool/run
-// Queries MarketCheck (if key present) or internal DB. Logs to AdminInventorySearchRun.
+// Queries MarketCheck through the ADAPTER (if key present) or the internal DB.
+// Logs to AdminInventorySearchRun.
+//
+// PHASE 4 (§10 inventory/R57, §8.4): THE SECOND PROVIDER CLIENT IS RETIRED.
+//
+// This route used to build its own URL and fetch `https://marketcheck-prod.apigee.net`
+// directly — a different HOST from the adapter's `api.marketcheck.com`, with:
+//
+//   * no radius parameter at all, so the provider's own default applied and nothing bounded
+//     the search — it now sends the SWEEP's configured radius
+//     (`inventory_sources.radius_miles`), which is the right bound for an operations tool
+//     looking at the market we sweep. It is deliberately NOT `SHORTLIST_RADIUS_MILES`: that
+//     constant is the BUYER policy for shortlist eligibility, and an admin diagnosing what
+//     the sweep sees should see the sweep's circle. (The first version of this comment said
+//     the fix applied the 100-mile policy. It does not, and the claim was corrected in
+//     review rather than the code changed to match it.)
+//   * none of the three `include_*` flags, while reading `l.build?.*` — the same latent
+//     shape defect the adapter had, which returns nothing when the flags are absent;
+//   * its own narrower listing type, so no dealer object was captured and nothing this
+//     tool surfaced could ever resolve to a rooftop;
+//   * `year_min`/`year_max`, which are not the provider's documented parameter names.
+//
+// Every one of those is fixed in `MarketCheckAdapter`. Keeping a second client meant
+// fixing each defect twice, and the record shows that is not what happens. One client.
+//
+// The budget draw is UNCHANGED and still happens here: the adapter takes a `budget` and
+// draws immediately before dispatch, so the ledger sees this consumer exactly as before.
 
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
@@ -8,7 +34,8 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { InventorySourceType } from "@prisma/client";
 import { resolveMarketConfig } from "@/lib/services/inventory/inventory-source-config.service";
-import { cycleKeyFor, rollCycleForward, tryConsumeCall } from "@/lib/services/inventory/inventory-call-budget.service";
+import { cycleKeyFor, rollCycleForward, makeCallBudget, makeStaticBudget } from "@/lib/services/inventory/inventory-call-budget.service";
+import { MarketCheckAdapter } from "@/lib/services/inventory/adapters/marketcheck.adapter";
 
 const schema = z.object({
   make: z.string().optional(),
@@ -19,17 +46,6 @@ const schema = z.object({
   maxPrice: z.coerce.number().positive().optional(),
   condition: z.enum(["new", "used", "certified", "all"]).default("all"),
 });
-
-interface MarketCheckListing {
-  id?: string;
-  vin?: string;
-  price?: number;
-  miles?: number;
-  build?: { year?: number; make?: string; model?: string; trim?: string };
-  media?: { photo_links?: string[] };
-  exterior_color?: string;
-  inventory_type?: string;
-}
 
 export async function POST(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
@@ -61,86 +77,94 @@ export async function POST(request: NextRequest) {
 
   let results: ResultItem[] = [];
   let source = "db";
+  // Recorded on the run row so an operator can tell a failed provider call from an empty
+  // market without re-running the search.
+  let providerOutcome: string | undefined;
+  let providerError: string | undefined;
 
-  // This route is the SECOND consumer of MARKETCHECK_API_KEY, on a different host
-  // (marketcheck-prod.apigee.net), one call per admin click, and it was outside every
-  // budget. Low volume historically (28 in April, 4 in May, 7 in June) so it is not the
-  // cause of the 429 storm — but a monthly cap that only counts the orchestrator is not a
-  // real cap. It now draws from the same per-credential ledger, and falls back to the
-  // internal DB when the ledger refuses.
-  let budgetAllowed = false;
+  // One call per admin click, drawn from the SAME per-credential ledger the daily sweep
+  // spends from. Low volume historically (28 in April, 4 in May, 7 in June) so it is not
+  // the cause of the 429 storm — but a monthly cap that only counts the orchestrator is not
+  // a real cap.
+  let budget: { acquire(): Promise<boolean>; spent(): number } | null = null;
+  let sourceConfigured = false;
+  let marketZip: string | undefined;
+  let marketRadius: number | undefined;
+
   if (marketCheckKey) {
     const resolved = await resolveMarketConfig(InventorySourceType.MARKETCHECK, "MarketCheck");
-    if (resolved.ok && resolved.config.sourceId && resolved.config.configSource === "row") {
-      const cycleKey = cycleKeyFor(new Date());
-      await rollCycleForward(resolved.config.sourceId, cycleKey);
-      budgetAllowed = await tryConsumeCall(
-        resolved.config.sourceId, cycleKey, resolved.config.monthlyCallBudget,
-      );
-    } else {
-      // No ledger to draw from (source inactive, unconfigured, or the migration is not yet
-      // applied). Allow the call only when the source is not explicitly disabled — the
-      // is_active kill switch must hold here too.
-      budgetAllowed = resolved.ok;
+    sourceConfigured = resolved.ok;
+    if (resolved.ok) {
+      marketZip = params.zip?.trim() || resolved.config.zip;
+      marketRadius = resolved.config.radiusMiles;
+      if (resolved.config.sourceId && resolved.config.configSource === "row") {
+        const cycleKey = cycleKeyFor(new Date());
+        await rollCycleForward(resolved.config.sourceId, cycleKey);
+        budget = makeCallBudget(resolved.config.sourceId, cycleKey, resolved.config.monthlyCallBudget, 1);
+      } else {
+        // No ledger to draw from (env-tier config). The `is_active` kill switch still held
+        // above via `resolved.ok`; the per-click grant of 1 is the remaining bound.
+        budget = makeStaticBudget(1);
+      }
     }
   }
 
-  if (marketCheckKey && budgetAllowed) {
-    try {
-      const qp = new URLSearchParams({ api_key: marketCheckKey, rows: "24", start: "0" });
-      if (params.make) qp.set("make", params.make);
-      if (params.model) qp.set("model", params.model);
-      if (params.yearMin) qp.set("year_min", String(params.yearMin));
-      if (params.yearMax) qp.set("year_max", String(params.yearMax));
-      if (params.zip) qp.set("zip", params.zip);
-      if (params.maxPrice) qp.set("price_max", String(params.maxPrice));
-      if (params.condition && params.condition !== "all") qp.set("car_type", params.condition);
+  if (marketCheckKey && sourceConfigured && marketZip) {
+    // THROUGH THE ADAPTER. Radius clamped, the three include flags sent, the dealer object
+    // captured, one host, and the documented parameter names.
+    const run = await new MarketCheckAdapter().search({
+      zip: marketZip,
+      radius: marketRadius,
+      rowsPerCall: 24,
+      maxCalls: 1,
+      budget: budget ?? undefined,
+      make: params.make,
+      model: params.model,
+      yearMin: params.yearMin,
+      yearMax: params.yearMax,
+      priceMaxCents: params.maxPrice ? Math.round(params.maxPrice * 100) : undefined,
+      carType: params.condition === "all" ? undefined : params.condition,
+    });
 
-      const mcRes = await fetch(`https://marketcheck-prod.apigee.net/v2/search/car/active?${qp}`, {
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(10000),
-      });
-
-      // `source` is set from the RESPONSE, not before the request. It used to be assigned
-      // "marketcheck" before the fetch, so a non-OK response returned an empty result list
-      // still labelled as coming from MarketCheck — an empty market and a failed provider
-      // call looked identical to the admin reading the screen.
-      if (mcRes.ok) {
-        source = "marketcheck";
-        const mcData = await mcRes.json() as { listings?: MarketCheckListing[] };
-        const listings: MarketCheckListing[] = mcData.listings ?? [];
-        const vins = listings.map(l => l.vin).filter(Boolean) as string[];
-        const existingVins = new Set(
-          (await prisma.inventoryItem.findMany({ where: { vin: { in: vins } }, select: { vin: true } }))
-            .map(i => i.vin).filter(Boolean) as string[]
-        );
-
-        results = listings.map(l => ({
-          vin: l.vin ?? `MC-${l.id ?? Math.random().toString(36).slice(2)}`,
-          make: l.build?.make ?? "",
-          model: l.build?.model ?? "",
-          year: l.build?.year ?? 0,
-          trim: l.build?.trim,
-          priceCents: (l.price ?? 0) * 100,
-          mileage: l.miles ?? 0,
-          images: l.media?.photo_links?.slice(0, 1) ?? [],
-          source: "marketcheck",
-          alreadyInInventory: existingVins.has(l.vin ?? ""),
-          externalId: l.id,
-        }));
-      }
-    } catch (err) {
-      logger.error("[search-tool/run] MarketCheck error:", err);
+    // `source` is set from the OUTCOME, not before the request. It used to be assigned
+    // "marketcheck" before the fetch, so a non-OK response returned an empty result list
+    // still labelled as coming from MarketCheck — an empty market and a failed provider
+    // call looked identical to the admin reading the screen. The adapter's outcome
+    // vocabulary makes that distinction first-class.
+    if (run.outcome === "SUCCESS" || run.outcome === "ZERO_RESULTS") {
+      source = "marketcheck";
+      const vins = run.vehicles.map((v) => v.vin).filter(Boolean) as string[];
+      const existingVins = new Set(
+        (await prisma.inventoryItem.findMany({ where: { vin: { in: vins } }, select: { vin: true } }))
+          .map((i) => i.vin).filter(Boolean) as string[]
+      );
+      results = run.vehicles.map((v) => ({
+        vin: v.vin ?? `MC-${v.sourceKey}`,
+        make: v.make,
+        model: v.model,
+        year: v.year,
+        trim: v.trim,
+        priceCents: v.priceCents,
+        mileage: v.mileage ?? 0,
+        images: v.images.slice(0, 1),
+        source: "marketcheck",
+        alreadyInInventory: existingVins.has(v.vin ?? ""),
+        externalId: v.listingId,
+      }));
+    } else if (run.outcome === "BUDGET_EXHAUSTED") {
+      // The key exists but the ledger refused. Say so rather than silently presenting the
+      // internal DB as if it were a live provider search.
+      source = "db_budget_exhausted";
+    } else {
+      // FAILED / DEFERRED / PARTIAL / NOT_CONFIGURED. A provider failure is never rendered
+      // as an empty market (§22a L1079) — the admin sees that the provider did not answer.
       source = "db_provider_error";
+      if (run.error) logger.error("[search-tool/run] MarketCheck:", run.error);
     }
-    if (source !== "marketcheck" && source !== "db_provider_error") {
-      // A non-OK HTTP response: the provider answered, but not with listings.
-      source = "db_provider_error";
-    }
-  } else if (marketCheckKey) {
-    // The key exists but the ledger refused. Say so rather than silently presenting the
-    // internal DB as if it were a live provider search.
-    source = "db_budget_exhausted";
+    providerOutcome = run.outcome;
+    providerError = run.error;
+  } else if (marketCheckKey && !sourceConfigured) {
+    source = "db_source_inactive";
   }
 
   // Fallback to internal DB
@@ -177,12 +201,17 @@ export async function POST(request: NextRequest) {
   }
 
   // Log the search run
+  // The run row said COMPLETED unconditionally, including when the provider errored —
+  // the same "a resolved call is a successful call" shape as the cron log. It now records
+  // what actually happened.
   await prisma.adminInventorySearchRun.create({
     data: {
       triggeredBy: admin.adminId,
       params: params as unknown as Parameters<typeof prisma.adminInventorySearchRun.create>[0]["data"]["params"],
-      status: "COMPLETED",
+      status: source === "db_provider_error" ? "FAILED" : "COMPLETED",
       vehiclesFetched: results.length,
+      completedAt: new Date(),
+      ...(providerError ? { error: providerError } : {}),
     },
   }).catch(() => {});
 
@@ -197,7 +226,10 @@ export async function POST(request: NextRequest) {
     action: "INVENTORY_SEARCH_TOOL_RUN",
     entityType: "AdminInventorySearchRun",
     entityId: admin.adminId,
-    metadata: { source, total: results.length, params },
+    // `source` says what the ADMIN saw; `providerOutcome` says what the provider actually
+    // answered. They differ in exactly the case that matters — a failed call and an empty
+    // market both degrade to internal results — so the audit trail carries both.
+    metadata: { source, providerOutcome, total: results.length, params },
   });
 
   return NextResponse.json({ success: true, data: serialized, source, total: results.length });

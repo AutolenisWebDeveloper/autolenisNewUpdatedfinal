@@ -11,12 +11,14 @@
 //    Any failure returns the buyer to the exact missing requirement — named, not
 //    generic."
 //
-// SEVEN CONDITIONS HERE, NOT THE EIGHT §5a LISTS. The co-buyer and trade elections
-// clause moved to Phase 4 with its writer (§11.6 ruling 12): its predicate row PAY-06b
-// was Phase 3 while every writer of those elections — PAY-06a, S3-02c, R14 — is Phase 4,
-// so shipping the check now would refuse every buyer for a field nothing writes. It was
-// NOT shipped inert. A predicate that always passes cannot be told apart from a missing
-// one, and the next reader would have no way to know which they were looking at.
+// ALL EIGHT §5a CONDITIONS ARE HERE AS OF PHASE 4. Phase 3 shipped seven of the eight:
+// the co-buyer and trade elections clause was deliberately held back with its writer
+// (§11.6 ruling 12), because its predicate row PAY-06b was Phase 3 while every writer of
+// those elections — PAY-06a, S3-02c, R14 — is Phase 4, and shipping the check first would
+// have refused every buyer for a field nothing wrote. It was NOT shipped inert: a
+// predicate that always passes cannot be told apart from a missing one, and the next
+// reader would have no way to know which they were looking at. Phase 4 adds the writers
+// and the predicate together — `ELECTIONS_REQUIRED`, condition 6 below.
 //
 // TWO GATES, NOT ONE. §5b says eligibility passing is what moves a Vehicle Request to
 // PAYMENT_REQUIRED, and §5b ALSO says the disclosures are shown "at checkout" — which
@@ -27,8 +29,8 @@
 // "Playwright: PI not created until acceptance". So the blocked artefact is the
 // PaymentIntent, not the transition:
 //
-//   TRANSITION gate (to PAYMENT_REQUIRED) — six conditions, disclosures not yet shown.
-//   INTENT gate (mint the PaymentIntent) — the same six, plus disclosure acceptance.
+//   TRANSITION gate (to PAYMENT_REQUIRED) — seven conditions, disclosures not yet shown.
+//   INTENT gate (mint the PaymentIntent) — the same seven, plus disclosure acceptance.
 //
 // This module is a PURE decision, in the style of `classifyPaymentConfirmation`:
 // callers gather the facts and pass them in. That is what makes every branch testable
@@ -51,6 +53,7 @@ export type EligibilityFailureCode =
   | "LOCATION_REQUIRED"
   | "PREQUAL_REQUIRED"
   | "VEHICLE_CRITERIA_INCOMPLETE"
+  | "ELECTIONS_REQUIRED"
   | "REQUEST_CONFLICT"
   | "DISCLOSURE_REQUIRED";
 
@@ -74,6 +77,14 @@ export interface EligibilityFacts {
     makePreference: string | null;
     modelPreference: string | null;
     maxBudgetCents: number | null;
+    /**
+     * §5a's "co-buyer and trade elections recorded". THREE-STATE, and that is the whole
+     * point: `null` is "we have not asked", `false` is "the buyer said no". A boolean
+     * with a default would record every existing buyer as having answered a question
+     * nobody put to them.
+     */
+    coBuyerElected: boolean | null;
+    tradeElected: boolean | null;
   };
   /** Open Vehicle Requests for this buyer OTHER than the one being paid for. */
   otherOpenRequestIds: string[];
@@ -207,7 +218,31 @@ export function checkPaymentEligibility(
     );
   }
 
-  // 6. No conflicting open request.
+  // 6. Both Stage 4 elections recorded.
+  //
+  // §5a requires the eligibility recheck to confirm "co-buyer and trade elections
+  // recorded" — RECORDED, not true. A buyer buying alone with nothing to trade answers
+  // "no" twice and passes; a buyer who was never asked does not, because the answer
+  // changes who signs and what the deal is worth, and discovering it after the money has
+  // moved is how a deal stalls at e-sign with a required signer nobody collected.
+  //
+  // NULL is the unasked state. `co_buyer_elected` shipped with the Phase 1 wave and
+  // `trade_elected` with 20261112000000; both are nullable with no default for exactly
+  // this reason.
+  const missingElections = [
+    facts.request.coBuyerElected === null || facts.request.coBuyerElected === undefined ? "co-buyer" : null,
+    facts.request.tradeElected === null || facts.request.tradeElected === undefined ? "trade-in" : null,
+  ].filter(Boolean) as string[];
+  if (missingElections.length > 0) {
+    return fail(
+      "ELECTIONS_REQUIRED",
+      missingElections.join(", "),
+      `Tell us whether you have a ${missingElections.join(" and a ")} before paying — ` +
+        `both change who signs and what your deal is worth, and "no" is a perfectly good answer.`,
+    );
+  }
+
+  // 7. No conflicting open request.
   //
   // The database enforces one open request per buyer, so this is not the guard of last
   // resort — it exists so the buyer is TOLD, in the checkout, rather than meeting a
@@ -222,7 +257,7 @@ export function checkPaymentEligibility(
     );
   }
 
-  // 7. Acceptance of the payment and distance disclosures. INTENT gate only.
+  // 8. Acceptance of the payment and distance disclosures. INTENT gate only.
   if (opts.requireDisclosureAcceptance) {
     if (!facts.disclosuresAcceptedAt) {
       return fail(
@@ -276,9 +311,9 @@ export interface GatherEligibilityInput {
  */
 /** The two verdicts §5a and §5b ask for, from one read. See the note below. */
 export interface EligibilityGates {
-  /** The six §5a conditions. Passing this moves the request to PAYMENT_REQUIRED. */
+  /** The seven §5a conditions. Passing this moves the request to PAYMENT_REQUIRED. */
   transition: EligibilityResult;
-  /** The six, plus acceptance of the CURRENT disclosures. Passing this permits a mint. */
+  /** The seven, plus acceptance of the CURRENT disclosures. Passing this permits a mint. */
   intent: EligibilityResult;
 }
 
@@ -289,9 +324,9 @@ export interface EligibilityGates {
  * at two different moments, and collapsing them into one verdict put the checkout in
  * an impossible position:
  *
- *   • `transition` — the six §5a conditions. Passing this is what moves the request to
+ *   • `transition` — the seven §5a conditions. Passing this is what moves the request to
  *     PAYMENT_REQUIRED (PAY-10b). It says the buyer may REACH checkout.
- *   • `intent` — the same six, plus acceptance of the current disclosures. Passing
+ *   • `intent` — the same seven, plus acceptance of the current disclosures. Passing
  *     this is what permits a PaymentIntent to be minted (PAY-08).
  *
  * Why the split has to be visible to the caller rather than hidden here: a buyer who
@@ -332,6 +367,11 @@ export async function gatherAndCheckEligibility(input: {
         makePreference: true,
         modelPreference: true,
         maxBudgetCents: true,
+        // §5a elections. Narrowed like everything else here: an unnarrowed read raises
+        // P2022 in the window between an application deploy and its migration, and
+        // `trade_elected` is precisely such a column right now.
+        coBuyerElected: true,
+        tradeElected: true,
       },
     }),
     prisma.vehicleRequest.findMany({

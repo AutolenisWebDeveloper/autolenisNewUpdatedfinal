@@ -8,7 +8,6 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { MAX_SHORTLIST_ITEMS } from "@/lib/constants";
-import { countAvailableItems } from "@/lib/services/shortlist/shortlist.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -74,10 +73,15 @@ export async function POST(request: NextRequest, { params }: Props) {
     include: { items: true },
   });
 
-  // Enforce max shortlist limit
-  // Counts AVAILABLE candidates, matching the buyer-facing route — an admin must not see a
-  // different cap from the buyer they are helping.
-  if (await countAvailableItems(shortlist.items) >= MAX_SHORTLIST_ITEMS) {
+  // Enforce max shortlist limit.
+  //
+  // ROWS, matching the buyer-facing route and — the point of the owner ruling on 2026-09-10 —
+  // matching `shortlist_items_enforce_cap_trg`, which does `count(*)` with no availability
+  // predicate. Counting available candidates here let an admin past a gate the trigger then
+  // slammed, which is a worse experience than a strict refusal because nothing in the error
+  // told them why. An admin must not see a different cap from the buyer they are helping, and
+  // neither of them may see a different cap from the database.
+  if (shortlist.items.length >= MAX_SHORTLIST_ITEMS) {
     return adminError(
       "SHORTLIST_FULL",
       `Shortlist is full — max ${MAX_SHORTLIST_ITEMS} items allowed`,

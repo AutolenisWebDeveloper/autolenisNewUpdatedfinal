@@ -87,7 +87,13 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/api/cron/auction-close/route.ts", reasons: ["direct-sender"], senders: ["sendDealerAuctionReminderEmail", "sendDealerOfferRevisionClosingEmail"], removalPhase: 10 },
   { file: "app/api/cron/dealer-invitation-reminder/route.ts", reasons: ["direct-sender"], senders: ["sendDealerAuctionReminderEmail"], removalPhase: 10 },
   { file: "app/api/cron/dealer-scorecard-snapshot/route.ts", reasons: ["direct-sender"], senders: ["sendDealerWeeklyScorecardEmail"], removalPhase: 10 },
-  { file: "app/api/cron/inventory-stale-sweep/route.ts", reasons: ["direct-sender"], senders: ["sendDealerInventorySyncFailureEmail", "sendDealerStaleListingRemovalEmail"], removalPhase: 10 },
+  // DELISTED IN PHASE 4 (jobs/I-22). The stale sweep's two dealer notices —
+  // sendDealerStaleListingRemovalEmail and sendDealerInventorySyncFailureEmail — now go
+  // through enqueueTransactional. They were the last direct sends on a SCHEDULED path,
+  // and the direct rail applies no suppression, so a dealer who bounced or unsubscribed
+  // was re-emailed on every sweep, nightly. Ahead of the §8.4 Phase 10 clock because
+  // Phase 4 owns the cron (jobs/I-22) and the rule is that a query failure and a send
+  // both go through the substrate.
   { file: "app/api/cron/social-lead-nurture/route.ts", reasons: ["direct-sender"], senders: ["sendSocialLeadNurtureEmail"], removalPhase: 10 },
   { file: "app/api/cron/social-optimize/route.ts", reasons: ["direct-sender"], senders: ["sendOptimizationReport"], removalPhase: 10 },
   { file: "app/api/dealer/auth/forgot-password/route.ts", reasons: ["direct-sender"], senders: ["sendDealerPasswordResetEmail"], removalPhase: 10 },

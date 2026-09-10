@@ -152,7 +152,7 @@ test("the allowlist shrinks, never grows, without a deliberate edit", () => {
   // static half of the same measurement.
   assert.equal(
     DIRECT_SEND_ALLOWLIST.length,
-    98,
+    97,
     "The direct-send count changed. Going DOWN is the goal — update this number and say which path was migrated. " +
       "Going UP means a new direct send was added and needs justifying."
   );

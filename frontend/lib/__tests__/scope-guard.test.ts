@@ -42,7 +42,7 @@ const APP_ROOT = process.cwd();
 const REPO_ROOT = resolve(APP_ROOT, "..");
 
 /** The phase this branch implements. */
-const CURRENT_PHASE = 3;
+const CURRENT_PHASE = 4;
 
 /** What each phase is allowed to ADD, beyond the baseline. §8.2 declares these. */
 const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string[]; libDirs: string[]; tables: string[] }> = {
@@ -78,6 +78,34 @@ const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string
     // `DepositStatus.DISPUTED` (control/E26-10) — which this guard does not track and
     // should not: constraint C1 bounds the additive COLUMN wave, and §12.2 provides for
     // "any schema-touching phase".
+    tables: [],
+  },
+  4: {
+    // DELIBERATELY EMPTY, ALL FOUR KEYS. Phase 4 is 90 parity rows across nine areas
+    // and adds no new directory and no new table — every one of its files lands in a
+    // directory that already exists:
+    //
+    //   qualified-results.service.ts, listing-rooftop-resolution changes → lib/services/inventory
+    //   co-buyer capture                                                 → lib/services/vehicle-request
+    //   trade packet + edit path                                         → lib/services/trade-in
+    //   the single gated shortlist writer                                → lib/services/shortlist
+    //   candidate creation and revalidation                              → lib/services/auction
+    //   every new route                                                  → app/api/buyer (an existing family)
+    //
+    // and its one migration (`20261112000000_stage4_trade_election`) adds a COLUMN,
+    // `vehicle_requests.trade_elected`, not a table. The `inventory_query_cache` table
+    // Phase 4's cache reads already exists — the Phase 1 wave created it
+    // (20261106000100/migration.sql), so it is in BASELINE_TABLES and is not this
+    // phase's to declare.
+    //
+    // The entry exists rather than being absent so the record is a statement rather
+    // than an omission: `allowed()` loops p = 2 … CURRENT_PHASE and treats a missing
+    // key identically to an empty one, which means "Phase 4 declared nothing" and
+    // "nobody wrote a Phase 4 entry" would be indistinguishable. They are not the same
+    // claim, and this file is where the difference is recorded.
+    routeFamilies: [],
+    serviceDirs: [],
+    libDirs: [],
     tables: [],
   },
 };

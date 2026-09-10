@@ -489,23 +489,49 @@ describe("wiring: a destructive suite must never sit in a job that has no dispos
     return [...seen];
   };
 
-  test("nothing reachable from test:all runs the destructive suite — globs expanded, not guessed", () => {
-    const hits = filesReachableFromTestAll().filter((f) => f.includes("select-offer-concurrency"));
+  // The convention, and the only thing that makes these two guards general: a suite that writes
+  // real rows lives in a `__tests__/destructive/` directory, which no `*` glob in test:all
+  // reaches. Phase 4 added a second one (the shortlist five-cap concurrency proof), and the
+  // guard that named the FIRST file by hand failed rather than protecting it — which is the
+  // right failure, and the reason it is written by directory now.
+  const DESTRUCTIVE_DIR = /(^|\/)__tests__\/destructive\//;
+
+  /** Every destructive suite in the repository, found rather than listed. */
+  const allDestructiveFiles = (): string[] =>
+    globSync("lib/**/__tests__/destructive/*.test.ts", { cwd: repoRoot })
+      .map((f) => f.replaceAll("\\", "/"))
+      .sort();
+
+  test("nothing reachable from test:all runs a destructive suite — globs expanded, not guessed", () => {
+    const hits = filesReachableFromTestAll().filter((f) => DESTRUCTIVE_DIR.test(f));
     assert.deepEqual(
       hits,
       [],
       "test:all runs in a job with no disposable database; its DSN is " +
         "`secrets.DATABASE_URL || <placeholder>`. A row-writing suite reachable from it points at " +
-        "an unidentified target. Keep the destructive suite under " +
-        "lib/services/deal/__tests__/destructive/, which no `*` glob in test:all reaches, and run " +
-        "it in the e2e job against POSTGRES_DB=autolenis_e2e.",
+        "an unidentified target. Keep every destructive suite under a `__tests__/destructive/` " +
+        "directory, which no `*` glob in test:all reaches, and run it in the e2e job against " +
+        "POSTGRES_DB=autolenis_e2e.",
     );
   });
 
-  test("the destructive suite is still reachable from its own script, so coverage-check passes", () => {
-    const own = globSync(pkg.scripts["test:concurrency"].split(/\s+/).at(-1) as string, { cwd: repoRoot });
-    assert.equal(own.length, 1, "test:concurrency must resolve to exactly the destructive test file");
-    assert.match(own[0].replaceAll("\\", "/"), /destructive\/select-offer-concurrency\.test\.ts$/);
+  test("EVERY destructive suite is reachable from test:concurrency, and nothing else is", () => {
+    // Both directions. A destructive file missing from the script would never run at all and
+    // would fail coverage-check; a NON-destructive file added to the script would be run
+    // against a real database for no reason.
+    const tokens = pkg.scripts["test:concurrency"].split(/\s+/).filter((t: string) => t.endsWith(".test.ts"));
+    const named = tokens
+      .flatMap((t: string) => globSync(t, { cwd: repoRoot }))
+      .map((f: string) => f.replaceAll("\\", "/"))
+      .sort();
+
+    const found = allDestructiveFiles();
+    assert.ok(found.length >= 2, `expected at least the two known destructive suites, found ${found.length}`);
+    assert.deepEqual(named, found,
+      "test:concurrency must name exactly the destructive suites — no more, no fewer");
+    for (const f of named) {
+      assert.match(f, DESTRUCTIVE_DIR, `${f} is run by test:concurrency but is not in a destructive directory`);
+    }
   });
 
   test("test:all DOES run both non-destructive guard suites", () => {

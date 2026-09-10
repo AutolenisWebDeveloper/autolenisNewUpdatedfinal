@@ -1,9 +1,17 @@
-// The admin inventory search tool is the SECOND consumer of MARKETCHECK_API_KEY.
+// The admin inventory search tool is the second CONSUMER of MARKETCHECK_API_KEY — and,
+// since Phase 4, no longer a second CLIENT.
 //
-// It issues its own fetch to a different host (marketcheck-prod.apigee.net), one call per
-// admin click, and it was outside every budget. Historic volume is low (28 in April, 4 in
-// May, 7 in June, none since), so it is not the cause of the 2026-08 429 storm — but a
-// monthly cap that only counts the orchestrator is not a real cap.
+// It used to fetch a different host (marketcheck-prod.apigee.net) with its own URL
+// builder: no radius, none of the three include_* flags while reading `build.*`, its own
+// narrow listing type, and undocumented parameter names. Every one of those defects was
+// fixed in MarketCheckAdapter and none of the fixes reached here, which is the argument
+// against a second client rather than a hypothetical about one. It now calls the adapter
+// (§10 inventory/R57, §8.4).
+//
+// Historic volume is low (28 in April, 4 in May, 7 in June, none since), so it is not the
+// cause of the 2026-08 429 storm — but a monthly cap that only counts the orchestrator is
+// not a real cap, and the ledger draw is unchanged: the adapter takes the budget and draws
+// immediately before dispatch.
 //
 //   npx tsx --test --experimental-test-module-mocks \
 //     app/api/admin/__tests__/inventory-search-tool-budget.test.ts
@@ -109,7 +117,34 @@ test("an inactive source is the kill switch here too", async () => {
   const res = await POST(req());
   const body = await res.json() as { source?: string };
   assert.equal(providerCalls, 0);
-  assert.equal(body.source, "db_budget_exhausted");
+  // Distinct from db_budget_exhausted now. Both degrade to the internal DB, but "the
+  // source is switched off" and "the month's calls are spent" are different facts and an
+  // operator reading the screen needs to know which one they are looking at.
+  assert.equal(body.source, "db_source_inactive");
+});
+
+test("the adapter is the client — one host, radius clamped, include flags sent", async () => {
+  // §10 inventory/R57. The assertions are on the URL because the URL is what was wrong:
+  // a second client meant a second set of provider defects, and the record shows they do
+  // not get fixed twice.
+  let url = "";
+  globalThis.fetch = (async (input: string | URL) => {
+    providerCalls++;
+    url = String(input);
+    return Response.json({ num_found: 0, listings: [] });
+  }) as typeof fetch;
+
+  const { POST } = await import("@/app/api/admin/inventory/search-tool/run/route");
+  await POST(req({ make: "Ford", yearMin: 2019, yearMax: 2023 }));
+
+  const u = new URL(url);
+  assert.equal(u.host, "api.marketcheck.com", "one host — the apigee client is retired");
+  assert.equal(u.searchParams.get("radius"), "100", "AutoLenis's radius applies; before, none was sent at all");
+  assert.equal(u.searchParams.get("include_dealer_object"), "true");
+  assert.equal(u.searchParams.get("include_mc_dealership_object"), "true");
+  assert.equal(u.searchParams.get("include_build_object"), "true");
+  assert.equal(u.searchParams.get("year_range"), "2019-2023", "the documented parameter name");
+  assert.equal(u.searchParams.get("year_min"), null);
 });
 
 test("a failed provider call is NOT labelled as a MarketCheck result", async () => {

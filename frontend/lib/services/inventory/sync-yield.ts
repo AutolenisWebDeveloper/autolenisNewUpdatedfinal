@@ -52,6 +52,19 @@ export interface YieldEvidence {
   rawListings: number;
   /** Listings that survived normalize() — the number actually ingestable. */
   normalized: number;
+  /**
+   * Listings the adapter rejected for being outside the requested radius, BEFORE normalize()
+   * was called on them.
+   *
+   * Gate 2 measures response-SHAPE loss, and a policy rejection is not a shape failure. These
+   * rows are counted in `rawListings` but can never appear in `normalized`, so without this
+   * they read as normalize() failing on them. A page of 50 in which 40 are out of radius —
+   * the exact case the rejection was added for — produced 10 normalized of 50 raw, tripped
+   * the 0.25 floor, and reported a healthy run as FAILED with "normalization dropped 40 of
+   * 50 listings (missing year/make/model/price)". The orchestrator then raised
+   * INVENTORY_SWEEP_SHORTFALL with that false root cause. Found in review.
+   */
+  radiusRejected?: number;
   /** Pages that returned 200. A failed page is NOT counted. */
   pagesFetched: number;
   rowsPerCall: number;
@@ -105,15 +118,19 @@ export function classifyYield(e: YieldEvidence): YieldVerdict {
   // Gate 2 — NORMALIZATION LOSS. normalize() returns null for any listing missing
   // year/make/model/price, and that loss is invisible today: a provider response-shape
   // change would halve ingestion with every run still reporting COMPLETED.
+  // Measured over the listings normalize() was actually GIVEN. Rows rejected for being
+  // outside the radius never reached it, so counting them as normalization loss accuses the
+  // wrong subsystem — see `radiusRejected`.
+  const offered = e.rawListings - (e.radiusRejected ?? 0);
   if (
-    e.rawListings >= NORMALIZE_MIN_RAW &&
-    e.normalized < Math.floor(e.rawListings * NORMALIZE_MIN_RATIO)
+    offered >= NORMALIZE_MIN_RAW &&
+    e.normalized < Math.floor(offered * NORMALIZE_MIN_RATIO)
   ) {
     return {
       outcome: "FAILED",
       coverage: expected === null ? "UNKNOWN" : "OK",
       reason:
-        `normalization dropped ${e.rawListings - e.normalized} of ${e.rawListings} listings ` +
+        `normalization dropped ${offered - e.normalized} of ${offered} listings ` +
         `(missing year/make/model/price)`,
     };
   }

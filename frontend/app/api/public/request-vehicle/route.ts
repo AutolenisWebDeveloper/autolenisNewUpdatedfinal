@@ -390,7 +390,10 @@ export async function POST(request: NextRequest) {
     budgetAmount: parseBudgetToCents(data.budget) ?? undefined,
     timeline:     TIMELINE_MAP[data.timeline],
 
-    hasTradeIn: data.hasTradeIn ?? false,
+    // `?? false` is kept for the OPPORTUNITY's own flag (unchanged), but the ELECTION must
+    // stay three-state: a buyer who never reached the trade question has not said "no".
+    hasTradeIn: data.hasTradeIn,
+    coBuyer: data.coBuyer,
     tradeInDetails: data.hasTradeIn
       ? {
           year:            data.tradeYear,

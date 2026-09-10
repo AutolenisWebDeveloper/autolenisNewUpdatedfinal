@@ -67,6 +67,19 @@ export const ZIP_COORDS: Record<string, LatLng> = {
   "75201": { lat: 32.7831, lng: -96.8067 }, "75204": { lat: 32.8025, lng: -96.7856 },
   "75080": { lat: 32.9756, lng: -96.7325 }, // Richardson
   "76102": { lat: 32.7531, lng: -97.3284 }, // Fort Worth
+  // Arlington — THE CONFIGURED MARKET CENTRE. `inventory_sources.center_zip` is 76011, so this
+  // is the ZIP the platform actually sweeps and the one a buyer in this market types. It was
+  // absent, and its absence was not cosmetic: `geocodeZip` falls back to the cache and then to
+  // Google, and with no Google key provisioned it returned null — so every Arlington buyer got
+  // NEED_ZIP on the qualified-results view and NO_ZIP on every shortlist add. Reproduced
+  // end-to-end against a real database by
+  // lib/services/shortlist/__tests__/destructive/shortlist-cap-concurrency.test.ts.
+  //
+  // City centroid, on the same documented basis as the Frisco entries above: this table feeds a
+  // radius filter measured in tens of miles, and a sourced city centroid beats a per-ZIP figure
+  // that cannot be sourced. Curating it by hand is the fallback, not the design — provisioning
+  // GOOGLE_GEOCODING_API_KEY is what stops the next market needing this edit.
+  "76011": { lat: 32.7357, lng: -97.1081 }, // Arlington
   "77002": { lat: 29.7589, lng: -95.3677 }, "77005": { lat: 29.7174, lng: -95.4188 },
   "77024": { lat: 29.7721, lng: -95.5151 }, // Houston
   "78701": { lat: 30.2711, lng: -97.7437 }, "78704": { lat: 30.2421, lng: -97.7669 }, // Austin
