@@ -678,7 +678,12 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     requiredAction: "Run a manual refund review against the record of service delivered; never refund the $99.",
     deadlineHours: 120,
     returnPoint: "§23.3 — downgrade",
-    raisedByPhase: 10,
+    // Phase 3, not 10. §8.2's Phase 3 bullet carries "downgrade before/after
+    // settlement", and the downgrade service that raises this ships with it
+    // (`lib/services/plan/plan-change.service.ts`). The 10 here was the planned phase
+    // before that bullet was written; corrected 2026-09-10 rather than left to imply
+    // the row has no writer for seven more phases.
+    raisedByPhase: 3,
     specSection: "§26; §23.3",
   },
   {
