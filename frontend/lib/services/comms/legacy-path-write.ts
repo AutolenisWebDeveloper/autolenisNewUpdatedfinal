@@ -51,7 +51,17 @@ export type LegacyPathKind =
    * off — that is the sequencing guard working, not a leak. §8.4's thirty-days-of-zero
    * removal clock starts at the flip.
    */
-  | "SETTLEMENT_AUCTION_LAUNCH";
+  | "SETTLEMENT_AUCTION_LAUNCH"
+  /**
+   * A caller still trying to enrol the $99 series on `lifecycle_touch_schedule` after
+   * Phase 3 moved it to `comms_outbox`. The adapter STANDS DOWN and records this
+   * instead of enrolling, so a forgotten caller surfaces as a row here rather than as
+   * a buyer receiving all six touches twice.
+   *
+   * EXPECTED TO BE ZERO from the day Phase 3 ships — unlike SETTLEMENT_AUCTION_LAUNCH,
+   * there is no flag keeping this path alive. A non-zero count names a caller to fix.
+   */
+  | "LEGACY_LIFECYCLE_ENROLLMENT";
 
 export interface LegacyPathWriteInput {
   kind: LegacyPathKind;

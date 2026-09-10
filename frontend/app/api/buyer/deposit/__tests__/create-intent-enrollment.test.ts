@@ -22,6 +22,7 @@ const REVIEW_TOKEN = "rev_tok_123";
 
 interface Ctrl {
   enrollCalls: Array<Record<string, unknown>>;
+  legacyCancels: string[];
   preCheckoutCancels: string[];
   emitCalls: string[];
   reviewRow: Record<string, unknown> | null;
@@ -101,15 +102,24 @@ mock.module("@/lib/services/prequal/prequal.service", {
   namedExports: { isPrequalValid: () => ctrl.prequalValid },
 });
 
-mock.module("@/lib/services/crm/lifecycle-scheduler", {
+// PHASE 3: the $99 series enrols on `comms_outbox`, not on the lifecycle rail. The
+// property this file pins — ONE enrolment, from ONE owner, never for concierge — is
+// unchanged; only the callee moved.
+mock.module("@/lib/services/payment/deposit-reminder.service", {
   namedExports: {
-    scheduleLifecycleWorkload: async (input: Record<string, unknown>) => { ctrl.enrollCalls.push(input); },
+    enrollDepositReminders: async (input: Record<string, unknown>) => {
+      ctrl.enrollCalls.push(input);
+      return { emailsEnqueued: 6, smsEnqueued: 6 };
+    },
   },
 });
 
 mock.module("@/lib/services/crm/lifecycle-touch-drain.service", {
   namedExports: {
     cancelPreCheckoutTouches: async (buyerId: string) => { ctrl.preCheckoutCancels.push(buyerId); return { canceled: 0, status: "OK" }; },
+    // Called first, so a buyer already enrolled on the retired rail does not receive
+    // every touch twice.
+    cancelDepositReminderTouches: async (buyerId: string) => { ctrl.legacyCancels.push(buyerId); return { canceled: 0, status: "OK" }; },
   },
 });
 
@@ -160,6 +170,7 @@ function req(body: Record<string, unknown> = {}): NextRequest {
 beforeEach(() => {
   ctrl = {
     enrollCalls: [],
+    legacyCancels: [],
     preCheckoutCancels: [],
     emitCalls: [],
     reviewRow: null,

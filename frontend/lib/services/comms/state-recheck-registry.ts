@@ -25,6 +25,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { OPEN_REQUEST_STATUSES } from "@/lib/services/vehicle-request/open-request.service";
 
 /** What the recheck saw and decided. */
 export type StateRecheckDecision = { proceed: true } | { proceed: false; reason: string };
@@ -144,6 +145,23 @@ export const PHASE_2_TEMPLATES = {
 export type Phase2TemplateKey = (typeof PHASE_2_TEMPLATES)[keyof typeof PHASE_2_TEMPLATES];
 
 /**
+ * Phase 3, §5c — the six-touch $99 series. The keys are the SAME strings the
+ * `lifecycle_touch_schedule` sequence names used, so an operator comparing an
+ * in-flight legacy row with a new outbox row sees one vocabulary.
+ */
+export const DEPOSIT_REMINDER_TEMPLATES = {
+  DEPOSIT_REMINDER_1: "deposit_reminder_1",
+  DEPOSIT_REMINDER_2: "deposit_reminder_2",
+  DEPOSIT_REMINDER_3: "deposit_reminder_3",
+  DEPOSIT_REMINDER_4: "deposit_reminder_4",
+  DEPOSIT_REMINDER_5: "deposit_reminder_5",
+  DEPOSIT_REMINDER_6: "deposit_reminder_6",
+} as const;
+
+export type DepositReminderTemplateKey =
+  (typeof DEPOSIT_REMINDER_TEMPLATES)[keyof typeof DEPOSIT_REMINDER_TEMPLATES];
+
+/**
  * A verified buyer no longer needs to be told to verify.
  *
  * `users` carries no email-verification column — verification lives in Supabase
@@ -199,6 +217,52 @@ const skipIfAlreadyClaimed: StateRecheckFn = async (ctx) => {
   return { proceed: true };
 };
 
+/**
+ * PAY-21 / PAY-23 — the $99 series must stop the moment the money question is answered
+ * OR the request it is about goes away.
+ *
+ * THREE READS, and the third is the one the rail it replaces never did.
+ *
+ *   1. THE REQUEST. `lifecycle_touch_schedule` keyed the series to the BUYER and its
+ *      guard read only deposits and account flags, so cancelling, closing or expiring
+ *      a request left the series chasing money for it. A request that is no longer
+ *      open is the clearest possible "stop".
+ *   2. THE MONEY, via `depositConversionResolved` — the guard the old rail used,
+ *      reused rather than reimplemented so the two cannot answer differently while
+ *      legacy rows are still draining. It stops on a PAID deposit, on no PENDING
+ *      deposit remaining (which is how REFUNDED, FAILED and DISPUTED all stop), and on
+ *      an administratively halted buyer.
+ *   3. FAIL CLOSED. No request reference, no request row, or a throw — none of those
+ *      is permission to ask someone for money.
+ *
+ * The dispute/refund HOLD is covered twice over and deliberately: `applyFulfillmentHold`
+ * cancels the rows outright by cancel key, and if that cancellation ever failed, the
+ * held deposit has left PENDING so this recheck refuses the send anyway. A cancelled
+ * row and a refused send are both silence; two independent paths to it is the right
+ * number for a message that would otherwise dun a buyer mid-chargeback.
+ */
+const skipIfDepositResolvedOrRequestClosed: StateRecheckFn = async (ctx) => {
+  if (!ctx.vehicleRequestId) {
+    return { proceed: false, reason: "deposit reminder with no vehicle request reference" };
+  }
+  const vr = await ctx.db.vehicleRequest.findUnique({
+    where: { id: ctx.vehicleRequestId },
+    select: { status: true },
+  });
+  if (!vr) return { proceed: false, reason: "vehicle request no longer exists" };
+  if (!OPEN_REQUEST_STATUSES.includes(vr.status)) {
+    return { proceed: false, reason: `request is ${vr.status} — no longer open` };
+  }
+
+  if (!ctx.recipientId) return { proceed: false, reason: "deposit reminder with no buyer reference" };
+  const { depositConversionResolved } = await import("@/lib/qstash/state");
+  if (await depositConversionResolved(ctx.recipientId)) {
+    return { proceed: false, reason: "deposit resolved — paid, no longer pending, or buyer halted" };
+  }
+
+  return { proceed: true };
+};
+
 /** An approval that has been renewed does not need its expiry warning. */
 const skipIfPrequalRenewed: StateRecheckFn = async (ctx) => {
   if (!ctx.recipientId) return { proceed: true };
@@ -240,3 +304,9 @@ registerStateRecheck(PHASE_2_TEMPLATES.PREQUAL_PROVIDER_DELAY, alwaysSend("a del
 registerStateRecheck(PHASE_2_TEMPLATES.PREQUAL_DECLINED, alwaysSend("adverse-action information is required regardless of any later state"), "compliance notice");
 registerStateRecheck(PHASE_2_TEMPLATES.PREQUAL_EXPIRING, skipIfPrequalRenewed);
 registerStateRecheck(PHASE_2_TEMPLATES.PREQUAL_EXPIRED, skipIfPrequalRenewed);
+
+// Phase 3 — the six §5c deposit reminders. All six share one recheck: they say the
+// same thing at six different times, so they stop for the same reasons.
+for (const key of Object.values(DEPOSIT_REMINDER_TEMPLATES)) {
+  registerStateRecheck(key, skipIfDepositResolvedOrRequestClosed);
+}

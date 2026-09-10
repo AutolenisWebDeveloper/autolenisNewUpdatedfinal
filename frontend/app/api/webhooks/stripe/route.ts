@@ -323,6 +323,27 @@ export async function POST(request: NextRequest) {
             } catch (err) {
               logger.error("[stripe/webhook] deposit reminder cancel failed:", err);
             }
+            // BOTH RAILS. Phase 3 moved the series to `comms_outbox`, keyed to the
+            // request; the call above still cancels rows in flight on the rail it
+            // replaced. Cancelling only one of them is how a paid buyer keeps being
+            // asked to pay — the send-time recheck would refuse each one, but a
+            // cancelled row is the cheaper and more honest silence.
+            if (effects.vehicleRequestId) {
+              try {
+                const { cancelByKey } = await import(
+                  "@/lib/services/comms/transactional-dispatcher.service"
+                );
+                const { depositReminderCancelKey } = await import(
+                  "@/lib/services/payment/deposit-reminder.service"
+                );
+                await cancelByKey(
+                  depositReminderCancelKey(effects.vehicleRequestId),
+                  "deposit_paid",
+                );
+              } catch (err) {
+                logger.error("[stripe/webhook] deposit outbox cancel failed:", err);
+              }
+            }
 
             // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were
             // never notified). Phase 3: this is now the LEGACY path, reached only while

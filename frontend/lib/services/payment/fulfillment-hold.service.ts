@@ -34,16 +34,11 @@ import {
   QueueItemConcurrencyError,
 } from "@/lib/services/operations/queue-item.service";
 import { cancelByKey } from "@/lib/services/comms/transactional-dispatcher.service";
+// The cancel handle is the PRODUCER's to define — one builder, so a key that
+// cancels nothing is impossible rather than merely unlikely.
+import { depositReminderCancelKey } from "@/lib/services/payment/deposit-reminder.service";
 
 type Db = typeof prisma | Prisma.TransactionClient;
-
-/**
- * One cancel handle per request, matching the Phase 2 convention
- * (`draft_recovery:<requestId>`), so the whole $99 series stops together.
- */
-export function depositCommsCancelKey(vehicleRequestId: string): string {
-  return `deposit_reminder:${vehicleRequestId}`;
-}
 
 /**
  * The §26 Finance exception for this provider reference.
@@ -143,7 +138,7 @@ export async function applyFulfillmentHold(
   }
   if (input.vehicleRequestId) {
     try {
-      const res = await cancelByKey(depositCommsCancelKey(input.vehicleRequestId), holdReason, db);
+      const res = await cancelByKey(depositReminderCancelKey(input.vehicleRequestId), holdReason, db);
       outboxCancelled = res.cancelled;
     } catch (err) {
       logger.error(`[fulfillment-hold] outbox cancellation failed for deposit ${input.depositId}:`, err);

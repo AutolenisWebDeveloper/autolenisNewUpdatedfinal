@@ -102,7 +102,19 @@ beforeEach(() => {
 // or reset flag row cannot silently kill the circle. The +1h delay is the internal
 // chain's own documented first-touch grace (the 86400 above mirrored the QStash
 // job's schedule, which no longer runs).
-test("deposit_reminder with the flag OFF still goes INTERNAL — QStash is never used", async () => {
+// PHASE 3 — deposit_reminder no longer routes anywhere from here.
+//
+// This asserted that the workload reached the internal lifecycle plane rather than the
+// removed QStash service. It now reaches NEITHER: §8.2 moved the $99 series to
+// `comms_outbox`, keyed to the Vehicle Request and drained every minute, and checkout
+// calls `enrollDepositReminders` directly. Leaving both rails able to enrol would send
+// a buyer all six touches twice, so the adapter stands down here and counts the
+// attempt — the counter is what makes a forgotten caller visible.
+//
+// The stand-down and its counter are pinned in `deposit-reminder-producer.test.ts`;
+// the new rail's cadence and guards in
+// `lib/services/payment/__tests__/deposit-reminder-outbox.test.ts`.
+test("deposit_reminder routes NOWHERE from the scheduler — the $99 series moved rails", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
     workload: "deposit_reminder",
@@ -111,16 +123,7 @@ test("deposit_reminder with the flag OFF still goes INTERNAL — QStash is never
     email: "b@x.com",
   });
   assert.equal(ctrl.dispatches.length, 0, "the removed service must never be targeted");
-  assert.equal(ctrl.enqueues.length, 1);
-  const e = ctrl.enqueues[0];
-  assert.equal(e.sequence, "deposit_reminder_1");
-  assert.equal(e.baseKey, "deposit-reminder:b1");
-  assert.equal(e.entityId, "b1");
-  // CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7):
-  // touch 1 is the "here's your link back", enqueued with NO delay, so runAt is
-  // left undefined and enqueueLifecycleTouch defaults it to now. This previously
-  // asserted ~now+1h, the grace the owner overruled.
-  assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
+  assert.equal(ctrl.enqueues.length, 0, "and the lifecycle rail must not enrol a second copy");
 });
 
 test("auction_active enqueues INTERNALLY, whatever the flag store says", async () => {
@@ -178,7 +181,7 @@ test("deal_complete enqueues internally, keyed on the deal", async () => {
 // ── flag ON → internal enqueue, correct mapping ─────────────────────────────
 // UPDATED (QStash removal): the flag is no longer consulted for this workload, so
 // setting it ON must be a no-op rather than the thing that enables delivery.
-test("deposit_reminder with the flag ON behaves identically — the flag is irrelevant now", async () => {
+test("the flag cannot bring the retired rail back for deposit_reminder", async () => {
   ctrl.enabled[MOCK_FLAGS.LIFECYCLE_INTERNAL_DEPOSIT_REMINDER] = true;
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload({
@@ -188,16 +191,7 @@ test("deposit_reminder with the flag ON behaves identically — the flag is irre
     email: "b@x.com",
   });
   assert.equal(ctrl.dispatches.length, 0);
-  assert.equal(ctrl.enqueues.length, 1);
-  const e = ctrl.enqueues[0];
-  assert.equal(e.sequence, "deposit_reminder_1");
-  assert.equal(e.baseKey, "deposit-reminder:b1");
-  assert.equal(e.entityId, "b1");
-  // CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7):
-  // touch 1 is the "here's your link back", enqueued with NO delay, so runAt is
-  // left undefined and enqueueLifecycleTouch defaults it to now. This previously
-  // asserted ~now+1h, the grace the owner overruled.
-  assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
+  assert.equal(ctrl.enqueues.length, 0, "the stand-down happens before the routing decision is even made");
 });
 
 test("auction_active ON → internal enqueue keyed on auction, immediate (runAt undefined)", async () => {

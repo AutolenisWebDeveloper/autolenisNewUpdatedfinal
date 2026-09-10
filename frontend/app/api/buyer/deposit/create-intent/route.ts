@@ -3,7 +3,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
-import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
+import { enrollDepositReminders } from "@/lib/services/payment/deposit-reminder.service";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 import { cancelPreCheckoutTouches } from "@/lib/services/crm/lifecycle-touch-drain.service";
 import { logger } from "@/lib/logger";
@@ -412,25 +412,57 @@ export async function POST(request: NextRequest) {
     // "$99 deposit" reminder sequence or the abandoned-deposit nurture. Only the
     // normal competitive path enrolls — everything below is gated on !concierge.
     if (!conciergeReviewToken) {
-      // Start the $99 deposit-conversion reminder via the lifecycle scheduler.
-      // THIS IS THE SINGLE ENROLLMENT OWNER for the chain — onboarding/complete
-      // used to enroll too and claimed the touch-1 row before any deposit existed.
-      // Routing is the internal lifecycle_touch plane, unconditionally (no flag).
-      // Self-stops once the deposit is PAID (send-time guard), so re-creating an
-      // intent is safe.
+      // Start the $99 deposit-conversion reminder. STILL the single enrollment owner
+      // for the chain — onboarding/complete used to enroll too and claimed the touch-1
+      // row before any deposit existed — but the RAIL has changed.
+      //
+      // It now writes six touches to `comms_outbox`, keyed to this Vehicle Request and
+      // drained every minute, instead of one `lifecycle_touch_schedule` row chained
+      // through a fifteen-minute drain and keyed to the buyer. §8.2 Phase 3: "the
+      // series runs on the every-minute outbox drain rather than the 15-minute touch
+      // drain". The words and the six offsets are the same ones; see
+      // `deposit-reminder.service.ts` for what changed and why.
+      //
+      // Any lifecycle rows still in flight for this buyer are cancelled first. Both
+      // rails enrolling would mean the buyer received every touch twice, and a buyer
+      // who was enrolled before this shipped and then returns to checkout is exactly
+      // the case that would produce it.
       const buyerContact = await prisma.buyer.findUnique({
         where: { id: buyer.id },
         select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
       });
-      if (buyerContact?.user?.email) {
+      if (buyerContact?.user?.email && openRequest) {
+        const email = buyerContact.user.email;
         // Best-effort tail — never affects the payment response.
-        scheduleLifecycleWorkload({
-          workload: "deposit_reminder",
-          buyerId: buyer.id,
-          firstName: buyerContact.firstName,
-          email: buyerContact.user.email,
-          phone: buyerContact.phone,
-        }).catch((err) => logger.error("[deposit/create-intent] reminder enrollment failed:", err));
+        void (async () => {
+          try {
+            const { cancelDepositReminderTouches } = await import(
+              "@/lib/services/crm/lifecycle-touch-drain.service"
+            );
+            await cancelDepositReminderTouches(buyer.id, { reason: "migrated_to_comms_outbox" });
+          } catch (err) {
+            logger.error("[deposit/create-intent] legacy reminder cancellation failed:", err);
+          }
+          try {
+            const res = await enrollDepositReminders({
+              buyerId: buyer.id,
+              vehicleRequestId: openRequest.id,
+              firstName: buyerContact.firstName,
+              email,
+              phone: buyerContact.phone,
+            });
+            if (res.smsSkippedReason) {
+              // Returned rather than swallowed: an SMS series that quietly became an
+              // email-only series is a capability that disappeared without saying so.
+              logger.warn(
+                `[deposit/create-intent] $99 series enrolled email-only for request ` +
+                  `${openRequest.id}: ${res.smsSkippedReason}`,
+              );
+            }
+          } catch (err) {
+            logger.error("[deposit/create-intent] reminder enrollment failed:", err);
+          }
+        })();
       }
 
       // HANDOFF: a competitive PENDING deposit now exists → the pre-checkout stage

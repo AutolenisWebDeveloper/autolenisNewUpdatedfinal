@@ -168,9 +168,24 @@ beforeEach(() => {
   nextId = 1;
 });
 
+// Straight to `enqueueLifecycleTouch`: Phase 3 retired `scheduleLifecycleWorkload` for
+// this workload and moved new enrolments to `comms_outbox`. This file still covers the
+// legacy rail's DRAIN, which in-flight production rows depend on, and writing the row
+// directly is what one of those rows is.
+async function enroll() {
+  const { enqueueLifecycleTouch } = await import("@/lib/services/crm/lifecycle-touch-drain.service");
+  await enqueueLifecycleTouch({
+    sequence: "deposit_reminder_1",
+    entityId: BUYER.buyerId,
+    firstName: BUYER.firstName,
+    email: BUYER.email,
+    phone: BUYER.phone ?? null,
+    baseKey: `deposit-reminder:${BUYER.buyerId}`,
+  });
+}
+
 test("abandoned deposit → touch 1 is scheduled IMMEDIATELY and is due at once", async () => {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
+  await enroll();
 
   assert.equal(table.length, 1, "the producer wrote a touch row");
   assert.equal(table[0]!.sequence, "deposit_reminder_1");
@@ -189,8 +204,7 @@ test("abandoned deposit → touch 1 is scheduled IMMEDIATELY and is due at once"
 });
 
 test("the drain walks ALL SIX touches in order and stops at the day-7 final notice", async () => {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
+  await enroll();
 
   const { drainDueLifecycleTouches } = await import("@/lib/services/crm/lifecycle-touch-drain.service");
 
@@ -220,8 +234,7 @@ test("the drain walks ALL SIX touches in order and stops at the day-7 final noti
 });
 
 test("a buyer who PAID before the drain runs is never chased", async () => {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
+  await enroll();
   deposits = [{ status: "PAID" }]; // paid between enrollment and the drain's pass
   fastForward();
 
@@ -234,8 +247,7 @@ test("a buyer who PAID before the drain runs is never chased", async () => {
 });
 
 test("an administratively halted buyer is never chased either", async () => {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
+  await enroll();
   buyerHalted = true;
   fastForward();
 
@@ -247,9 +259,8 @@ test("an administratively halted buyer is never chased either", async () => {
 });
 
 test("re-enrolling the same buyer does not duplicate the touch", async () => {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
-  await scheduleLifecycleWorkload(BUYER); // buyer restarts checkout
+  await enroll();
+  await enroll(); // buyer restarts checkout
 
   assert.equal(
     table.filter((r) => r.sequence === "deposit_reminder_1").length,

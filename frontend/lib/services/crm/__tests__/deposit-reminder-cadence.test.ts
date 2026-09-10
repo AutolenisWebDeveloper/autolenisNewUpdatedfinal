@@ -226,9 +226,26 @@ beforeEach(() => {
   process.env.RESEND_API_KEY = ""; // no email transport — see SCOPE LIMIT
 });
 
+// Enrolment goes straight to `enqueueLifecycleTouch` rather than through
+// `scheduleLifecycleWorkload`.
+//
+// Phase 3 moved NEW $99 enrolments to `comms_outbox` (see
+// `lib/services/payment/__tests__/deposit-reminder-outbox.test.ts`, which pins the
+// same cadence there) and the scheduler now stands down for this workload. What this
+// file still covers is the rail's DRAIN — the chaining, the guards and the TCPA gate
+// that in-flight production rows are draining through today, and will keep draining
+// through until the last one finishes. Writing the row directly is exactly what one of
+// those rows is; going through a producer that has been retired would test nothing.
 async function enroll() {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
+  const { enqueueLifecycleTouch } = await import("@/lib/services/crm/lifecycle-touch-drain.service");
+  await enqueueLifecycleTouch({
+    sequence: "deposit_reminder_1",
+    entityId: BUYER.buyerId,
+    firstName: BUYER.firstName,
+    email: BUYER.email,
+    phone: BUYER.phone ?? null,
+    baseKey: `deposit-reminder:${BUYER.buyerId}`,
+  });
 }
 
 async function drain() {

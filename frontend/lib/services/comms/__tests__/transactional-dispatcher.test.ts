@@ -92,6 +92,13 @@ mock.module("@/lib/prisma", {
 
 mock.module("@/lib/logger", { namedExports: { logger: { info: () => {}, warn: () => {}, error: () => {} } } });
 
+// The §5c deposit recheck reuses the guard the retired rail used, so the two cannot
+// answer differently while legacy rows are still draining.
+let depositResolved = false;
+mock.module("@/lib/qstash/state", {
+  namedExports: { depositConversionResolved: async () => depositResolved },
+});
+
 let deliverOutcome: string = "SUCCESS";
 let deliverThrows = false;
 let deliverCalls = 0;
@@ -560,4 +567,76 @@ test("an SMS payload is not subject to the email content rule", async () => {
     payload: { phone: "+15555550100", body: "hi" },
   });
   assert.equal(res.enqueued, true);
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAY-21 / PAY-23 — the §5c deposit reminders' state recheck.
+//
+// The rail this series moved from re-read the buyer's deposits and account flags and
+// NOTHING about the request, so cancelling a request left the series chasing money for
+// it. The recheck below reads both, and fails closed on anything it cannot establish.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function depositCtx(over: Record<string, unknown> = {}) {
+  const { prisma } = await import("@/lib/prisma");
+  return {
+    db: prisma,
+    templateKey: "deposit_reminder_3",
+    triggerEvent: "deposit_pending_reminder_3",
+    vehicleRequestId: "vr_1",
+    dealId: null,
+    auctionId: null,
+    recipientKind: "buyer",
+    recipientId: "buyer_1",
+    payload: {},
+    ...over,
+  };
+}
+
+test("all six deposit reminders are registered — an unregistered one cannot be enqueued at all", async () => {
+  const { hasStateRecheck, DEPOSIT_REMINDER_TEMPLATES } = await registry();
+  for (const key of Object.values(DEPOSIT_REMINDER_TEMPLATES)) {
+    assert.equal(hasStateRecheck(key), true, `${key} must have a recheck or enqueue throws`);
+  }
+});
+
+test("an OPEN request with an unresolved deposit proceeds", async () => {
+  depositResolved = false;
+  db.requests.set("vr_1", { id: "vr_1", status: "PAYMENT_REQUIRED" });
+  const { runStateRecheck } = await registry();
+  assert.deepEqual(await runStateRecheck((await depositCtx()) as never), { proceed: true });
+});
+
+test("a request that is no longer open STOPS the series — the defect the old guard had", async () => {
+  depositResolved = false;
+  db.requests.set("vr_1", { id: "vr_1", status: "CANCELLED" });
+  const { runStateRecheck } = await registry();
+  const d = await runStateRecheck((await depositCtx()) as never);
+  assert.equal(d.proceed, false);
+  assert.match((d as { reason: string }).reason, /CANCELLED/);
+});
+
+test("a resolved deposit stops it — paid, no longer pending, or the buyer was halted", async () => {
+  depositResolved = true;
+  db.requests.set("vr_1", { id: "vr_1", status: "PAYMENT_REQUIRED" });
+  const { runStateRecheck } = await registry();
+  const d = await runStateRecheck((await depositCtx()) as never);
+  assert.equal(d.proceed, false);
+  assert.match((d as { reason: string }).reason, /deposit resolved/);
+});
+
+test("it FAILS CLOSED: no request reference, no request row, no buyer reference", async () => {
+  depositResolved = false;
+  const { runStateRecheck } = await registry();
+
+  assert.equal((await runStateRecheck((await depositCtx({ vehicleRequestId: null })) as never)).proceed, false);
+  db.requests.delete("vr_1");
+  assert.equal((await runStateRecheck((await depositCtx()) as never)).proceed, false);
+  db.requests.set("vr_1", { id: "vr_1", status: "PAYMENT_REQUIRED" });
+  assert.equal(
+    (await runStateRecheck((await depositCtx({ recipientId: null })) as never)).proceed,
+    false,
+    "none of these is permission to ask someone for money",
+  );
 });
