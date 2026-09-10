@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/prisma";
-import {
-  sendDealerStaleListingRemovalEmail,
-  sendDealerInventorySyncFailureEmail,
-} from "@/lib/services/email/resend.service";
+import { DEALER_STALE_LISTING_REMOVAL_SUBJECT, renderDealerStaleListingRemovalEmail } from "@/lib/services/email/templates/dealer-stale-listing-removal";
+import { DEALER_INVENTORY_SYNC_FAILURE_SUBJECT, renderDealerInventorySyncFailureEmail } from "@/lib/services/email/templates/dealer-inventory-sync-failure";
+import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
+import { INVENTORY_DEALER_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { sweepStaleInventory, staleSweepWhere, sweepMode } from "@/lib/services/inventory/stale-sweep.service";
 
@@ -67,12 +67,31 @@ export async function GET(request: NextRequest) {
         include: { user: { select: { email: true } } },
       });
       if (!dealer?.user?.email) continue;
-      await sendDealerStaleListingRemovalEmail({
+      // §27 / jobs/I-22: through the durable outbox, never the direct rail. The direct
+      // rail applies NO suppression, so a dealer who bounced or unsubscribed was
+      // re-emailed on every sweep — nightly, forever. The dispatcher checks suppression
+      // on every send and re-reads dealer status at dispatch.
+      //
+      // The key carries the DAY, not Date.now(). The retired direct call used a
+      // millisecond timestamp, which made its "idempotency" key unique on every run and
+      // therefore no idempotency at all.
+      await enqueueTransactional({
+        triggerEvent: "inventory.stale_listings_removed",
+        templateKey: INVENTORY_DEALER_TEMPLATES.STALE_LISTING_REMOVAL,
+        channel: "email",
+        recipientKind: "dealer",
+        recipientId: dealerId,
         to: dealer.user.email,
-        contactName: dealer.dealershipName,
-        affectedVehicles: vehicles.slice(0, 25),
-        reason: "Listings were not seen in your feed for over 48 hours.",
-        inventoryUrl: `${APP_URL}/dealer/inventory`,
+        idempotencyKey: `${INVENTORY_DEALER_TEMPLATES.STALE_LISTING_REMOVAL}:${dealerId}:${now.toISOString().slice(0, 10)}`,
+        payload: {
+          subject: DEALER_STALE_LISTING_REMOVAL_SUBJECT,
+          html: renderDealerStaleListingRemovalEmail({
+            contactName: dealer.dealershipName,
+            affectedVehicles: vehicles.slice(0, 25),
+            reason: "Listings were not seen in your feed for over 48 hours.",
+            inventoryUrl: `${APP_URL}/dealer/inventory`,
+          }),
+        },
       }).catch(() => {});
     }
 
@@ -108,12 +127,26 @@ export async function GET(request: NextRequest) {
         continue;
       }
       const lastSync = dealer.feedConfig.lastSyncAt.toISOString().slice(0, 10);
-      await sendDealerInventorySyncFailureEmail({
+      // Onto the dispatcher, with a recheck that skips when the feed recovered between
+      // this sweep and the drain — the canonical §27 case, and one the direct rail
+      // (which the route comment above notes "has no suppression") could not express.
+      await enqueueTransactional({
+        triggerEvent: "inventory.dealer_feed_no_data",
+        templateKey: INVENTORY_DEALER_TEMPLATES.INVENTORY_SYNC_FAILURE,
+        channel: "email",
+        recipientKind: "dealer",
+        recipientId: dealer.id,
         to: dealer.user.email,
-        contactName: dealer.dealershipName,
-        lastSuccessfulSync: lastSync,
-        errorCategory: "FEED_NO_DATA",
-        feedSetupUrl: `${APP_URL}/dealer/inventory/feed`,
+        idempotencyKey: `${INVENTORY_DEALER_TEMPLATES.INVENTORY_SYNC_FAILURE}:${dealer.id}:${now.toISOString().slice(0, 10)}`,
+        payload: {
+          subject: DEALER_INVENTORY_SYNC_FAILURE_SUBJECT,
+          html: renderDealerInventorySyncFailureEmail({
+            contactName: dealer.dealershipName,
+            lastSuccessfulSync: lastSync,
+            errorCategory: "FEED_NO_DATA",
+            feedSetupUrl: `${APP_URL}/dealer/inventory/feed`,
+          }),
+        },
       }).catch(() => {});
       feedFailureEmails++;
     }

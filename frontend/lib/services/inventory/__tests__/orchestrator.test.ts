@@ -24,6 +24,7 @@ const calls = {
   itemFindMany: [] as Call[],
   itemFindFirst: [] as Call[],
   notifications: [] as Call[],
+  queueItems: [] as Call[],
 };
 let existingAlert: unknown = null;
 let ledgerRefuses = false;
@@ -78,6 +79,33 @@ mock.module("@/lib/prisma", {
         findFirst: async () => existingAlert,
         create: async ({ data }: Call) => { calls.notifications.push(data as Call); return { id: "n_1" }; },
       },
+      // PHASE 4 RE-FIXTURE. The budget alert and the sweep-shortfall alert are §26
+      // EXCEPTIONS now, written to `queue_items` through the single writer, not bare
+      // Notifications. §26 requires each to name an owner, a buyer-visible status, a
+      // required action, a deadline and a return point; a Notification carries none of
+      // those and lands in a table nothing routes from. The health-ratio alert stays a
+      // Notification deliberately — §26 has no row for it — which is why both sinks are
+      // mocked and the tests below say which one they mean.
+      queueItem: {
+        // Models the PARTIAL UNIQUE INDEX on `idempotency_key`, because that is where the
+        // dedup actually lives now. raiseException creates, catches P2002 and reads the
+        // holder; a mock that never conflicts would let a duplicate through and report
+        // green — which is the shape of bug this whole area is about.
+        create: async ({ data }: Call) => {
+          const key = (data as Record<string, unknown>).idempotencyKey;
+          if (key && calls.queueItems.some((q) => (q as Record<string, unknown>).idempotencyKey === key)) {
+            const e = new Error(`Unique constraint failed on idempotency_key`) as Error & { code?: string };
+            e.code = "P2002";
+            throw e;
+          }
+          const row = { ...(data as Record<string, unknown>), id: `q_${calls.queueItems.length + 1}` };
+          calls.queueItems.push(row as Call);
+          return row;
+        },
+        findFirst: async ({ where }: { where: { idempotencyKey?: string } }) =>
+          calls.queueItems.find((q) => (q as Record<string, unknown>).idempotencyKey === where.idempotencyKey) ?? null,
+        updateMany: async () => ({ count: 1 }),
+      },
     },
   },
 });
@@ -92,7 +120,7 @@ const origKey = process.env.MARKETCHECK_API_KEY;
 beforeEach(() => {
   calls.itemUpsert = []; calls.itemCreate = []; calls.syncRun = []; calls.sourceUpsert = []; calls.sourceUpdate = [];
   calls.itemUpdateMany = []; calls.itemFindMany = []; calls.itemFindFirst = [];
-  calls.notifications = []; existingAlert = null; ledgerRefuses = false;
+  calls.notifications = []; calls.queueItems = []; existingAlert = null; ledgerRefuses = false;
   calls.sourceFindUnique = []; ledgerUsed = 0; readFailure = false;
   existingItem = null;
 });
@@ -298,8 +326,10 @@ test("a fully budget-exhausted sweep alerts — it is excluded from health, so n
   assert.equal(result.healthScore, null, "excluded from the denominator, never scored 0");
   assert.equal(result.attemptedSources, 0, "zero calls is not an attempt");
   assert.equal(calls.syncRun[0]!.status, "BUDGET_EXHAUSTED");
-  assert.equal(calls.notifications.length, 1, "exactly one alert");
-  assert.match(String(calls.notifications[0]!.title), /budget exhausted/i);
+  assert.equal(calls.queueItems.length, 1, "exactly one exception");
+  assert.equal(String(calls.queueItems[0]!.exceptionCode), "INVENTORY_PROVIDER_BUDGET_CEILING");
+  assert.match(String(calls.queueItems[0]!.requiredAction), /budget exhausted/i);
+  assert.equal(calls.notifications.length, 0, "and NOT a bare Notification — §26 wants the five facts");
 });
 
 test("a sweep that crosses 80% of the budget warns while there is still room to act", async () => {
@@ -311,10 +341,12 @@ test("a sweep that crosses 80% of the budget warns while there is still room to 
   const { runInventorySync } = await load();
   await runInventorySync({}, "full");
 
-  assert.equal(calls.notifications.length, 1, "exactly one warning");
-  assert.match(String(calls.notifications[0]!.title), /80%/);
-  assert.match(String(calls.notifications[0]!.body), /340 of 400/);
-  assert.doesNotMatch(String(calls.notifications[0]!.title), /exhausted/i);
+  assert.equal(calls.queueItems.length, 1, "exactly one warning");
+  assert.equal(String(calls.queueItems[0]!.exceptionCode), "INVENTORY_PROVIDER_BUDGET_CEILING");
+  assert.match(String(calls.queueItems[0]!.requiredAction), /80%/);
+  assert.match(String(calls.queueItems[0]!.requiredAction), /340 of 400/);
+  assert.doesNotMatch(String(calls.queueItems[0]!.idempotencyKey), /EXHAUSTED/,
+    "the WARNING level, not the exhaustion — they are different events and both must be seeable");
 });
 
 test("a healthy budget stays silent and costs no alert query", async () => {
@@ -323,7 +355,8 @@ test("a healthy budget stays silent and costs no alert query", async () => {
   ledgerUsed = 12;
   const { runInventorySync } = await load();
   await runInventorySync({}, "full");
-  assert.equal(calls.notifications.length, 0, "a healthy sweep must not page anyone");
+  assert.equal(calls.queueItems.length, 0, "a healthy sweep must not page anyone");
+  assert.equal(calls.notifications.length, 0);
 });
 
 test("the month-to-date read happens AFTER the run, so this sweep's calls are counted", async () => {
@@ -350,8 +383,8 @@ test("a ledger read failure cannot silence the EXHAUSTED alert", async () => {
   const { runInventorySync } = await load();
   const result = await runInventorySync({}, "full");
   assert.equal(result.outcome, "BUDGET_EXHAUSTED");
-  assert.equal(calls.notifications.length, 1, "still alerted despite the failed read");
-  assert.match(String(calls.notifications[0]!.title), /budget exhausted/i);
+  assert.equal(calls.queueItems.length, 1, "still alerted despite the failed read");
+  assert.match(String(calls.queueItems[0]!.requiredAction), /budget exhausted/i);
 });
 
 test("the budget alert is deduped to once per cycle, not once per run", async () => {
@@ -359,8 +392,11 @@ test("the budget alert is deduped to once per cycle, not once per run", async ()
   globalThis.fetch = (async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ listings: [] }) })) as unknown as typeof fetch;
   const { runInventorySync } = await load();
   ledgerRefuses = true;
-  existingAlert = { id: "already_alerted" };   // the cycle already raised one
+  // TWO sweeps in one cycle. Deduplication is `raiseException`'s own — keyed, indexed and
+  // race-safe — rather than a find/create pair this service owned, so the honest way to
+  // exercise it is to run the thing twice rather than to pre-seed a sentinel.
   await runInventorySync({}, "full");
-  assert.equal(calls.notifications.length, 0,
-    "a month-long exhaustion must produce ONE greppable alert, not thirty");
+  await runInventorySync({}, "full");
+  assert.equal(calls.queueItems.length, 1,
+    "a month-long exhaustion must produce ONE greppable exception, not thirty");
 });

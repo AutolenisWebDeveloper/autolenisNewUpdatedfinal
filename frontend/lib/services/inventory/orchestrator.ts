@@ -16,6 +16,7 @@
 // TrueCar, Edmunds web-scrape stubs — they returned [] and inflated healthScore.
 
 import { logger } from "@/lib/logger";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 import {
   resolveListingRooftops,
   type ListingDealerFacts,
@@ -182,6 +183,47 @@ export interface OrchestratorRunResult {
   rooftopResolution: ResolutionResult | null;
   startedAt: Date;
   completedAt: Date;
+}
+
+/**
+ * Should this run be RECORDED as failed, even though `runInventorySync` resolved?
+ *
+ * THE DEFECT THIS CLOSES, WHICH WAS LIVE. `withCronRun` wrote COMPLETED whenever the work
+ * resolved, and a sweep reports its own failure INSIDE the resolved result. Verified in
+ * production 2026-09-10: `inventory_sources.last_run_status = FAILED`,
+ * `vehicles_last_count = 0`, last run 08:00:07 that morning — the sweep failing daily while
+ * the cron log said COMPLETED and `detectFailedCrons`, which filters on
+ * `CronJobLog.status`, saw nothing. The same defect class as the 191-run silent freeze,
+ * one layer up.
+ *
+ * WHICH OUTCOMES COUNT AS FAILURE, and why the list is not simply "not SUCCESS":
+ *
+ *   FAILED             yes — including a yield downgrade, which is the §26 E26-18 case
+ *   PARTIAL            yes — some sources failed; a run that half-worked is not a green run
+ *   DEFERRED           yes — a 429 or a 5xx. Recorded as failure precisely BECAUSE it is
+ *                      transient: 191 consecutive transient runs is what "silently frozen"
+ *                      looked like, and each one individually excusable is how it lasted
+ *                      seven days.
+ *   BUDGET_EXHAUSTED   NO  — we declined to spend. Nothing failed; the cap did its job, and
+ *                      the budget exception already tells Operations separately.
+ *   ZERO_RESULTS       NO  — the provider answered and the market was empty. A legitimate
+ *                      business result, and the anti-fake-success primitive exists to keep
+ *                      it distinct from a failure.
+ *   NOT_CONFIGURED     NO  — an ops configuration gap, not a health incident. Recording it
+ *                      as a failed run would make an intentionally disabled source page
+ *                      someone every night.
+ */
+export function assessSyncRun(result: OrchestratorRunResult): { failed: boolean; error?: string } {
+  const failing: OrchestratorRunResult["outcome"][] = ["FAILED", "PARTIAL", "DEFERRED"];
+  if (!failing.includes(result.outcome)) return { failed: false };
+  const reasons = result.adapterResults
+    .filter((r) => r.outcome === "FAILED" || r.outcome === "DEFERRED" || r.outcome === "PARTIAL")
+    .map((r) => `${r.adapter}: ${r.outcome}${r.error ? ` — ${r.error}` : ""}`)
+    .join("; ");
+  return {
+    failed: true,
+    error: `inventory sync outcome ${result.outcome}${reasons ? ` (${reasons})` : ""}`,
+  };
 }
 
 // Roll a set of per-adapter outcomes into one run-level outcome.
@@ -585,8 +627,50 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     await raiseBudgetAlert(snapshot);
   }
 
+  // ── E26-18 / V22 — a run that swept less than it claimed is a FAILED run ──────────
+  //
+  // §26: "Sweep returns fewer listings than expected -> treat as a failed run, not a
+  // successful one; investigate before the catalogue decays."
+  //
+  // classifyYield already reaches that verdict — it downgrades a claimed SUCCESS to FAILED
+  // on a coverage shortfall or a normalization collapse, measured against the PROVIDER's own
+  // num_found so a genuinely small market cannot produce a false alarm. What was missing is
+  // the consequence: the verdict lived in the returned payload and in nothing an operator
+  // watches. Now it opens an Ops exception, which is the one signal that escapes the cron
+  // log — and the cron log is itself the thing that was lying (see the assess() note in
+  // cron-monitor.service.ts).
+  //
+  // Deduped per source per DAY, not per run: a broken sweep fails every run, and one row a
+  // day is a queue while one row a run is a flood that trains Operations to ignore it.
+  for (const r of adapterResults) {
+    if (r.outcome !== "FAILED") continue;
+    // A radius refusal is a configuration defect with its own message; a coverage shortfall
+    // is a decay. Both are this exception — the required action is the same — but the detail
+    // must say which, because the fixes are not the same.
+    const day = new Date().toISOString().slice(0, 10);
+    await raiseException({
+      code: "INVENTORY_SWEEP_SHORTFALL",
+      idempotencyKey: `INVENTORY_SWEEP_SHORTFALL:${r.adapter}:${day}`,
+      detail:
+        `${r.adapter}: ${r.error ?? "no reason recorded"}. ` +
+        `Received ${r.rawListings ?? 0} raw listings across ${r.pagesFetched ?? 0} pages ` +
+        `against a provider num_found of ${r.numFound ?? "unknown"}; ` +
+        `${r.vehicles.length} survived normalization` +
+        (r.outOfRadiusDropped ? `, ${r.outOfRadiusDropped} rejected as outside the ${r.market?.radiusMiles ?? "?"}-mile radius` : "") +
+        `. Stop reason: ${r.stopReason ?? "unknown"}.`,
+    }).catch((e: unknown) => {
+      // Never break ingestion to report on ingestion.
+      logger.warn("[inventory-orchestrator] sweep-shortfall exception failed to raise:", e);
+    });
+  }
+
   // ENH-14: Alert only on a genuine failure among sources that actually ran — never
   // for an unconfigured source (that is an ops config gap, not a health incident).
+  //
+  // Kept as a Notification deliberately, and NOT folded into the loop above. This is a
+  // different fact: the shortfall exception is per-SOURCE and says a specific sweep decayed,
+  // while this is the cross-source health ratio. §26 has a row for the first and none for
+  // the second, and inventing an exception code for it would be building past the register.
   if (healthScore !== null && healthScore < 70 && attemptedSources > 0) {
     await prisma.notification.create({
       data: {
