@@ -427,9 +427,18 @@ function CoBuyerForm({
         <span>{consentText || "I have this person's permission to share their details."}</span>
       </label>
 
+      {/* THE PHRASE IS DELIBERATELY NOT RENDERED, and this is not squeamishness.
+          `lib/security/__tests__/no-ssn-intake.test.ts` is a §0 build-failing control that fails
+          on a rendered "Social Security" string anywhere a buyer or dealer can reach, because a
+          rendered label is how one gets collected. It cannot tell a promise from a prompt, and
+          it should not have to: the safer reading of an ambiguous string on a form is the strict
+          one. The guard is correct and is left exactly as strict as it was; the copy carries the
+          same reassurance in words that are not a field label. The full statement — we never ask
+          for a co-buyer's Social Security number, and they provide it to the lender directly at
+          financing — lives here, in the comment channel that guard's own header reserves for it. */}
       <p className="text-xs text-slate-500">
-        We never ask for a co-buyer&rsquo;s Social Security number. They give that to the lender
-        themselves, later.
+        We never ask for a co-buyer&rsquo;s identity numbers. Anything the lender needs, they
+        collect from your co-buyer directly.
       </p>
 
       <div className="flex gap-2">
