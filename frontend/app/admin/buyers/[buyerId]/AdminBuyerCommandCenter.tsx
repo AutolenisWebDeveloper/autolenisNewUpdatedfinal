@@ -130,6 +130,21 @@ interface Props {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * The POST /api/admin/buyers/[buyerId]/plan payload. Declared here rather than imported
+ * because the route is a server module; the shape is asserted against it by
+ * `app/api/admin/buyers/__tests__/plan-route.test.ts`.
+ */
+interface PlanChangeResponse {
+  buyer: { id: string; plan: string; planUpgradedAt: string | null };
+  downgrade:
+    | { kind: "ELECTION_ONLY"; conciergeReleased: boolean; snapshotId: string | null }
+    | { kind: "REFUND_REVIEW_RAISED"; settledPremiumCents: number; snapshotId: string | null }
+    | null;
+  planServiceError: string | null;
+}
+
+
 function fmtCents(cents: number | null | undefined): string {
   if (cents == null) return "—";
   return "$" + (cents / 100).toLocaleString();
@@ -815,22 +830,90 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
   const depositTotal = deposits.filter((d) => d.status === "PAID").reduce((s, d) => s + d.amountCents, 0);
   const failedDeposits = deposits.filter((d) => d.status === "FAILED");
 
-  const showToast = (msg: string, type: "success" | "error" = "success") => {
+  const showToast = (msg: string, type: "success" | "error" = "success", durationMs = 4000) => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), durationMs);
   };
 
-  const handleSuccess = (msg: string) => {
+  /**
+   * `holdMs` delays the reload for outcomes the admin has to READ, not just see.
+   * The default 1200ms reload wipes the toast a second after it appears, which is fine
+   * for "Note added" and wrong for "a Finance refund review is now open" — the fact is
+   * not on the page that replaces it.
+   */
+  const handleSuccess = (msg: string, holdMs = 1200) => {
     setModal(null);
-    showToast(msg);
+    showToast(msg, "success", Math.max(4000, holdMs));
     // Trigger page refresh
     setRefreshing(true);
-    setTimeout(() => window.location.reload(), 1200);
+    setTimeout(() => window.location.reload(), holdMs);
   };
 
-  async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
-    await api.post("/api/admin/buyers/" + buyer.id + "/" + endpoint, body);
-    handleSuccess(successMsg);
+  /**
+   * `successMsg` may be a function of the response payload. Most actions have nothing
+   * to report beyond "it worked", but a few — the plan change below — answer with an
+   * OUTCOME that differs from the request, and discarding it left the admin reading a
+   * flat success for a partial one.
+   */
+  async function doAction<T = unknown>(
+    endpoint: string,
+    body: Record<string, string>,
+    successMsg: string | ((data: T) => { msg: string; holdMs?: number }),
+  ): Promise<T> {
+    const data = await api.post<T>("/api/admin/buyers/" + buyer.id + "/" + endpoint, body);
+    if (typeof successMsg === "string") handleSuccess(successMsg);
+    else {
+      const { msg, holdMs } = successMsg(data);
+      handleSuccess(msg, holdMs);
+    }
+    return data;
+  }
+
+  /**
+   * §23.1 / §23.3 — SAY WHAT ACTUALLY HAPPENED.
+   *
+   * Found by the second independent review: the route returns `downgrade` and
+   * `planServiceError`, and this screen threw both away and showed "Buyer downgraded to
+   * Standard" either way. Two outcomes were therefore invisible to the person who had
+   * just made the decision:
+   *
+   *   • REFUND_REVIEW_RAISED — the $400 had already settled, so §22.1's manual review is
+   *     now open. NOTHING was refunded. An admin who reads a flat success may well tell
+   *     the buyer their money is on the way.
+   *   • planServiceError — the plan flag and the audit row committed, but the snapshot,
+   *     the concierge release or the Finance review did not. That is a partial success
+   *     and it needs following up by hand; the retry answers NO_CHANGE.
+   */
+  function describePlanChange(plan: "PREMIUM" | "STANDARD") {
+    return (data: PlanChangeResponse) => {
+      if (data.planServiceError) {
+        return {
+          msg:
+            `Plan set to ${plan} and recorded in the audit log, but the follow-up work failed ` +
+            `(${data.planServiceError}). The election, concierge release or Finance review may be ` +
+            `incomplete — check before telling the buyer anything else.`,
+          holdMs: 9000,
+        };
+      }
+      if (data.downgrade?.kind === "REFUND_REVIEW_RAISED") {
+        return {
+          msg:
+            `Buyer downgraded to Standard. The ${fmtCents(data.downgrade.settledPremiumCents)} ` +
+            `Premium fee had already settled, so a Finance refund review is now open. NO money has ` +
+            `been refunded — that decision is Finance's.`,
+          holdMs: 9000,
+        };
+      }
+      if (data.downgrade?.kind === "ELECTION_ONLY") {
+        return {
+          msg: data.downgrade.conciergeReleased
+            ? "Buyer downgraded to Standard. Concierge released and ownership returned to the Operations pool."
+            : "Buyer downgraded to Standard. No Premium fee had settled, so there is nothing to refund.",
+          holdMs: 4500,
+        };
+      }
+      return { msg: plan === "PREMIUM" ? "Buyer upgraded to Premium" : "Buyer downgraded to Standard" };
+    };
   }
 
   const tabs = [
@@ -868,8 +951,8 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
     <div className="min-h-screen bg-slate-50" data-testid="admin-buyer-command-center">
       {/* Toast */}
       {toast && (
-        <div className={"fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm shadow-xl font-medium flex items-center gap-2 max-w-sm " + (toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white")}>
-          {toast.type === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+        <div className={"fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm shadow-xl font-medium flex items-start gap-2 max-w-sm " + (toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white")}>
+          {toast.type === "success" ? <CheckCircle2 size={15} className="shrink-0" /> : <AlertTriangle size={15} className="shrink-0" />}
           <span>{toast.msg}</span>
           {refreshing && <RefreshCw size={13} className="animate-spin ml-1" />}
         </div>
@@ -1043,7 +1126,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           description={`Upgrade ${buyer.firstName} ${buyer.lastName} to the PREMIUM plan? Premium benefits apply immediately.`}
           submitLabel="Upgrade to Premium" requireReason
           onCancel={() => setModal(null)}
-          onConfirm={async (reason) => { await doAction("plan", { plan: "PREMIUM", reason }, "Buyer upgraded to Premium"); }}
+          onConfirm={async (reason) => { await doAction<PlanChangeResponse>("plan", { plan: "PREMIUM", reason }, describePlanChange("PREMIUM")); }}
         />
       )}
       {modal === "downgradePlan" && (
@@ -1052,7 +1135,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           description={`Downgrade ${buyer.firstName} ${buyer.lastName} to the STANDARD plan? This removes Premium benefits immediately.`}
           submitLabel="Downgrade to Standard" destructive requireReason
           onCancel={() => setModal(null)}
-          onConfirm={async (reason) => { await doAction("plan", { plan: "STANDARD", reason }, "Buyer downgraded to Standard"); }}
+          onConfirm={async (reason) => { await doAction<PlanChangeResponse>("plan", { plan: "STANDARD", reason }, describePlanChange("STANDARD")); }}
         />
       )}
       {modal === "overrideDeposit" && (

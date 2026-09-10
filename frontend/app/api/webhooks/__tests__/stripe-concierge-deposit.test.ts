@@ -14,7 +14,7 @@ import { NextRequest } from "next/server";
 type EventRow = { eventId: string; eventType: string; processed: boolean };
 type DepositRow = {
   id: string; buyerId: string; stripePaymentIntentId: string | null;
-  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED"; amountCents: number;
+  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED" | "DISPUTED"; amountCents: number;
 };
 
 interface Db {
@@ -250,4 +250,29 @@ test("a late CANCELLATION never downgrades a PAID concierge deposit either", asy
   const res = await deliver("evt_c5b", "payment_intent.canceled", CONCIERGE_PI);
   assert.equal(res.status, 200);
   assert.equal(db.deposits[0].status, "PAID");
+});
+
+
+// The same gate as the standard branch, and it was missing here first. The flip is
+// scoped by `SETTLE_FROM`, and the conversion below it ran regardless of whether the
+// flip matched: a late success for a concierge deposit that had since been refunded
+// would convert the curated review into a CLOSED auction and tell the buyer "your
+// offers are ready" for money that had already gone back.
+test("a late success on a REFUNDED concierge deposit converts NOTHING", async () => {
+  db.deposits[0].status = "REFUNDED";
+  const res = await deliver("evt_late", "payment_intent.succeeded", CONCIERGE_PI);
+
+  assert.equal(res.status, 200, "acknowledged — retrying cannot fix an out-of-order delivery");
+  assert.equal(db.deposits[0].status, "REFUNDED");
+  assert.equal(convertCalls.length, 0, "the review must not become a closed auction");
+  assert.equal(db.notifications.length, 0, "and the buyer is never told their offers are ready");
+});
+
+test("a late success on a DISPUTED concierge deposit converts nothing either", async () => {
+  db.deposits[0].status = "DISPUTED";
+  const res = await deliver("evt_late2", "payment_intent.succeeded", CONCIERGE_PI);
+
+  assert.equal(res.status, 200);
+  assert.equal(db.deposits[0].status, "DISPUTED");
+  assert.equal(convertCalls.length, 0);
 });

@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { logger } from "@/lib/logger";
 import { downgradeToStandard, assignConcierge } from "@/lib/services/plan/plan-change.service";
 import { recordRequestPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
 import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
@@ -52,6 +53,23 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   if (oldPlan === plan) return adminError("NO_CHANGE", `Buyer is already on ${plan} plan`, 400);
 
+  // VALIDATE THE CONCIERGE BEFORE ANY WRITE.
+  //
+  // Found by the second independent review: this is a client-supplied string written to
+  // `vehicle_requests.assigned_admin_id`, which is foreign-keyed to `admins`. A typo
+  // produced a P2003 AFTER the plan flag had already committed — leaving the buyer
+  // changed with no audit row, and unable to be retried, because the very next attempt
+  // answers NO_CHANGE. Checked here, where the answer is a 400 and nothing has moved.
+  if (parsed.data.conciergeAdminId) {
+    const conciergeAdmin = await prisma.admin.findUnique({
+      where: { id: parsed.data.conciergeAdminId },
+      select: { id: true },
+    });
+    if (!conciergeAdmin) {
+      return adminError("VALIDATION_ERROR", "conciergeAdminId does not name an admin", 400);
+    }
+  }
+
   const now = new Date();
   const updated = await prisma.buyer.update({
     where: { id: buyerId },
@@ -60,6 +78,29 @@ export async function POST(request: NextRequest, { params }: Props) {
       planUpgradedAt: plan === "PREMIUM" ? now : null,
     },
     select: { id: true, plan: true, planUpgradedAt: true },
+  });
+
+  const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;
+
+  // THE AUDIT ROW GOES FIRST, immediately after the flag it records.
+  //
+  // It used to be written after the plan services below, so a throw in any of them left
+  // the buyer's plan changed with NO audit trail at all — and unrecoverable, because the
+  // retry answers NO_CHANGE. The audit row is the record that an admin made this
+  // decision; it must not be contingent on the work that follows it succeeding.
+  await prisma.adminAuditLog.create({
+    data: {
+      adminId: admin.adminId,
+      adminEmail: admin.email,
+      action: "BUYER_PLAN_CHANGED",
+      entityType: "Buyer",
+      entityId: buyerId,
+      reason,
+      previousState: { plan: oldPlan },
+      newState: { plan },
+      ipAddress: ipAddress ?? null,
+      metadata: { buyerEmail: buyer.user.email },
+    },
   });
 
   // §23.1 / §23.3 — THE PLAN CHANGE IS RECORDED, AND A DOWNGRADE DOES MORE THAN A FLAG.
@@ -74,7 +115,13 @@ export async function POST(request: NextRequest, { params }: Props) {
   // A buyer with no open request still gets the flag change and the audit row: the
   // election has nothing to bind to, and refusing an admin action for that would be
   // worse than recording it at buyer level alone.
+  //
+  // The service work is reported, not thrown. The flag and the audit row have already
+  // committed; failing the whole action here would tell the admin nothing happened when
+  // something did, and the retry would answer NO_CHANGE.
   let downgrade: Awaited<ReturnType<typeof downgradeToStandard>> | null = null;
+  let planServiceError: string | null = null;
+  try {
   const openRequest = await findOpenRequest(buyerId);
   if (openRequest) {
     if (plan === "STANDARD") {
@@ -103,23 +150,10 @@ export async function POST(request: NextRequest, { params }: Props) {
       }
     }
   }
-
-  const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;
-
-  await prisma.adminAuditLog.create({
-    data: {
-      adminId: admin.adminId,
-      adminEmail: admin.email,
-      action: "BUYER_PLAN_CHANGED",
-      entityType: "Buyer",
-      entityId: buyerId,
-      reason,
-      previousState: { plan: oldPlan },
-      newState: { plan },
-      ipAddress: ipAddress ?? null,
-      metadata: { buyerEmail: buyer.user.email },
-    },
-  });
+  } catch (err) {
+    planServiceError = err instanceof Error ? err.message : "plan services failed";
+    logger.error(`[admin/plan] plan services failed for buyer ${buyerId} after the flag committed:`, err);
+  }
 
   return adminSuccess({
     buyer: { id: updated.id, plan: updated.plan, planUpgradedAt: updated.planUpgradedAt },
@@ -127,5 +161,8 @@ export async function POST(request: NextRequest, { params }: Props) {
     // open. NOTHING was refunded — the admin UI must say so rather than implying money
     // moved.
     downgrade,
+    // Non-null when the flag and the audit row landed but the snapshot, the concierge
+    // release or the Finance review did not. The admin needs to know the difference.
+    planServiceError,
   });
 }

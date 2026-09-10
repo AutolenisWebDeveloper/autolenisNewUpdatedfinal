@@ -569,7 +569,23 @@ export async function POST(request: NextRequest) {
               where: { stripePaymentIntentId: pi.id },
               include: { buyer: { include: { user: { select: { email: true } } } } },
             });
-            if (!deposit) return { deposit: null, auctionId: null, offerCount: 0, reused: false };
+            if (!deposit) return { deposit: null, auctionId: null, offerCount: 0, reused: false, notSettleable: false };
+
+            // THE SAME GATE AS THE STANDARD BRANCH, and for the same reason. The flip
+            // above is correctly scoped by `SETTLE_FROM`, and the conversion below ran
+            // regardless of whether it matched: a late `payment_intent.succeeded` for a
+            // concierge deposit that had since been refunded or disputed would convert
+            // the review into a CLOSED auction and tell the buyer "your offers are
+            // ready" for money that had gone back. Fixing only the standard branch would
+            // have left the twin doing exactly what the fix was for.
+            if (deposit.status !== "PAID") {
+              logger.warn(
+                `[stripe/webhook] concierge payment_intent.succeeded for ${pi.id} left deposit ` +
+                  `${deposit.id} at ${deposit.status} — the transition matrix refused it. No conversion, ` +
+                  `no notification, no email.`,
+              );
+              return { deposit, auctionId: null, offerCount: 0, reused: false, notSettleable: true };
+            }
 
             if (!reviewToken) {
               // Should never happen — create-intent always stamps reviewToken on
@@ -578,7 +594,7 @@ export async function POST(request: NextRequest) {
               logger.error(
                 `[stripe/webhook] concierge_deposit ${deposit.id} missing pi.metadata.reviewToken — deposit marked PAID, no auction created`,
               );
-              return { deposit, auctionId: null, offerCount: 0, reused: false };
+              return { deposit, auctionId: null, offerCount: 0, reused: false, notSettleable: false };
             }
 
             const conv = await convertConciergeOfferToClosedAuction(tx, {
@@ -598,7 +614,13 @@ export async function POST(request: NextRequest) {
                 },
               });
             }
-            return { deposit, auctionId: conv.auctionId, offerCount: conv.offerIds.length, reused: conv.reused };
+            return {
+              deposit,
+              auctionId: conv.auctionId,
+              offerCount: conv.offerIds.length,
+              reused: conv.reused,
+              notSettleable: false,
+            };
           }, {
             // Bound the lock hold like the standard deposit cluster. The
             // conversion is a handful of local inserts, so this is generous.
@@ -679,8 +701,33 @@ export async function POST(request: NextRequest) {
           const feeDeal = await prisma.deal.findFirst({ where: whereClause });
           routed = feeDeal !== null;
           if (feeDeal) {
-            // Net of the $99 deposit credit — the amount actually captured.
-            const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: pi.id };
+            // THE LEDGER ROW FIRST, because the deal column is derived from it.
+            //
+            // Found by the second independent review: `deals.fee_amount_cents` stamped the
+            // $400 CONSTANT while this phase made the charge variable. For a buyer whose
+            // $99 was refunded or charged back the credit basis is broken,
+            // `quotePremiumBalance` prices Premium at $499 gross, Stripe takes $499 — and
+            // this column said 40000. The two ledgers then disagreed by $99 on exactly the
+            // deals where the deposit contributed nothing, so a revenue report summing
+            // deposits plus this column under-counted twice over.
+            //
+            // The fix had been applied to `recordFeePayment`, which has NO CALLERS — the
+            // live path is here. Moving the ledger write above the deal update is what
+            // lets this read the amount that was actually recorded rather than assume one.
+            //
+            // Still best-effort: a ledger-row failure falls back to the constant rather
+            // than losing the fee receipt, which is the same trade as before.
+            const feePayment = await writeServiceFeePayment(feeDeal.id, pi.id).catch((err) => {
+              logger.error("[stripe-webhook] service fee payment record failed:", err);
+              return null;
+            });
+            // The amount actually captured: $499 gross less whatever $99 genuinely
+            // settled — $400 in the ordinary case, $499 where the credit basis is broken.
+            const feeData = {
+              feePaidAt: new Date(),
+              feeAmountCents: feePayment?.netAmountCents ?? PREMIUM_FEE_REMAINING_CENTS,
+              stripeFeePIId: pi.id,
+            };
             // Recording the fee is enough: advanceDealStatus settles the rest of
             // the ladder on arrival (FEE_PAID → INSURANCE_PENDING, and on into the
             // insurance gate when proof is already on file). Re-issuing an explicit
@@ -696,14 +743,6 @@ export async function POST(request: NextRequest) {
               await prisma.deal.update({ where: { id: feeDeal.id }, data: feeData });
             }
 
-            // Ledger completeness: write the ServiceFeePayment row (the only
-            // writer — recordFeePayment was dead, so service_fee_payments never
-            // populated even after a real fee). Idempotent on dealId; best-effort
-            // so a ledger-row failure never rolls back the already-committed fee
-            // receipt / status advance above.
-            await writeServiceFeePayment(feeDeal.id, pi.id).catch((err) =>
-              logger.error("[stripe-webhook] service fee payment record failed:", err),
-            );
           }
 
           // Send the buyer a confirmation that their service fee was received.

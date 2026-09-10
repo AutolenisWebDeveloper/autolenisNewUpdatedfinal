@@ -47,6 +47,8 @@ mock.module("@/lib/prisma", {
 mock.module("@/lib/logger", {
   namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } },
 });
+// `plan-change.service` gets the mocked snapshot writer; the dedupe tests at the bottom
+// import the REAL module through a second specifier so both can live in one file.
 mock.module("@/lib/services/buyer/plan-snapshot.service", {
   namedExports: {
     entitledPlanForRequest: async () => ctrl.entitled,
@@ -252,3 +254,4 @@ test("assigning a concierge moves ownership, and re-assigning the same one is a 
   });
   assert.equal(again.changed, false);
 });
+

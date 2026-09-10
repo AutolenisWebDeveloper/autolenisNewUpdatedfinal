@@ -109,8 +109,24 @@ const ELIGIBILITY_STEP: Record<EligibilityFailureCode | "REQUEST_REQUIRED", { hr
   VEHICLE_CRITERIA_INCOMPLETE: { href: "/buyer/requests", cta: "Complete your request" },
   REQUEST_CONFLICT: { href: "/buyer/requests", cta: "Review your open requests" },
   REQUEST_REQUIRED: { href: "/request-a-car", cta: "Start a vehicle request" },
-  // The buyer is already here, and the gate above is what fixes it. There is nowhere
-  // else to send them, so the CTA returns them to the disclosures on this page.
+  // SHADOWED BY DESIGN, and the only entry that is.
+  //
+  // `DISCLOSURE_REQUIRED` is handled by its own branch in `postCreateIntent` before this
+  // map is consulted, because it means two different things depending on the call: on the
+  // PROBE it is the expected answer ("nothing is owed, the buyer has not accepted yet")
+  // and must render no error at all, while on the ACCEPT call it means the wording moved
+  // on mid-session. A single href/cta pair cannot say both. The entry stays because the
+  // `Record<EligibilityFailureCode | …>` type is exhaustive on purpose — a ninth failure
+  // code added to §5a will not compile until someone decides where it sends the buyer.
+  //
+  // Found by the second independent review, which counted TWO dead entries here. The
+  // other was `PREQUAL_REQUIRED`, and that one was a defect rather than a design: its
+  // special-case branch replaced the server's named message with a fixed string and then
+  // yanked the buyer away after two seconds. §5a requires the exact missing requirement,
+  // named — and the server distinguishes "complete your prequalification" from "yours has
+  // expired or wasn't approved", a distinction the fixed string threw away. That branch is
+  // gone; the entry below now does the work, and the buyer reads the real reason and
+  // chooses when to leave the page.
   DISCLOSURE_REQUIRED: { href: "/buyer/deposit", cta: "Read the terms again" },
 };
 
@@ -299,9 +315,6 @@ export default function DepositPage() {
             paymentIntentId: d.error.details?.paymentIntentId ?? null,
             intentStatus: d.error.details?.intentStatus ?? null,
           });
-        } else if (d.error?.code === "PREQUAL_REQUIRED") {
-          setError("You need to complete prequalification before paying the Auction Access Deposit.");
-          setTimeout(() => router.push("/buyer/prequal"), 2000);
         } else if (d.error?.code === "REVIEW_FORBIDDEN") {
           setError("These offers were sent to a different account. Please sign in with the email the offers were sent to.");
         } else if (d.error?.code === "REVIEW_EXPIRED" || d.error?.code === "REVIEW_NOT_FOUND") {

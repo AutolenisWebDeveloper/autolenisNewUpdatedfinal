@@ -204,10 +204,22 @@ export async function recordRequestPlanElection(
   const latest = await db.planSnapshot.findFirst({
     where: { vehicleRequestId: input.vehicleRequestId },
     orderBy: { effectiveAt: "desc" },
-    select: { id: true, plan: true },
+    select: { id: true, plan: true, settledDepositCents: true },
   });
 
-  if (latest && latest.plan === input.plan) {
+  // DEDUPED ON THE PLAN, but NOT when the row would carry money the existing one does
+  // not. Found by the second independent review: a buyer who elected PREMIUM through the
+  // upgrade surface BEFORE paying already had a PREMIUM snapshot for this request, so
+  // settlement's own election — the one carrying `settled_deposit_cents` and touchpoint
+  // "settlement" — was discarded as a duplicate. The money field was then never recorded
+  // for exactly the buyers whose money had just moved.
+  //
+  // A snapshot that records what settled is not a repeat of one that records an
+  // intention, even when the plan on both is the same word.
+  const carriesMoney =
+    (input.settledDepositCents ?? null) !== null || (input.settledPremiumCents ?? null) !== null;
+  const alreadyRecorded = carriesMoney && latest?.settledDepositCents === (input.settledDepositCents ?? null);
+  if (latest && latest.plan === input.plan && (!carriesMoney || alreadyRecorded)) {
     await bindSnapshot(input.vehicleRequestId, input.dealId ?? null, latest.id, db);
     return { snapshot: null, boundSnapshotId: latest.id };
   }

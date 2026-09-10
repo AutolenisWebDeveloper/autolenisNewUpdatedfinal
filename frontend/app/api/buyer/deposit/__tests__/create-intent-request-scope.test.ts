@@ -219,3 +219,56 @@ test("no open request is refused before anything is minted", async () => {
   assert.equal(ctrl.createArgs.length, 0, "the $99 activates sourcing for a SPECIFIC request");
 });
 
+
+// ─── PAY-08 / §13-D48: only the version IN FORCE is ever stored ──────────────────
+//
+// Raised as a question by the second independent review and confirmed material. The
+// route parses `disclosuresVersion` from the request body and used to write it straight
+// to `deposits.disclosures_version`. On the standard path that value has already been
+// compared to `DISCLOSURES_VERSION` by §5b's intent gate — but the CONCIERGE branch has
+// no §5a recheck at all (its gate is the strict buyer↔offer binding), so `intentGate` is
+// null there and nothing compared it to anything. An arbitrary client string became the
+// stored record of which wording the buyer agreed to.
+//
+// These pin the invariant rather than one branch: whatever any gate concluded, a value
+// that is not the version in force is never stamped. The gate fake above reports
+// `eligible` unconditionally, which is precisely the ungated concierge condition.
+
+test("PAY-08: the version in force is stamped on both halves of the upsert", async () => {
+  const POST = await load();
+  await POST(req({ disclosuresVersion: "2026-09-09-draft" }));
+
+  const create = ctrl.upserts[0]!.create as Record<string, unknown>;
+  const update = ctrl.upserts[0]!.update as Record<string, unknown>;
+  assert.equal(create.disclosuresVersion, "2026-09-09-draft");
+  assert.ok(create.disclosuresAcceptedAt instanceof Date);
+  assert.equal(update.disclosuresVersion, "2026-09-09-draft", "a concurrent retry's row is brought up to date too");
+});
+
+test("PAY-08: an unrecognised version is NEVER stored, even where no gate refused it", async () => {
+  const POST = await load();
+  await POST(req({ disclosuresVersion: "v-the-buyer-made-up" }));
+
+  const create = ctrl.upserts[0]!.create as Record<string, unknown>;
+  const update = ctrl.upserts[0]!.update as Record<string, unknown>;
+  assert.equal(
+    create.disclosuresVersion,
+    undefined,
+    "storing it would record the buyer agreeing to wording that does not exist",
+  );
+  assert.equal(create.disclosuresAcceptedAt, undefined, "and an acceptance with no version is not an acceptance");
+  assert.equal(update.disclosuresVersion, undefined);
+  assert.equal(update.disclosuresAcceptedAt, undefined);
+});
+
+test("PAY-08: an unrecognised version is still a MINT, not a probe", async () => {
+  // The raw value is deliberately kept for the probe/limiter decision. Nulling it at the
+  // parse site would make `isProbe` true for a stale checkout tab, dropping it to the
+  // read limiter and skipping the PAYMENT_REQUIRED transition — a buyer acting would be
+  // treated as a page rendering.
+  const POST = await load();
+  await POST(req({ disclosuresVersion: "v-the-buyer-made-up" }));
+
+  assert.equal(ctrl.createArgs.length, 1, "the buyer is still ACTING; an intent is minted");
+  assert.deepEqual(ctrl.paymentRequiredCalls, [REQUEST_ID], "and the request still transitions");
+});

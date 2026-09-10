@@ -440,7 +440,10 @@ test("a probe does not spend the payment-intent budget and does not move the req
   ctrl.existingDeposit = null;
   await post();
 
-  assert.deepEqual(ctrl.limiterKinds, ["general", "general"], "buyer and IP, both as reads");
+  // Four: the entry throttle (buyer + IP), then the probe's own budget (buyer + IP).
+  // The entry pair is what keeps an authenticated endpoint from being unbounded while
+  // the body is being read to decide which of the two money guards applies.
+  assert.deepEqual(ctrl.limiterKinds, ["general", "general", "general", "general"]);
   assert.equal(ctrl.paymentRequiredCalls, 0, "a page render is not a buyer acting");
 });
 
@@ -449,6 +452,55 @@ test("an accept spends the real budget and moves the request", async () => {
   ctrl.existingDeposit = null;
   await post();
 
-  assert.deepEqual(ctrl.limiterKinds, ["intent", "intent"], "minting is what the card-testing guard is for");
+  assert.deepEqual(
+    ctrl.limiterKinds,
+    ["general", "general", "intent", "intent"],
+    "the entry throttle first, then the card-testing guard — minting is what the second is for",
+  );
   assert.equal(ctrl.paymentRequiredCalls, 1);
+});
+
+
+// §5b — THE REUSE BRANCH RECORDS THE ACCEPTANCE TOO.
+//
+// The upsert at the bottom of the route is the only writer of `disclosures_version`, and
+// the reuse branch returns before reaching it. So when legal returns approved wording and
+// the version bumps, a buyer with a live intent who reads the NEW text and accepts it got
+// the existing client secret and a deposit row still stamped with the OLD version — the
+// stored record of what they agreed to would be the wrong wording, which is the one thing
+// the version mechanism exists to prevent.
+test("accepting on a reusable intent stamps the version the buyer actually read", async () => {
+  ctrl.disclosuresAccepted = true;
+  ctrl.existingDeposit = { id: "dep_1", status: "PENDING", stripePaymentIntentId: "pi_live" };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "pi_live_secret_x", metadata: { type: "deposit" } };
+
+  const res = await post();
+  assert.equal(res.ok, true, "the live intent is still reused — no second charge");
+
+  const stamp = ctrl.depositUpdates.find(
+    (u) => (u.data as Record<string, unknown> | undefined)?.disclosuresVersion !== undefined,
+  );
+  assert.ok(stamp, "the acceptance must be recorded before the secret is handed back");
+  assert.equal((stamp!.data as { disclosuresVersion: string }).disclosuresVersion, "2026-09-09-draft");
+  assert.ok(
+    (stamp!.data as { disclosuresAcceptedAt?: Date }).disclosuresAcceptedAt instanceof Date,
+    "and stamped with when",
+  );
+  assert.equal(
+    (stamp!.data as Record<string, unknown>).vehicleRequestId,
+    undefined,
+    "§3: only the acceptance — stamping a parent id onto an existing row is the re-parent the ratchet holds at zero",
+  );
+});
+
+test("a PROBE on a reusable intent records nothing — there is no acceptance to record", async () => {
+  ctrl.disclosuresAccepted = false;
+  ctrl.existingDeposit = { id: "dep_1", status: "PENDING", stripePaymentIntentId: "pi_live" };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "pi_live_secret_x", metadata: { type: "deposit" } };
+
+  await post();
+  const stamp = ctrl.depositUpdates.find(
+    (u) => (u.data as Record<string, unknown> | undefined)?.disclosuresVersion !== undefined,
+  );
+  assert.equal(stamp, undefined);
 });

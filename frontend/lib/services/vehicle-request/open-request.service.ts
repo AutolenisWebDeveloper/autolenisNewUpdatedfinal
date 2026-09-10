@@ -197,7 +197,7 @@ export async function attachOrCreateOpenRequest(input: AttachInput, db: Db = pri
     // The create is savepointed: a P2002 inside an interactive transaction aborts
     // the WHOLE transaction, so the re-read below would throw and `$transaction`
     // would still resolve — reporting success for a request that was rolled back.
-    // See lib/db/savepoint.ts; measured, not assumed.
+    // See lib/prisma-savepoint.ts; measured, not assumed.
     const created = await withSavepoint(db, () =>
       db.vehicleRequest.create({
         data: { buyerId: input.buyerId, status: input.createStatus, ...input.data },

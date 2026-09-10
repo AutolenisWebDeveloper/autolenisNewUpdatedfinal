@@ -105,7 +105,23 @@ export async function POST(request: NextRequest) {
       metadata: { buyerId, type: "deposit", source: "admin_initiated" },
       description: `AutoLenis ${DEPOSIT_AMOUNT_USD} Auction Access Deposit (admin-initiated)`,
     }, {
-      idempotencyKey: `deposit-admin-${buyerId}`,
+      // KEYED PER REQUEST, not per buyer.
+      //
+      // Found by the second independent review. Stripe holds an idempotency key for 24
+      // hours, and this one named only the buyer — so once the obligation check became
+      // request-scoped (correctly: §23.1 says a new request means a new $99), a second
+      // mint inside that window replayed the FIRST request's intent. If that intent had
+      // succeeded, the deposit insert collided on the unique PaymentIntent, the P2002
+      // recovery returned the OLD request's PAID row, and the route reported a fresh
+      // PENDING obligation that did not exist. The admin would believe a $99 was owed
+      // for the new request when nothing had been created for it.
+      //
+      // The request scopes the key exactly as the obligation check scopes the question.
+      // A buyer with no open request keeps the buyer-scoped key, which is the shape that
+      // has always applied to a deposit with nothing to attach to.
+      idempotencyKey: openRequest
+        ? `deposit-admin-${buyerId}-${openRequest.id}`
+        : `deposit-admin-${buyerId}`,
     });
     intentId = intent.id;
   } catch (err) {
@@ -167,10 +183,21 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  // READ THE ROW BACK, never assert its shape. The response used to carry the literal
+  // "PENDING", which is a claim about a row rather than a reading of one — and the P2002
+  // recovery above can hand back a row that is already PAID (a replayed intent from a
+  // prior request inside Stripe's 24-hour window). Reporting PENDING for it told the
+  // admin an obligation existed that had in fact been settled.
+  const created = await prisma.deposit.findUnique({
+    where: { id: deposit.id },
+    select: { amountCents: true, status: true, vehicleRequestId: true },
+  });
+
   return adminSuccess({
     depositId: deposit.id,
-    amountCents: DEPOSIT_AMOUNT_CENTS,
+    amountCents: created?.amountCents ?? DEPOSIT_AMOUNT_CENTS,
     stripePaymentIntentId: intentId,
-    status: "PENDING",
+    status: created?.status ?? "PENDING",
+    vehicleRequestId: created?.vehicleRequestId ?? null,
   }, 201);
 }

@@ -20,6 +20,11 @@ interface Ctrl {
   retrieved: string[];
   /** §5d fulfilment holds this primitive applied. */
   holds: Array<Record<string, unknown>>;
+  /**
+   * Calls ATTEMPTED, counted before the mock can throw. `holds` alone cannot tell a hold
+   * that failed apart from a hold that was never called, and those are opposite defects.
+   */
+  holdAttempts: number;
   holdThrows: boolean;
 }
 let ctrl: Ctrl;
@@ -27,6 +32,7 @@ let ctrl: Ctrl;
 mock.module("@/lib/services/payment/fulfillment-hold.service", {
   namedExports: {
     applyFulfillmentHold: async (input: Record<string, unknown>) => {
+      ctrl.holdAttempts += 1;
       if (ctrl.holdThrows) throw new Error("hold write failed");
       ctrl.holds.push(input);
       return { disputed: false, touchesCancelled: 0, outboxCancelled: 0 };
@@ -78,6 +84,7 @@ beforeEach(() => {
     intentStatus: "succeeded",
     retrieved: [],
     holds: [],
+    holdAttempts: 0,
     holdThrows: false,
   };
 });
@@ -197,6 +204,7 @@ test("a refund that changed nothing applies NO hold", async () => {
 
   assert.equal(res.outcome, "ALREADY_REFUNDED");
   assert.deepEqual(ctrl.holds, [], "the hold follows the money, not the call");
+  assert.equal(ctrl.holdAttempts, 0, "and it is not even attempted when the flip matched nothing");
 });
 
 test("a hold failure never turns a real refund into a reported failure", async () => {
@@ -211,4 +219,10 @@ test("a hold failure never turns a real refund into a reported failure", async (
     "REFUNDED",
     "money moved; reporting otherwise would invite a second refund. The webhook's own call is the second chance.",
   );
+  // Strengthened after the second independent review: asserting the outcome alone would
+  // pass just as happily if the hold had been SKIPPED rather than attempted-and-failed,
+  // and those are opposite defects — one is the best-effort behaviour this test exists to
+  // pin, the other is the §26 gap Phase 3 fixed.
+  assert.equal(ctrl.holdAttempts, 1, "the hold was genuinely attempted, not quietly skipped");
+  assert.equal(ctrl.holds.length, 0, "and it recorded nothing, so the webhook's call is still the second chance");
 });

@@ -14,7 +14,7 @@
     "test:admin-content": "tsx --test --experimental-test-module-mocks app/api/admin/content/__tests__/*.test.ts",
     "test:content-ui": "tsx --test components/admin/content/__tests__/*.test.ts",
     "test:buyer-insurance": "tsx --test --experimental-test-module-mocks app/api/buyer/insurance/__tests__/*.test.ts",
-    "test:buyer-plan": "tsx --test --experimental-test-module-mocks app/api/buyer/plan/__tests__/*.test.ts lib/services/plan/__tests__/*.test.ts",
+    "test:buyer-plan": "tsx --test --experimental-test-module-mocks app/api/buyer/plan/__tests__/*.test.ts lib/services/plan/__tests__/*.test.ts lib/services/buyer/__tests__/plan-snapshot.test.ts",
     "test:buyer-search": "tsx --test --experimental-test-module-mocks app/api/buyer/search/__tests__/*.test.ts",
     "test:buyer-contracts": "tsx --test --experimental-test-module-mocks app/buyer/contracts/__tests__/*.test.ts",
     "test:security": "tsx --test --experimental-test-module-mocks lib/security/__tests__/*.test.ts lib/__tests__/role-boundary-frozen.test.ts lib/__tests__/scope-guard.test.ts app/api/admin/__tests__/*.test.ts",

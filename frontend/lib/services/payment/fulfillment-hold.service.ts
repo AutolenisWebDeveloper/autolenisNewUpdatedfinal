@@ -64,6 +64,11 @@ export interface ApplyHoldInput {
   providerRef: string;
   /** Stripe's own reason, when it gave one. */
   reason?: string | null;
+  /**
+   * Who caused this. The §26 row is read by a person, and "Stripe reported a refund"
+   * is false for a refund an admin deliberately issued from the operations surface.
+   */
+  initiatedBy?: "provider" | "admin";
 }
 
 export interface ApplyHoldResult {
@@ -125,9 +130,23 @@ export async function applyFulfillmentHold(
     });
     disputed = flipped.count > 0;
   } else {
+    // A REFUND ALWAYS PUTS THE HOLD BACK ON, even on a row that has been disputed before.
+    //
+    // This was guarded on `disputedAt: null`, so after a dispute the platform WON —
+    // `disputed_at` set, `hold_released_at` stamped — a later admin refund matched
+    // nothing: the release stamp stayed, and `hold_reason` still named the old dispute.
+    // The stored state then said "not on hold" for a deposit whose money had gone back.
+    //
+    // Two writes rather than one, because `disputed_at` is SET-ONCE. It is the record
+    // that a hold first began, and overwriting it on every refund would lose when. The
+    // second write is unconditional and carries what changed.
     await db.deposit.updateMany({
       where: { id: input.depositId, disputedAt: null },
-      data: { disputedAt: new Date(), holdReason: holdReason, holdReleasedAt: null },
+      data: { disputedAt: new Date() },
+    });
+    await db.deposit.updateMany({
+      where: { id: input.depositId },
+      data: { holdReason: holdReason, holdReleasedAt: null },
     });
   }
 
@@ -173,7 +192,8 @@ export async function applyFulfillmentHold(
       vehicleRequestId: input.vehicleRequestId ?? null,
       idempotencyKey: disputeExceptionKey(input.providerRef),
       detail:
-        `Stripe reported a ${input.trigger} (${input.providerRef}) against deposit ${input.depositId}` +
+        `${input.initiatedBy === "admin" ? "An administrator issued" : "Stripe reported"} a ${input.trigger} ` +
+        `(${input.providerRef}) against deposit ${input.depositId}` +
         `${input.reason ? `, reason "${input.reason}"` : ""}. Fulfilment is on hold and ` +
         `${touchesCancelled + outboxCancelled} unsent message(s) were cancelled. Sourcing must not ` +
         `resume until this is resolved. Refunds are reviewed manually (§22.1) — this exception is the ` +

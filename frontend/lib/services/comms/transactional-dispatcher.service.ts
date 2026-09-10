@@ -182,7 +182,7 @@ export async function enqueueTransactional(input: EnqueueTransactionalInput, db:
     // Savepointed: enqueueTransactional is designed to be called inside the
     // caller's transaction, and its dedup key makes P2002 the EXPECTED outcome of
     // a duplicate emit. Without a savepoint that expected conflict would abort the
-    // caller's whole transaction (lib/db/savepoint.ts).
+    // caller's whole transaction (lib/prisma-savepoint.ts).
     const row = await withSavepoint(db, () => db.commsOutbox.create({
       data: {
         id: randomUUID(),

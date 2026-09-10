@@ -16,10 +16,28 @@ import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.ser
 import { enterPaymentRequired } from "@/lib/services/vehicle-request/vehicle-request.service";
 import { gatherAndCheckEligibility, type EligibilityResult } from "@/lib/services/payment/deposit-eligibility";
 import { getRequestUser } from "@/lib/auth/api";
+import { DISCLOSURES_VERSION } from "@/lib/payments/deposit-disclosures";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
+
+  // A CHEAP THROTTLE ABOVE EVERYTHING BODY-DEPENDENT.
+  //
+  // The card-testing guard below has to come after the body is read, because whether a
+  // call can mint is decided by what the body carries. That left the concierge
+  // review-token lookup and the buyer lookup below it running with no throttle at all —
+  // an authenticated endpoint that used to be capped at ten calls an hour became
+  // unbounded database load, and its 404-vs-403 split is an existence oracle. The token
+  // is a v4 UUID so enumeration is impractical; the load is not.
+  //
+  // Deliberately generous and deliberately not the card-testing guard: this is a floor
+  // on request volume, and the guard that actually protects money is still applied to
+  // every minting call below.
+  for (const key of [`deposit-entry:buyer:${buyer.id}`, `deposit-entry:ip:${clientIpKey(request.headers)}`]) {
+    const rl = await limitGeneral(key, { tokens: 120, window: "10 m" });
+    if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
+  }
 
   // Concierge convergence path: when a reviewToken is supplied, this deposit
   // unlocks an admin-curated set of dealer offers (System B) rather than
@@ -38,6 +56,26 @@ export async function POST(request: NextRequest) {
     } catch { /* no body — standard path */ }
     acceptedDisclosuresVersion =
       typeof body?.disclosuresVersion === "string" ? body.disclosuresVersion.trim() : null;
+    if (acceptedDisclosuresVersion !== null && acceptedDisclosuresVersion !== DISCLOSURES_VERSION) {
+      // Raised as a QUESTION by the second independent review, and it is material.
+      //
+      // The raw value is kept — the standard path's §5b intent gate must still SEE a stale
+      // version so it can answer DISCLOSURE_REQUIRED and tell the buyer the terms moved on
+      // (nulling it here would instead make the call look like a probe, changing the
+      // limiter and skipping the PAYMENT_REQUIRED transition). What must never happen is
+      // STORING it: `stampableDisclosuresVersion` below is what reaches the row.
+      //
+      // The concierge branch is why this exists. It has no §5a recheck at all — its gate is
+      // the strict buyer↔offer binding — so `intentGate` is null there and nothing compared
+      // this string to anything. An arbitrary client value became the stored record of which
+      // wording the buyer agreed to, which is the single thing §13-D48's version mechanism
+      // exists to make trustworthy. Pre-existing, not introduced by Phase 3, fixed here
+      // because this route is where the column is written.
+      logger.warn(
+        `[deposit/create-intent] ignoring an unrecognised disclosures version from the client ` +
+          `(buyer sent one that is not the version in force); the acceptance will not be stamped`,
+      );
+    }
     const reviewToken = typeof body?.reviewToken === "string" ? body.reviewToken.trim() : "";
     if (reviewToken) {
       const review = await prisma.buyerOfferReview.findUnique({
@@ -80,10 +118,23 @@ export async function POST(request: NextRequest) {
   //
   // The concierge path is NOT a probe: it has no §5a recheck and no disclosure gate, so
   // a call with a reviewToken mints whether or not a version is present.
+  /**
+   * THE ONLY VALUE THAT EVER REACHES `deposits.disclosures_version`.
+   *
+   * Null unless the client named the version actually in force. Every stamp site below
+   * uses this rather than the raw request value, so no path — standard, reuse, or
+   * concierge — can write a record of the buyer agreeing to wording that does not exist.
+   * On the standard path it is a no-op: §5b's intent gate has already refused anything
+   * else before the mint. On the concierge path, which has no §5a gate, it is the check.
+   */
+  const stampableDisclosuresVersion =
+    acceptedDisclosuresVersion === DISCLOSURES_VERSION ? acceptedDisclosuresVersion : null;
+
   const isProbe = acceptedDisclosuresVersion === null && conciergeReviewToken === null;
 
-  // Card-testing guard: throttle intent creation per buyer and per source IP.
-  // Fails CLOSED on limiter-store outage (see lib/security/rate-limit.ts).
+  // Card-testing guard on the MINTING call. `limitPaymentIntent` fails CLOSED on a
+  // limiter-store outage, which is right for money; the probe's `limitGeneral` fails
+  // OPEN, which is right for a page load and is why the two are not the same call.
   for (const key of [`deposit:buyer:${buyer.id}`, `deposit:ip:${clientIpKey(request.headers)}`]) {
     const rl = isProbe
       ? await limitGeneral(`deposit-probe:${key}`, { tokens: 60, window: "10 m" })
@@ -336,7 +387,7 @@ export async function POST(request: NextRequest) {
         // and accepts it gets the existing secret and a deposit row still stamped with
         // the OLD version. The stored record of what they agreed to would be the wrong
         // wording, which is the one thing the version mechanism exists to prevent.
-        if (acceptedDisclosuresVersion) {
+        if (stampableDisclosuresVersion) {
           await prisma.deposit.updateMany({
             where: { id: existingDeposit.id },
             // ONLY the acceptance. Stamping `vehicleRequestId` onto an existing row here
@@ -345,7 +396,7 @@ export async function POST(request: NextRequest) {
             // NEW row its parent is what §3 requires.
             data: {
               disclosuresAcceptedAt: new Date(),
-              disclosuresVersion: acceptedDisclosuresVersion,
+              disclosuresVersion: stampableDisclosuresVersion,
             },
           });
         }
@@ -438,8 +489,8 @@ export async function POST(request: NextRequest) {
         // PAY-D / PAY-08: the acceptance is recorded WITH the version accepted. A
         // later wording change bumps the version and invalidates it, so a buyer is
         // never treated as having agreed to words they did not see (§13-D48).
-        ...(acceptedDisclosuresVersion
-          ? { disclosuresAcceptedAt: new Date(), disclosuresVersion: acceptedDisclosuresVersion }
+        ...(stampableDisclosuresVersion
+          ? { disclosuresAcceptedAt: new Date(), disclosuresVersion: stampableDisclosuresVersion }
           : {}),
       },
       // An existing row is BROUGHT UP TO DATE rather than left alone. The reuse path
@@ -449,8 +500,8 @@ export async function POST(request: NextRequest) {
       // version of both.
       update: {
         ...(openRequest ? { vehicleRequestId: openRequest.id } : {}),
-        ...(acceptedDisclosuresVersion
-          ? { disclosuresAcceptedAt: new Date(), disclosuresVersion: acceptedDisclosuresVersion }
+        ...(stampableDisclosuresVersion
+          ? { disclosuresAcceptedAt: new Date(), disclosuresVersion: stampableDisclosuresVersion }
           : {}),
       },
     });

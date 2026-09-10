@@ -142,6 +142,47 @@ Each of these was found during the phase and is named here rather than acted on.
   same-day assignment has nobody to assign. The ownership move is built and an admin names the
   person.
 
+## The second review's four questions, answered
+
+The independent re-review closed with four questions rather than findings. Each is answered here
+from the code, and one of them turned out to be material and was fixed.
+
+**1. `recordFeePayment` has zero callers — future path, or obsolete?**
+Obsolete as written, and **reported rather than deleted**, per the standing rule. It is documented
+as dead at `frontend/lib/services/deal/service-fee.service.ts:239` and named again at
+`frontend/app/api/webhooks/stripe/route.ts:714`, where the webhook writes the ledger row itself.
+Making it the webhook's path would be a refactor of a settled money path for tidiness, which is not
+this phase's to do; the owner decides whether it is removed.
+
+**2. `plan_snapshots.settled_deposit_cents` has no reader — audit column, or dead?**
+It **has a reader**, inside the service that owns it:
+`recordRequestPlanElection` selects it (`plan-snapshot.service.ts:207`) and uses it as the
+money-carrying discriminator (`:221`), which is what stops settlement's own election from being
+discarded as a duplicate of an earlier PREMIUM election. What it deliberately is **not** is the
+basis of any live money decision. `settledDepositCentsForRequest` (`:404-422`) reads the `deposits`
+table instead, hold-aware and refund-aware, because the credit a buyer is owed **now** and the fact
+that was true **when they elected** are two different questions. Recording the second in the
+snapshot is the point of the column.
+
+**3. `touchpoint: "admin_override"` / `"downgrade"` are not in `UPGRADE_TOUCHPOINTS` — drift?**
+Two vocabularies, deliberately. `PlanTouchpoint` (`plan-snapshot.service.ts:38-47`) is the closed
+union that governs `plan_snapshots.touchpoint` and answers *where was the election made*; it has
+always carried `signup`, `checkout` and `admin_override`, and Phase 3 added `settlement` and
+`downgrade`. `UPGRADE_TOUCHPOINTS` (`upgrade-suppression.service.ts:49-60`) is §23.2a's five
+**upsell prompt positions** and answers *where may AutoLenis ask*. A downgrade is not a prompt
+position; neither is an admin override. Not drift.
+
+**4. The concierge path's unvalidated `disclosuresVersion` — does it matter?**
+**Yes, and it is fixed.** On that branch `intentGate` is null, so nothing compared the client's
+string to `DISCLOSURES_VERSION`, and an arbitrary value reached `deposits.disclosures_version` —
+the column §13-D48's whole version mechanism relies on to prove which words a buyer agreed to.
+`create-intent/route.ts` now derives `stampableDisclosuresVersion`, null unless the value is the
+version in force, and all three stamp sites use it. The raw value is still parsed, because the
+standard path's gate must see a stale version to answer `DISCLOSURE_REQUIRED`, and because nulling
+it at the parse site would misclassify a stale checkout tab as a probe. Pre-existing rather than
+introduced here; fixed because this route is where the column is written. Proven failing-first by
+`create-intent-request-scope.test.ts` tests 8-10.
+
 ## Owner-gated
 
 §13-**D48** (legal-approved checkout and receipt copy) · §13-**D10** (the six NULL-location buyers)

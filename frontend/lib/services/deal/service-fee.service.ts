@@ -223,6 +223,19 @@ export async function createFeePaymentIntent(
   };
 }
 
+/**
+ * REPORTED, NOT DELETED: this function has no callers.
+ *
+ * The live fee-settlement path is the Stripe webhook's `concierge_fee` branch, which
+ * writes the ledger row and the deal columns itself. This is a second implementation of
+ * the same act, and the second review found the phase's ledger-amount fix applied HERE
+ * and therefore to nothing — the webhook was still stamping the constant. That fix now
+ * lives on the live path; this one is kept in step so the two cannot say different
+ * things if a caller ever appears.
+ *
+ * `CLAUDE.md`: "Anything that looks obsolete, duplicated, unfinished, misleading, or
+ * dead gets REPORTED for an owner decision — never deleted."
+ */
 export async function recordFeePayment(dealId: string, paymentIntentId: string) {
   const existing = await prisma.serviceFeePayment.findUnique({ where: { dealId } });
   if (existing) return existing;

@@ -235,7 +235,7 @@ async function attemptCreate(
     // `raiseException` is frequently handed a transaction client so the exception
     // commits with the business write. Inside a transaction a raw P2002 aborts
     // everything and the read below would throw while `$transaction` still
-    // resolved — the caller would be told the write landed (lib/db/savepoint.ts).
+    // resolved — the caller would be told the write landed (lib/prisma-savepoint.ts).
     const item = await withSavepoint(db, () =>
       db.queueItem.create({ data: { ...base, id: randomUUID(), idempotencyKey } }),
     );

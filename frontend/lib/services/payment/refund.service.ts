@@ -147,6 +147,9 @@ export async function refundDepositCharge(
           trigger: "refund",
           providerRef: stripeRefundId ?? intentId,
           reason,
+          // Every caller of this primitive is an admin surface or the AI action-intent
+          // command acting for one. Saying so keeps the Finance queue truthful.
+          initiatedBy: "admin",
         });
       }
     } catch (err) {

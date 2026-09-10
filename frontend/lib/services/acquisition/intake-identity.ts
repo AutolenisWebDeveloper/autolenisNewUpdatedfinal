@@ -257,7 +257,7 @@ async function createGuestCapture(
     try {
       // Savepointed: a P2002 inside an interactive transaction aborts the WHOLE
       // transaction, so the re-read below would throw while `$transaction` still
-      // resolved — a capture reported as saved and rolled back (lib/db/savepoint.ts).
+      // resolved — a capture reported as saved and rolled back (lib/prisma-savepoint.ts).
       userId = (
         await withSavepoint(db, () =>
           db.user.create({
