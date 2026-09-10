@@ -808,7 +808,13 @@ export async function sendPickupReadyEmail(to: string, buyerName: string, pickup
   });
 }
 
-export async function sendDepositConfirmationEmail(to: string, firstName: string, depositId: string) {
+export async function sendDepositConfirmationEmail(
+  to: string,
+  firstName: string,
+  depositId: string,
+  /** §23.2a touchpoint 1 — one Premium line, or nothing when §23.2b suppresses the ask. */
+  premiumLine?: string | null,
+) {
   const depositDate = new Date().toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
@@ -820,7 +826,7 @@ export async function sendDepositConfirmationEmail(to: string, firstName: string
     to,
     templateId: "deposit-confirmed",
     subject: DEPOSIT_CONFIRMATION_SUBJECT,
-    html: renderDepositConfirmationEmail({ firstName, depositId, depositDate, auctionsUrl }),
+    html: renderDepositConfirmationEmail({ firstName, depositId, depositDate, auctionsUrl, premiumLine }),
   });
 }
 

@@ -23,7 +23,7 @@ import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { allowedPredecessors } from "@/lib/payments/deposit-state";
+import { SETTLE_FROM } from "@/lib/payments/deposit-state";
 import { reconcileDepositActivation } from "@/lib/services/auction/deposit-activation.service";
 import { z } from "zod";
 
@@ -60,7 +60,12 @@ export async function POST(request: NextRequest, { params }: Props) {
   // REFUNDED/FAILED deposit and never double-applies under concurrency — the
   // check-then-write race a findUnique + unconditional update leaves open.
   const flipped = await prisma.deposit.updateMany({
-    where: { id: depositId, status: { in: allowedPredecessors("PAID") } },
+    // `SETTLE_FROM` (PENDING or FAILED), not `allowedPredecessors("PAID")`. The
+    // matrix also allows DISPUTED -> PAID, and an administrator must not be able to
+    // clear a live chargeback by marking the deposit paid: that edge belongs to
+    // `charge.dispute.closed`, on evidence from the provider. FAILED is included for
+    // the rows defect 1 stranded.
+    where: { id: depositId, status: { in: [...SETTLE_FROM] } },
     data: { status: "PAID" },
   });
   if (flipped.count === 0) {

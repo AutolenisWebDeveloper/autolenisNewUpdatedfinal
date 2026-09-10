@@ -78,13 +78,13 @@ export type LifecycleSequence =
 
 type Entity = "buyer" | "dealer";
 
-interface RenderedTouch {
+export interface RenderedTouch {
   sms: string;
   emailSubject: string;
   emailHtml: string;
 }
 
-interface RowContext {
+export interface RowContext {
   entityId: string;
   firstName: string;
   email: string;
@@ -592,6 +592,28 @@ export async function enqueueLifecycleTouch(
 export function depositReminderBaseKey(buyerId: string): string {
   return `deposit-reminder:${buyerId}`;
 }
+
+/**
+ * The six §5c deposit-reminder bodies, exposed so the comms_outbox producer can send
+ * the SAME words on the every-minute rail (§8.2 Phase 3: "existing deposit-reminder
+ * cadence reused").
+ *
+ * Exported rather than copied. Two rails rendering two texts is how a "truthful $99
+ * copy" correction lands in one of them and not the other, which is the §13-D48
+ * failure in miniature. The producer imports this DYNAMICALLY: this module pulls the
+ * Resend and Twilio SDKs through `lib/qstash/notify`, and the producer is reached from
+ * the checkout route, whose module graph should not carry them.
+ *
+ * Indexed 1..6 to match the sequence names.
+ */
+export const DEPOSIT_REMINDER_RENDERERS: Readonly<Record<1 | 2 | 3 | 4 | 5 | 6, (ctx: RowContext) => RenderedTouch>> = {
+  1: SEQUENCES.deposit_reminder_1.render,
+  2: SEQUENCES.deposit_reminder_2.render,
+  3: SEQUENCES.deposit_reminder_3.render,
+  4: SEQUENCES.deposit_reminder_4.render,
+  5: SEQUENCES.deposit_reminder_5.render,
+  6: SEQUENCES.deposit_reminder_6.render,
+};
 
 const DEPOSIT_REMINDER_SEQUENCES: LifecycleSequence[] = [
   "deposit_reminder_1", "deposit_reminder_2", "deposit_reminder_3",

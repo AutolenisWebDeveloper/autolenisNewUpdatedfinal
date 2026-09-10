@@ -46,11 +46,17 @@ interface Ctrl {
   depositUpdates: Array<Record<string, unknown>>;
   upsertCalls: number;
   enrollCalls: number;
+  /** False models the CHECKOUT PROBE — a call carrying no disclosure version. */
+  disclosuresAccepted: boolean;
+  /** Which limiter each call consulted, in order. */
+  limiterKinds: string[];
+  paymentRequiredCalls: number;
 }
 let ctrl: Ctrl;
 
 mock.module("@/lib/auth/api", {
   namedExports: {
+    getRequestUser: async () => ({ email_confirmed_at: "2026-01-01T00:00:00Z" }),
     getRequestBuyer: async () => ({ id: BUYER_ID, preQualification: { decision: "APPROVED" } }),
     successResponse: (data: unknown) => ({ ok: true, data }),
     // Mirrors the real helper's optional 4th `details` argument so the tests can
@@ -79,10 +85,22 @@ mock.module("@/lib/prisma", {
       },
       shortlistItem: { count: async () => 1 },
       deposit: {
+        // Phase 3: the route no longer point-looks-up one row. It calls the shared
+        // obligation check, which selects EVERY obligation-bearing row for the buyer
+        // and asks Stripe about each. The fake models that selection rather than
+        // returning the fixture unconditionally, so a test that sets a REFUNDED
+        // fixture really does exercise "no obligation".
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          const d = ctrl.existingDeposit;
+          if (!d) return [];
+          const statuses = ((args.where.status as Record<string, unknown>)?.in ?? []) as string[];
+          return statuses.includes(d.status as string) ? [d] : [];
+        },
         findFirst: async () => ctrl.existingDeposit,
         upsert: async () => { ctrl.upsertCalls += 1; return { id: "dep_1" }; },
         create: async () => ({ id: "dep_1" }),
         update: async (args: Record<string, unknown>) => { ctrl.depositUpdates.push(args); return { id: "dep_1" }; },
+        updateMany: async (args: Record<string, unknown>) => { ctrl.depositUpdates.push(args); return { count: 1 }; },
       },
     },
   },
@@ -103,7 +121,13 @@ mock.module("@/lib/stripe", {
 });
 
 mock.module("@/lib/security/rate-limit", {
-  namedExports: { limitPaymentIntent: async () => ({ ok: true }), clientIpKey: () => "ip" },
+  namedExports: {
+    limitPaymentIntent: async () => { ctrl.limiterKinds.push("intent"); return { ok: true }; },
+    // The checkout PROBE (a call with no disclosure version) is rate-limited as the
+    // read it is, not against the 10/hour card-testing budget a mint uses.
+    limitGeneral: async () => { ctrl.limiterKinds.push("general"); return { ok: true }; },
+    clientIpKey: () => "ip",
+  },
 });
 mock.module("@/lib/services/prequal/prequal.service", {
   namedExports: { isPrequalValid: () => true },
@@ -115,6 +139,35 @@ mock.module("@/lib/services/crm/lifecycle-touch-drain.service", {
   namedExports: { cancelPreCheckoutTouches: async () => ({ canceled: 0, status: "OK" }) },
 });
 mock.module("@/lib/events/emit", { namedExports: { emitDomainEvent: async () => {} } });
+// Phase 3: the route now resolves the buyer's open Vehicle Request, runs the §5a
+// eligibility recheck and moves the request to PAYMENT_REQUIRED before it reaches the
+// duplicate-charge logic these tests are about. Those are mocked to their passing
+// answers here — they have their own suites — so this file keeps testing the one thing
+// it was written for.
+mock.module("@/lib/services/vehicle-request/open-request.service", {
+  namedExports: {
+    findOpenRequest: async () => ({ id: "vr_1", buyerId: BUYER_ID, status: "SUBMITTED" }),
+    OPEN_REQUEST_STATUSES: ["DRAFT", "SUBMITTED", "INTAKE", "PAYMENT_REQUIRED"],
+  },
+});
+mock.module("@/lib/services/vehicle-request/vehicle-request.service", {
+  namedExports: { enterPaymentRequired: async () => { ctrl.paymentRequiredCalls += 1; return true; } },
+});
+mock.module("@/lib/services/payment/deposit-eligibility", {
+  namedExports: {
+    // Two verdicts from one gather: §5a decides the PAYMENT_REQUIRED transition,
+    // §5a-plus-disclosures decides whether a PaymentIntent may be minted. The
+    // existing-obligation check sits BETWEEN them, which is why the route needs
+    // them separately and why this fake returns both.
+    gatherAndCheckEligibility: async () => ({
+      transition: { eligible: true },
+      intent: ctrl.disclosuresAccepted
+        ? { eligible: true }
+        : { eligible: false, code: "DISCLOSURE_REQUIRED", message: "Please read and accept what the $99 covers before paying.", missing: "disclosures" },
+    }),
+  },
+});
+
 mock.module("@/lib/logger", {
   namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } },
 });
@@ -123,16 +176,35 @@ async function load() {
   return (await import("@/app/api/buyer/deposit/create-intent/route")).POST;
 }
 
-function req(): NextRequest {
+// The route decides probe-vs-mint from the BODY — a call with no disclosure version
+// cannot mint, which is what makes it usable as a read. So the tests send the version
+// exactly when they mean "the buyer accepted".
+function req(body: Record<string, unknown> = {}): NextRequest {
   return new NextRequest("https://autolenis.com/api/buyer/deposit/create-intent", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   });
+}
+
+interface RouteResult {
+  ok: boolean;
+  code?: string;
+  status?: number;
+  details?: { paymentIntentId?: string; intentStatus?: string; missing?: string };
+}
+
+async function post(): Promise<RouteResult> {
+  const POST = await load();
+  const body = ctrl.disclosuresAccepted ? { disclosuresVersion: "2026-09-09-draft" } : {};
+  return (await POST(req(body))) as unknown as RouteResult;
 }
 
 beforeEach(() => {
   ctrl = {
+    disclosuresAccepted: true,
+    limiterKinds: [],
+    paymentRequiredCalls: 0,
     existingDeposit: null,
     retrievedPi: { status: "requires_payment_method", client_secret: "cs_reusable", metadata: {} },
     createCalls: [],
@@ -257,10 +329,178 @@ test("a buyer with no deposit at all still gets an intent", async () => {
   assert.equal(ctrl.createCalls.length, 1);
 });
 
-test("an ALREADY_PAID deposit still short-circuits ahead of this guard", async () => {
+test("an ALREADY_PAID deposit still short-circuits, with its own clearer message", async () => {
+  // The fixture now states BOTH facts, because Phase 3 requires both to agree before
+  // the buyer is told they have paid: our row says PAID and Stripe says the intent
+  // succeeded. The old fixture left the PaymentIntent at the beforeEach default
+  // (`requires_payment_method`), so it was asserting "already paid" for a deposit the
+  // provider said had never been paid — the exact disagreement the CONTRADICTION case
+  // below now refuses to resolve silently.
   ctrl.existingDeposit = { id: "dep_1", status: "PAID", stripePaymentIntentId: PAID_PI };
+  ctrl.retrievedPi = { status: "succeeded", client_secret: "x", metadata: { type: "deposit" } };
+
   const POST = await load();
   const res = (await POST(req())) as { ok: boolean; code?: string };
   assert.equal(res.code, "ALREADY_PAID", "settled deposits keep their own clearer message");
   assert.equal(ctrl.createCalls.length, 0);
+});
+
+test("a PAID row the provider contradicts is blocked, reported to the buyer from OUR record, and flagged", async () => {
+  // Our record says the money arrived; Stripe says that intent never took it. The
+  // known producer is the admin deposit override, which writes PAID with no charge.
+  // Two wrong answers are available here and both are silent: mint (charging someone
+  // whose record says paid) or reuse (letting a "settled" deposit be paid again).
+  ctrl.existingDeposit = { id: "dep_1", status: "PAID", stripePaymentIntentId: PAID_PI };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "x", metadata: { type: "deposit" } };
+
+  const POST = await load();
+  const res = (await POST(req())) as { ok: boolean; code?: string; details?: Record<string, unknown> };
+
+  // ALREADY_PAID, not CHARGE_UNSETTLED. Both block, so neither risks a double charge,
+  // and the only question is which sentence is true: "it isn't recorded on our side
+  // yet" is false for a row that IS recorded on our side. The disagreement travels as
+  // `needsReview` for Finance instead of as confusing copy for the buyer.
+  assert.equal(res.code, "ALREADY_PAID");
+  assert.equal(ctrl.createCalls.length, 0, "and no second intent is minted");
+  assert.equal(res.details?.intentStatus, "requires_payment_method", "the disagreement is reported, not hidden");
+  assert.equal(res.details?.needsReview, true, "and flagged, because one of the two records is wrong");
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GATE ORDER: the existing-obligation check runs BEFORE the disclosure gate.
+//
+// This is not tidiness. The checkout page loads with nothing accepted and asks this
+// endpoint what the buyer's situation is. If the disclosure gate answered first, a
+// buyer whose money had ALREADY moved would be told "accept the disclosures" — the
+// obligation check would never run, the page would learn nothing about the charge,
+// and it would render a card form and a "Total charged today $99.00" summary to
+// someone who had already paid. `deposit-charge-unsettled-block` and its E2E test
+// exist to prevent exactly that.
+//
+// The same ordering is what makes the probe safe: a call with no version cannot mint,
+// because the gate it fails sits immediately before the mint.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("PROBE: an already-charged buyer is told about the charge, not about disclosures", async () => {
+  ctrl.disclosuresAccepted = false; // the page's on-load probe
+  ctrl.existingDeposit = { id: "dep_1", status: "PENDING", stripePaymentIntentId: PAID_PI };
+  ctrl.retrievedPi = { status: "succeeded", client_secret: "x", metadata: { type: "deposit" } };
+
+  const res = await post();
+  assert.equal(res.code, "CHARGE_UNSETTLED", "the charge is the more important truth, so it is answered first");
+  assert.equal(res.details?.paymentIntentId, PAID_PI, "the page needs the reference to re-check");
+  assert.equal(ctrl.createCalls.length, 0);
+});
+
+test("PROBE: a buyer who owes nothing is asked for the disclosures and gets NO intent", async () => {
+  ctrl.disclosuresAccepted = false;
+  ctrl.existingDeposit = null;
+
+  const res = await post();
+  assert.equal(res.code, "DISCLOSURE_REQUIRED");
+  assert.equal(res.details?.missing, "disclosures");
+  assert.equal(ctrl.createCalls.length, 0, "a probe must never mint — that is what makes it a probe");
+  assert.equal(ctrl.upsertCalls, 0, "and never write a Deposit row either");
+});
+
+test("PROBE: a reusable live intent is NOT handed out before acceptance", async () => {
+  ctrl.disclosuresAccepted = false;
+  ctrl.existingDeposit = { id: "dep_1", status: "PENDING", stripePaymentIntentId: "pi_live" };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "pi_live_secret_x", metadata: { type: "deposit" } };
+
+  const res = await post();
+  assert.equal(
+    res.code,
+    "DISCLOSURE_REQUIRED",
+    "the reuse branch sits AFTER the disclosure gate — otherwise the probe would return a usable client secret",
+  );
+  assert.equal(res.ok, false);
+});
+
+test("ACCEPT: the same buyer, with the version, gets the intent", async () => {
+  ctrl.disclosuresAccepted = true;
+  ctrl.existingDeposit = null;
+
+  const res = await post();
+  assert.equal(res.ok, true);
+  assert.equal(ctrl.createCalls.length, 1);
+});
+
+
+// The PROBE is a READ, and must cost like one (found by the independent review).
+//
+// `limitPaymentIntent` is a card-testing guard at 10/hour per buyer AND per source IP.
+// Charging a page LOAD against it meant five reload-and-accept cycles locked a buyer out
+// of their own checkout, and a shared office IP tripped sooner. Moving a DRAFT request to
+// PAYMENT_REQUIRED on a page view was the second cost: it silently suppresses the §6.4
+// draft-recovery series for a buyer who looked at checkout once and never paid.
+test("a probe does not spend the payment-intent budget and does not move the request", async () => {
+  ctrl.disclosuresAccepted = false;
+  ctrl.existingDeposit = null;
+  await post();
+
+  // Four: the entry throttle (buyer + IP), then the probe's own budget (buyer + IP).
+  // The entry pair is what keeps an authenticated endpoint from being unbounded while
+  // the body is being read to decide which of the two money guards applies.
+  assert.deepEqual(ctrl.limiterKinds, ["general", "general", "general", "general"]);
+  assert.equal(ctrl.paymentRequiredCalls, 0, "a page render is not a buyer acting");
+});
+
+test("an accept spends the real budget and moves the request", async () => {
+  ctrl.disclosuresAccepted = true;
+  ctrl.existingDeposit = null;
+  await post();
+
+  assert.deepEqual(
+    ctrl.limiterKinds,
+    ["general", "general", "intent", "intent"],
+    "the entry throttle first, then the card-testing guard — minting is what the second is for",
+  );
+  assert.equal(ctrl.paymentRequiredCalls, 1);
+});
+
+
+// §5b — THE REUSE BRANCH RECORDS THE ACCEPTANCE TOO.
+//
+// The upsert at the bottom of the route is the only writer of `disclosures_version`, and
+// the reuse branch returns before reaching it. So when legal returns approved wording and
+// the version bumps, a buyer with a live intent who reads the NEW text and accepts it got
+// the existing client secret and a deposit row still stamped with the OLD version — the
+// stored record of what they agreed to would be the wrong wording, which is the one thing
+// the version mechanism exists to prevent.
+test("accepting on a reusable intent stamps the version the buyer actually read", async () => {
+  ctrl.disclosuresAccepted = true;
+  ctrl.existingDeposit = { id: "dep_1", status: "PENDING", stripePaymentIntentId: "pi_live" };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "pi_live_secret_x", metadata: { type: "deposit" } };
+
+  const res = await post();
+  assert.equal(res.ok, true, "the live intent is still reused — no second charge");
+
+  const stamp = ctrl.depositUpdates.find(
+    (u) => (u.data as Record<string, unknown> | undefined)?.disclosuresVersion !== undefined,
+  );
+  assert.ok(stamp, "the acceptance must be recorded before the secret is handed back");
+  assert.equal((stamp!.data as { disclosuresVersion: string }).disclosuresVersion, "2026-09-09-draft");
+  assert.ok(
+    (stamp!.data as { disclosuresAcceptedAt?: Date }).disclosuresAcceptedAt instanceof Date,
+    "and stamped with when",
+  );
+  assert.equal(
+    (stamp!.data as Record<string, unknown>).vehicleRequestId,
+    undefined,
+    "§3: only the acceptance — stamping a parent id onto an existing row is the re-parent the ratchet holds at zero",
+  );
+});
+
+test("a PROBE on a reusable intent records nothing — there is no acceptance to record", async () => {
+  ctrl.disclosuresAccepted = false;
+  ctrl.existingDeposit = { id: "dep_1", status: "PENDING", stripePaymentIntentId: "pi_live" };
+  ctrl.retrievedPi = { status: "requires_payment_method", client_secret: "pi_live_secret_x", metadata: { type: "deposit" } };
+
+  await post();
+  const stamp = ctrl.depositUpdates.find(
+    (u) => (u.data as Record<string, unknown> | undefined)?.disclosuresVersion !== undefined,
+  );
+  assert.equal(stamp, undefined);
 });

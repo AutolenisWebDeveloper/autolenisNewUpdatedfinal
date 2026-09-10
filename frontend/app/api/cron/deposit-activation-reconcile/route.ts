@@ -36,7 +36,43 @@ export async function GET(request: NextRequest) {
     // Settlement first: a deposit settled here becomes activation's input below.
     // A settlement failure must not prevent activation from converging deposits
     // that are ALREADY paid, so it is reported rather than thrown.
-    const settlement = await reconcileDepositSettlements();
+    // Reported rather than thrown, which the comment above has always claimed and the
+    // code did not do: an awaited call with no guard meant one failed `findMany` in
+    // stage 1 skipped stage 2 entirely, stranding deposits that were ALREADY paid and
+    // had nothing to do with the failure.
+    let settlement: Awaited<ReturnType<typeof reconcileDepositSettlements>>;
+    try {
+      settlement = await reconcileDepositSettlements();
+    } catch (err) {
+      logger.error("[deposit-activation-reconcile] settlement stage failed; activation still runs:", err);
+      settlement = { scanned: 0, settled: 0, unsettled: 0, errors: 1, skipped: "settlement_stage_threw" };
+      // AND SAY SO ON THE RAIL A PERSON READS.
+      //
+      // Catching lets stage 2 run — deposits that are ALREADY paid have nothing to do
+      // with a stage-1 failure and must still converge. But catching alone turned a dead
+      // money-settling stage into a COMPLETED cron row and a 200: anything alerting on
+      // cron status would have seen a healthy job while the stage that recovers missed
+      // webhooks had been failing for days. The one exception rail is where that belongs.
+      //
+      // Keyed on the day, so a stage failing every tick produces one row to work rather
+      // than one every fifteen minutes.
+      try {
+        const { raiseException } = await import("@/lib/services/operations/queue-item.service");
+        await raiseException({
+          code: "PAYMENT_WEBHOOK_MISSED",
+          idempotencyKey: `SETTLEMENT_STAGE_DOWN:${new Date().toISOString().slice(0, 10)}`,
+          detail:
+            `The deposit SETTLEMENT stage of deposit-activation-reconcile threw and recovered no ` +
+            `payments this tick: ${err instanceof Error ? err.message : String(err)}. The activation ` +
+            `stage still ran. While this persists, a buyer whose Stripe webhook was missed stays ` +
+            `PENDING with their money gone — which is the exact condition this stage exists to ` +
+            `recover. Check Stripe reachability and the database, then re-run /api/cron/` +
+            `deposit-activation-reconcile.`,
+        });
+      } catch (raiseErr) {
+        logger.error("[deposit-activation-reconcile] could not raise the stage-failure exception:", raiseErr);
+      }
+    }
     const activation = await reconcileStuckActivations();
     return { settlement, activation };
   });

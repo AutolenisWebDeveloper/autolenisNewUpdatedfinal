@@ -1,4 +1,6 @@
 import 'server-only';
+import { sourcingCaseReplacesAuctionLaunch } from '@/lib/payments/settlement-flags';
+import { recordLegacyPathWrite } from '@/lib/services/comms/legacy-path-write';
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { createAuction, launchAuction } from "@/lib/services/auction/auction.service";
@@ -181,6 +183,34 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
       if (action === 'ok') return 'ok';
       if (action === 'skip') return 'skip';
 
+      // ── PHASE 3: THE SECOND PATH TO AUCTION CREATION ────────────────────────
+      //
+      // The Stripe webhook is not the only thing that creates an auction and invites
+      // dealers — this reconciler does it too, on the recovery path, every five
+      // minutes. Neutralising only the webhook would have left this one running, so
+      // the sourcing case would open at settlement and the reconciler would create the
+      // auction anyway a few minutes later.
+      //
+      // With SOURCING_CASE_REPLACES_AUCTION_LAUNCH ON, all three of this reconciler's
+      // fulfilment branches stand down: `create_auction` and `invite` because launch
+      // readiness and the invitation service (Phase 5) own them, and `close` because
+      // Phase 5's readiness hold replaces closing an auction that never got dealers.
+      //
+      // WHY `close` IS GATED ON THE SAME FLAG rather than retired outright. §8.2 says
+      // it is "retired in favour of Phase 5's readiness hold", and with the flag on
+      // that is exactly right — no auction is created, so there is nothing to close.
+      // But with the flag OFF auctions ARE still created, and retiring the branch would
+      // leave one that got zero invitations ACTIVE for ever with no exception raised.
+      // That is strictly worse than today's behaviour, and it would reach production
+      // immediately, which is the one thing the sequencing guard exists to prevent.
+      if (sourcingCaseReplacesAuctionLaunch()) {
+        logger.info(
+          `[deposit-activation] standing down on '${action}' for deposit ${depositId}: ` +
+            `SOURCING_CASE_REPLACES_AUCTION_LAUNCH is on, so launch readiness (Phase 5) owns this`,
+        );
+        return 'skip';
+      }
+
       if (action === 'create_auction') {
         // CONCIERGE ISOLATION. Creating the auction here is the ONE step that
         // decides a deposit is competitive, so it is the one step that must
@@ -204,6 +234,15 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
           await raiseUnconvergableTrackException(depositId, track);
           return 'skip';
         }
+        await recordLegacyPathWrite({
+          kind: 'SETTLEMENT_AUCTION_LAUNCH',
+          detail:
+            `activation reconciler created an auction for deposit ${depositId} instead of leaving ` +
+            `sourcing to the case`,
+          entityType: 'Deposit',
+          entityId: depositId,
+          removalPhase: 5,
+        });
         await createAuction(loaded.buyerId, depositId);
         continue;
       }
@@ -220,6 +259,13 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
         continue;
       }
       if (action === 'invite' && loaded.auctionId) {
+        await recordLegacyPathWrite({
+          kind: 'SETTLEMENT_AUCTION_LAUNCH',
+          detail: `activation reconciler invited dealers to auction ${loaded.auctionId} (deposit ${depositId})`,
+          entityType: 'Deposit',
+          entityId: depositId,
+          removalPhase: 5,
+        });
         const invited = await inviteDealersToAuction(loaded.auctionId, loaded.buyerId);
         logger.info(`[deposit-activation] re-invited ${invited} dealers for auction ${loaded.auctionId} (deposit ${depositId})`);
         // Re-read once more so a 0-result invite past the grace can converge to refund.

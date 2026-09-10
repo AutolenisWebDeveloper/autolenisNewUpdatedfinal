@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 
 interface Enqueued { sequence: string; entityId: string; baseKey: string; runAt?: Date }
 
+let legacyWrites: Array<Record<string, unknown>> = [];
 let enqueued: Enqueued[] = [];
 let dispatched: Array<{ path: string; delaySeconds?: number }> = [];
 let flagValue = false;
@@ -76,7 +77,14 @@ const DEPOSIT = {
   phone: "+15551230000",
 };
 
+mock.module("@/lib/services/comms/legacy-path-write", {
+  namedExports: {
+    recordLegacyPathWrite: async (input: Record<string, unknown>) => { legacyWrites.push(input); },
+  },
+});
+
 beforeEach(() => {
+  legacyWrites = [];
   enqueued = [];
   dispatched = [];
   flagValue = false;   // production default: no feature_flag row exists
@@ -84,60 +92,56 @@ beforeEach(() => {
   flagThrows = false;
 });
 
-test("with NO flag row, deposit_reminder still enqueues INTERNALLY — never QStash", async () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 3 — THIS PRODUCER NO LONGER PRODUCES THE $99 SERIES.
+//
+// The four tests that stood here pinned how `deposit_reminder` ROUTED: internal
+// rather than QStash, without consulting a feature flag, immediately, carrying the
+// buyer's contact details. Every one of them described a path that has moved.
+//
+// The series now runs on `comms_outbox` — keyed to the Vehicle Request, drained every
+// minute, with a state recheck that reads the request as well as the money. The same
+// cadence and the same guards are pinned there, in
+// `lib/services/payment/__tests__/deposit-reminder-outbox.test.ts`; the legacy rail's
+// DRAIN is still pinned in `deposit-reminder-cadence.test.ts`, because production rows
+// are still draining through it.
+//
+// What is worth pinning HERE is the thing that replaced them: the adapter stands down
+// and SAYS SO. Both rails enrolling would send a buyer all six touches twice, and the
+// failure mode of a forgotten caller is silent — so the stand-down is counted, not
+// just logged.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("deposit_reminder enrols NOTHING on the lifecycle rail — both rails would double-send", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload(DEPOSIT);
 
-  assert.equal(enqueued.length, 1, "the internal plane is the producer, flag or no flag");
-  assert.deepEqual(dispatched, [], "QStash is removed — dispatching there delivers nothing");
-  assert.equal(enqueued[0]!.sequence, "deposit_reminder_1");
-  assert.equal(enqueued[0]!.entityId, "buyer_1");
-  assert.equal(enqueued[0]!.baseKey, "deposit-reminder:buyer_1");
+  assert.deepEqual(enqueued, [], "the $99 series moved to comms_outbox in Phase 3");
+  assert.deepEqual(dispatched, [], "and certainly not to the removed QStash service");
 });
 
-test("no feature flag is consulted for deposit_reminder at all", async () => {
+test("the stand-down is COUNTED, so a forgotten caller surfaces as a row and not as duplicate messages", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload(DEPOSIT);
 
-  assert.ok(
-    !flagReads.includes("lifecycle_internal_deposit_reminder"),
-    "consulting the flag is what let a missing row kill the circle — the workload must not read it",
-  );
+  assert.equal(legacyWrites.length, 1);
+  assert.equal(legacyWrites[0]!.kind, "LEGACY_LIFECYCLE_ENROLLMENT");
+  assert.match(String(legacyWrites[0]!.detail), /buyer_1/);
+  assert.match(String(legacyWrites[0]!.detail), /comms_outbox/);
 });
 
-test("a feature-flag lookup FAILURE cannot divert the workload to the removed service", async () => {
-  // internalEnabled() catches a flag-read error and falls back to QStash. For a
-  // workload whose QStash target no longer exists, that fallback is a silent drop.
-  flagThrows = true;
+test("it does not throw — the callers are best-effort tails that would swallow it", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload(DEPOSIT);
-
-  assert.equal(enqueued.length, 1, "an unreadable flag table must not stop deposit reminders");
-  assert.deepEqual(dispatched, []);
+  // Reaching here without a rejection IS the assertion; a throw in a `.catch(log)`
+  // tail is invisible, which is why the counter above exists instead.
+  assert.equal(legacyWrites.length, 1);
 });
 
-test("touch 1 is enqueued IMMEDIATELY — no first-touch grace", async () => {
+test("no feature flag is consulted — the workload does not reach the routing decision", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload(DEPOSIT);
-
-  // runAt is left undefined so enqueueLifecycleTouch defaults it to now; the row
-  // is therefore due on the drain's next pass. The chain then carries
-  // +1h/+6h/+24h/+72h/day-7 itself.
-  assert.equal(
-    enqueued[0]!.runAt,
-    undefined,
-    "the owner's cadence leads with an immediate touch; any delay here shifts all six",
-  );
-});
-
-test("the buyer's contact details are carried onto the touch row", async () => {
-  const { scheduleLifecycleWorkload } = await load();
-  await scheduleLifecycleWorkload(DEPOSIT);
-
-  const row = enqueued[0]! as unknown as Record<string, unknown>;
-  assert.equal(row.email, "buyer@example.com");
-  assert.equal(row.firstName, "Sam");
-  assert.equal(row.phone, "+15551230000", "the SMS leg needs the phone; the TCPA gate decides whether it sends");
+  assert.deepEqual(flagReads, [], "the stand-down happens before buildPlan");
 });
 
 // ── PHASE 2: the flip is now GLOBAL, deliberately ──────────────────────────

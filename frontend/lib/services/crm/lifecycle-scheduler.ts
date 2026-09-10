@@ -35,6 +35,7 @@ import { logger } from "@/lib/logger";
 // not by deletion.
 import { isEnabled } from "@/lib/services/system/feature-flags.service";
 import type { LifecycleSequence } from "@/lib/services/crm/lifecycle-touch-drain.service";
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 
 const SECONDS = 1000;
 
@@ -268,6 +269,37 @@ async function internalEnabled(flag: string): Promise<boolean> {
 
 export async function scheduleLifecycleWorkload(input: LifecycleWorkloadInput): Promise<void> {
   try {
+    // §8.2 Phase 3 — THE $99 SERIES HAS MOVED, and this is the compatibility adapter
+    // that says so out loud rather than quietly enrolling a second copy.
+    //
+    // `lib/services/payment/deposit-reminder.service.ts` now enrols the six touches on
+    // `comms_outbox`, keyed to the Vehicle Request and drained every minute. Checkout
+    // calls it directly. If anything still reaches HERE for `deposit_reminder`, both
+    // rails would be running and the buyer would receive every touch twice — so this
+    // stands down and COUNTS the attempt, which is what makes a forgotten caller show
+    // up as a `LEGACY_PATH_WRITE` row instead of as duplicate messages to a buyer.
+    //
+    // Standing down rather than throwing: this function is called from best-effort
+    // tails that swallow errors, so a throw would be invisible. The counter is not.
+    //
+    // Rows already in flight on the old rail are NOT affected — the touch drain keeps
+    // draining them, and checkout cancels a buyer's remaining ones when it enrols them
+    // on the new rail. This is only about creating NEW ones.
+    if (input.workload === "deposit_reminder") {
+      await recordLegacyPathWrite({
+        kind: "LEGACY_LIFECYCLE_ENROLLMENT",
+        detail:
+          `scheduleLifecycleWorkload("deposit_reminder") for buyer ${input.buyerId} — the $99 series ` +
+          `moved to comms_outbox in Phase 3; nothing was enrolled on the lifecycle rail`,
+        removalPhase: 3,
+      });
+      logger.warn(
+        `[lifecycle-scheduler] deposit_reminder enrollment refused for buyer ${input.buyerId}: ` +
+          `the $99 series runs on comms_outbox (enrollDepositReminders). Nothing was enqueued.`,
+      );
+      return;
+    }
+
     const plan = buildPlan(input);
     // `flag: null` marks a workload the internal plane owns outright — it is used
     // without consulting (or being able to fail over from) a feature flag.

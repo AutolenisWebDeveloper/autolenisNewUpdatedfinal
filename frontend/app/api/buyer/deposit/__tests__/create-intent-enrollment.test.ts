@@ -22,6 +22,7 @@ const REVIEW_TOKEN = "rev_tok_123";
 
 interface Ctrl {
   enrollCalls: Array<Record<string, unknown>>;
+  legacyCancels: string[];
   preCheckoutCancels: string[];
   emitCalls: string[];
   reviewRow: Record<string, unknown> | null;
@@ -33,6 +34,7 @@ let ctrl: Ctrl;
 
 mock.module("@/lib/auth/api", {
   namedExports: {
+    getRequestUser: async () => ({ email_confirmed_at: "2026-01-01T00:00:00Z" }),
     getRequestBuyer: async () => ({
       id: BUYER_ID,
       preQualification: { decision: "APPROVED" },
@@ -56,10 +58,19 @@ mock.module("@/lib/prisma", {
       },
       shortlistItem: { count: async () => ctrl.shortlistCount },
       deposit: {
+        // Phase 3: the route calls the shared obligation check, which selects every
+        // obligation-bearing row for the buyer rather than point-looking-up one.
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          const d = ctrl.existingDeposit;
+          if (!d) return [];
+          const statuses = ((args.where.status as Record<string, unknown>)?.in ?? []) as string[];
+          return statuses.includes(d.status as string) ? [d] : [];
+        },
         findFirst: async () => ctrl.existingDeposit,
         upsert: async () => ({ id: "dep_1" }),
         create: async () => ({ id: "dep_1" }),
         update: async () => ({ id: "dep_1" }),
+        updateMany: async () => ({ count: 1 }),
       },
     },
   },
@@ -83,6 +94,8 @@ mock.module("@/lib/stripe", {
 mock.module("@/lib/security/rate-limit", {
   namedExports: {
     limitPaymentIntent: async () => ({ ok: true }),
+    // The checkout PROBE (no disclosure version) is rate-limited as a read.
+    limitGeneral: async () => ({ ok: true }),
     clientIpKey: () => "ip",
   },
 });
@@ -91,21 +104,54 @@ mock.module("@/lib/services/prequal/prequal.service", {
   namedExports: { isPrequalValid: () => ctrl.prequalValid },
 });
 
-mock.module("@/lib/services/crm/lifecycle-scheduler", {
+// PHASE 3: the $99 series enrols on `comms_outbox`, not on the lifecycle rail. The
+// property this file pins — ONE enrolment, from ONE owner, never for concierge — is
+// unchanged; only the callee moved.
+mock.module("@/lib/services/payment/deposit-reminder.service", {
   namedExports: {
-    scheduleLifecycleWorkload: async (input: Record<string, unknown>) => { ctrl.enrollCalls.push(input); },
+    enrollDepositReminders: async (input: Record<string, unknown>) => {
+      ctrl.enrollCalls.push(input);
+      return { emailsEnqueued: 6, smsEnqueued: 6 };
+    },
   },
 });
 
 mock.module("@/lib/services/crm/lifecycle-touch-drain.service", {
   namedExports: {
     cancelPreCheckoutTouches: async (buyerId: string) => { ctrl.preCheckoutCancels.push(buyerId); return { canceled: 0, status: "OK" }; },
+    // Called first, so a buyer already enrolled on the retired rail does not receive
+    // every touch twice.
+    cancelDepositReminderTouches: async (buyerId: string) => { ctrl.legacyCancels.push(buyerId); return { canceled: 0, status: "OK" }; },
   },
 });
 
 mock.module("@/lib/events/emit", {
   namedExports: {
     emitDomainEvent: async (name: string) => { ctrl.emitCalls.push(name); },
+  },
+});
+
+// Phase 3: the route now resolves the buyer's open Vehicle Request, runs the §5a
+// eligibility recheck and moves the request to PAYMENT_REQUIRED before it reaches the
+// duplicate-charge logic these tests are about. Those are mocked to their passing
+// answers here — they have their own suites — so this file keeps testing the one thing
+// it was written for.
+mock.module("@/lib/services/vehicle-request/open-request.service", {
+  namedExports: {
+    findOpenRequest: async () => ({ id: "vr_1", buyerId: BUYER_ID, status: "SUBMITTED" }),
+    OPEN_REQUEST_STATUSES: ["DRAFT", "SUBMITTED", "INTAKE", "PAYMENT_REQUIRED"],
+  },
+});
+mock.module("@/lib/services/vehicle-request/vehicle-request.service", {
+  namedExports: { enterPaymentRequired: async () => true },
+});
+mock.module("@/lib/services/payment/deposit-eligibility", {
+  namedExports: {
+    // Two verdicts from one gather: §5a decides the PAYMENT_REQUIRED transition,
+    // §5a-plus-disclosures decides whether a PaymentIntent may be minted. The
+    // existing-obligation check sits BETWEEN them, which is why the route needs
+    // them separately and why this fake returns both.
+    gatherAndCheckEligibility: async () => ({ transition: { eligible: true }, intent: { eligible: true } }),
   },
 });
 
@@ -126,6 +172,7 @@ function req(body: Record<string, unknown> = {}): NextRequest {
 beforeEach(() => {
   ctrl = {
     enrollCalls: [],
+    legacyCancels: [],
     preCheckoutCancels: [],
     emitCalls: [],
     reviewRow: null,

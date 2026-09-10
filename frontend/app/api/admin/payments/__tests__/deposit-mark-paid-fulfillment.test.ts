@@ -183,7 +183,19 @@ test("the PAID flip is guarded by the deposit transition matrix", async () => {
   const where = ctrl.flipWhere as { id: string; status: { in: string[] } };
   assert.equal(where.id, "dep_1");
   assert.ok(Array.isArray(where.status?.in), "flip must constrain the predecessor status set");
-  assert.deepEqual(where.status.in, ["PENDING"], "PAID is reachable only from PENDING");
+  assert.deepEqual(
+    where.status.in,
+    ["PENDING", "FAILED"],
+    "Phase 3: PAID is reachable from PENDING or FAILED. FAILED is in the set because the " +
+      "pre-Phase-3 behaviour parked card declines there while their PaymentIntents stayed live " +
+      "(money-path defect 1), and an admin must be able to settle those rows.",
+  );
+  assert.ok(
+    !where.status.in.includes("DISPUTED"),
+    "and NOT from DISPUTED. The matrix allows that edge, but it belongs to charge.dispute.closed " +
+      "on provider evidence — an administrator must not be able to clear a live chargeback by " +
+      "marking the deposit paid.",
+  );
 });
 
 test("a settled deposit is never resurrected — a lost flip runs no cascade", async () => {

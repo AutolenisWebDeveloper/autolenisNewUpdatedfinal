@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { NotificationType, NotificationChannel } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { limitGeneral } from "@/lib/security/rate-limit";
-import { recordPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
+import { recordPlanElection, recordRequestPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
+import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
+import { isUpgradeWindowOpen, quotePremiumBalance } from "@/lib/services/plan/upgrade-window.service";
 
 // POST /api/buyer/plan/upgrade
 // Upgrades an authenticated Standard buyer to Premium.
@@ -59,6 +61,41 @@ export async function POST(request: NextRequest) {
     reason: "Self-service upgrade STANDARD → PREMIUM (no charge at this stage; fee collected at deal payment).",
   });
 
+  // PHASE 3 — §23.1: PLAN IS ELECTED PER VEHICLE REQUEST.
+  //
+  // The buyer-level snapshot above is the DEFAULT ("the buyer record carries the current
+  // default"); this binds the election to the request it is actually about ("the Vehicle
+  // Request and the Deal carry the binding snapshot"). Without it the election is
+  // recorded for the person and not for the transaction, and §23.4's "a buyer starts a
+  // second Vehicle Request → new request, new $99, fresh plan election" has nowhere to
+  // record the difference.
+  //
+  // The buyer-level writer would not have written this even if it had the request id: it
+  // dedupes on the BUYER's latest plan, and after the row above the buyer is already
+  // PREMIUM. That dedupe is right at buyer level and wrong at request level, which is
+  // why the request-scoped writer exists.
+  //
+  // ELECTION IS STILL FREE, and deliberately (owner decision, 2026-07, above). What
+  // Phase 3 changes is that electing is no longer the same thing as being entitled:
+  // `entitledPlanForRequest` reads the ledger of settled payments, so the concierge is
+  // never delivered unpaid (§23.1, PAY-57). This response says so rather than returning a
+  // bare "PREMIUM" that reads as though something had been bought.
+  let windowState: Awaited<ReturnType<typeof isUpgradeWindowOpen>> | null = null;
+  let quote: Awaited<ReturnType<typeof quotePremiumBalance>> | null = null;
+  const openRequest = await findOpenRequest(buyer.id);
+  if (openRequest) {
+    await recordRequestPlanElection({
+      buyerId: buyer.id,
+      vehicleRequestId: openRequest.id,
+      plan: "PREMIUM",
+      touchpoint: "buyer_dashboard_upgrade",
+      actor: buyer.id,
+      reason: "Self-service election STANDARD → PREMIUM for this request. The $400 balance is unpaid.",
+    });
+    windowState = await isUpgradeWindowOpen(openRequest.id);
+    quote = await quotePremiumBalance(openRequest.id);
+  }
+
   // Audit the self-service plan change (non-blocking).
   await Promise.all([
     prisma.auditLog.create({
@@ -107,5 +144,14 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return successResponse({ plan: updated.plan, planUpgradedAt: updated.planUpgradedAt, alreadyUpgraded: false });
+  return successResponse({
+    plan: updated.plan,
+    planUpgradedAt: updated.planUpgradedAt,
+    alreadyUpgraded: false,
+    // §23.1 / PAY-57 — the election is recorded; the entitlement is not granted. Named
+    // in the payload so a client cannot render "you are Premium" from a free flip.
+    entitled: false,
+    upgradeWindow: windowState,
+    balance: quote,
+  });
 }

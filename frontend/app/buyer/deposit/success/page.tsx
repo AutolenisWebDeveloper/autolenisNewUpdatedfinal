@@ -20,6 +20,47 @@ export const dynamic = "force-dynamic";
 
 interface Props { searchParams: Promise<Record<string, string>> }
 
+/**
+ * §23.2a touchpoint 1, for the sourcing-started screen.
+ *
+ * Returns null — no line at all — whenever §23.2b suppresses the ask or the buyer has no
+ * open request to price against. Never a greyed-out or generic line: "named, not pushed"
+ * means the absence of an ask is a legitimate outcome, not a degraded one.
+ *
+ * Best-effort. A page that renders the payment outcome must not fail because an upsell
+ * could not be priced.
+ */
+async function composePremiumLine(buyerId: string): Promise<string | null> {
+  try {
+    const { findOpenRequest } = await import("@/lib/services/vehicle-request/open-request.service");
+    const request = await findOpenRequest(buyerId);
+    if (!request) return null;
+
+    const { isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS } = await import(
+      "@/lib/services/plan/upgrade-suppression.service"
+    );
+    const decision = await isUpgradePromptSuppressed({
+      vehicleRequestId: request.id,
+      buyerId,
+      touchpoint: UPGRADE_TOUCHPOINTS.RECEIPT,
+    });
+    if (decision.suppressed) return null;
+
+    const { quotePremiumBalance } = await import("@/lib/services/plan/upgrade-window.service");
+    const quote = await quotePremiumBalance(request.id);
+    return (
+      `Premium adds a named concierge who coordinates the rest of your purchase — ` +
+      `$${(quote.grossCents / 100).toFixed(0)} in total` +
+      (quote.creditCents > 0
+        ? `, less the $${(quote.creditCents / 100).toFixed(0)} you just paid, so $${(quote.dueCents / 100).toFixed(0)}.`
+        : `.`) +
+      ` Available whenever you want it — there is nothing to decide now.`
+    );
+  } catch {
+    return null;
+  }
+}
+
 export default async function DepositSuccessPage({ searchParams }: Props) {
   const params   = await searchParams;
   const intentId = params.payment_intent ?? null;
@@ -33,6 +74,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
   // is the same one the Stripe webhook branches on — pi.metadata.type — so the
   // copy below can never claim dealer competition for a concierge purchase.
   let isConcierge = false;
+  let premiumLine: string | null = null;
 
   if (intentId) {
     try {
@@ -54,6 +96,17 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
       });
 
       if (mayClaimActivation(outcome)) conversionValueCents = deposit?.amountCents;
+
+      // §23.2a TOUCHPOINT 1 — the other half of "a single line on the receipt AND the
+      // sourcing-started screen". The receipt carries it from the Stripe webhook; this
+      // is the screen.
+      //
+      // Only where activation may be claimed. Showing a buyer an upsell on a page that
+      // is telling them their payment is still settling is exactly §23.2b's "never sold
+      // into a stall AutoLenis caused", one page earlier.
+      if (mayClaimActivation(outcome) && !isConcierge) {
+        premiumLine = await composePremiumLine(buyer.id);
+      }
       if (outcome === "failed") {
         errorMsg = `Payment status: ${intent.status}. Return to payment and try again.`;
       }
@@ -151,6 +204,11 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
           </>
         )}
       </div>
+      {premiumLine && (
+        <p className="text-xs text-[#6B7280] mb-6 leading-relaxed text-left" data-testid="deposit-premium-line">
+          {premiumLine}
+        </p>
+      )}
       <Link href="/buyer/auctions" data-testid="view-auction-btn"
         className="inline-flex items-center justify-center gap-2 w-full py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
         {isConcierge ? "View My Offers" : "View My Auction"} <ArrowRight size={15} aria-hidden="true" />

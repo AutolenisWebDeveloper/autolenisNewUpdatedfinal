@@ -38,17 +38,25 @@
 // 1. OFF BY DEFAULT. This writes money state; deploying the code must change
 //    nothing until an owner turns it on (the CRM_INAPP_ENGINE_ENABLED /
 //    ESIGN_EXECUTED_ARTIFACT_ENABLED cutover pattern).
-// 2. AN EXCLUSION LIST THAT DEFAULTS NON-EMPTY. See below — today the only
-//    candidate in production is a deposit under owner investigation.
+// 2. AN EXCLUSION LIST, configured in the environment. It defaulted non-empty
+//    with one production customer's UUID compiled in; Phase 3 emptied that on
+//    §13-D12's instruction and the run now announces an empty list rather than
+//    carrying a hard-coded one. Safety still rests on property 1: the sweep is
+//    off until an owner turns it on, and D12 orders the exclusion set first.
 // 3. NO FABRICATED PROVIDER EVENTS. `payment_provider_events` means "a provider
 //    event was received". This polled. Writing one would forge the audit trail
 //    and destroy the same non-fabrication guarantee the admin override keeps.
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { allowedPredecessors } from "@/lib/payments/deposit-state";
-import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
+import { SETTLE_FROM } from "@/lib/payments/deposit-state";
+import {
+  retrievePaymentIntent,
+  searchPaymentIntentsByDepositId,
+} from "@/lib/services/payment/stripe.service";
 import { classifyPaymentConfirmation, wasCharged } from "@/lib/services/payment/payment-confirmation";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { applySettlementEffects } from "@/lib/services/payment/settlement-effects.service";
 
 export const DEPOSIT_SETTLEMENT_FLAG = "DEPOSIT_SETTLEMENT_RECONCILE_ENABLED";
 export const DEPOSIT_SETTLEMENT_EXCLUDED_FLAG = "DEPOSIT_SETTLEMENT_EXCLUDED_DEPOSIT_IDS";
@@ -56,19 +64,24 @@ export const DEPOSIT_SETTLEMENT_EXCLUDED_FLAG = "DEPOSIT_SETTLEMENT_EXCLUDED_DEP
 /**
  * Deposits this reconciler must never touch, even when it is switched on.
  *
- * `77934f10-…` is under active owner investigation with a standing instruction
- * not to act on it. It is also, at the time of writing, the ONLY PENDING deposit
- * in production carrying a PaymentIntent — so without this default the very
- * first enabled run would act on precisely the row that must be left alone.
+ * EMPTIED IN PHASE 3, on §13-D12's instruction: "the reconciler also carries a
+ * hard-coded excluded production deposit id (`:69-71`) that Phase 3 removes."
  *
- * The default is non-empty on purpose: an unset env var must not be able to
- * revoke a standing instruction. Remove this entry (or override the list via
- * DEPOSIT_SETTLEMENT_EXCLUDED_DEPOSIT_IDS) once the owner closes the
- * investigation.
+ * What was here was a real production customer's UUID, compiled into the binary
+ * and shipped to every environment. That is the defect, not the exclusion: the
+ * standing instruction it encoded is real and still stands, but the place to
+ * express it is the environment, alongside the flag that enables the sweep at
+ * all — both are runtime decisions the owner makes together, and neither should
+ * need a deploy.
+ *
+ * Nothing is weakened by emptying it, because the sweep is still OFF by default.
+ * D12's own preconditions are explicit that the enable comes AFTER the excluded
+ * deposit is resolved by hand, and `assertExclusionsConfigured` below refuses to
+ * let that be forgotten silently.
+ *
+ * Set `DEPOSIT_SETTLEMENT_EXCLUDED_DEPOSIT_IDS` to exclude a row.
  */
-export const DEFAULT_EXCLUDED_DEPOSIT_IDS: readonly string[] = [
-  "77934f10-8c13-44b9-9a4a-1a5d7b0e99d6",
-];
+export const DEFAULT_EXCLUDED_DEPOSIT_IDS: readonly string[] = [];
 
 /** Strict opt-in: anything but the exact string "true" leaves this off. */
 export function isDepositSettlementReconcilerEnabled(): boolean {
@@ -82,6 +95,27 @@ export function excludedDepositIds(): string[] {
     return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   }
   return [...DEFAULT_EXCLUDED_DEPOSIT_IDS];
+}
+
+/**
+ * Say so, loudly, when the sweep is enabled with no exclusions configured.
+ *
+ * The compiled-in default that used to make this impossible is gone (see above), so
+ * the failure mode it prevented — enabling the flag and acting on a row that was
+ * under investigation — is now prevented by the owner following §13-D12's order
+ * instead. An order nobody is reminded of is one that gets skipped, so the run says
+ * plainly what it is about to do. It does not refuse: an empty list is the correct
+ * steady state once the investigation closes, and a reconciler that cannot run
+ * without a dummy exclusion would be worse than one that announces itself.
+ */
+function assertExclusionsConfigured(excluded: string[]): void {
+  if (excluded.length === 0) {
+    logger.warn(
+      `[deposit-settlement] enabled with NO excluded deposit ids. Every eligible row will be settled. ` +
+        `If a deposit is under investigation, set ${DEPOSIT_SETTLEMENT_EXCLUDED_FLAG} before this runs again ` +
+        `(§13-D12).`,
+    );
+  }
 }
 
 // A sandbox mock id never existed at Stripe; retrieving it would just throw.
@@ -101,36 +135,47 @@ export interface SettlementSweepResult {
   skipped?: string;
 }
 
-// Ops-only alert. Reuses the SYSTEM_ALERT Notification rail the deposit-activation
-// reconciler already uses (surfaced on /admin/operations), rather than inventing an
-// exception store. NO buyerId: the buyer is never told a cron rescued their payment.
-// Best-effort — it must never roll back a settlement that already committed.
-async function raiseWebhookGapAlert(depositId: string, intentId: string): Promise<void> {
-  const title = `Deposit settled by reconciler (webhook gap): ${depositId}`;
+/**
+ * THE ONE RAIL for a webhook gap (§13-D12, C5, DUP-03).
+ *
+ * WHAT THIS REPLACED, and why each part of it mattered. This wrote a `Notification`
+ * row with `type: "SYSTEM_ALERT"` and `actionUrl: "/admin/operations"`, deduped by
+ * reading back its own exact title string. Three defects travelled with that:
+ *
+ *   1. read-then-write dedup on a TITLE — two concurrent sweeps both read "not
+ *      found" and both inserted. `raiseException` dedups on a real unique index.
+ *   2. `/admin/operations` renders no notifications, so the alert was reachable
+ *      only through the `/admin/queues` "system" tab — the instruction pointed at
+ *      a dead end.
+ *   3. no owner. §26 assigns this row to FINANCE and `Notification` has no column
+ *      to say so; `queue_items.owner_role` does.
+ *
+ * KEYED ON THE PAYMENT INTENT, not the deposit, and that is the fold. The read-only
+ * detector in `health.service.checkDepositProviderEvidence` finds the SAME rows by
+ * the same provider fact and now raises with the same key, so a gap the reconciler
+ * settles and the detector notices produces ONE queue row rather than two. §13-D12's
+ * post-completion check (c) is exactly that assertion, run against production.
+ *
+ * NO buyerId: the buyer is never told a cron rescued their payment. Best-effort — it
+ * must never roll back a settlement that already committed.
+ */
+async function raiseWebhookGapException(depositId: string, intentId: string): Promise<void> {
   try {
-    // Same dedupe key and destination the deposit-activation reconciler uses for
-    // its own operator exceptions, so both land on one operations queue.
-    const existing = await prisma.notification.findFirst({
-      where: { title, type: "SYSTEM_ALERT" },
-      select: { id: true },
-    });
-    if (existing) return;
-    await prisma.notification.create({
-      data: {
-        buyerId: null,
-        type: "SYSTEM_ALERT",
-        actionUrl: "/admin/operations",
-        title,
-        body:
-          `Deposit ${depositId} was flipped PENDING → PAID by the settlement reconciler after ` +
-          `Stripe reported PaymentIntent ${intentId} as succeeded. The money moved, so the deposit ` +
-          `is now correct — but this transition is the Stripe webhook's job, and the webhook did ` +
-          `not deliver it. Treat this as a webhook outage: check the endpoint and signing secret. ` +
-          `No PaymentProviderEvent was written, because none was received.`,
-      },
+    await raiseException({
+      code: "PAYMENT_WEBHOOK_MISSED",
+      depositId,
+      idempotencyKey: `PAYMENT_WEBHOOK_MISSED:${intentId}`,
+      detail:
+        `Deposit ${depositId} was flipped to PAID by the settlement reconciler after Stripe reported ` +
+        `PaymentIntent ${intentId} as succeeded. The money moved, so the deposit is now correct — but ` +
+        `this transition is the Stripe webhook's job and the webhook did not deliver it. Treat this as a ` +
+        `webhook outage: check Stripe Dashboard → Developers → Webhooks that the endpoint exists in LIVE ` +
+        `mode, that payment_intent.succeeded is subscribed, and that the signing secret matches ` +
+        `STRIPE_WEBHOOK_SECRET. No PaymentProviderEvent was written, because none was received — do NOT ` +
+        `fabricate one.`,
     });
   } catch (err) {
-    logger.error(`[deposit-settlement] ops alert failed for deposit ${depositId}:`, err);
+    logger.error(`[deposit-settlement] webhook-gap exception failed for deposit ${depositId}:`, err);
   }
 }
 
@@ -161,17 +206,33 @@ export async function reconcileDepositSettlements(opts?: {
   const limit = opts?.limit ?? 100;
   const cutoff = new Date(Date.now() - graceMin * 60000);
 
+  const excluded = excludedDepositIds();
+  assertExclusionsConfigured(excluded);
+
+  // PAY-34: the sweep is widened to the two classes that escaped it.
+  //
+  // (1) `status: "PENDING"` → `SETTLE_FROM` (PENDING or FAILED). A row the
+  //     pre-Phase-3 behaviour pushed to FAILED on a card decline still has a live
+  //     PaymentIntent at Stripe, and if the buyer retried successfully the money is
+  //     already gone from their account. Those are precisely the buyers this
+  //     reconciler exists for, and the old filter could not see a single one of them.
+  //
+  // (2) `stripePaymentIntentId: { not: null }` is GONE. An admin send-link deposit
+  //     carries no intent until the Checkout Session produces one, so a session that
+  //     was paid while the webhook was down leaves a paid buyer on a null-intent row
+  //     that nothing could ever find. Those rows are resolved below by asking Stripe
+  //     for intents stamped with this deposit's id, rather than by having none.
+  //
+  // The exclusion stays in the QUERY, so a row we must not act on is never loaded,
+  // let alone looked up at the provider.
   const candidates = await prisma.deposit.findMany({
     where: {
-      status: "PENDING",
+      status: { in: [...SETTLE_FROM] },
       refundedAt: null,
-      stripePaymentIntentId: { not: null },
       createdAt: { lt: cutoff },
-      // Excluded ids are filtered in the QUERY, so a deposit we must not act on
-      // is never even loaded, let alone looked up at the provider.
-      id: { notIn: excludedDepositIds() },
+      id: { notIn: excluded },
     },
-    select: { id: true, stripePaymentIntentId: true, status: true },
+    select: { id: true, stripePaymentIntentId: true, status: true, buyerId: true, vehicleRequestId: true, amountCents: true },
     orderBy: { createdAt: "asc" },
     take: limit,
   });
@@ -181,13 +242,44 @@ export async function reconcileDepositSettlements(opts?: {
   let errors = 0;
 
   for (const deposit of candidates) {
-    const intentId = deposit.stripePaymentIntentId;
-    if (!intentId || intentId.startsWith(MOCK_INTENT_PREFIX)) {
+    let intentId = deposit.stripePaymentIntentId;
+
+    // A sandbox mock id never existed at Stripe; retrieving it would just throw.
+    if (intentId?.startsWith(MOCK_INTENT_PREFIX)) {
       unsettled += 1;
       continue;
     }
 
     try {
+      // PAY-34 class (2): no intent on the row. This is the admin send-link shape —
+      // the Checkout Session mints the intent and the webhook writes it back, so a
+      // missed webhook leaves a paid buyer pointing at nothing. Ask Stripe for the
+      // intents stamped with this deposit's id and adopt a succeeded one.
+      //
+      // Only a SUCCEEDED intent is adopted. A live or dead one tells us nothing that
+      // this reconciler acts on, and writing a live intent id onto the row here would
+      // race the webhook that is about to write the same thing.
+      if (!intentId) {
+        const found = await searchPaymentIntentsByDepositId(deposit.id);
+        const succeeded = found.find((pi) => pi.status === "succeeded");
+        if (!succeeded) {
+          unsettled += 1;
+          continue;
+        }
+        // Attach it, guarded: `stripePaymentIntentId` is @unique and the webhook may
+        // be writing the same value concurrently. `updateMany` scoped to the still-null
+        // row makes losing that race a no-op rather than a P2002.
+        await prisma.deposit.updateMany({
+          where: { id: deposit.id, stripePaymentIntentId: null },
+          data: { stripePaymentIntentId: succeeded.id },
+        });
+        intentId = succeeded.id;
+        logger.warn(
+          `[deposit-settlement] adopted PaymentIntent ${succeeded.id} for deposit ${deposit.id} ` +
+            `from provider metadata — the row carried no intent, which is the admin send-link shape`,
+        );
+      }
+
       const intent = await retrievePaymentIntent(intentId);
       // The shared rule, not a local reading of Stripe's statuses. recordedStatus
       // is this deposit's own status: PENDING here, so a succeeded intent
@@ -203,13 +295,48 @@ export async function reconcileDepositSettlements(opts?: {
       }
 
       // The database enforces the transition matrix; this is the atomic guard.
-      const updated = await prisma.deposit.updateMany({
-        where: { id: deposit.id, status: { in: allowedPredecessors("PAID") } },
-        data: { status: "PAID" },
-      });
+      // `SETTLE_FROM` rather than `allowedPredecessors("PAID")`: the matrix also
+      // permits DISPUTED -> PAID, and a reconciler must never clear a live dispute.
+      // That edge belongs to `charge.dispute.closed` alone.
+      //
+      // THE SETTLEMENT EFFECT RIDES WITH THE FLIP, in one transaction, for the same
+      // reason it does in the webhook (§5d "atomically"). This reconciler exists to
+      // do the webhook's job when the webhook did not run — so it has to do the WHOLE
+      // job. Flipping the status alone would leave a paid buyer with no sourcing case
+      // and a Vehicle Request still sitting at PAYMENT_REQUIRED, which is a quieter
+      // failure than the one this sweep was written to fix and would only surface
+      // once SOURCING_CASE_REPLACES_AUCTION_LAUNCH is on: with the flag off the
+      // ACTIVATION reconciler still creates the auction from the PAID row, so the
+      // legacy path converges and the hole is invisible.
+      //
+      // `runLegacyAuctionPath` is deliberately IGNORED here. The activation sweep in
+      // the same cron tick owns auction creation for reconciler-settled rows and is
+      // already gated on the same flag; creating one here as well would race it.
+      const effects = await prisma.$transaction(async (tx) => {
+        const updated = await tx.deposit.updateMany({
+          where: { id: deposit.id, status: { in: [...SETTLE_FROM] } },
+          data: { status: "PAID" },
+        });
+        // Someone else settled it between the read and the write. Not an error, and
+        // not ours to apply effects for — the winner applied its own.
+        if (updated.count === 0) return null;
 
-      if (updated.count === 0) {
-        // Someone else settled it between the read and the write. Not an error.
+        return applySettlementEffects(
+          {
+            depositId: deposit.id,
+            buyerId: deposit.buyerId,
+            vehicleRequestId: deposit.vehicleRequestId,
+            // The same fact the webhook records. Leaving it null here produced a
+            // `plan_snapshots` row whose money field read "nothing settled" for a
+            // settlement that had just happened — and the field's own contract is
+            // "what had ACTUALLY settled at this moment. Never a projection."
+            settledDepositCents: deposit.amountCents,
+          },
+          tx,
+        );
+      }, { maxWait: 2000, timeout: 5000 });
+
+      if (effects === null) {
         unsettled += 1;
         continue;
       }
@@ -217,9 +344,10 @@ export async function reconcileDepositSettlements(opts?: {
       settled += 1;
       logger.warn(
         `[deposit-settlement] settled deposit ${deposit.id} from PaymentIntent ${intentId} ` +
-          `(${intent.status}) — the webhook did not deliver this`,
+          `(${intent.status}) — the webhook did not deliver this` +
+          (effects.sourcingCaseId ? `; sourcing case ${effects.sourcingCaseId} opened` : ""),
       );
-      await raiseWebhookGapAlert(deposit.id, intentId);
+      await raiseWebhookGapException(deposit.id, intentId);
     } catch (err) {
       // One unreachable intent must not strand every other paid buyer in the sweep.
       errors += 1;

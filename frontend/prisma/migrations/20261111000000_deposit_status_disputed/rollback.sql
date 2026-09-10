@@ -1,0 +1,31 @@
+-- Rollback for 20261111000000_deposit_status_disputed.
+--
+-- THERE IS NO SCHEMA ROLLBACK, AND THIS FILE DOES NOT PRETEND OTHERWISE.
+--
+-- PostgreSQL cannot drop an enum label. `ALTER TYPE ... DROP VALUE` does not exist;
+-- removing one means creating a replacement type, rewriting every column that uses it,
+-- swapping defaults and constraints, and dropping the old type -- a destructive
+-- rewrite of a live money table to reclaim a label that costs nothing to leave in
+-- place. The Phase 1 proof records the same fact about its own wave: "enum labels
+-- remaining after rollback: 505 (labels cannot be dropped)".
+--
+-- SO WHAT ROLLING BACK MEANS HERE. Roll the CODE back. With the writers reverted,
+-- nothing sets DISPUTED, the label is inert vocabulary, and the derived hold predicate
+-- (`disputed_at IS NOT NULL AND hold_released_at IS NULL`) reverts to what it was
+-- before this phase -- unread. No row is rewritten by rolling back.
+--
+-- WHAT IS LOST IF ROWS ALREADY CARRY IT. Any deposit already at DISPUTED must be moved
+-- to a label the reverted code understands before that code is deployed, or every read
+-- of it raises 22P02 on the way into the old enum's TypeScript union. The correct
+-- destination is PAID, not FAILED and not REFUNDED: the charge succeeded and no money
+-- has been returned, which is exactly what PAID meant before this label existed. The
+-- statement is left commented out because running it is a decision about live money
+-- and belongs to a human, not to a rollback script executed under pressure.
+--
+--   -- UPDATE "deposits" SET "status" = 'PAID'
+--   --  WHERE "status" = 'DISPUTED';
+--
+-- Before running it, `SELECT id, disputed_at, hold_reason FROM deposits WHERE status =
+-- 'DISPUTED'` and satisfy yourself each row's dispute is genuinely resolved or being
+-- tracked elsewhere. Reverting the label without reverting the hold leaves a contested
+-- charge looking settled.

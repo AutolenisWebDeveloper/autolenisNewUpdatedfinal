@@ -27,12 +27,20 @@ let depositQueries = 0;
 let intentLookups = 0;
 let activationRuns = 0;
 let activationThrows = false;
+let settlementThrows = false;
+let raisedExceptions: Array<Record<string, unknown>> = [];
 
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       deposit: {
-        findMany: async () => { depositQueries += 1; return []; },
+        findMany: async () => {
+          depositQueries += 1;
+          // Fail the sweep's very first read, so the throw comes from the REAL
+          // settlement service rather than from a stub standing in for it.
+          if (settlementThrows) throw new Error("could not reach the database");
+          return [];
+        },
         updateMany: async () => ({ count: 0 }),
       },
       notification: { findFirst: async () => null, create: async () => ({}) },
@@ -52,6 +60,17 @@ mock.module("@/lib/services/auction/deposit-activation.service", {
       activationRuns += 1;
       if (activationThrows) throw new Error("activation blew up");
       return { scanned: 2, outcomes: { created: 1, ok: 1 } };
+    },
+  },
+});
+
+// The one exception rail. The route imports this DYNAMICALLY inside its catch, which
+// `mock.module` intercepts the same as a static import.
+mock.module("@/lib/services/operations/queue-item.service", {
+  namedExports: {
+    raiseException: async (input: Record<string, unknown>) => {
+      raisedExceptions.push(input);
+      return { created: true };
     },
   },
 });
@@ -97,6 +116,8 @@ beforeEach(() => {
   intentLookups = 0;
   activationRuns = 0;
   activationThrows = false;
+  settlementThrows = false;
+  raisedExceptions = [];
   delete env().DEPOSIT_SETTLEMENT_RECONCILE_ENABLED;
   assert.equal(env().DEPOSIT_SETTLEMENT_RECONCILE_ENABLED, undefined);
 });
@@ -150,4 +171,63 @@ test("an activation failure still surfaces as a failed run", async () => {
 
   assert.equal(res.status, 500);
   assert.equal(cronOutcome?.status, "FAILED", "a real failure must not be masked by the new composition");
+});
+
+test("a settlement-stage failure still runs activation AND is reported on the exception rail", async () => {
+  // Found by the second independent review. The catch that keeps stage 2 alive also
+  // swallowed the failure whole: a dead settlement stage produced a COMPLETED cron row
+  // and a 200, so the monitor that watches cron status would report a healthy job while
+  // the stage that recovers missed webhooks had been failing for days. Both halves are
+  // asserted here — activation must still run, and the failure must reach a person.
+  env().DEPOSIT_SETTLEMENT_RECONCILE_ENABLED = "true";
+  settlementThrows = true;
+
+  const GET = await load();
+  const res = await GET(req());
+  const body = (await res.json()) as {
+    success: boolean;
+    data: { settlement: { skipped?: string; errors: number; settled: number }; activation: { scanned: number } };
+  };
+
+  // Stage 2 is the whole reason the throw is caught rather than rethrown.
+  assert.equal(activationRuns, 1, "activation still runs when the settlement stage throws");
+  assert.equal(body.data.activation.scanned, 2);
+  assert.equal(res.status, 200);
+  assert.equal(body.success, true);
+  assert.equal(cronOutcome?.status, "COMPLETED");
+
+  // The response says the stage died rather than presenting zeros as a clean sweep.
+  assert.equal(body.data.settlement.skipped, "settlement_stage_threw");
+  assert.equal(body.data.settlement.errors, 1);
+  assert.equal(body.data.settlement.settled, 0);
+
+  // And it reaches the one exception rail, deduped per day.
+  assert.equal(raisedExceptions.length, 1, "exactly one exception is raised for the dead stage");
+  const raised = raisedExceptions[0] as { code: string; idempotencyKey: string; detail: string };
+  assert.equal(raised.code, "PAYMENT_WEBHOOK_MISSED");
+  assert.match(
+    raised.idempotencyKey,
+    /^SETTLEMENT_STAGE_DOWN:\d{4}-\d{2}-\d{2}$/,
+    "keyed on the day, so a stage failing every tick produces one row to work",
+  );
+  assert.match(raised.detail, /could not reach the database/, "the underlying cause is carried, not discarded");
+});
+
+test("a settlement-stage failure whose exception raise ALSO fails still completes activation", async () => {
+  // The raise is best-effort by construction: the rail being down must not take out the
+  // activation stage as collateral. Without its own try/catch this would have thrown out
+  // of the outer catch and failed the whole run.
+  env().DEPOSIT_SETTLEMENT_RECONCILE_ENABLED = "true";
+  settlementThrows = true;
+  raisedExceptions = {
+    push() { throw new Error("queue table unreachable"); },
+    length: 0,
+  } as unknown as Array<Record<string, unknown>>;
+
+  const GET = await load();
+  const res = await GET(req());
+
+  assert.equal(res.status, 200);
+  assert.equal(cronOutcome?.status, "COMPLETED");
+  assert.equal(activationRuns, 1, "activation survives a failure of the exception rail itself");
 });

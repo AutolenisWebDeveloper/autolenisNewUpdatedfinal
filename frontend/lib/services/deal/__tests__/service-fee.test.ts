@@ -45,6 +45,9 @@ mock.module("@/lib/prisma", {
           return { id: "sfp_1", ...data };
         },
       },
+      // The fee is per DEAL and the plan rules are per REQUEST, so pricing the credit
+      // crosses this one join.
+      deal: { findUnique: async () => ({ vehicleRequestId: "vr_1" }) },
     },
   },
 });
@@ -52,6 +55,23 @@ mock.module("@/lib/prisma", {
 // service-fee.service imports getStripe + advanceDealStatus at module load; stub
 // both so importing the module is side-effect free (writeServiceFeePayment uses neither).
 mock.module("@/lib/stripe", { namedExports: { getStripe: () => ({}) } });
+// PAY-52: the fee amount and the recorded credit are now the LEDGER's answer, not a
+// constant — $499 less whatever $99 actually settled and was not refunded, disputed or
+// charged back. The rule itself is pinned in
+// `lib/services/plan/__tests__/upgrade-window.test.ts`; here it is held to the ordinary
+// case so these tests stay about the duplicate-charge guard.
+mock.module("@/lib/services/plan/upgrade-window.service", {
+  namedExports: {
+    quotePremiumBalance: async () => ({
+      grossCents: 49900,
+      creditCents: 9900,
+      dueCents: 40000,
+      creditBasis: "settled_deposit",
+      explanation: "test quote",
+    }),
+  },
+});
+
 mock.module("@/lib/services/deal/deal.service", { namedExports: { advanceDealStatus: async () => {} } });
 
 async function load() { return import("@/lib/services/deal/service-fee.service"); }

@@ -1890,6 +1890,13 @@ enum DepositStatus {
   PAID
   REFUNDED
   FAILED
+  // The charge succeeded and is contested. Neither FAILED (which this phase reserves
+  // for a cancelled or expired intent, and which the buyer may retry out of) nor
+  // REFUNDED (money returned) is true of a dispute, and using either would lie about
+  // the money -- see 20261111000000_deposit_status_disputed. Listed last because
+  // `ALTER TYPE ... ADD VALUE` without BEFORE/AFTER appends, and this order must match
+  // pg_enum's enumsortorder or `db:check-drift` reports a difference that is not one.
+  DISPUTED
 }
 
 enum ESignStatus {

@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { Button } from "@/components/ui/button";
-import { Shield, Sparkles, Loader2 } from "lucide-react";
+import { Shield, Sparkles, Loader2, Check } from "lucide-react";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
+import { DEPOSIT_DISCLOSURES, DISCLOSURES_VERSION } from "@/lib/payments/deposit-disclosures";
+import type { EligibilityFailureCode } from "@/lib/services/payment/deposit-eligibility";
 
 import PreIntelligencePanel from "@/components/buyer/PreIntelligencePanel";
 import PaymentUnsettledNotice from "@/components/buyer/PaymentUnsettledNotice";
@@ -83,6 +85,121 @@ function DepositForm({
   );
 }
 
+/**
+ * §5a / PAY-09 — THE CODE → STEP MAP.
+ *
+ * "Any failure returns the buyer to the exact missing requirement — named, not
+ * generic." The server has always sent the code and the named item; this page handled
+ * five codes and dropped every other one into "Unable to initialize payment. Please try
+ * again." with a Try Again button that reloads and fails identically. A buyer with no
+ * ZIP code, an unverified email or an incomplete request met a dead end that told them
+ * nothing and offered them nothing — which is the opposite of what §5a asks for, and the
+ * §13-D10 buyers land here by construction.
+ *
+ * TYPED AS A TOTAL RECORD over the union on purpose: adding an eligibility code without
+ * giving the buyer somewhere to go now fails the build rather than shipping another dead
+ * end.
+ */
+const ELIGIBILITY_STEP: Record<EligibilityFailureCode | "REQUEST_REQUIRED", { href: string; cta: string }> = {
+  ACCOUNT_INACTIVE: { href: "/buyer/dashboard", cta: "Go to your dashboard" },
+  EMAIL_UNVERIFIED: { href: "/buyer/profile", cta: "Verify your email" },
+  ONBOARDING_REQUIRED: { href: "/buyer/onboarding", cta: "Finish setting up your account" },
+  LOCATION_REQUIRED: { href: "/buyer/profile", cta: "Add your location" },
+  PREQUAL_REQUIRED: { href: "/buyer/prequal", cta: "Complete prequalification" },
+  VEHICLE_CRITERIA_INCOMPLETE: { href: "/buyer/requests", cta: "Complete your request" },
+  REQUEST_CONFLICT: { href: "/buyer/requests", cta: "Review your open requests" },
+  REQUEST_REQUIRED: { href: "/request-a-car", cta: "Start a vehicle request" },
+  // SHADOWED BY DESIGN, and the only entry that is.
+  //
+  // `DISCLOSURE_REQUIRED` is handled by its own branch in `postCreateIntent` before this
+  // map is consulted, because it means two different things depending on the call: on the
+  // PROBE it is the expected answer ("nothing is owed, the buyer has not accepted yet")
+  // and must render no error at all, while on the ACCEPT call it means the wording moved
+  // on mid-session. A single href/cta pair cannot say both. The entry stays because the
+  // `Record<EligibilityFailureCode | …>` type is exhaustive on purpose — a ninth failure
+  // code added to §5a will not compile until someone decides where it sends the buyer.
+  //
+  // Found by the second independent review, which counted TWO dead entries here. The
+  // other was `PREQUAL_REQUIRED`, and that one was a defect rather than a design: its
+  // special-case branch replaced the server's named message with a fixed string and then
+  // yanked the buyer away after two seconds. §5a requires the exact missing requirement,
+  // named — and the server distinguishes "complete your prequalification" from "yours has
+  // expired or wasn't approved", a distinction the fixed string threw away. That branch is
+  // gone; the entry below now does the work, and the buyer reads the real reason and
+  // chooses when to leave the page.
+  DISCLOSURE_REQUIRED: { href: "/buyer/deposit", cta: "Read the terms again" },
+};
+
+/**
+ * §5b — the seven things a buyer must be shown before they pay.
+ *
+ * The WORDS come from `lib/payments/deposit-disclosures.ts` and are never written
+ * here. §13-D48 exists because they were written twice before: this page said the $99
+ * was "refundable on request" while the confirmation email said it was "credited
+ * toward your concierge fee", and both contradicted §23.1. Copy that lives in two
+ * files gets corrected in one, so this renders the list and owns none of it.
+ *
+ * ACCEPTANCE GATES THE PAYMENT INTENT, not the PAYMENT_REQUIRED transition. §5a's
+ * seven eligibility conditions decide whether a buyer may reach checkout at all;
+ * whether they have READ the disclosures is a different question, answered at the
+ * moment money is about to move. That split is why the intent is created on the
+ * button below rather than on mount, which is where it used to be created — before
+ * the buyer had seen a single one of these.
+ *
+ * The version travels with the acceptance. `DISCLOSURES_VERSION` is stored on the
+ * deposit, and the server refuses an acceptance naming a different one, so when legal
+ * returns approved wording (§13-D48) bumping the constant re-asks every buyer instead
+ * of treating agreement to these words as agreement to those.
+ */
+function DisclosureGate({
+  accepted,
+  pending,
+  onAccept,
+}: {
+  accepted: boolean;
+  pending: boolean;
+  onAccept: () => void;
+}) {
+  return (
+    <div
+      className="bg-white border border-[#E5E7EB] rounded-xl p-5 mb-6"
+      data-testid="deposit-disclosures"
+    >
+      <h2 className="text-sm font-semibold text-[#111827] mb-3">Before you pay, please read this</h2>
+      <ul className="space-y-2.5" data-testid="deposit-disclosure-list">
+        {DEPOSIT_DISCLOSURES.map((d) => (
+          // 14px, not 12. These are seven material terms a buyer must read before money
+          // moves, and the rest of this page sets body copy at `text-sm`; rendering the
+          // one block that carries the legal substance a size smaller than the marketing
+          // around it is the wrong emphasis as well as the harder read.
+          <li key={d.id} className="flex gap-2.5 text-sm text-[#4B5563] leading-relaxed" data-disclosure-id={d.id}>
+              <Check size={15} className="text-[#50D14E] shrink-0 mt-1" aria-hidden="true" />
+            <span>{d.text}</span>
+          </li>
+        ))}
+      </ul>
+
+      {!accepted && (
+        <Button
+          className="w-full mt-5"
+          size="lg"
+          onClick={onAccept}
+          disabled={pending}
+          data-testid="deposit-accept-disclosures-btn"
+        >
+          {pending ? "One moment…" : "I've read this — continue to payment"}
+        </Button>
+      )}
+      {accepted && (
+        <p className="text-xs text-[#1A6B18] mt-4 flex items-center gap-1.5" data-testid="deposit-disclosures-accepted">
+          <Check size={12} aria-hidden="true" />
+          Recorded with your payment.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function DepositPage() {
   const router = useRouter();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -97,6 +214,15 @@ export default function DepositPage() {
     { paymentIntentId: string | null; intentStatus: string | null } | null
   >(null);
   const [plan, setPlan] = useState<"STANDARD" | "PREMIUM">("STANDARD");
+  // §5b: the buyer has read the seven disclosures. Nothing is charged, and no
+  // PaymentIntent is even created, until this is true.
+  const [accepted, setAccepted] = useState(false);
+  /** A create-intent call is in flight. Separate from `loading`, which is page setup. */
+  const [creating, setCreating] = useState(false);
+  /** Our own books say this deposit is PAID. No card form, ever. */
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
+  /** §5a: where to send the buyer to fix the exact thing that is missing (PAY-09). */
+  const [errorStep, setErrorStep] = useState<{ href: string; cta: string } | null>(null);
   // Concierge convergence: when the buyer arrives from a "?offer=<reviewToken>"
   // vehicle-offer review link, this deposit unlocks an admin-curated set of
   // dealer offers (converted to a CLOSED auction on settle) instead of launching
@@ -118,12 +244,41 @@ export default function DepositPage() {
       })
       .catch(() => { /* default to STANDARD */ });
 
+    // PROBE. The same endpoint, called WITHOUT the disclosure version.
+    //
+    // A call with no version cannot mint: the server checks §5a, moves the request to
+    // PAYMENT_REQUIRED, runs the provider-side existing-obligation check, and only
+    // then asks whether the disclosures were accepted. So this load answers the one
+    // question the page must know before it renders anything — has this buyer already
+    // been charged? — and can never create a PaymentIntent while doing it.
+    //
+    // That question has to be answered on LOAD rather than on accept, because a buyer
+    // whose money has already moved must never be shown a card form or a "Total
+    // charged today" summary. Minting used to happen here, which is what made the
+    // answer available; the probe is what keeps it available now that it does not.
+    postCreateIntent(false, token);
+  }, []);
+
+  /**
+   * Ask the server for a PaymentIntent, or (with `withVersion` false) merely for the
+   * buyer's situation.
+   *
+   * `token` is passed explicitly rather than read from state because the mount probe
+   * runs in the same tick as `setReviewToken` and would otherwise see null.
+   */
+  function postCreateIntent(withVersion: boolean, token: string | null) {
+    if (withVersion) setCreating(true);
+    setError(null);
+    setErrorStep(null);
     fetch("/api/buyer/deposit/create-intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Concierge deposits carry the review token so the server binds this
       // deposit to the offers and stamps the concierge PI metadata.
-      body: JSON.stringify(token ? { reviewToken: token } : {}),
+      body: JSON.stringify({
+        ...(token ? { reviewToken: token } : {}),
+        ...(withVersion ? { disclosuresVersion: DISCLOSURES_VERSION } : {}),
+      }),
     })
       .then(r => r.json())
       .then((d: {
@@ -137,6 +292,20 @@ export default function DepositPage() {
       }) => {
         if (d.success && d.data) {
           setClientSecret(d.data.clientSecret);
+          setAccepted(true);
+        } else if (d.error?.code === "DISCLOSURE_REQUIRED") {
+          // On the PROBE this is the expected answer and means "nothing is owed, the
+          // buyer just has not accepted yet" — the disclosure gate renders and waits.
+          // On the ACCEPT call it means the server's wording moved on since this page
+          // loaded (legal-approved copy landing mid-session, §13-D48); reloading
+          // fetches the new text, and accepting the old one would record agreement to
+          // words that are no longer shown.
+          if (withVersion) {
+            setError("These terms have just been updated. Please reload the page and read them again before paying.");
+          }
+        } else if (d.error?.code === "ALREADY_PAID") {
+          // Our own books say PAID. Not an error to retry, and never a card form.
+          setAlreadyPaid(true);
         } else if (d.error?.code === "CHARGE_UNSETTLED") {
           // The buyer's money already moved — the server refused to mint a
           // second PaymentIntent. Record the facts; the render path below turns
@@ -146,20 +315,26 @@ export default function DepositPage() {
             paymentIntentId: d.error.details?.paymentIntentId ?? null,
             intentStatus: d.error.details?.intentStatus ?? null,
           });
-        } else if (d.error?.code === "PREQUAL_REQUIRED") {
-          setError("You need to complete prequalification before paying the Auction Access Deposit.");
-          setTimeout(() => router.push("/buyer/prequal"), 2000);
         } else if (d.error?.code === "REVIEW_FORBIDDEN") {
           setError("These offers were sent to a different account. Please sign in with the email the offers were sent to.");
         } else if (d.error?.code === "REVIEW_EXPIRED" || d.error?.code === "REVIEW_NOT_FOUND") {
           setError("This offer review link is no longer valid. Please contact AutoLenis support.");
+        } else if (d.error?.code && d.error.code in ELIGIBILITY_STEP) {
+          // §5a: the server named the missing requirement. Say what it is and give the
+          // buyer the one control that fixes it.
+          const step = ELIGIBILITY_STEP[d.error.code as keyof typeof ELIGIBILITY_STEP];
+          setError(d.error.message ?? "Something is missing before you can pay.");
+          setErrorStep(step);
         } else {
           setError("Unable to initialize payment. Please try again.");
         }
       })
       .catch(() => setError("Unable to connect to payment service."))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        setCreating(false);
+        setLoading(false);
+      });
+  }
 
   // Confirmation handed off to the server — show a neutral, truthful
   // interstitial while the verifying page loads. It claims nothing about the
@@ -190,6 +365,24 @@ export default function DepositPage() {
   // verifying page uses, not by a second interpretation of Stripe's statuses
   // written here: `recordedStatus` is null because our side has recorded nothing
   // — that is precisely why the server refused to create another intent.
+  // Our own books say PAID. This is not "unsettled" — there is nothing in flight and
+  // nothing to re-check at Stripe — so it gets its own, plainer answer rather than
+  // being pushed through the unsettled notice, whose copy ("it isn't recorded on our
+  // side yet") would be false here.
+  if (alreadyPaid) {
+    return (
+      <div className="p-6 md:p-8 max-w-lg" data-testid="deposit-already-paid-block">
+        <h1 className="text-xl font-bold text-[#111827] mb-2">You&apos;ve already paid this.</h1>
+        <p className="text-sm text-[#4B5563] mb-5">
+          Your ${DEPOSIT_AMOUNT_CENTS / 100} is recorded against your vehicle request. Please do not pay again.
+        </p>
+        <Button onClick={() => router.push("/buyer/billing")} data-testid="deposit-already-paid-billing-btn">
+          View your billing
+        </Button>
+      </div>
+    );
+  }
+
   if (unsettled) {
     const outcome = classifyPaymentConfirmation({
       intentStatus: unsettled.intentStatus,
@@ -275,13 +468,6 @@ export default function DepositPage() {
         </p>
       </div>
 
-      {loading && <div className="h-32 bg-slate-100 rounded-lg animate-pulse" />}
-      {error && (
-        <div className="text-center py-8">
-          <p className="text-sm text-red-600 mb-4" data-testid="deposit-init-error">{error}</p>
-          <Button variant="secondary" onClick={() => window.location.reload()} data-testid="deposit-retry-btn">Try Again</Button>
-        </div>
-      )}
       {!stripePromise ? (
         <div className="text-center py-8" data-testid="stripe-unavailable">
           <p className="text-sm text-red-600 font-medium">
@@ -289,7 +475,29 @@ export default function DepositPage() {
           </p>
           <p className="text-xs text-[#6B7280] mt-1">Please contact support.</p>
         </div>
-      ) : (clientSecret && (
+      ) : (
+        <>
+          {/* §5b. Rendered BEFORE the card form and before any PaymentIntent exists,
+              because a disclosure shown after the money moves is not a disclosure. */}
+          <DisclosureGate accepted={accepted} pending={creating} onAccept={() => postCreateIntent(true, reviewToken)} />
+
+          {loading && <div className="h-32 bg-slate-100 rounded-lg animate-pulse" />}
+          {error && (
+            <div className="text-center py-8">
+              <p className="text-sm text-red-600 mb-4" data-testid="deposit-init-error">{error}</p>
+              {errorStep ? (
+                <Button
+                  onClick={() => router.push(errorStep.href)}
+                  data-testid="deposit-fix-step-btn"
+                >
+                  {errorStep.cta}
+                </Button>
+              ) : (
+                <Button variant="secondary" onClick={() => window.location.reload()} data-testid="deposit-retry-btn">Try Again</Button>
+              )}
+            </div>
+          )}
+          {clientSecret && (
         <Elements stripe={stripePromise} options={{ clientSecret }}>
           <DepositForm
             clientSecret={clientSecret}
@@ -306,7 +514,9 @@ export default function DepositPage() {
             }}
           />
         </Elements>
-      ))}
+          )}
+        </>
+      )}
     </div>
   );
 }

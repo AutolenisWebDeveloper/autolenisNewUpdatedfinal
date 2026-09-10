@@ -173,7 +173,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       let refunded = false;
       if (auction.deposit) {
         try {
-          refunded = (await refundDepositCharge(auction.deposit)) === "REFUNDED";
+          refunded = (await refundDepositCharge(auction.deposit, reason)).outcome === "REFUNDED";
         } catch (err) {
           return adminError("STRIPE_ERROR", `Refund failed: ${err}`, 500);
         }

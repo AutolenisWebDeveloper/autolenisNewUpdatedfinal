@@ -1,4 +1,7 @@
 import { logger } from "@/lib/logger";
+import { applySettlementEffects } from "@/lib/services/payment/settlement-effects.service";
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
+import { applyFulfillmentHold, releaseFulfillmentHold, recordDisputeLost } from "@/lib/services/payment/fulfillment-hold.service";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
@@ -20,7 +23,11 @@ import { writeServiceFeePayment } from "@/lib/services/deal/service-fee.service"
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
-import { allowedPredecessors } from "@/lib/payments/deposit-state";
+import {
+  SETTLE_FROM,
+  DEAD_INTENT_FROM,
+  REFUND_FROM,
+} from "@/lib/payments/deposit-state";
 import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
 
@@ -162,7 +169,14 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
-        const { buyerId, type } = pi.metadata;
+        // `buyerId` is deliberately NOT destructured here. Every branch below resolves
+        // the buyer from the DEPOSIT row it acted on (`deposit.buyerId`) rather than from
+        // provider metadata, because the admin send-link path mints a Checkout Session
+        // whose PaymentIntent carries no `buyerId` at all — reading it from metadata
+        // would be null for exactly the payments an admin took by hand. The concierge-fee
+        // branch reads `pi.metadata.buyerId` explicitly, under its own name, where that
+        // is the correct source.
+        const { type } = pi.metadata;
         // Set true only by a branch that matched this payment's type AND resolved
         // the row it is meant to act on. Left false, this is a real charge that
         // changed nothing — the failure mode a bare 200 hides best.
@@ -198,13 +212,23 @@ export async function POST(request: NextRequest) {
               });
             }
 
-            // Transition matrix (deposit-state.ts): only advance to PAID from a
-            // permitted predecessor (PENDING). A terminal REFUNDED/FAILED, or an
-            // already-PAID row, is left untouched — the WHERE clause enforces the
-            // allowed edge at the DB level, so a late/out-of-order success can
+            // Transition matrix (deposit-state.ts): advance to PAID only from a
+            // state this EVENT may act from — `SETTLE_FROM`, which is PENDING or
+            // FAILED. FAILED is in the set because production holds rows the
+            // pre-Phase-3 behaviour pushed there on a card decline while their
+            // PaymentIntent stayed live at Stripe; a successful retry on that same
+            // intent must be able to land (money-path defect 1).
+            //
+            // It is `SETTLE_FROM` rather than `allowedPredecessors("PAID")`
+            // deliberately: the matrix also allows DISPUTED → PAID, and that edge
+            // belongs to `charge.dispute.closed` alone. A redelivered success event
+            // must never clear a live dispute.
+            //
+            // REFUNDED and already-PAID rows are untouched, and the WHERE clause
+            // enforces the edge at the DB level, so a late/out-of-order success can
             // never resurrect a settled deposit.
             await tx.deposit.updateMany({
-              where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("PAID") } },
+              where: { stripePaymentIntentId: pi.id, status: { in: [...SETTLE_FROM] } },
               data: { status: "PAID" },
             });
 
@@ -216,7 +240,64 @@ export async function POST(request: NextRequest) {
                 },
               },
             });
-            if (!deposit) return { deposit: null, createdAuction: null, isNewAuction: false };
+            if (!deposit) {
+              return { deposit: null, createdAuction: null, isNewAuction: false, effects: null, notSettleable: false };
+            }
+
+            // THE FLIP'S RESULT GATES EVERYTHING BELOW IT.
+            //
+            // The `updateMany` above is correctly scoped by `SETTLE_FROM`, so it cannot
+            // resurrect a REFUNDED or DISPUTED row — but the code that followed it read
+            // the deposit and carried on REGARDLESS of whether the flip matched
+            // anything. A late `payment_intent.succeeded` for a deposit that had since
+            // been refunded therefore left the status correctly REFUNDED and then
+            // applied every side effect anyway: the request unlocked to ACTIVE_SOURCING,
+            // a sourcing case opened, a plan snapshot written recording 9900 cents of
+            // settled deposit for money that had gone back, "Auction activated!" sent,
+            // an auction created and dealers invited. A dispute arriving before a
+            // retried success produced the same run against a contested charge.
+            //
+            // The settlement reconciler already guards this way and the webhook did
+            // not, which is the disagreement that hid it.
+            //
+            // The test is the row's STATE, not the update count. Count is 0 both for a
+            // deposit that must not settle and for one the reconciler already settled
+            // through the same intent — and the second is a legitimate redelivery whose
+            // effects are all idempotent, so refusing on count alone would leave a
+            // reconciler-settled buyer without a receipt.
+            if (deposit.status !== "PAID") {
+              logger.warn(
+                `[stripe/webhook] payment_intent.succeeded for ${pi.id} left deposit ${deposit.id} ` +
+                  `at ${deposit.status} — the transition matrix refused it. No settlement effects, no ` +
+                  `auction, no email. This is a late or out-of-order delivery, not an unroutable payment.`,
+              );
+              return { deposit, createdAuction: null, isNewAuction: false, effects: null, notSettleable: true };
+            }
+
+            // §5d, the settlement side effect: attach the payment to the Vehicle
+            // Request, unlock it, and open the sourcing case with its due-diligence
+            // checkpoints — all inside THIS transaction, with the PAID flip above.
+            // A sourcing case that outlived a failed settlement would show a request
+            // being sourced for money that never arrived.
+            const effects = await applySettlementEffects(
+              {
+                depositId: deposit.id,
+                buyerId: deposit.buyerId,
+                vehicleRequestId: deposit.vehicleRequestId,
+                settledDepositCents: deposit.amountCents,
+              },
+              tx,
+            );
+
+            // THE LEGACY PATH. Phase 3 stops settlement creating an auction — but it
+            // also removes the only thing that invites dealers, and the replacement is
+            // Phase 5's. So with SOURCING_CASE_REPLACES_AUCTION_LAUNCH off (the
+            // default) the auction is still created here, exactly as before, and the
+            // fact is COUNTED. §8.4's thirty-days-of-zero removal clock starts when
+            // Phase 5 flips the flag, not at Phase 3 acceptance (§13-D52).
+            if (!effects.runLegacyAuctionPath) {
+              return { deposit, createdAuction: null, isNewAuction: false, effects, notSettleable: false };
+            }
 
             // Auction.depositId is unique — re-use if a prior partial run created it.
             const existingAuction = await tx.auction.findUnique({
@@ -237,7 +318,7 @@ export async function POST(request: NextRequest) {
                 data: { buyerId: deposit.buyerId, title: "Auction activated!", body: "Your $99 deposit was received. Your private auction is being prepared.", type: "AUCTION_STARTED" },
               });
             }
-            return { deposit, createdAuction, isNewAuction: !existingAuction };
+            return { deposit, createdAuction, isNewAuction: !existingAuction, effects, notSettleable: false };
           }, {
             // Bound the row-lock hold and connection acquisition so a burst of
             // concurrent Stripe redeliveries on the same deposit can't exhaust
@@ -252,10 +333,17 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ received: true, duplicate: true });
           }
 
-          const { deposit, createdAuction, isNewAuction } = outcome;
+          const { deposit, createdAuction, isNewAuction, effects, notSettleable } = outcome;
+          // `routed` says the platform KNEW what this payment was, not that it acted on
+          // it. A refused late delivery is routed — the deposit was found — so it must
+          // not raise PAYMENT_UNROUTABLE, which is §26's "money we cannot name".
           routed = deposit !== null;
           const existingAuction = isNewAuction ? null : createdAuction;
-          if (deposit) {
+          // Every post-commit effect below — the reminder cancellations, the auction
+          // launch, the dealer invitations, the receipt, the GHL sync — is gated with
+          // the in-transaction work by the same fact. Splitting the gate would put the
+          // emails back on a path the money did not take.
+          if (deposit && !notSettleable && effects) {
             // Post-commit effects: idempotent or best-effort; failures are
             // alerted via logger.error → Sentry rather than retried by Stripe
             // (the money state above has already committed).
@@ -273,9 +361,45 @@ export async function POST(request: NextRequest) {
             } catch (err) {
               logger.error("[stripe/webhook] deposit reminder cancel failed:", err);
             }
+            // BOTH RAILS. Phase 3 moved the series to `comms_outbox`, keyed to the
+            // request; the call above still cancels rows in flight on the rail it
+            // replaced. Cancelling only one of them is how a paid buyer keeps being
+            // asked to pay — the send-time recheck would refuse each one, but a
+            // cancelled row is the cheaper and more honest silence.
+            if (effects.vehicleRequestId) {
+              try {
+                const { cancelByKey } = await import(
+                  "@/lib/services/comms/transactional-dispatcher.service"
+                );
+                const { depositReminderCancelKey } = await import(
+                  "@/lib/services/payment/deposit-reminder.service"
+                );
+                await cancelByKey(
+                  depositReminderCancelKey(effects.vehicleRequestId),
+                  "deposit_paid",
+                );
+              } catch (err) {
+                logger.error("[stripe/webhook] deposit outbox cancel failed:", err);
+              }
+            }
 
-            // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were never notified)
+            // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were
+            // never notified). Phase 3: this is now the LEGACY path, reached only while
+            // SOURCING_CASE_REPLACES_AUCTION_LAUNCH is off, and every trip through it is
+            // recorded. Post-commit and best-effort by design — a dealer-invitation call
+            // inside the money transaction would hold a row lock on the deposit for the
+            // length of a third-party round trip.
             if (createdAuction && !existingAuction) {
+              await recordLegacyPathWrite({
+                kind: "SETTLEMENT_AUCTION_LAUNCH",
+                detail:
+                  `settlement created auction ${createdAuction.id} for deposit ${deposit.id} ` +
+                  `instead of leaving sourcing to the case` +
+                  (effects?.sourcingCaseId ? ` (case ${effects.sourcingCaseId} was opened too)` : ""),
+                entityType: "Deposit",
+                entityId: deposit.id,
+                removalPhase: 5,
+              });
               await launchAuction(createdAuction.id).catch((err: unknown) =>
                 logger.error("[stripe/webhook] launchAuction failed:", err)
               );
@@ -303,8 +427,49 @@ export async function POST(request: NextRequest) {
             }
 
             if (buyerEmail && !existingAuction) {
+              // §23.2a TOUCHPOINT 1 — "a single line on the receipt and the
+              // sourcing-started screen. Named, not pushed."
+              //
+              // Composed here rather than in the template because both halves are facts
+              // the template cannot know: whether §23.2b permits the ask at all, and
+              // what the balance actually is once the settled ledger has been read. A
+              // suppressed buyer gets no line, not a greyed-out one.
+              //
+              // Best-effort, and silence on failure: a receipt that goes out without an
+              // upsell line is a receipt; one held back because an upsell could not be
+              // priced is a missing receipt for money that moved.
+              let premiumLine: string | null = null;
               try {
-                await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id);
+                if (effects.vehicleRequestId) {
+                  const { isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS } = await import(
+                    "@/lib/services/plan/upgrade-suppression.service"
+                  );
+                  const decision = await isUpgradePromptSuppressed({
+                    vehicleRequestId: effects.vehicleRequestId,
+                    buyerId: deposit.buyerId,
+                    touchpoint: UPGRADE_TOUCHPOINTS.RECEIPT,
+                  });
+                  if (!decision.suppressed) {
+                    const { quotePremiumBalance } = await import(
+                      "@/lib/services/plan/upgrade-window.service"
+                    );
+                    const quote = await quotePremiumBalance(effects.vehicleRequestId);
+                    premiumLine =
+                      `Premium adds a named concierge who coordinates the rest of your purchase. ` +
+                      `It is $${(quote.grossCents / 100).toFixed(0)} in total` +
+                      (quote.creditCents > 0
+                        ? `, less the $${(quote.creditCents / 100).toFixed(0)} you have just paid — ` +
+                          `$${(quote.dueCents / 100).toFixed(0)} whenever you want it.`
+                        : `.`) +
+                      ` There is nothing to decide now.`;
+                  }
+                }
+              } catch (e) {
+                logger.error("[stripe/webhook] premium receipt line failed (receipt still sends):", e);
+              }
+
+              try {
+                await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id, premiumLine);
               } catch (e) {
                 logger.error("[stripe/webhook] deposit confirmation email failed:", e);
               }
@@ -390,11 +555,13 @@ export async function POST(request: NextRequest) {
             });
             if (claimed.count === 0) return null; // another delivery won
 
-            // Guarded PAID flip (transition matrix): only from an allowed
-            // predecessor, so a late/out-of-order success can't resurrect a
-            // settled deposit.
+            // Guarded PAID flip (transition matrix): only from a state this event
+            // may act from, so a late/out-of-order success can't resurrect a
+            // settled deposit or clear a live dispute. Same `SETTLE_FROM` set as
+            // the standard branch, including FAILED for the rows defect 1
+            // stranded — a concierge deposit declines and retries identically.
             await tx.deposit.updateMany({
-              where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("PAID") } },
+              where: { stripePaymentIntentId: pi.id, status: { in: [...SETTLE_FROM] } },
               data: { status: "PAID" },
             });
 
@@ -402,7 +569,23 @@ export async function POST(request: NextRequest) {
               where: { stripePaymentIntentId: pi.id },
               include: { buyer: { include: { user: { select: { email: true } } } } },
             });
-            if (!deposit) return { deposit: null, auctionId: null, offerCount: 0, reused: false };
+            if (!deposit) return { deposit: null, auctionId: null, offerCount: 0, reused: false, notSettleable: false };
+
+            // THE SAME GATE AS THE STANDARD BRANCH, and for the same reason. The flip
+            // above is correctly scoped by `SETTLE_FROM`, and the conversion below ran
+            // regardless of whether it matched: a late `payment_intent.succeeded` for a
+            // concierge deposit that had since been refunded or disputed would convert
+            // the review into a CLOSED auction and tell the buyer "your offers are
+            // ready" for money that had gone back. Fixing only the standard branch would
+            // have left the twin doing exactly what the fix was for.
+            if (deposit.status !== "PAID") {
+              logger.warn(
+                `[stripe/webhook] concierge payment_intent.succeeded for ${pi.id} left deposit ` +
+                  `${deposit.id} at ${deposit.status} — the transition matrix refused it. No conversion, ` +
+                  `no notification, no email.`,
+              );
+              return { deposit, auctionId: null, offerCount: 0, reused: false, notSettleable: true };
+            }
 
             if (!reviewToken) {
               // Should never happen — create-intent always stamps reviewToken on
@@ -411,7 +594,7 @@ export async function POST(request: NextRequest) {
               logger.error(
                 `[stripe/webhook] concierge_deposit ${deposit.id} missing pi.metadata.reviewToken — deposit marked PAID, no auction created`,
               );
-              return { deposit, auctionId: null, offerCount: 0, reused: false };
+              return { deposit, auctionId: null, offerCount: 0, reused: false, notSettleable: false };
             }
 
             const conv = await convertConciergeOfferToClosedAuction(tx, {
@@ -431,7 +614,13 @@ export async function POST(request: NextRequest) {
                 },
               });
             }
-            return { deposit, auctionId: conv.auctionId, offerCount: conv.offerIds.length, reused: conv.reused };
+            return {
+              deposit,
+              auctionId: conv.auctionId,
+              offerCount: conv.offerIds.length,
+              reused: conv.reused,
+              notSettleable: false,
+            };
           }, {
             // Bound the lock hold like the standard deposit cluster. The
             // conversion is a handful of local inserts, so this is generous.
@@ -512,8 +701,33 @@ export async function POST(request: NextRequest) {
           const feeDeal = await prisma.deal.findFirst({ where: whereClause });
           routed = feeDeal !== null;
           if (feeDeal) {
-            // Net of the $99 deposit credit — the amount actually captured.
-            const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: pi.id };
+            // THE LEDGER ROW FIRST, because the deal column is derived from it.
+            //
+            // Found by the second independent review: `deals.fee_amount_cents` stamped the
+            // $400 CONSTANT while this phase made the charge variable. For a buyer whose
+            // $99 was refunded or charged back the credit basis is broken,
+            // `quotePremiumBalance` prices Premium at $499 gross, Stripe takes $499 — and
+            // this column said 40000. The two ledgers then disagreed by $99 on exactly the
+            // deals where the deposit contributed nothing, so a revenue report summing
+            // deposits plus this column under-counted twice over.
+            //
+            // The fix had been applied to `recordFeePayment`, which has NO CALLERS — the
+            // live path is here. Moving the ledger write above the deal update is what
+            // lets this read the amount that was actually recorded rather than assume one.
+            //
+            // Still best-effort: a ledger-row failure falls back to the constant rather
+            // than losing the fee receipt, which is the same trade as before.
+            const feePayment = await writeServiceFeePayment(feeDeal.id, pi.id).catch((err) => {
+              logger.error("[stripe-webhook] service fee payment record failed:", err);
+              return null;
+            });
+            // The amount actually captured: $499 gross less whatever $99 genuinely
+            // settled — $400 in the ordinary case, $499 where the credit basis is broken.
+            const feeData = {
+              feePaidAt: new Date(),
+              feeAmountCents: feePayment?.netAmountCents ?? PREMIUM_FEE_REMAINING_CENTS,
+              stripeFeePIId: pi.id,
+            };
             // Recording the fee is enough: advanceDealStatus settles the rest of
             // the ladder on arrival (FEE_PAID → INSURANCE_PENDING, and on into the
             // insurance gate when proof is already on file). Re-issuing an explicit
@@ -529,14 +743,6 @@ export async function POST(request: NextRequest) {
               await prisma.deal.update({ where: { id: feeDeal.id }, data: feeData });
             }
 
-            // Ledger completeness: write the ServiceFeePayment row (the only
-            // writer — recordFeePayment was dead, so service_fee_payments never
-            // populated even after a real fee). Idempotent on dealId; best-effort
-            // so a ledger-row failure never rolls back the already-committed fee
-            // receipt / status advance above.
-            await writeServiceFeePayment(feeDeal.id, pi.id).catch((err) =>
-              logger.error("[stripe-webhook] service fee payment record failed:", err),
-            );
           }
 
           // Send the buyer a confirmation that their service fee was received.
@@ -634,14 +840,36 @@ export async function POST(request: NextRequest) {
         const pi = event.data.object as Stripe.PaymentIntent;
 
         if (pi.metadata.type === "deposit" || pi.metadata.type === "concierge_deposit") {
-          // Transition matrix: FAILED is reachable only from PENDING, so a late
-          // failure event can never downgrade a PAID or REFUNDED deposit. Both the
-          // standard and concierge deposit types are $99 Deposit rows keyed on the
-          // same stripePaymentIntentId, so the same guarded flip applies.
-          await prisma.deposit.updateMany({
-            where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("FAILED") } },
-            data:  { status: "FAILED" },
-          });
+          // MONEY-PATH DEFECT 1, fixed at the cause. This branch used to write
+          // FAILED here. It must not, and the reason is not a matrix detail — it is
+          // what the event means.
+          //
+          // `payment_intent.payment_failed` is a DECLINED ATTEMPT, not a dead
+          // intent. Stripe Elements retries on the same PaymentIntent, so the
+          // obligation still stands and the buyer can still pay it. Recording that
+          // as FAILED made the row terminal, stranded the retry, and left the
+          // reconciler — which swept PENDING only — unable to find it ever again.
+          //
+          // So the deposit STAYS PENDING and nothing is written. PENDING is the
+          // truth: an unpaid obligation with a live intent. The row remains inside
+          // the create-intent reuse lookup and inside the reconciler sweep, which
+          // is the whole point.
+          //
+          // What DOES write FAILED is `payment_intent.canceled` and
+          // `checkout.session.expired` below — the two events that mean the intent
+          // itself is gone.
+          //
+          // §5c/§27's "Payment failed → truthful failure and retry path" message is
+          // NOT sent from here and is not silently dropped: the six-touch series
+          // owns buyer-facing $99 messaging and rechecks live payment state at send
+          // time, so a decline is already covered by the next due touch. This branch
+          // sent the buyer nothing before this change either, so no capability is
+          // removed. Recorded rather than assumed, because "we left it as it was" is
+          // exactly the kind of gap that reads as deliberate a year later.
+          logger.info(
+            `[stripe/webhook] deposit payment attempt declined for PI ${pi.id} — deposit left PENDING; ` +
+              `the intent is live and the buyer may retry on it`,
+          );
         }
 
         if (pi.metadata.type === "concierge_fee" || pi.metadata.type === "service_fee") {
@@ -660,6 +888,35 @@ export async function POST(request: NextRequest) {
         break;
       }
 
+      // MONEY-PATH DEFECT 1, the other half. Nothing in this webhook handled a dead
+      // intent before Phase 3, because `payment_failed` was (wrongly) doing that job.
+      // Now that a decline correctly leaves the deposit PENDING, something has to
+      // record the case where the intent really is gone — otherwise a cancelled
+      // obligation sits PENDING for ever, keeps blocking new intents through the
+      // obligation check, and keeps drawing deposit-reminder touches for money the
+      // buyer can no longer pay.
+      //
+      // Stripe emits this when an intent is cancelled explicitly or by its automatic
+      // timeout. `DEAD_INTENT_FROM` is PENDING only: a cancellation arriving after a
+      // success (they do cross) must never downgrade a PAID row, and the WHERE clause
+      // enforces that at the database rather than in a read-then-write.
+      case "payment_intent.canceled": {
+        const pi = event.data.object as Stripe.PaymentIntent;
+        if (pi.metadata.type === "deposit" || pi.metadata.type === "concierge_deposit") {
+          const dead = await prisma.deposit.updateMany({
+            where: { stripePaymentIntentId: pi.id, status: { in: [...DEAD_INTENT_FROM] } },
+            data: { status: "FAILED" },
+          });
+          if (dead.count === 1) {
+            logger.info(
+              `[stripe/webhook] PaymentIntent ${pi.id} cancelled — deposit marked FAILED (dead intent). ` +
+                `The buyer may start a new one.`,
+            );
+          }
+        }
+        break;
+      }
+
       case "charge.refunded": {
         const charge = event.data.object as Stripe.Charge;
         const piId   = typeof charge.payment_intent === "string"
@@ -670,19 +927,41 @@ export async function POST(request: NextRequest) {
 
         const deposit = await prisma.deposit.findFirst({
           where:  { stripePaymentIntentId: piId },
-          select: { id: true, status: true, buyerId: true },
+          select: { id: true, status: true, buyerId: true, vehicleRequestId: true },
         });
 
-        // Transition matrix: REFUNDED is reachable only from PAID. The updateMany
+        // Transition matrix: REFUNDED is reachable from PAID or DISPUTED. The DISPUTED
+        // edge is here because a lost dispute leaves the deposit in that state and the
+        // money does go back — but the branch that RULES on a lost dispute is
+        // `charge.dispute.closed`, not this one. Whether Stripe also emits a refund
+        // event for a lost dispute is a claim about provider behaviour this session
+        // could not verify against a live account, so neither path depends on the other:
+        // both are idempotent, and whichever arrives second finds the row already
+        // REFUNDED and changes nothing. The updateMany
         // WHERE enforces the edge atomically (count 1 = we performed the refund,
         // count 0 = disallowed/already-settled → skip side effects). This closes
         // the check-then-write race a findFirst+update leaves open.
         const refundApplied = deposit
           ? (await prisma.deposit.updateMany({
-              where: { id: deposit.id, status: { in: allowedPredecessors("REFUNDED") } },
+              where: { id: deposit.id, status: { in: [...REFUND_FROM] } },
               data:  { status: "REFUNDED", refundedAt: new Date() },
             })).count === 1
           : false;
+
+        // §5d: a refund places fulfilment on hold and stops all unsent outreach — the
+        // same clause as a dispute, and previously honoured for neither. Applied on the
+        // refund actually landing, not on the event arriving, so a redelivery does not
+        // re-cancel and re-raise.
+        if (deposit && refundApplied) {
+          await applyFulfillmentHold({
+            depositId: deposit.id,
+            buyerId: deposit.buyerId,
+            vehicleRequestId: deposit.vehicleRequestId,
+            trigger: "refund",
+            providerRef: charge.id,
+            reason: charge.refunds?.data?.[0]?.reason ?? null,
+          });
+        }
 
         if (deposit && refundApplied) {
           await prisma.notification.create({
@@ -796,6 +1075,37 @@ export async function POST(request: NextRequest) {
           ? dispute.charge
           : dispute.charge.id;
 
+        // §26: "Payment disputed or refunded | Finance | Hold fulfillment; stop unsent
+        // outreach." Before Phase 3 this branch wrote an audit row and nothing else —
+        // best-effort, with a swallowed catch — so a contested charge changed no state,
+        // stopped no outreach and told nobody, while sourcing carried on spending money
+        // on it. The audit row is kept below; it is no longer the whole response.
+        if (piId) {
+          const disputed = await prisma.deposit.findFirst({
+            where: { stripePaymentIntentId: piId },
+            select: { id: true, buyerId: true, vehicleRequestId: true },
+          });
+          if (disputed) {
+            await applyFulfillmentHold({
+              depositId: disputed.id,
+              buyerId: disputed.buyerId,
+              vehicleRequestId: disputed.vehicleRequestId,
+              trigger: "dispute",
+              providerRef: dispute.id,
+              reason: dispute.reason ?? null,
+            });
+          } else {
+            // A dispute against a charge we cannot resolve to a deposit is the §26
+            // "never absorbed" case wearing a different hat, and it is the more
+            // alarming direction: money is being clawed back from an obligation we
+            // cannot name.
+            await raiseUnroutablePaymentException(
+              { id: piId, metadata: {} } as Stripe.PaymentIntent,
+              `a dispute (${dispute.id}) was filed against it but no deposit carries this PaymentIntent`,
+            );
+          }
+        }
+
         await prisma.adminAuditLog.create({
           data: {
             action:     "STRIPE_DISPUTE_CREATED",
@@ -814,6 +1124,83 @@ export async function POST(request: NextRequest) {
             },
           },
         }).catch((err: unknown) => logger.error("[stripe/webhook] dispute audit log failed:", err));
+        break;
+      }
+
+      // The other half of the hold. Without it, `charge.dispute.created` would be a
+      // one-way door: every disputed deposit would sit at DISPUTED for ever, its Finance
+      // exception open, its buyer told "your payment is under review" indefinitely — even
+      // for the disputes the platform WINS, which is most of them.
+      //
+      // Stripe closes a dispute with one of three outcomes and they are not symmetrical:
+      //   • won            — the charge stands. Release the hold, deposit back to PAID.
+      //   • lost           — the money is withdrawn. REFUNDED, and the hold STAYS on.
+      //   • warning_closed — an early-fraud warning that never became a formal dispute.
+      //                      No ruling was made, so nothing here rules either.
+      //
+      // The `lost` branch is handled HERE rather than left to `charge.refunded`. Whether
+      // Stripe also emits a refund event for a lost dispute is a claim about provider
+      // behaviour this session cannot verify against a live account, and a money path
+      // that depends on an unverified provider assumption is exactly the shape of the
+      // defects this phase exists to fix. Both branches are idempotent, so if a refund
+      // event does also arrive it finds the row already REFUNDED and changes nothing.
+      case "charge.dispute.closed": {
+        const dispute = event.data.object as Stripe.Dispute;
+        const charge  = await getStripe().charges.retrieve(dispute.charge as string);
+        const piId    = typeof charge.payment_intent === "string"
+          ? charge.payment_intent
+          : charge.payment_intent?.id;
+
+        const deposit = piId
+          ? await prisma.deposit.findFirst({
+              where: { stripePaymentIntentId: piId },
+              select: { id: true, buyerId: true, vehicleRequestId: true },
+            })
+          : null;
+
+        if (deposit && dispute.status === "won") {
+          await releaseFulfillmentHold(deposit.id, dispute.id);
+        } else if (deposit && dispute.status === "lost") {
+          await recordDisputeLost({
+            depositId:        deposit.id,
+            buyerId:          deposit.buyerId,
+            vehicleRequestId: deposit.vehicleRequestId,
+            providerRef:      dispute.id,
+          });
+        } else if (deposit) {
+          // warning_closed, or a status Stripe adds later. The hold stays and the Finance
+          // exception stays open, because "we do not recognise this outcome" is a reason
+          // to leave a human in the loop, not a reason to guess at one.
+          logger.warn(
+            `[stripe/webhook] dispute ${dispute.id} closed with status "${dispute.status}" — ` +
+              `no ruling applied to deposit ${deposit.id}; the fulfilment hold and its Finance ` +
+              `exception both stand`,
+          );
+        } else if (piId) {
+          logger.warn(
+            `[stripe/webhook] dispute ${dispute.id} closed ("${dispute.status}") for PaymentIntent ` +
+              `${piId}, which no deposit carries — the created event already raised the unroutable ` +
+              `exception; nothing to release`,
+          );
+        }
+
+        await prisma.adminAuditLog.create({
+          data: {
+            action:     "STRIPE_DISPUTE_CLOSED",
+            entityType: "Payment",
+            entityId:   dispute.id,
+            adminId:    "system",
+            adminEmail: "system@autolenis.com",
+            metadata: {
+              disputeId:       dispute.id,
+              paymentIntentId: piId ?? null,
+              depositId:       deposit?.id ?? null,
+              amount:          dispute.amount,
+              reason:          dispute.reason,
+              status:          dispute.status,
+            },
+          },
+        }).catch((err: unknown) => logger.error("[stripe/webhook] dispute-closed audit log failed:", err));
         break;
       }
     }
