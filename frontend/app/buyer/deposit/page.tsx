@@ -152,8 +152,12 @@ function DisclosureGate({
       <h2 className="text-sm font-semibold text-[#111827] mb-3">Before you pay, please read this</h2>
       <ul className="space-y-2.5" data-testid="deposit-disclosure-list">
         {DEPOSIT_DISCLOSURES.map((d) => (
-          <li key={d.id} className="flex gap-2.5 text-xs text-[#4B5563] leading-relaxed" data-disclosure-id={d.id}>
-            <Check size={14} className="text-[#50D14E] shrink-0 mt-0.5" aria-hidden="true" />
+          // 14px, not 12. These are seven material terms a buyer must read before money
+          // moves, and the rest of this page sets body copy at `text-sm`; rendering the
+          // one block that carries the legal substance a size smaller than the marketing
+          // around it is the wrong emphasis as well as the harder read.
+          <li key={d.id} className="flex gap-2.5 text-sm text-[#4B5563] leading-relaxed" data-disclosure-id={d.id}>
+              <Check size={15} className="text-[#50D14E] shrink-0 mt-1" aria-hidden="true" />
             <span>{d.text}</span>
           </li>
         ))}
