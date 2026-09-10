@@ -105,11 +105,24 @@ the public root. No authenticated page was exercised in a browser.
 
 ## Deploy order is a constraint, not a preference
 
-`DepositStatus.DISPUTED` appears in **read** predicates that run on every checkout. Deploying the
-application before the migration is applied makes PostgreSQL raise `22P02` on
-`WHERE status IN (… 'DISPUTED')`, which is a 500 for every buyer at checkout rather than only for
-disputed ones. **The migration is applied first**, through the per-run protocol, and verified in
-both halves before the application deploy.
+*(Honoured. The migration was applied at `2026-09-10T04:15:47Z` and the Phase 3 merge landed at
+`04:17Z` — migration first, by two minutes. Owner-supplied and owner-verified against production;
+no Claude session held a credential or ran anything against it.)*
+
+`DepositStatus.DISPUTED` appears in a **read** predicate that runs on every checkout:
+`OBLIGATION_BEARING` (`frontend/lib/services/payment/deposit-obligation.ts:164`) is spread
+unconditionally into `status: { in: [...] }` at `:195`, and the three callers of
+`findExistingDepositObligation` are the buyer checkout and both admin deposit routes. Deploying the
+application before the migration is applied makes PostgreSQL raise `22P02` on that predicate, which
+is a 500 for every buyer who so much as opens checkout — the page fires the call as a probe on
+mount — rather than only for disputed ones. **The migration is applied first**, through the per-run
+protocol, and verified in both halves before the application deploy.
+
+The migration's own header said the opposite — "additive and safe in either order" — because it
+reasoned only about which code *writes* the label. That is corrected, with the full blast radius and
+the reason the wrong conclusion was reachable, in
+`frontend/prisma/migrations/20261111000000_deposit_status_disputed/ORDERING.md`. The rule it
+generalises to is now in the `autolenis-supabase-postgres` skill's "Add a status value" workflow.
 
 ## Reported, not fixed
 

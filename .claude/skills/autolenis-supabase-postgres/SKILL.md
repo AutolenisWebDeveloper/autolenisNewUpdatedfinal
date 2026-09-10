@@ -127,7 +127,50 @@ needed → tests → rollback (drop table).
 **Add a status value.** Extend the Prisma enum → migration
 `ALTER TYPE ... ADD VALUE IF NOT EXISTS` → update every switch/guard that
 exhausts the enum (transition maps, `allowedPredecessors`, status-history
-writers) → tests for the new transition. Never reorder existing values.
+writers) → **grep for the new label in query predicates** (see below) → tests
+for the new transition. Never reorder existing values.
+
+> **An added enum label is NOT order-independent. Check reads, not just writes.**
+>
+> "Additive, so either deploy order is fine" is the reasoning to distrust here. It
+> holds only while the label is written and never named in a **predicate**. The
+> moment any code puts the label in a `where` — a status set spread into
+> `status: { in: [...] }`, a raw `IN (...)`, a filtered count — that query is sent
+> to PostgreSQL with the label bound and cast to the enum type, and a database that
+> does not have the label yet answers `22P02 invalid_text_representation`. The
+> query fails **entirely**, for every caller, not only for rows in the new state.
+>
+> So: **apply the migration, verify both halves, then deploy** — the order in
+> `docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` §8.1a.2, which is binding.
+> The reverse order is the safe one: an older deployment neither sends the label
+> nor can receive it, so the label is inert until its code ships.
+>
+> Nothing catches this for you. The CI migration job applies the chain to an
+> **empty** database, so the label always exists before any query runs there. The
+> mismatch lives only in the window between a production deploy and a production
+> migration, which no automated check in this repository inspects.
+>
+> Worked example, including how the wrong conclusion was reached:
+> `frontend/prisma/migrations/20261111000000_deposit_status_disputed/ORDERING.md`.
+> `DepositStatus.DISPUTED` looked like a webhook-only write — every obvious use of
+> it is one — while the label also sat in `OBLIGATION_BEARING`, an unconditional
+> predicate on the buyer checkout path. Deploying first would have `22P02`'d every
+> buyer who merely opened the checkout page.
+>
+> **Never edit a migration that has shipped — applied or not.** You cannot
+> reliably know which, and `CLAUDE.md`'s rule is unqualified for that reason.
+> `_prisma_migrations.checksum` is `sha256(migration.sql)`, proven against this
+> project's live ledger in `docs/plans/MIGRATION-LEDGER-RECONCILIATION.md` §7.3:
+> recomputing it reproduced the stored value for 61 of 67 recorded rows, and the
+> six that failed were exactly the migrations edited after being recorded — the
+> ledger left holding "a fossil of the pre-edit file". Those six made a planned
+> reconciliation's post-condition unachievable before it began (§7.1), Prisma
+> ships no CLI command to repair a stale checksum (§7.6), and **they are still
+> unrepaired** (§7.8 — no `prisma migrate` command has been run against
+> production from a Claude session; the repair SQL is proposed, not applied).
+> Put the correction in a NEW companion file in the same directory, as that
+> `ORDERING.md` does — `prisma migrate deploy` reads only `migration.sql` per
+> directory, and `rollback.sql` already proves companions are safe there.
 
 **Backfill.** Idempotent and resumable, batched by PK range or `updated_at`,
 throttled, with progress logging. Provide a manual re-run endpoint/script.
