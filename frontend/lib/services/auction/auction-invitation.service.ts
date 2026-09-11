@@ -932,3 +932,123 @@ export async function countReachedInvitations(
   ]);
   return { total: unified + legacyOutside, unified, legacyOutside };
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// S7-10 / §13-D37 — resolving a tokenised invitation link
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why an invitation link cannot be acted on. Each value is a DIFFERENT message to a real
+ * dealership, which is the reason this is an enum and not a boolean: "this auction has closed"
+ * and "this link is not one of ours" want opposite responses from the recipient.
+ */
+export type InvitationTokenRejection =
+  | "NOT_FOUND"
+  | "TOKEN_EXPIRED"
+  | "AUCTION_NOT_ACTIVE"
+  | "INVITATION_SUPERSEDED"
+  | "ALREADY_DECLINED";
+
+export interface ResolvedInvitation {
+  invitationId: string;
+  auctionId: string;
+  rooftopId: string | null;
+  dealerId: string | null;
+  /**
+   * NULLABLE, because `auction_invitations.dealership_name` is. A row written by the legacy
+   * admin hand-pick path can carry none, and substituting a placeholder HERE would put an
+   * invented name into the service's own return — the surface decides how to address a
+   * dealership whose name we do not hold, and it can only decide that if it is told.
+   */
+  dealershipName: string | null;
+  contactName: string | null;
+  status: string;
+  /** The auction's own close time — the deadline the dealership is bidding against. */
+  endsAt: Date | null;
+  expiresAt: Date | null;
+  /** Null when the link is usable. */
+  rejection: InvitationTokenRejection | null;
+  /** True when an offer already stands for this invitation. */
+  alreadyBid: boolean;
+}
+
+/**
+ * Resolve a RAW invitation token to its invitation, and say why it cannot be used.
+ *
+ * §Stage 7's token is "auction-and-rooftop-bound", and §13-D37's ruling (owner, 2026-09-11) is
+ * that THE TOKEN BINDS THE INVITATION AND THE SESSION AUTHORISES THE PORTAL. So this function
+ * answers exactly one question — which invitation is this link, and is the link still live —
+ * and answers nothing about what the holder may do. The caller authenticates separately. A
+ * resolver that also granted access would be the token-alone surface the owner declined to
+ * authorise, which is an authorization change and wants a security batch.
+ *
+ * ONLY THE HASH IS STORED AND ONLY THE HASH IS COMPARED. `issueInvitations` persists
+ * `tokenHash` and never the raw token, so a database read cannot produce a working link — and
+ * this lookup is a hash equality, so a raw token never appears in a query log either.
+ *
+ * DOES NOT RECORD THE VIEW. Reading a link is not the same act as opening it, and a resolver
+ * that wrote on every call would stamp `openedAt` from a link preview, a mail scanner, or a
+ * rejected attempt. The caller records `OPENED` once it has decided the view is real.
+ */
+export async function resolveInvitationByToken(
+  rawToken: string,
+  db: Db = defaultPrisma,
+  now: Date = new Date(),
+): Promise<ResolvedInvitation | null> {
+  if (!rawToken) return null;
+  const { hashToken } = await import("@/lib/services/dealer-recruitment/account-claim.service");
+
+  const inv = await db.auctionInvitation.findFirst({
+    where: { tokenHash: hashToken(rawToken) },
+    select: {
+      id: true,
+      auctionId: true,
+      rooftopId: true,
+      dealerId: true,
+      dealershipName: true,
+      contactName: true,
+      status: true,
+      expiresAt: true,
+      declinedAt: true,
+      offerSubmittedAt: true,
+      auction: { select: { status: true, endsAt: true } },
+    },
+  });
+  // A token that resolves to nothing is NOT a rejection shape — there is no invitation to
+  // describe, and telling the holder "expired" would be a guess about a link we have never
+  // issued. The caller renders a not-found page.
+  if (!inv) return null;
+
+  const base = {
+    invitationId: inv.id,
+    auctionId: inv.auctionId,
+    rooftopId: inv.rooftopId,
+    dealerId: inv.dealerId,
+    dealershipName: inv.dealershipName,
+    contactName: inv.contactName,
+    status: inv.status,
+    endsAt: inv.auction?.endsAt ?? null,
+    expiresAt: inv.expiresAt,
+    alreadyBid: inv.offerSubmittedAt !== null,
+  };
+
+  // ORDER MATTERS, and it is the order of WHAT THE DEALERSHIP SHOULD BE TOLD. A replaced
+  // invitation is reported as superseded even if the auction has also ended, because the
+  // dealership's own question is "why doesn't my link work" and the specific answer is that a
+  // newer one was issued to them.
+  if (inv.status === "REPLACED") return { ...base, rejection: "INVITATION_SUPERSEDED" };
+  if (inv.declinedAt) return { ...base, rejection: "ALREADY_DECLINED" };
+  if (inv.expiresAt && inv.expiresAt.getTime() <= now.getTime()) {
+    return { ...base, rejection: "TOKEN_EXPIRED" };
+  }
+  // THE AUCTION IS THE AUTHORITY ON THE WINDOW, not the token. `issueInvitations` sets
+  // `expiresAt` to the auction's `endsAt` precisely so the two agree, but an auction closed
+  // EARLY by an admin action moves only the auction — so both are checked and the auction's
+  // state wins where they differ.
+  if (inv.auction?.status !== "ACTIVE") return { ...base, rejection: "AUCTION_NOT_ACTIVE" };
+  if (inv.auction.endsAt && inv.auction.endsAt.getTime() <= now.getTime()) {
+    return { ...base, rejection: "AUCTION_NOT_ACTIVE" };
+  }
+
+  return { ...base, rejection: null };
+}

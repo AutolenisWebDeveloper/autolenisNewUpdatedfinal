@@ -298,6 +298,11 @@ export const DETAIL_PARENTS: Readonly<Record<string, string>> = {
   "/admin/deals/[dealId]/pickup": "/admin/deals",
   "/admin/prequal/[id]": "/admin/prequal",
   "/admin/requests/[requestId]": "/admin/requests",
+  // Phase 5: the Operations destination for one sourcing case. It is a drill-down off the
+  // request, not a rail entry — a menu cannot usefully list "a sourcing case", and the entry
+  // point is already the §26 queue item (`THIN_DEALER_COVERAGE`, `LAUNCH_READINESS_BLOCKED`)
+  // plus the link on the request detail page.
+  "/admin/sourcing/[caseId]": "/admin/requests/[requestId]",
   // The canonical triage path is Requests → request detail → send to dealers.
   // The legacy detail links here too, but it is an email-entry surface and not
   // itself click-reachable, so naming it the parent would leave this page

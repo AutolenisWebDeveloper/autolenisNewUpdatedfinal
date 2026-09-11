@@ -9,6 +9,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { ClipboardList, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import { parseRequestNotes } from "@/lib/services/vehicle-request/notes-parser";
+import { getSourcingCase } from "@/lib/services/sourcing/sourcing-case.service";
 import AdminOfferComposer from "@/components/admin/AdminOfferComposer";
 import CompleteCheckpointButton from "@/components/admin/CompleteCheckpointButton";
 import AdminRequestActionButtons from "@/components/admin/AdminRequestActionButtons";
@@ -46,6 +47,12 @@ export default async function AdminRequestDetailPage({ params }: Props) {
     },
   });
   if (!req) notFound();
+
+  // Phase 5 — the link that makes `/admin/sourcing/[caseId]` click-reachable. `lib/admin/nav.ts`
+  // DETAIL_PARENTS names this page as its parent, and the rule there is that a drill-down with no
+  // rail entry "must be linked from its parent workflow" — a route reachable only by typing a URL
+  // is not a capability an operator has.
+  const sourcingCase = await getSourcingCase(requestId);
 
   const allCheckpointsDone = req.checkpoints.length > 0 && req.checkpoints.every(c => c.completed);
   const canSendOffer = allCheckpointsDone && req.status === "ACTIVE_SOURCING";
@@ -99,6 +106,24 @@ export default async function AdminRequestDetailPage({ params }: Props) {
               : `Approval expires in ${expiryDaysLeft} day${expiryDaysLeft === 1 ? "" : "s"} — act promptly.`}
           </p>
         </div>
+      )}
+
+      {sourcingCase && (
+        <Link
+          href={`/admin/sourcing/${sourcingCase.id}`}
+          data-testid="sourcing-case-link"
+          className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-al-primary/30"
+        >
+          <span className="text-sm">
+            <span className="font-semibold text-slate-800">Sourcing case</span>
+            <span className="ml-2 text-slate-500">
+              {sourcingCase.status} · band {sourcingCase.band} · {sourcingCase.coverageCount} invitation-ready
+            </span>
+          </span>
+          <span className="text-xs font-semibold text-al-primary">
+            Readiness &amp; approvals →
+          </span>
+        </Link>
       )}
 
       <div className="grid grid-cols-2 gap-8">
