@@ -46,6 +46,36 @@ export type EmailOutboxPayload = {
   campaignRecipientId?: string;
   type?: "transactional" | "marketing";
   idempotencyKey?: string;
+  /**
+   * WHICH SUPPRESSION TIER APPLIES. Added in Phase 5 to fix defect 1 at its cause.
+   *
+   * The tier used to be DERIVED from `type`: transactional meant hard-only
+   * (bounced/complained/spam_trap) and everything else meant the full store. That
+   * conflates two different questions — "is this message part of a transaction?" and
+   * "has this recipient asked us to stop?" — and for one class of message the derived
+   * answer is wrong.
+   *
+   * A BUYER's deal email is rightly hard-only: someone who unsubscribed from marketing
+   * must still receive their own receipt. A DEALER AUCTION INVITATION is not that. It is
+   * solicited B2B outreach, frequently to an address that never opted in, and §7's launch
+   * readiness requires "every contact is send-safe against suppression AND OPT-OUT lists".
+   * Under the derived tier, a dealership that used AutoLenis' own one-click unsubscribe —
+   * which writes `email_suppression.reason = 'unsubscribed'` and deliberately does not set
+   * `do_not_contact` (`app/api/public/dealer-unsubscribe/route.ts:15-26`) — stayed fully
+   * mailable by every invitation and every reminder, forever.
+   *
+   * Omitted, the tier is derived exactly as before, so no existing caller changes
+   * behaviour. `"full"` is set explicitly by the dealer invitation rail.
+   */
+  suppressionTier?: "hard" | "full";
+  /**
+   * Overrides the `List-Unsubscribe` target. See `ResendSendArgs.listUnsubscribeUrl`.
+   *
+   * The default the provider sends points at `/unsubscribe`, which cannot identify a
+   * dealership — a header that looks like an opt-out and is not one. Dealer-facing mail
+   * passes the token URL that actually suppresses the address.
+   */
+  listUnsubscribeUrl?: string;
 };
 
 export type SmsOutboxPayload = {
@@ -183,8 +213,14 @@ export async function deliverEmail(
     return { outcome: "GATED" };
   }
 
+  // THE TIER IS EXPLICIT WHERE IT MATTERS AND DERIVED WHERE IT ALWAYS WAS. `suppressionTier`
+  // is Phase 5's fix for defect 1: see the field's own note on `EmailOutboxPayload`. Absent,
+  // the behaviour is byte-for-byte what it was — transactional means hard-only, everything
+  // else means the full store — so no pre-Phase-5 caller moves.
+  const tier: "hard" | "full" =
+    payload.suppressionTier ?? (payload.type === "transactional" ? "hard" : "full");
   const suppressed =
-    payload.type === "transactional"
+    tier === "hard"
       ? await SuppressionService.isEmailHardSuppressed(supabase, payload.email)
       : await SuppressionService.isEmailSuppressed(supabase, payload.email);
   if (suppressed) return { outcome: "SUPPRESSED" };
@@ -232,6 +268,9 @@ export async function deliverEmail(
       // Provider-side idempotency (the outbox dedup_key) collapses a crash-window
       // re-send within Resend's ~24h dedup window.
       idempotencyKey: payload.idempotencyKey,
+      // Phase 5: dealer-facing mail carries its own one-click opt-out target. Absent, the
+      // provider keeps the buyer-oriented default it always sent.
+      listUnsubscribeUrl: payload.listUnsubscribeUrl,
     });
     providerId = out.id ?? undefined;
   } catch (err) {

@@ -105,6 +105,23 @@ export interface ResendSendArgs {
    * dispatched_at reclaim policy.
    */
   idempotencyKey?: string;
+  /**
+   * Overrides the default `List-Unsubscribe` target. Added in Phase 5 for dealer-facing
+   * mail.
+   *
+   * The default below points at `/unsubscribe`, a buyer-oriented page that cannot identify
+   * a dealership — so for an auction invitation it is a header that looks like an opt-out
+   * and is not one. `/api/public/dealer-unsubscribe?token=…` identifies the address and
+   * writes its suppression row, which is the thing that actually stops the next send.
+   *
+   * When set, `List-Unsubscribe-Post` is sent with it. That header is a PROMISE to the
+   * mail provider that the URL honours an unattended POST (RFC 8058 one-click), so it is
+   * only ever sent alongside an explicit URL — and the dealer route does export a POST
+   * handler (`app/api/public/dealer-unsubscribe/route.ts:34`). Asserting one-click against
+   * a GET-only endpoint would make Gmail's one-click button fail silently, which is worse
+   * than not claiming it.
+   */
+  listUnsubscribeUrl?: string;
 }
 
 export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: string | null }> {
@@ -119,7 +136,12 @@ export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: st
       subject: args.subject,
       text: args.text,
       html: args.html,
-      headers: { "List-Unsubscribe": `<${process.env.NEXT_PUBLIC_APP_URL}/unsubscribe>` },
+      headers: args.listUnsubscribeUrl
+        ? {
+            "List-Unsubscribe": `<${args.listUnsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          }
+        : { "List-Unsubscribe": `<${process.env.NEXT_PUBLIC_APP_URL}/unsubscribe>` },
     },
     args.idempotencyKey ? { idempotencyKey: args.idempotencyKey } : undefined,
   );

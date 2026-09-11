@@ -40,7 +40,15 @@ import { raiseException } from "@/lib/services/operations/queue-item.service";
 type Db = typeof prisma | Prisma.TransactionClient;
 
 /** Where the recheck ran. Stage 3 names three; §26 gets one exception either way. */
-export type ApprovalGate = "payment" | "offer_selection" | "contract_request";
+/**
+ * Where the recheck is being run.
+ *
+ * `auction_launch` added in Phase 5 for §10.6 S7-02 — §Stage 7's entry requires "the
+ * prequalification and approved ceiling are attached" before an auction may go live, and that
+ * gate sits AFTER payment like the two below it: the buyer has paid, so arriving with no
+ * usable approval is a stuck buyer rather than an unfinished one, and it raises.
+ */
+export type ApprovalGate = "payment" | "auction_launch" | "offer_selection" | "contract_request";
 
 export type ApprovalVerdict =
   | { ok: true; approvedAmountCents: number | null; expiresAt: Date }
@@ -107,12 +115,18 @@ async function fail(
   //   • at `payment`, a buyer who never applied or is still under review is the
   //     ordinary case — they simply have not finished. Raising there would fill
   //     the queue with rows nobody can act on, which is why it does not.
-  //   • at `offer_selection` and `contract_request` the buyer has already PAID and
-  //     an auction has already run. Arriving there with no approval at all is not
-  //     an ordinary case, it is a buyer stuck behind a gate with nothing they can
-  //     do about it — and before this, the 409 was the only trace: no queue row, no
-  //     alert, and an auction that closes unselected while everyone waits.
-  const postPaymentGate = gate === "offer_selection" || gate === "contract_request";
+  //   • at `auction_launch`, `offer_selection` and `contract_request` the buyer has
+  //     already PAID. Arriving there with no approval at all is not an ordinary
+  //     case, it is a buyer stuck behind a gate with nothing they can do about it —
+  //     and before this, the 409 was the only trace: no queue row, no alert, and an
+  //     auction that closes unselected while everyone waits.
+  //
+  //     `auction_launch` is the earliest of the three (Phase 5, §Stage 7 entry) and
+  //     it is the one where raising matters most: the auction has not launched yet,
+  //     so the buyer's $99 is sitting against a request that cannot proceed and
+  //     nothing downstream has happened to reveal it.
+  const postPaymentGate =
+    gate === "auction_launch" || gate === "offer_selection" || gate === "contract_request";
   const raise = reason === "EXPIRED" || postPaymentGate;
   if (opts.raiseOnFailure && raise) {
     try {

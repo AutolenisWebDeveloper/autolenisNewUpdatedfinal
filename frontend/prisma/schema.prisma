@@ -604,7 +604,12 @@ model AuctionInvitation {
   dealer             Dealer?                 @relation("DealerInvitations", fields: [dealerId], references: [id], onDelete: Restrict)
   // Phase 1 transaction spine (20261106000100).
   bouncedAt          DateTime?               @map("bounced_at")
-  candidateIds       String[]                @map("candidate_ids")
+  // Phase 5 (20261113000000) added the SQL DEFAULT this was missing. The column was
+  // nullable TEXT[] with no default while Prisma declared it non-nullable — invisible
+  // while nothing read it, a P2022 on read and an undefined-iteration TypeError on use
+  // once S7-23 fills it per invitation. Its sibling
+  // `SourcingCandidate.servedCandidateIds` was `@default([])` from the start.
+  candidateIds       String[]                @default([]) @map("candidate_ids")
   contactName        String?                 @map("contact_name")
   dealershipName     String?                 @map("dealership_name")
   declinedAt         DateTime?               @map("declined_at")
@@ -3180,21 +3185,68 @@ model CircumventionAttempt {
   resolvedBy String?               @map("resolved_by")
   // Phase 1 transaction spine (20261106000100).
   dealerId   String?               @map("dealer_id")
+  // Phase 5 sourcing/invitations (20261113000000).
+  //
+  // §25.2 scopes its consequence twice — "after a paid auction" and "when the
+  // dealership initiates" — and the row could express neither. `dealerId` names the
+  // dealership the thread belongs to, not the party that initiated: `userId` is the
+  // sender, but `Message.senderId` has no relation and `MessageThread` carries no
+  // buyer/dealer, so the sender's ROLE is resolved once at detection through
+  // `message_thread_participants` and recorded here.
+  //
+  // `afterPaidAuction` is nullable rather than `@default(false)` on purpose: NULL is
+  // "not determined", false is "determined, and there was no paid auction". Those
+  // carry different consequences, and a default would record an unresolved detection
+  // as a non-violation.
+  initiatorRole    String?          @map("initiator_role")
+  afterPaidAuction Boolean?         @map("after_paid_auction")
+  /// CONFIRMED | DISMISSED — the audited Operations outcome (§26, 25-12).
+  resolution       String?
+  resolvedAt       DateTime?        @map("resolved_at")
   // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
   dealer     Dealer?               @relation(fields: [dealerId], references: [id])
 
+  // Phase 5: Operations reviews by dealership and recency, and D42's 90-day repeat
+  // window is a range scan over exactly this pair.
+  @@index([dealerId, detectedAt])
   @@map("circumvention_attempts")
 }
 
+/// Two kinds of row share this table, and §11.6's split is why.
+///
+/// An ALERT row — the original shape — carries `flag` plus `description` and names a
+/// buyer and/or dealer. A WITHHELD-STATE row — added by Phase 5 (20261113000000) for
+/// §25.1 / 25-10 — carries `auctionId` + `rooftopId` + `state` and NO flag: it records
+/// that buyer identity is withheld from that rooftop for that auction.
+///
+/// `flag` is therefore nullable. The alternative, a WITHHELD label on
+/// `AntiCircumventionFlag`, was rejected: it would make a firewall state
+/// indistinguishable from a circumvention pattern in every query that groups by flag.
+///
+/// PHASE 5 WRITES ONLY `WITHHELD`. `LIFTED`, `liftedAt` and `liftedBy` exist so the
+/// Phase 7 lift at reaffirmation has somewhere to land and so a reader can tell a
+/// withheld auction from an unrecorded one — but nothing in Phase 5 writes them, which
+/// is §11.6's "Phase 5 builds the firewall, Phase 7 performs the lift" made mechanical.
 model IdentityFirewallEntry {
-  id          String                @id @default(uuid())
-  buyerId     String?               @map("buyer_id")
-  dealerId    String?               @map("dealer_id")
-  flag        AntiCircumventionFlag
+  id          String                 @id @default(uuid())
+  buyerId     String?                @map("buyer_id")
+  dealerId    String?                @map("dealer_id")
+  flag        AntiCircumventionFlag?
   description String
-  riskScore   Int                   @default(0) @map("risk_score")
-  createdAt   DateTime              @default(now()) @map("created_at")
+  riskScore   Int                    @default(0) @map("risk_score")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  // Phase 5 sourcing/invitations (20261113000000).
+  auctionId   String?                @map("auction_id")
+  rooftopId   String?                @map("rooftop_id")
+  /// WITHHELD | LIFTED. Vocabulary in code, like `SourcingCase.status`.
+  state       String?
+  liftedAt    DateTime?              @map("lifted_at")
+  liftedBy    String?                @map("lifted_by")
 
+  // One firewall entry per auction per rooftop. Plain composite unique, not a partial:
+  // NULLs are distinct in PostgreSQL, so legacy alert rows (both columns NULL) stay
+  // unconstrained while two withheld entries for one auction+rooftop collide.
+  @@unique([auctionId, rooftopId])
   @@map("identity_firewall_entries")
 }
 
@@ -4572,9 +4624,22 @@ model ApolloReveal {
   revealedAt   DateTime @default(now()) @map("revealed_at")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+  // Phase 5 sourcing/invitations (20261113000000).
+  //
+  // The paid-spend link §6b requires ("paid enrichment runs only after payment") and the
+  // §6c "enrichment spend" record, in one column: a reveal carries the sourcing case that
+  // authorised it, and the case's spend is SUM(creditsCost) over its reveals. A link
+  // rather than a counter on `SourcingCase`, because §3 requires lineage never to break —
+  // a counter says how much was spent, this says which rooftop each credit bought.
+  //
+  // Soft key with no FK, matching this table's existing `rooftopId`, which also has
+  // none. A CASCADE from `sourcing_cases` would delete the record of credits actually
+  // spent when a case closes, which §6c requires to survive.
+  sourcingCaseId String? @map("sourcing_case_id")
 
   @@unique([rooftopId, cycleKey])
   @@index([rooftopId])
+  @@index([sourcingCaseId])
   @@map("apollo_reveals")
 }
 
@@ -6407,7 +6472,11 @@ model SourcingCase {
   closedAt                 DateTime?           @map("closed_at")
   closeReason              String?             @map("close_reason")
   createdAt                DateTime            @default(now()) @map("created_at")
-  updatedAt                DateTime            @default(now()) @map("updated_at")
+  // Phase 5: `@updatedAt` added. Client-side only — no DDL, no drift. The column shipped
+  // `@default(now())` with no `@updatedAt` and the Phase 1 wave created no updated_at
+  // trigger, so it read the INSERT time forever. Phase 5's band-expansion and stale-case
+  // sweeps use it as a last-touched signal, which it was not.
+  updatedAt                DateTime            @default(now()) @updatedAt @map("updated_at")
   auctions                 Auction[]
   sourcingCandidates       SourcingCandidate[]
   vehicleRequest           VehicleRequest      @relation(fields: [vehicleRequestId], references: [id], onDelete: Cascade)
@@ -6429,7 +6498,20 @@ model SourcingCandidate {
   rooftop            DealerRooftop?          @relation(fields: [rooftopId], references: [id])
   sourcingCase       SourcingCase            @relation(fields: [sourcingCaseId], references: [id], onDelete: Cascade)
 
+  // Phase 5 (20261113000000). §6a step 0 deduplicates by rooftop and §33 step 29 is
+  // "dedupe to one invitation per rooftop"; `auction_invitations` got a database backstop
+  // for that in the Phase 1 wave and this table, where the dedup actually happens one rung
+  // earlier, got none. It matters under concurrency: band expansion is a read-then-insert
+  // that a reconciler tick can overlap, and a double-counted rooftop makes the §6c table
+  // read a field of 8 that is really 4 — launching an auction the spec says needs audited
+  // approval. Plain composite unique; `rooftopId` is nullable and NULLs are distinct, so
+  // unresolved rows stay unconstrained.
+  @@unique([sourcingCaseId, rooftopId])
   @@index([sourcingCaseId], map: "sourcing_candidates_case_idx")
+  // The FK shipped unindexed, so the SET NULL on rooftop deletion and every "which cases
+  // has this rooftop served" read — the §6c ranking input and the D42 suspension check —
+  // sequentially scanned.
+  @@index([rooftopId])
   @@map("sourcing_candidates")
 }
 

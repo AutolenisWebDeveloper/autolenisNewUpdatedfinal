@@ -239,6 +239,54 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     specSection: "§26; Stage 6c",
   },
   {
+    // NOT A §26 ROW. §26 enumerates "Zero dealer coverage" and "No dealer coverage at 250
+    // miles" and stops; the 1–2 case is stated in §Stage 6c's decision table instead —
+    // "1–2 | Continue expansion, source manually, or close after review" — and §10.6 S6-25
+    // requires a SOURCING_EXCEPTION for it. Catalogued here on the same footing as
+    // COMMS_TERMINAL_FAILURE, LINEAGE_ORPHAN and POSSIBLE_DUPLICATE_BUYER: stated in the
+    // Markdown, just not as a §26 row.
+    //
+    // Distinct from ZERO_DEALER_COVERAGE rather than folded into it, because the actions
+    // differ. Zero coverage is "close or expand"; one or two rooftops is a field that EXISTS
+    // and could become a limited auction with one more rooftop, so "source manually" is a
+    // real third option an operator reading the queue needs to see.
+    code: "THIN_DEALER_COVERAGE",
+    type: "SOURCING_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "One or two invitation-ready rooftops",
+    requiredResult: "Continue expansion, source manually, or close after review",
+    buyerVisibleStatus: "We are still working to find dealerships for your request.",
+    requiredAction:
+      "Decide between expanding the search, sourcing manually, or closing after review. A field this small cannot launch without an audited limited-auction approval.",
+    deadlineHours: 48,
+    returnPoint: "Stage 6 — sourcing outcome",
+    raisedByPhase: 5,
+    specSection: "Stage 6c (decision table); §10.6 S6-25",
+  },
+  {
+    // NOT A §26 ROW either. §Stage 7's failure clause is the statement — "A launch that
+    // cannot reach readiness holds and surfaces the blocker with an owner" — and §10.6 S7-22
+    // requires the exception. §26's register has no row for a held launch.
+    //
+    // The OWNER IS OVERRIDDEN PER OCCURRENCE. Readiness has eight items with four different
+    // owners (a missing deposit is the buyer's, a declined prequalification is Compliance's,
+    // a suppressed contact is Operations'), so the catalogue's default is Operations and the
+    // raise site passes `ownerRole` for the item that actually failed. That is the one place
+    // §26 itself splits an owner by branch, which is what `ownerRole` on the input exists for.
+    code: "LAUNCH_READINESS_BLOCKED",
+    type: "SOURCING_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Launch readiness blocked",
+    requiredResult: "Hold the auction and surface the exact missing prerequisite with an owner",
+    buyerVisibleStatus: "We are completing the final checks before your auction opens.",
+    requiredAction:
+      "Clear the named prerequisite. The auction stays PENDING until every §7 entry item passes — it never launches half-ready.",
+    deadlineHours: 24,
+    returnPoint: "Stage 7 — launch readiness",
+    raisedByPhase: 5,
+    specSection: "Stage 7 (entry, and 'If it fails'); §10.6 S7-22",
+  },
+  {
     code: "INVITATION_BOUNCED",
     type: "DEALER_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
