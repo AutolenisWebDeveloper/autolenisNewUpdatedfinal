@@ -83,8 +83,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       // extension is indistinguishable from no extension when someone later asks why a deadline
       // moved. The write is best-effort because the extension itself has already been applied --
       // failing the request here would leave the deadline moved and tell the operator it was not.
-      await prisma.auctionExtensionLog
-        .create({
+      // TRY/CATCH AND NOT A TRAILING `.catch()`. "Best-effort" has to mean best-effort for a
+      // THROW as well as for a rejection, and a `.catch()` chained onto the call only covers the
+      // second: anything that throws before a promise exists propagates straight past it and
+      // fails the request — leaving the deadline moved and telling the operator it was not,
+      // which is the exact outcome this block is written to avoid.
+      try {
+        await prisma.auctionExtensionLog.create({
           data: {
             auctionId,
             extendedBy: admin.adminId,
@@ -93,10 +98,10 @@ export async function POST(request: NextRequest, { params }: Props) {
             newEnd,
             reason,
           },
-        })
-        .catch((err) =>
-          logger.error(`[auction-action] extension applied but NOT logged for ${auctionId}:`, err),
-        );
+        });
+      } catch (err) {
+        logger.error(`[auction-action] extension applied but NOT logged for ${auctionId}:`, err);
+      }
 
       // Notify every invited dealer that the deadline moved — they have more time to bid.
       const invitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });

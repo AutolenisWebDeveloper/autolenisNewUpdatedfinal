@@ -45,6 +45,17 @@ mock.module("@/lib/services/dealer-recruitment/apollo-credit-ledger.service", {
     ensureCurrentCycleLedger: async () => ({ cycleKey: "2026-03", capCredits: 2000, spentCredits: 0 }),
   },
 });
+// Phase 5 added the sourcing ladder as the coverage-hold cron's third reconciler (S6-34b reuses
+// that tick rather than adding a cron). Stubbed like the other two, and for the same reason: this
+// file asserts that invoking the cron WRITES a CronJobLog run, not what the reconcilers do. The
+// real module also reaches `comms-outbox.service`, which imports `server-only` — pulling that into
+// a node:test process fails at import, so leaving it unstubbed would make this file's own subject
+// unreachable.
+mock.module("@/lib/services/sourcing/sourcing-driver.service", {
+  namedExports: {
+    sweepSourcingCases: async () => ({ casesConsidered: 0, outcomes: {}, errors: [] }),
+  },
+});
 
 function cronReq(path: string) {
   return new NextRequest(`http://localhost${path}`, { headers: { authorization: "Bearer test-secret" } });
