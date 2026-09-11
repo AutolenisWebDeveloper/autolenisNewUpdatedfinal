@@ -5,6 +5,7 @@
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
+import { sendMessage } from "@/lib/services/messaging/messaging.service";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -75,19 +76,35 @@ export async function POST(request: NextRequest) {
     if (!part) return errorResponse("NOT_A_PARTICIPANT", "You are not a participant in this thread", 403);
   }
 
-  const message = await prisma.message.create({
-    data: {
+  // §25.2 / DEFECT 7 — THE DEALER SIDE IS SCANNED TOO.
+  //
+  // This used to be a bare `prisma.message.create` with `isRedacted: false` hard-coded, so a
+  // dealership could post a phone number, an email address or "let's do this off platform" and
+  // nothing examined it. The scanner was never asymmetric; the CALL SITES were — `sendMessage`
+  // had exactly one caller and it was the buyer route. The party §25.2 says should face
+  // consequences was the one party never looked at.
+  //
+  // `sendMessage` redacts, flags the thread, records the attempt with `initiatorRole: "DEALER"`
+  // and raises §26's CIRCUMVENTION_DETECTED — atomically for the message and the flag.
+  const message = await sendMessage(threadId, dealer.userId, content);
+
+  return successResponse(
+    {
+      messageId: message.id,
       threadId,
-      senderId: dealer.userId,
-      content,
-      isRedacted: false,
+      sentAt: message.sentAt,
+      // Told, not hidden. A dealership whose message was redacted needs to know, or it will
+      // assume the buyer read something they never saw and wait for a reply that cannot come.
+      isRedacted: message.isRedacted,
+      ...(message.isRedacted
+        ? {
+            notice:
+              "Your message was held back because it looked like contact details or an " +
+              "off-platform arrangement. Keep the conversation on AutoLenis — buyer contact " +
+              "details are released to the winning dealership at reaffirmation.",
+          }
+        : {}),
     },
-  });
-
-  await prisma.messageThread.update({
-    where: { id: threadId },
-    data: { lastMessageAt: new Date() },
-  });
-
-  return successResponse({ messageId: message.id, threadId, sentAt: message.sentAt }, 201);
+    201,
+  );
 }

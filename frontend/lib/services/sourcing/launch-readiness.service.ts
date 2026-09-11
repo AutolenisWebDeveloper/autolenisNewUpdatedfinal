@@ -336,7 +336,9 @@ async function buildFieldFromCase(
     const da = a.distanceMiles ?? Number.POSITIVE_INFINITY;
     const dbb = b.distanceMiles ?? Number.POSITIVE_INFINITY;
     if (da !== dbb) return da - dbb;
-    return a.rooftopId < b.rooftopId ? -1 : a.rooftopId > b.rooftopId ? 1 : 0;
+    const ka = a.rooftopId ?? a.dealerId ?? a.email;
+    const kb = b.rooftopId ?? b.dealerId ?? b.email;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
   return targets.slice(0, MAX_INVITATION_FIELD);
 }

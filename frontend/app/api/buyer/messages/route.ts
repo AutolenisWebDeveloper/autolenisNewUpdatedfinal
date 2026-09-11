@@ -74,6 +74,10 @@ export async function POST(request: NextRequest) {
 
     let message;
     if (hasDealer) {
+      // `sendMessage` now scans BOTH directions (§25.2 / defect 7). The buyer's side is
+      // unchanged in behaviour — redacted, thread flagged — and what changed is that a
+      // dealer-initiated attempt is finally examined too, and that the attempt row now records
+      // which party initiated so §25.2's "buyers are protected, not penalized" can be applied.
       message = await sendMessage(threadId, buyer.userId, content);
     } else {
       const [m] = await prisma.$transaction([

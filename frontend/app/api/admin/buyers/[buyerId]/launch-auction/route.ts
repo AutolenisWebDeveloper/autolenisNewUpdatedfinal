@@ -4,6 +4,8 @@ import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { issueInvitations } from "@/lib/services/auction/auction-invitation.service";
+import { MAX_INVITATION_FIELD } from "@/lib/services/sourcing/rooftop-sourcing.service";
 import { createAuction, launchAuction, resolveOwnedVehicleRequestId } from "@/lib/services/auction/auction.service";
 import {
   sendDealerAuctionInvitationEmail,
@@ -42,7 +44,14 @@ const auctionVehicleSchema = z.object({
 );
 
 const schema = z.object({
-  dealerIds: z.array(z.string().min(1)).min(1, "At least one dealer is required"),
+  // DEFECT 4's LITERAL MISSING LINE. `outsideDealers` below has carried `.max(8)` since it was
+  // written; `dealerIds` never did, so an admin could invite an unbounded field through the
+  // same request that capped the other pool at eight. §6c's budget is eight ROOFTOPS in total,
+  // and `MAX_INVITATION_FIELD` is imported rather than restated so the two cannot drift.
+  dealerIds: z
+    .array(z.string().min(1))
+    .min(1, "At least one dealer is required")
+    .max(MAX_INVITATION_FIELD, `At most ${MAX_INVITATION_FIELD} dealers — §6c's invitation budget`),
   reason: z.string().min(1, "Reason is required"),
   hours: z.number().int().positive().max(168).optional(),
   notes: z.string().max(2000).optional(),
@@ -104,13 +113,19 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   // Validate dealers are ACTIVE and dedupe
+  // DEFECT 4's OTHER HALF. This `findMany` had no `orderBy`, so the order dealers came back in
+  // was database order — and because `Array.prototype.sort` is stable, any later tie-break
+  // inherited it. Two runs over identical data could invite different dealerships and neither
+  // outcome was explainable. `id` is unique, so ordering on it is total.
   const activeDealers = await prisma.dealer.findMany({
     where: { id: { in: dealerIds }, status: "ACTIVE" },
     select: {
       id: true,
       dealershipName: true,
+      rooftopId: true,
       user: { select: { email: true } },
     },
+    orderBy: { id: "asc" },
   });
   if (activeDealers.length === 0) {
     return adminError("NO_VALID_DEALERS", "No active dealers found in selection", 400);
@@ -161,21 +176,54 @@ export async function POST(request: NextRequest, { params }: Props) {
     endsAt = newEndsAt;
   }
 
-  // Batch-create dealer invitations
-  await prisma.auctionInvitation.createMany({
-    data: dealers.map(d => ({
-      auctionId: launched.id,
+  // ONE INVITATION SERVICE (defect 4). This used to be a bare `createMany` that wrote
+  // `auctionId`/`dealerId`/`sentAt` and nothing else — no token, so the dealer got a generic
+  // dashboard link §Stage 7 forbids; no `distanceMiles` or `invitationScore`, so the columns
+  // the §7 readiness items read stayed null; no cap beyond the schema; and no firewall state.
+  //
+  // `issueInvitations` applies the cap against the EXISTING field, mints a hashed
+  // auction-and-rooftop-bound token, writes the §25.1 withheld-state row, and dispatches
+  // through the §27 rail with the full suppression tier and a working opt-out. The admin
+  // capability is unchanged: an operator still hand-picks the dealers.
+  const adminIssued = await issueInvitations(
+    launched.id,
+    dealers.map((d) => ({
+      rooftopId: d.rooftopId ?? null,
       dealerId: d.id,
-      sentAt: new Date(),
-    })),
-    skipDuplicates: true,
-  });
+      dealershipName: d.dealershipName,
+      contactName: null,
+      email: d.user?.email ?? "",
+      phone: null,
+      distanceMiles: null,
+      candidateIds: [],
+      invitationScore: null,
+    })).filter((t) => t.email !== ""),
+    prisma,
+  );
+  if (adminIssued.skipped.length > 0) {
+    logger.info(
+      `[launch-auction] ${adminIssued.skipped.length} hand-picked dealer(s) not invited: ` +
+        adminIssued.skipped.map((s) => `${s.rooftopId}:${s.reason}`).join(", "),
+    );
+  }
 
-  // Bump dealer load counters
-  await prisma.dealer.updateMany({
-    where: { id: { in: dealers.map(d => d.id) } },
-    data: { currentAuctionLoad: { increment: 1 } },
-  });
+  // Bump dealer load counters — only for the dealers actually invited, so the counter cannot
+  // outrun the field. §14.6 records the asymmetry this half belongs to: `DEALER_REMOVED` deletes
+  // an invitation without decrementing, because `releaseAuctionLoad` derives its list from the
+  // SURVIVING rows — so an increment for a dealer who was never invited would leak permanently
+  // and, at load >= 5, silently stop the scored path from inviting that dealer ever again.
+  const invitedDealerIds = (
+    await prisma.auctionInvitation.findMany({
+      where: { id: { in: adminIssued.invitationIds } },
+      select: { dealerId: true },
+    })
+  ).map((i) => i.dealerId).filter((id): id is string => id !== null);
+  if (invitedDealerIds.length > 0) {
+    await prisma.dealer.updateMany({
+      where: { id: { in: invitedDealerIds } },
+      data: { currentAuctionLoad: { increment: 1 } },
+    });
+  }
 
   // In-app notification for each dealer
   await prisma.notification.createMany({

@@ -12,6 +12,7 @@ import { logger } from "@/lib/logger";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { reconcileCoverageHolds } from "@/lib/services/acquisition/request-coverage-gate.service";
 import { reconcileRequestProgression } from "@/lib/services/vehicle-request/request-progression.service";
+import { sweepSourcingCases } from "@/lib/services/sourcing/sourcing-driver.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
@@ -33,7 +34,20 @@ export async function GET(request: NextRequest) {
       logger.error("[coverage-hold-reconcile] holds failed:", err);
       return { error: String(err) };
     });
-    return { progression, holds };
+    // (3) Phase 5 — advance every open sourcing case one rung of the §6a ladder, and hand a
+    // ready case to the §7 readiness check. S6-34b names this tick rather than a new cron:
+    // the ladder then advances on the same clock as the progression and hold reconcilers,
+    // which is also what drives the 14-day abandonment close.
+    //
+    // NO-OP WHILE SOURCING_CASE_REPLACES_AUCTION_LAUNCH IS OFF (the default). §13-D52 is the
+    // owner's, and with the flag off the legacy path is still the only thing that creates and
+    // invites — running both would put two auctions on one deposit, which
+    // `Auction.depositId @unique` would refuse on a buyer's paid request.
+    const sourcing = await sweepSourcingCases().catch((err) => {
+      logger.error("[coverage-hold-reconcile] sourcing sweep failed:", err);
+      return { error: String(err) };
+    });
+    return { progression, holds, sourcing };
   });
   if (!run.ok) {
     return NextResponse.json({ success: false, error: "reconcile_failed" }, { status: 500 });

@@ -70,7 +70,23 @@ export const OPEN_INVITATION_STATUSES = ["QUEUED", "SENT", "DELIVERED", "OPENED"
 export const ANSWERED_INVITATION_STATUSES = ["DECLINED", "RESPONDED", "OFFER_SUBMITTED"] as const;
 
 export interface InvitationTarget {
-  rooftopId: string;
+  /**
+   * NULLABLE, matching `auction_invitations.rooftop_id`.
+   *
+   * Almost every invitation has one — §33 step 29 makes the rooftop the sourcing unit, and
+   * the sourcing ladder only ever produces rooftop-bound targets. The exception is a
+   * REGISTERED dealer that has never been resolved to a rooftop (`Dealer.rooftopId` is
+   * nullable and 2 of 2 production dealers predate the rooftop graph), reachable through the
+   * admin hand-pick path. Refusing those would remove an admin capability; inventing a
+   * rooftop for them would mint a row from an admin click.
+   *
+   * THE DEDUP STILL HOLDS EITHER WAY, because the two constraints cover the two cases:
+   * `auction_invitations_auction_rooftop_key` (partial, WHERE rooftop_id IS NOT NULL) covers
+   * rooftop-bound invitations, and `@@unique([auctionId, dealerId])` covers dealer-bound ones.
+   * A row with BOTH null is the one shape nothing constrains, and `issueInvitations` refuses
+   * it below for exactly that reason.
+   */
+  rooftopId: string | null;
   /** Null for an outside rooftop with no registered dealer. */
   dealerId: string | null;
   dealershipName: string;
@@ -125,18 +141,31 @@ export async function issueInvitations(
   // second invite round after a bounce replacement must not take the field past eight.
   const existing = await db.auctionInvitation.findMany({
     where: { auctionId, status: { notIn: ["REPLACED", "EXPIRED"] } },
-    select: { rooftopId: true },
+    select: { rooftopId: true, dealerId: true },
   });
   const alreadyInvited = new Set(existing.map((e) => e.rooftopId).filter(Boolean) as string[]);
   const room = Math.max(0, MAX_INVITATION_FIELD - alreadyInvited.size);
+
+  const alreadyInvitedDealers = new Set(existing.map((e) => e.dealerId).filter(Boolean) as string[]);
 
   // Deterministic order before the cap. The caller ranks; this re-sorts on the recorded
   // score and then on rooftop id so the cap cuts the same rooftops every time even if a
   // caller hands them over unsorted.
   const ordered = [...targets]
     .filter((t) => {
-      if (alreadyInvited.has(t.rooftopId)) {
+      // NEITHER KEY MEANS NO DEDUP, SO IT IS REFUSED. An invitation with no rooftop and no
+      // dealer is constrained by nothing — Postgres treats NULLs as distinct in both
+      // indexes — so the same mailbox could be invited to one auction any number of times.
+      if (!t.rooftopId && !t.dealerId) {
+        skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "NO_DEDUP_KEY" });
+        return false;
+      }
+      if (t.rooftopId && alreadyInvited.has(t.rooftopId)) {
         skipped.push({ rooftopId: t.rooftopId, reason: "ALREADY_INVITED" });
+        return false;
+      }
+      if (t.dealerId && alreadyInvitedDealers.has(t.dealerId)) {
+        skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "ALREADY_INVITED" });
         return false;
       }
       return true;
@@ -148,12 +177,18 @@ export async function issueInvitations(
       const da = a.distanceMiles ?? Number.POSITIVE_INFINITY;
       const dbb = b.distanceMiles ?? Number.POSITIVE_INFINITY;
       if (da !== dbb) return da - dbb;
-      return a.rooftopId < b.rooftopId ? -1 : a.rooftopId > b.rooftopId ? 1 : 0;
+      // THE TOTAL TIE-BREAK. Defect 4's root cause was the absence of a final, unique
+      // comparison — without one, `Array.prototype.sort` leaves equal elements in input order,
+      // which for a `findMany` with no `orderBy` is database order. The key falls back through
+      // rooftop, dealer and address so it is total even for a rooftop-less target.
+      const ka = a.rooftopId ?? a.dealerId ?? a.email;
+      const kb = b.rooftopId ?? b.dealerId ?? b.email;
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
     });
 
   for (const [i, t] of ordered.entries()) {
     if (i >= room) {
-      skipped.push({ rooftopId: t.rooftopId, reason: "FIELD_CAP_REACHED" });
+      skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "FIELD_CAP_REACHED" });
       continue;
     }
 
@@ -164,7 +199,7 @@ export async function issueInvitations(
     // launching on mail a recipient cannot stop.
     const unsubscribeUrl = buildUnsubscribeUrl(t.email);
     if (!unsubscribeUrl) {
-      skipped.push({ rooftopId: t.rooftopId, reason: "NO_UNSUBSCRIBE_CHANNEL" });
+      skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "NO_UNSUBSCRIBE_CHANNEL" });
       continue;
     }
 
@@ -220,22 +255,31 @@ export async function issueInvitations(
         // Another writer got there first. Take its row and send nothing new: the token it
         // minted is the one in the dealership's inbox, and ours is discarded unused.
         const won = await db.auctionInvitation.findFirst({
-          where: { auctionId, rooftopId: t.rooftopId },
+          where: t.rooftopId
+            ? { auctionId, rooftopId: t.rooftopId }
+            : { auctionId, dealerId: t.dealerId },
           select: { id: true },
         });
         if (!won) throw err; // the unique violation was on something else entirely
-        skipped.push({ rooftopId: t.rooftopId, reason: "ALREADY_INVITED_CONCURRENTLY" });
+        skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "ALREADY_INVITED_CONCURRENTLY" });
         continue;
       }
       if (!row) {
-        skipped.push({ rooftopId: t.rooftopId, reason: "WRITE_FAILED" });
+        skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "WRITE_FAILED" });
         continue;
       }
       invitationIds.push(row.id);
 
       // §25.1 / 25-10 — the firewall state, written WITH the invitation. Phase 7 lifts it at
       // reaffirmation; nothing here writes LIFTED.
-      await writeWithheldFirewallEntry(auctionId, t.rooftopId, t.dealerId, db, now);
+      //
+      // Keyed on (auction, rooftop), so a rooftop-less registered dealer gets no state row.
+      // That is correct rather than a gap: 25-10 asks for an entry "per auction/rooftop", and
+      // the firewall for a registered dealer with no rooftop is enforced the same way it
+      // always was — by what the dealer-facing surfaces select, which is `{zip, city, state}`.
+      if (t.rooftopId) {
+        await writeWithheldFirewallEntry(auctionId, t.rooftopId, t.dealerId, db, now);
+      }
 
       // The emailed link carries the RAW token. It is never persisted and never logged.
       await enqueueDealerInvitation(
@@ -253,8 +297,12 @@ export async function issueInvitations(
     } catch (err) {
       // One rooftop failing must not abandon the field. The readiness check re-runs and the
       // rooftop is retried, because the upsert is keyed rather than appended.
-      logger.warn(`[invitation] could not issue for rooftop ${t.rooftopId} on auction ${auctionId}:`, err);
-      skipped.push({ rooftopId: t.rooftopId, reason: "WRITE_FAILED" });
+      logger.warn(
+        `[invitation] could not issue for ${t.rooftopId ? `rooftop ${t.rooftopId}` : `dealer ${t.dealerId}`} ` +
+          `on auction ${auctionId}:`,
+        err,
+      );
+      skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "WRITE_FAILED" });
     }
   }
 
@@ -763,7 +811,7 @@ async function enqueueReminder(
       vehicleRequestId: input.vehicleRequestId,
       rawToken: "",
       target: {
-        rooftopId: inv.rooftopId ?? "",
+        rooftopId: inv.rooftopId,
         dealerId: inv.dealerId,
         dealershipName: inv.dealershipName ?? "your dealership",
         contactName: inv.contactName,

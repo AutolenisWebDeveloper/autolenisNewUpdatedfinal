@@ -678,3 +678,85 @@ export async function recordRadiusAuthorization(
   );
   return { ok: true, authorizedRadiusMiles: authorized };
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// The reconciler entry point
+// ───────────────────────────────────────────────────────────────────────────────
+
+export interface SourcingSweepResult {
+  casesConsidered: number;
+  outcomes: Record<string, number>;
+  errors: string[];
+}
+
+/**
+ * Drive every open sourcing case forward one step.
+ *
+ * ON THE EXISTING TICK, NOT A NEW CRON. S6-34b says to reuse `coverage-hold-reconcile`'s
+ * tick, and it is the right one: it already runs every 15 minutes and already reconciles
+ * request-level state, so the sourcing ladder advances on the same clock as the progression
+ * and hold reconcilers rather than on a clock of its own that could drift from them.
+ *
+ * GATED ON THE FLIP, and that is the whole safety property of this phase. With
+ * `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` off — the default, and §13-D52 is the owner's —
+ * this sweep does NOTHING: the legacy webhook-and-reconciler path remains the only thing
+ * that creates auctions and invites dealers. Running both would mean two auctions per
+ * deposit, and `Auction.depositId` is `@unique`, so the second would fail noisily on a
+ * buyer's paid request.
+ *
+ * BOUNDED PER RUN. A batch, ordered oldest-first, with the remainder picked up next tick —
+ * the same shape every other reconciler here uses. One case failing never skips the rest:
+ * each is isolated, because a single unplaceable buyer must not stall sourcing for everyone
+ * else in the batch.
+ */
+export async function sweepSourcingCases(
+  db: PrismaClient = defaultPrisma as PrismaClient,
+  now: Date = new Date(),
+  batchSize = 50,
+): Promise<SourcingSweepResult> {
+  const result: SourcingSweepResult = { casesConsidered: 0, outcomes: {}, errors: [] };
+
+  const { sourcingCaseReplacesAuctionLaunch } = await import("@/lib/payments/settlement-flags");
+  if (!sourcingCaseReplacesAuctionLaunch()) {
+    // Not an error and not silent. An operator reading the cron log needs to see that the
+    // sweep ran and deliberately did nothing, rather than wondering why no case moved.
+    logger.info(
+      "[sourcing-driver] SOURCING_CASE_REPLACES_AUCTION_LAUNCH is off — the legacy path still " +
+        "creates and invites, so the sourcing ladder stands down (§13-D52 is the owner's)",
+    );
+    return { ...result, outcomes: { FLAG_OFF: 1 } };
+  }
+
+  const open = await db.sourcingCase.findMany({
+    where: {
+      status: {
+        in: [
+          SOURCING_CASE_STATUS.ACTIVE_SOURCING,
+          SOURCING_CASE_STATUS.READY_TO_LAUNCH,
+          SOURCING_CASE_STATUS.RADIUS_AUTHORIZATION_REQUIRED,
+        ],
+      },
+    },
+    select: { vehicleRequestId: true },
+    orderBy: { openedAt: "asc" },
+    take: batchSize,
+  });
+  result.casesConsidered = open.length;
+
+  for (const c of open) {
+    try {
+      const step = await driveSourcing(c.vehicleRequestId, db, now);
+      result.outcomes[step.outcome] = (result.outcomes[step.outcome] ?? 0) + 1;
+    } catch (err) {
+      result.errors.push(`${c.vehicleRequestId}: ${String(err)}`);
+      logger.error(`[sourcing-driver] sweep failed for ${c.vehicleRequestId}:`, err);
+    }
+  }
+
+  logger.info(
+    `[sourcing-driver] sweep: ${result.casesConsidered} case(s), ` +
+      `${Object.entries(result.outcomes).map(([k, v]) => `${k}=${v}`).join(" ")}` +
+      (result.errors.length ? ` errors=${result.errors.length}` : ""),
+  );
+  return result;
+}

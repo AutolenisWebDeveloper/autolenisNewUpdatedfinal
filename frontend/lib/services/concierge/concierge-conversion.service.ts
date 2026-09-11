@@ -116,9 +116,67 @@ export function parseBudgetToCents(budget: string | null | undefined): number | 
  * Convert a concierge VehicleOffer into a deposit-gated CLOSED Auction with
  * canonical Offers, inside the caller's transaction. Idempotent on the deposit.
  *
+ * DELIBERATELY OUTSIDE `SOURCING_CASE_REPLACES_AUCTION_LAUNCH`, and this paragraph is the
+ * record of that decision rather than an omission a later reader has to guess at.
+ *
+ * Owner ruling, S13-D52 precondition (b), 2026-09-11: "Explicitly exclude, and fix the statement
+ * rather than the code. A concierge conversion is a PRE-SOURCED transaction -- the offer already
+ * exists, curated by staff, and the VehicleRequest is created at OFFER_SENT. There is nothing to
+ * source, so opening a sourcing case for it would be wrong. The defect is that D52's
+ * verification (b) is written as universal when it is not."
+ *
+ * So this path does NOT call `applySettlementEffects`, opens NO `sourcing_cases` row, seeds NO
+ * due-diligence checkpoints, and writes NO `LEGACY_PATH_WRITE` row -- before the flip or after
+ * it. The auction it creates is already CLOSED with its Offers attached; no dealer is ever
+ * invited to compete, which is the whole difference between the concierge track and the standard
+ * one (`resolveDepositFulfillmentTrack` in `lib/services/payment/fulfillment-gate.ts` is what
+ * separates them, from `pi.metadata.type`).
+ *
+ * WHAT THIS MEANS FOR S8.4's REMOVAL CLOCK. "Thirty days of zero LEGACY_PATH_WRITE" is measured
+ * over NON-CONCIERGE settlements only. A reader who counted concierge deposits into that window
+ * would see zero writes from a path that is still creating auctions at settlement and conclude
+ * the legacy path was dead. IMPLEMENTATION-WORKFLOW.md S13-D52 and S8.4 are amended to say
+ * "non-concierge settlement" for exactly this reason.
+ *
+ * A KNOWN RISK ON THIS PATH, REPORTED AND NOT WORKED AROUND (carried forward from Phase 4): the
+ * `tx.vehicleRequest.create` below runs INSIDE the money transaction, AFTER the deposit has
+ * settled, and `vehicle_requests_one_open_per_buyer_key` is a partial unique index over ten open
+ * statuses -- OFFER_SENT among them. A buyer who already holds an open request therefore takes a
+ * 23505 here, which rolls back a settlement whose money has already moved. It has not fired in
+ * production (2 dealers, 7 closed auctions, no concierge conversion recorded), and fixing it is a
+ * Phase 3 settlement-surface change the owner has not authorised. Reported here so the next
+ * reader of this function finds it.
+ *
  * @throws ConciergeConversionError if the BuyerOfferReview no longer exists
  *   (a real integrity failure — the review was validated at deposit-intent time).
  */
+/**
+ * THE NAMED GUARD for S13-D52 precondition (b).
+ *
+ * A comment explains; a named, exported, asserted constant is what a future reader trips over.
+ * `concierge-conversion.test.ts` pins that this path opens no sourcing case and writes no
+ * LEGACY_PATH_WRITE, and it cites this symbol -- so routing the concierge branch through
+ * `applySettlementEffects` (which the owner did NOT authorise: that is Phase 3 surface work)
+ * fails a test rather than silently changing what the flip means.
+ */
+export const CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG = {
+  /** This path never calls `applySettlementEffects`. */
+  opensSourcingCase: false,
+  /** This path never writes a `LEGACY_PATH_WRITE` audit row. */
+  writesLegacyPathWrite: false,
+  /** This path never invites a dealer: the auction is created already CLOSED with its Offers. */
+  invitesDealers: false,
+  /**
+   * Why, in one line, for whoever reads this next. The long form is on
+   * `convertConciergeOfferToClosedAuction` above.
+   */
+  reason:
+    "A concierge conversion is pre-sourced: the offer already exists, curated by staff, and the " +
+    "VehicleRequest is created at OFFER_SENT. There is nothing to source, so opening a sourcing " +
+    "case would be wrong. S8.4's removal clock is therefore measured over NON-CONCIERGE " +
+    "settlements only.",
+} as const;
+
 export async function convertConciergeOfferToClosedAuction(
   tx: Prisma.TransactionClient,
   params: ConvertConciergeParams,

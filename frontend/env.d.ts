@@ -327,5 +327,28 @@ declare namespace NodeJS {
     // Blast-radius breaker. Above this many candidates the sweep deactivates
     // nothing and raises one alert instead.
     INVENTORY_SWEEP_MAX_DEACTIVATIONS?: string;
-  }
+  
+    // ── Phase 5 additions ────────────────────────────────────────────────────
+    //
+    // Every spend gate and every spend cap in the Apollo area was an UNDECLARED variable, so
+    // TypeScript gave no help against a typo in the exact flag names that keep paid calls OFF.
+    // Two names that WERE declared (ENABLE_APOLLO_ENRICHMENT, APOLLO_API_BASE_URL) are read
+    // nowhere in the codebase; they are left in place rather than removed, because removing a
+    // declaration an operator may have provisioned is a change to their environment, not to ours.
+    APOLLO_REVEAL_ENABLED?: string;
+    APOLLO_PEOPLE_SEARCH_ENABLED?: string;
+    APOLLO_ENRICHMENT_ENABLED?: string;
+    APOLLO_WATERFALL_ENABLED?: string;
+    APOLLO_BASE_URL?: string;
+    APOLLO_ENRICHMENT_MAX_CREDITS?: string;
+    APOLLO_CYCLE_CAP_CREDITS?: string;
+
+    /**
+     * S13-D52. Strict opt-in: `=== "true"` and nothing else. OFF means the legacy
+     * settlement-to-auction path still creates and invites, which until Phase 5 was the only way
+     * any dealer was ever invited. Declared here because this is the one place a reviewer or an
+     * operator looks for a flag's existence before a production flip, and it was absent.
+     */
+    SOURCING_CASE_REPLACES_AUCTION_LAUNCH?: string;
+}
 }

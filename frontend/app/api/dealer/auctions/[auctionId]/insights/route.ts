@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
+import { mayPublishSegmentMedian } from "@/lib/services/auction/auction-insights-policy";
 
 interface Props { params: Promise<{ auctionId: string }> }
 
@@ -36,8 +37,9 @@ export async function GET(request: NextRequest, { params }: Props) {
   // competitor's exact price (at n=2 the median is the other losing dealer's
   // OTD). Only surface a median once the sample is large enough that it cannot
   // be attributed to any single competitor.
-  const MIN_MEDIAN_SAMPLE = 4;
-  const medianOtd = allOffers.length >= MIN_MEDIAN_SAMPLE
+  // Exported so the server page imports the SAME threshold rather than restating it. §13-D35:
+  // the page used `length > 0` and leaked a single competitor's price at n=2.
+  const medianOtd = mayPublishSegmentMedian(allOffers.length)
     ? allOffers.map(o => o.otdPriceCents).sort((a, b) => a - b)[Math.floor(allOffers.length / 2)]
     : null;
 
