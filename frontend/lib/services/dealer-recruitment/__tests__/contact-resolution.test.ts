@@ -270,25 +270,56 @@ test("Apollo tier does NOT fire on the pre-deposit path (no allowPaid) — leak 
   assert.equal(revealRooftopContact.mock.callCount(), 0); // paid reveal never attempted pre-deposit
 });
 
-test("Apollo tier fires when allowPaid + all free tiers failed → VERIFIED, persisted", async () => {
+test("Apollo tier fires when allowPaid + a sourcing case + all free tiers failed → VERIFIED, persisted", async () => {
+  // PHASE 5 NARROWED THIS GATE, and the narrowing is the point of the new argument here.
+  //
+  // Before Phase 5 `allowPaid` alone opened the paid tier. `allowPaid` is a CLAIM by the caller
+  // that payment happened; `sourcingCaseId` is the EVIDENCE, and only `advanceSourcing` can
+  // supply one — it refuses to run until a settled deposit is bound to the request. The id is
+  // also stamped on the `apollo_reveals` claim row, so a live credit is traceable to the paid
+  // request that authorised it instead of only to the rooftop it was spent on.
+  //
+  // NO CAPABILITY WAS REMOVED: at the time of the change the only caller setting `allowPaid` was
+  // the sourcing ladder, which supplies the id. The test below this one pins the refusal.
   const revealRooftopContact = mock.fn(async () => ({ email: "ism@toyotaofdallas.com", status: "VERIFIED" as const, contactName: "Ann", contactTitle: "Internet Sales Manager" }));
   const { deps, updates } = makeDeps({ revealRooftopContact } as never);
-  const r = await resolveContactableEmail(cand({ email: null, website: null, rooftopId: "rt1", allowPaid: true }), deps);
+  const r = await resolveContactableEmail(
+    cand({ email: null, website: null, rooftopId: "rt1", allowPaid: true, sourcingCaseId: "case_1" }),
+    deps,
+  );
   assert.equal(r.contactable, true);
   assert.equal(r.status, "VERIFIED");
   assert.equal(r.source, "apollo");
   assert.equal(revealRooftopContact.mock.callCount(), 1);
+  // And the spend carries its authorisation, which is what makes it auditable.
+  const [revealInput] = revealRooftopContact.mock.calls[0]!.arguments as unknown as [Record<string, unknown>];
+  assert.equal(revealInput.sourcingCaseId, "case_1");
+  assert.equal(revealInput.consumer, "live");
   // The Apollo persist is the LAST prospect update (Gemini's M4b stamp precedes it).
   const last = updates[updates.length - 1];
   assert.equal(last.data.email, "ism@toyotaofdallas.com"); // persisted so send path can reach it
   assert.equal(last.data.emailSource, "apollo");
 });
 
+test("Apollo tier is REFUSED when allowPaid arrives with no sourcing case — §5 no-spend-before-payment", async () => {
+  // The other direction of the Phase 5 narrowing. An unlinked live spend would be real money
+  // whose authorisation was a log line, which is how paid credits came to be drawn with no link
+  // to a paid request at all.
+  const revealRooftopContact = mock.fn(async () => ({ email: "ism@toyotaofdallas.com", status: "VERIFIED" as const, contactName: "Ann", contactTitle: "ISM" }));
+  const { deps } = makeDeps({ revealRooftopContact } as never);
+  const r = await resolveContactableEmail(cand({ email: null, website: null, rooftopId: "rt1", allowPaid: true }), deps);
+  assert.equal(revealRooftopContact.mock.callCount(), 0, "a paid reveal fired with no case to bill it to");
+  assert.equal(r.contactable, false);
+});
+
 test("Apollo tier is skipped when a FREE tier already resolved (cheap-first)", async () => {
   const revealRooftopContact = mock.fn(async () => ({ email: "paid@x.com", status: "VERIFIED" as const, contactName: null, contactTitle: null }));
   const { deps } = makeDeps({ revealRooftopContact } as never);
-  // has website → role-derive succeeds; allowPaid true but must not be reached.
-  const r = await resolveContactableEmail(cand({ email: null, rooftopId: "rt1", allowPaid: true }), deps);
+  // has website → role-derive succeeds; the paid tier is fully authorised but must not be reached.
+  const r = await resolveContactableEmail(
+    cand({ email: null, rooftopId: "rt1", allowPaid: true, sourcingCaseId: "case_1" }),
+    deps,
+  );
   assert.equal(r.status, "ROLE_DERIVED");
   assert.equal(revealRooftopContact.mock.callCount(), 0); // no paid work when a free tier wins
 });

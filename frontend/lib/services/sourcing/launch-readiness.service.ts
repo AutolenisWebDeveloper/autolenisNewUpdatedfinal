@@ -40,6 +40,7 @@ import { issueInvitations, type InvitationTarget } from "@/lib/services/auction/
 import {
   SOURCING_CASE_STATUS,
   transitionCase,
+  effectiveRadiusMiles,
   type SourcingCaseRecord,
 } from "./sourcing-case.service";
 import {
@@ -209,17 +210,38 @@ export async function evaluateReadiness(
     owner: "OPERATIONS",
   });
 
-  const permitted = sourcingCase.authorizedRadiusMiles ?? Number(sourcingCase.band === "AUTHORIZED" ? 0 : sourcingCase.band);
-  const outOfRange = field.filter(
-    (t) => t.distanceMiles !== null && permitted > 0 && t.distanceMiles > permitted,
-  );
+  // THE SHARED ARITHMETIC, NOT A LOCAL RE-DERIVATION. `effectiveRadiusMiles` is
+  // `min(bandOuter, authorized)` and already handles the AUTHORIZED band, so the permitted edge
+  // here is by construction the same number the ladder searched to.
+  //
+  // An earlier draft derived it locally as `authorizedRadiusMiles ?? Number(band)`. That is
+  // arithmetically right for the three numeric bands — the values are "100"/"150"/"250" — and
+  // wrong in two ways that matter:
+  //
+  //   · `??` let an authorisation LARGER than the band's own edge win, so a case still at the
+  //     150 band with a 400-mile authorisation would have permitted 400. `min()` binds both.
+  //   · AUTHORIZED with no authorisation produced `permitted === 0`, and the `permitted > 0`
+  //     guard it sat behind then disabled the filter entirely — every rooftop passed an item
+  //     whose whole job is to refuse that state.
+  //
+  // Both are closed by calling the shared function instead of re-deriving it.
+  const permitted = effectiveRadiusMiles(sourcingCase.band, sourcingCase.authorizedRadiusMiles);
+  const outOfRange =
+    permitted === null
+      ? // AUTHORIZED with no authorisation: there is no permitted edge, so no rooftop can be
+        // inside one. Every rooftop with a known distance is out of range, which holds the
+        // launch — the ladder refuses to search in this state for the same reason.
+        field.filter((t) => t.distanceMiles !== null)
+      : field.filter((t) => t.distanceMiles !== null && t.distanceMiles > permitted);
   items.push({
     key: "ROOFTOPS_IN_DISTANCE",
     label: "Every rooftop within the permitted distance",
     passed: outOfRange.length === 0,
     blocker:
       outOfRange.length > 0
-        ? `${outOfRange.length} rooftop(s) sit beyond the permitted ${permitted} miles.`
+        ? permitted === null
+          ? `${outOfRange.length} rooftop(s) have no permitted distance: the case is at the authorized band with no buyer authorisation.`
+          : `${outOfRange.length} rooftop(s) sit beyond the permitted ${permitted} miles.`
         : null,
     owner: "SYSTEM",
   });

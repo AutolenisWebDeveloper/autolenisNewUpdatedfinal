@@ -623,6 +623,11 @@ export async function validateRooftop(
           emailVerificationStatus: r.contact?.emailVerificationStatus ?? null,
           rooftopId: r.rooftopId,
           allowPaid: input.allowPaid,
+          // The authorisation travels WITH the opt-in. `resolveContactableEmail`
+          // refuses its paid tier when `allowPaid` arrives without a case id, so
+          // dropping this line would not leak a spend — it would silently turn the
+          // paid tier off. Both halves are asserted in the defect-3 regression.
+          sourcingCaseId: input.sourcingCaseId ?? null,
         });
         if (resolved.contactable && resolved.email) {
           contactEmail = resolved.email;
