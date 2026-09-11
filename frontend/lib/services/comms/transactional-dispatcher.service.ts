@@ -127,7 +127,42 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 function assertRenderableEmail(input: EnqueueTransactionalInput): void {
   if (input.channel !== "email") return;
-  const payload = input.payload as { templateId?: unknown; subject?: unknown; html?: unknown };
+  const payload = input.payload as {
+    templateId?: unknown;
+    subject?: unknown;
+    html?: unknown;
+    email?: unknown;
+  };
+
+  // THE ADDRESS LIVES IN THE PAYLOAD, AND ONLY IN THE PAYLOAD.
+  //
+  // `input.to` is validated above and then NOT stored: `comms_outbox` has no recipient-address
+  // column, so the row the drain claims carries the address only inside `payload`. The drain
+  // hands `row.payload` straight to `deliverEmail`, which reads `payload.email` both for the
+  // suppression lookup and for the send.
+  //
+  // A caller that passes `to` and omits `payload.email` therefore enqueues a row that checks
+  // suppression for `undefined` and then asks the provider to mail `undefined` — and because
+  // `to` was validated, the call looked correct at the producer. That is how the two
+  // `inventory-stale-sweep` dealer notices came to be undeliverable with nothing saying so.
+  //
+  // Refused here, where the stack trace still names the producer, and required to MATCH `to` so
+  // the validated address and the sent address cannot diverge.
+  if (typeof payload.email !== "string" || !payload.email) {
+    throw new Error(
+      `enqueueTransactional("${input.templateKey}"): an email payload must carry the recipient in ` +
+        `payload.email. \`to\` is validated but not stored — comms_outbox has no address column, and ` +
+        `deliverEmail reads payload.email for both the suppression check and the send. Without it the ` +
+        `row is delivered to undefined.`
+    );
+  }
+  if (payload.email !== input.to) {
+    throw new Error(
+      `enqueueTransactional("${input.templateKey}"): payload.email ("${payload.email}") and to ` +
+        `("${String(input.to)}") disagree. Only payload.email is stored, so the row would be sent to an ` +
+        `address the enqueue never validated.`
+    );
+  }
 
   if (payload.templateId !== undefined && payload.templateId !== null) {
     if (typeof payload.templateId !== "string" || !UUID_RE.test(payload.templateId)) {

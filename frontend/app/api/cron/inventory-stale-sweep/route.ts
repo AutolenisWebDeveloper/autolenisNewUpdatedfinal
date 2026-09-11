@@ -85,6 +85,10 @@ export async function GET(request: NextRequest) {
         to: dealer.user.email,
         idempotencyKey: `${INVENTORY_DEALER_TEMPLATES.STALE_LISTING_REMOVAL}:${dealerId}:${now.toISOString().slice(0, 10)}`,
         payload: {
+          // The recipient, in the only place the drain can read it. `to` above is validated
+          // and then discarded — `comms_outbox` has no address column — so without this the
+          // row was delivered to `undefined`.
+          email: dealer.user.email,
           subject: DEALER_STALE_LISTING_REMOVAL_SUBJECT,
           html: renderDealerStaleListingRemovalEmail({
             contactName: dealer.dealershipName,
@@ -147,12 +151,16 @@ export async function GET(request: NextRequest) {
         to: dealer.user.email,
         idempotencyKey: `${INVENTORY_DEALER_TEMPLATES.INVENTORY_SYNC_FAILURE}:${dealer.id}:${now.toISOString().slice(0, 10)}`,
         payload: {
+          email: dealer.user.email,
           subject: DEALER_INVENTORY_SYNC_FAILURE_SUBJECT,
           html: renderDealerInventorySyncFailureEmail({
             contactName: dealer.dealershipName,
             lastSuccessfulSync: lastSync,
             errorCategory: "FEED_NO_DATA",
-            feedSetupUrl: `${APP_URL}/dealer/inventory/feed`,
+            // `/dealer/inventory/feed` does not exist and never did. The page is
+            // `app/dealer/inventory/feed-setup/page.tsx`, so the one call to action in a
+            // "your feed has stopped sending us data" email landed on a 404.
+            feedSetupUrl: `${APP_URL}/dealer/inventory/feed-setup`,
           }),
         },
       })

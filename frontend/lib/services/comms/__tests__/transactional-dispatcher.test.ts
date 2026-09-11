@@ -554,6 +554,48 @@ test("rendered subject + html enqueues, and so does a real template UUID", async
   assert.equal(byId.enqueued, true);
 });
 
+test("an email payload with no payload.email is refused — `to` is validated and NOT stored", async () => {
+  // The defect this guard closes. `comms_outbox` has no recipient-address column, so `to` is
+  // checked at enqueue and then discarded; the drain hands `row.payload` to `deliverEmail`,
+  // which reads `payload.email` for BOTH the suppression lookup and the send. A caller that
+  // passed only `to` enqueued a row that checked suppression for `undefined` and then asked the
+  // provider to mail `undefined` — and the call site looked correct, because `to` was there.
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  await assert.rejects(
+    () =>
+      enqueueTransactional({
+        triggerEvent: "t",
+        templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1,
+        channel: "email",
+        recipientKind: "dealer",
+        to: "dealer@example.invalid",
+        payload: { subject: "S", html: "<p>H</p>" },
+      }),
+    /must carry the recipient in payload\.email/,
+    "an address-less email payload is delivered to undefined",
+  );
+});
+
+test("payload.email disagreeing with `to` is refused — only payload.email is actually sent", async () => {
+  // The subtler half. If the two diverge, the row goes to the address the enqueue never
+  // validated, and every log line says the other one.
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  await assert.rejects(
+    () =>
+      enqueueTransactional({
+        triggerEvent: "t",
+        templateKey: PHASE_2_TEMPLATES.DRAFT_RECOVERY_1,
+        channel: "email",
+        recipientKind: "dealer",
+        to: "validated@example.invalid",
+        payload: { email: "actually-sent@example.invalid", subject: "S", html: "<p>H</p>" },
+      }),
+    /disagree/,
+  );
+});
+
 test("an SMS payload is not subject to the email content rule", async () => {
   const { enqueueTransactional } = await svc();
   const { PHASE_2_TEMPLATES } = await registry();
