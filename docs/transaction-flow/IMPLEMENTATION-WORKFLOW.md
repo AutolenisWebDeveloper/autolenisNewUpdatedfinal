@@ -1191,6 +1191,28 @@ is the corrected version, and the totals above were computed from the table rath
 - **Proved on PostgreSQL 16.13, not 17.x.** PGDG apt is blocked by the environment's proxy (403)
   and there is no docker daemon, so a 17.x server could not be stood up. CI's `migrations` and
   `phase1-proof` jobs run `postgres:17.6` on the PR and are the 17.x evidence.
+- **`pnpm test:visual` RAN — 10 failures, and they are the guardrail's own documented false-fail,
+  not a regression.** All 10 are the five frozen marketing pages × two viewports. Attribution, by
+  evidence rather than by assertion:
+  1. `.github/workflows/visual.yml`'s header states the rule: *"the baseline MUST be rendered by
+     this runner image, not an ad-hoc container: font/anti-aliasing rendering is
+     environment-specific, so capture and comparison have to happen on the same image or the
+     0.1%-tolerance gate false-fails"* — the runner is pinned to `ubuntu-24.04` for exactly this
+     reason. The committed baseline is CI-rendered; this container is not that image, so a
+     comparison here CANNOT pass by construction.
+  2. The diff images show **every glyph on the page** flagged and text doubled/offset while every
+     layout box, background and structural block is clean — the font-metric signature the header
+     describes, not a content change.
+  3. `visual.yml` triggers on five paths (`frontend/tests/visual/**`,
+     `playwright.visual.config.ts`, `frontend/components/ui/**`, `frontend/app/(public)/**`,
+     `.github/workflows/visual.yml`). **This diff changes zero files in all five**, so the
+     guardrail does not consider this PR marketing-affecting — and the 30 committed baseline
+     images are untouched by it.
+  4. Structurally the diff cannot reach those pages: no public route, layout, CSS, design token or
+     build-config file is changed, and all six changed component files are **new additions** under
+     `components/admin|buyer|dealer/` with no importer anywhere in the public tree.
+  The authoritative run is `visual.yml` on its pinned runner. Reported as **NOT VERIFIED in this
+  environment** rather than as a pass.
 - **No surface was rendered in a browser.** Every Phase 5 surface is behind a buyer, dealer or admin
   session, and this repository has no legitimate non-production authenticated environment. The
   Playwright journeys are written (`tests/e2e/phase5-sourcing-journeys.spec.ts`) and wired into
