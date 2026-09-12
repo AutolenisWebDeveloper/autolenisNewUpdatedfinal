@@ -37,6 +37,28 @@
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+// The production normaliser, so a seeded rooftop's `nameKey` is shaped exactly like a real
+// one — the ladder's dedup reads that column.
+import { normalizeDealerName } from "@/lib/services/dealer/dealer-identity.service";
+// STATIC, not `await import()`, and that distinction is load-bearing rather than stylistic.
+//
+// Playwright transforms the spec and the module graph it can see at build time, and THAT is what
+// applies the root tsconfig's `@/*` paths. A runtime `await import("@/…")` escapes the transform
+// and lands on Node's own resolver, which knows nothing about the alias — so the service loaded,
+// then died on its OWN `@/lib/logger` import with `Cannot find module`. The failure surfaced
+// inside `launch-readiness.service.ts`, never in this file, which is what made it read like a
+// missing dependency rather than a resolver boundary.
+//
+// This spec is the first e2e spec to call services in-process (the others drive the app over HTTP
+// and assert database state with Prisma), so nothing here had exercised that boundary before.
+import { launchFromCase } from "@/lib/services/sourcing/launch-readiness.service";
+import { getSourcingCaseById } from "@/lib/services/sourcing/sourcing-case.service";
+import {
+  recordRadiusAuthorization,
+  sweepSourcingCases,
+} from "@/lib/services/sourcing/sourcing-driver.service";
+import { advanceSourcing } from "@/lib/services/sourcing/rooftop-sourcing.service";
+import { CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG } from "@/lib/services/concierge/concierge-conversion.service";
 
 const prisma = new PrismaClient();
 
@@ -133,8 +155,15 @@ async function seedPaidRequest(opts: { rooftops: number; band?: string; caseStat
     data: {
       id: f.userId,
       email: `e2e-${stamp}-buyer@example.invalid`,
-      passwordHash: "not-a-real-hash",
       role: "BUYER",
+      // REQUIRED and @unique (`schema.prisma` User.supabaseId). Omitting it made every
+      // seeding journey fail with `Argument \`supabaseId\` is missing` — caught by CI's E2E job,
+      // which is the only place this helper runs against a real database.
+      //
+      // Derived from the row's own UUID rather than the `sb_e2e_${Date.now()}` used in
+      // `phase2-lane1-intake.spec.ts`: that helper creates ONE user, this one creates a buyer
+      // plus N dealers in a loop, and a millisecond timestamp collides inside a loop.
+      supabaseId: `sb_e2e_${f.userId}`,
     },
   });
   await prisma.buyer.create({
@@ -205,10 +234,16 @@ async function seedPaidRequest(opts: { rooftops: number; band?: string; caseStat
     f.dealerUserIds.push(dealerUserId);
     f.dealerIds.push(dealerId);
 
+    const displayName = `E2E ${stamp} Rooftop ${i}`;
     await prisma.dealerRooftop.create({
       data: {
         id: rooftopId,
-        displayName: `E2E ${stamp} Rooftop ${i}`,
+        displayName,
+        // REQUIRED (`schema.prisma` DealerRooftop.nameKey). Computed with the SAME normaliser
+        // production uses (`dealer-rooftop.service.ts:91`) rather than a hand-rolled string:
+        // the ladder's dedup reads this column, so a seeded rooftop whose key is shaped
+        // differently from a real one would exercise a code path no real row can reach.
+        nameKey: normalizeDealerName(displayName),
         latitude: 32.78 + i * 0.01,
         longitude: -96.8 + i * 0.01,
         websiteHost: `e2e-${stamp}-${i}.example.invalid`,
@@ -229,8 +264,9 @@ async function seedPaidRequest(opts: { rooftops: number; band?: string; caseStat
       data: {
         id: dealerUserId,
         email: `e2e-${stamp}-dealer-${i}@example.invalid`,
-        passwordHash: "not-a-real-hash",
         role: "DEALER",
+        // Required + @unique, as above. Per-dealer UUID, so the loop cannot collide.
+        supabaseId: `sb_e2e_${dealerUserId}`,
       },
     });
     await prisma.dealer.create({
@@ -289,8 +325,6 @@ test("journey 1: a paid request's case reaches readiness, and the launch goes PE
   // THE DATABASE IS THE ASSERTION, not the rendered verdict. `launchFromCase` is what S7-07
   // governs, and its requirement is an ORDER: the auction is created PENDING, invitations are
   // written against it, and only then does it flip ACTIVE — never half-ready.
-  const { launchFromCase } = await import("@/lib/services/sourcing/launch-readiness.service");
-  const { getSourcingCaseById } = await import("@/lib/services/sourcing/sourcing-case.service");
   const sourcingCase = await getSourcingCaseById(f.caseId);
   expect(sourcingCase).not.toBeNull();
 
@@ -375,7 +409,6 @@ test("journey 2: a case at its ceiling asks the buyer, and the buyer's authorisa
 
   // The SERVER path is the one that matters, and it is asserted directly rather than through a
   // form this environment has no buyer session for.
-  const { recordRadiusAuthorization } = await import("@/lib/services/sourcing/sourcing-driver.service");
   const result = await recordRadiusAuthorization(f.requestId, 150);
   expect(result.ok, `authorisation refused: ${result.reason ?? "unknown"}`).toBe(true);
   expect(result.authorizedRadiusMiles).toBe(400);
@@ -401,8 +434,6 @@ test("journey 2b: the ladder refuses to search the authorised band with no autho
 
   // FAIL CLOSED rather than search unbounded. This is the state §7.1's incident came from: a
   // deposit charged, an auction opened, zero invitations.
-  const { advanceSourcing } = await import("@/lib/services/sourcing/rooftop-sourcing.service");
-  const { getSourcingCaseById } = await import("@/lib/services/sourcing/sourcing-case.service");
   const sourcingCase = await getSourcingCaseById(f.caseId);
   const step = await advanceSourcing(f.requestId, sourcingCase!, { prisma });
   expect(step.outcome).toBe("ZERO_COVERAGE_REVIEW");
@@ -419,7 +450,6 @@ test("journey 3: with the flag OFF the ladder stands down; with it ON the ladder
   needsInfra();
   const f = await seedPaidRequest({ rooftops: 6, caseStatus: "ACTIVE_SOURCING" });
 
-  const { sweepSourcingCases } = await import("@/lib/services/sourcing/sourcing-driver.service");
   const flag = "SOURCING_CASE_REPLACES_AUCTION_LAUNCH";
   const original = process.env[flag];
 
@@ -457,9 +487,6 @@ test("journey 3b: the concierge conversion is outside the flip in both positions
   // §13-D52 precondition (b), owner ruling 2026-09-11. A concierge conversion is pre-sourced;
   // there is nothing to source, so opening a case for it would be wrong. Asserted against the
   // named guard so routing it through `applySettlementEffects` fails a test.
-  const { CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG } = await import(
-    "@/lib/services/concierge/concierge-conversion.service"
-  );
   expect(CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG.opensSourcingCase).toBe(false);
   expect(CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG.writesLegacyPathWrite).toBe(false);
   expect(CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG.invitesDealers).toBe(false);
@@ -474,8 +501,6 @@ test("a tokenised invitation link shows the brief with NO buyer identity, and no
   const f = await seedPaidRequest({ rooftops: 5, caseStatus: "READY_TO_LAUNCH" });
   await blockVendors(page);
 
-  const { launchFromCase } = await import("@/lib/services/sourcing/launch-readiness.service");
-  const { getSourcingCaseById } = await import("@/lib/services/sourcing/sourcing-case.service");
   const sourcingCase = await getSourcingCaseById(f.caseId);
   const launched = await launchFromCase(f.requestId, sourcingCase!, prisma);
   test.skip(!launched.launched, `readiness held: ${launched.blockers.join(" | ")} — no invitation to follow`);
