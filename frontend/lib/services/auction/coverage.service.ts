@@ -35,7 +35,27 @@ export const MIN_COVERAGE_DEALERS = 3;
 // Y3 radius-escalation ladder tiers (miles), tried tightest-first. Named
 // constants because the right radii depend on live dealer density. The ladder
 // concentrates invites locally when supply is dense and widens only when sparse.
-export const RADIUS_TIERS = [25, 50, 100, 150] as const;
+//
+// The governing transaction-flow spec (§22a) defines sourcing as 100 -> 150 ->
+// 250, then buyer authorisation. The ladder shipped as [25, 50, 100, 150]: it
+// starts tighter than the spec, which is deliberate and harmless (a tier that
+// meets MIN_COVERAGE_DEALERS stops the ladder, so extra tight rungs only
+// concentrate invites), but it stopped at 150 and never reached 250. Two things
+// were unreachable as a result:
+//
+//   1. the 250-mile rung itself, so a buyer with adequate supply between 150 and
+//      250 miles was never sourced from it; and
+//   2. the soft-hold in request-coverage-gate.service.ts, which fires when
+//      coverage is thin "at the widest tier". With 150 as the widest tier, that
+//      hold fired on buyers the spec says should first have been offered supply
+//      out to 250 — so the authorisation step was being reached early rather
+//      than after the ladder was genuinely exhausted.
+//
+// NOT a widening of who gets invited when supply is adequate: the ladder returns
+// the FIRST tier meeting the stop predicate, so 250 is consulted only when 25,
+// 50, 100 and 150 have all come up short. It is the difference between "no
+// dealers found" and "dealers found, 200 miles away".
+export const RADIUS_TIERS = [25, 50, 100, 150, 250] as const;
 
 // Cap prospects scanned per assessment so a dense metro can't fan out unbounded
 // resolution work (each unresolved prospect may cost an MX lookup / LLM call).

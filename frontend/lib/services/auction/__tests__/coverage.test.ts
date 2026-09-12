@@ -225,9 +225,19 @@ const cov = (radiusMiles: number, coverage: number): CoverageResult => ({
   coverage, registered: coverage, prospects: 0, radiusMiles, buyerGeocoded: true,
 });
 
-test("RADIUS_TIERS is tightest-first", () => {
-  assert.deepEqual([...RADIUS_TIERS], [25, 50, 100, 150]);
+test("RADIUS_TIERS is tightest-first and reaches the spec's 250-mile rung", () => {
+  assert.deepEqual([...RADIUS_TIERS], [25, 50, 100, 150, 250]);
 });
+
+test("RADIUS_TIERS is strictly ascending — the ladder may only widen", () => {
+  // selectCoverageRadius returns the FIRST tier meeting the stop predicate, so a
+  // non-ascending ladder would silently return a tighter radius than one already
+  // rejected. Pinning the order keeps "widen only" a property, not a convention.
+  for (let i = 1; i < RADIUS_TIERS.length; i += 1) {
+    assert.ok(RADIUS_TIERS[i]! > RADIUS_TIERS[i - 1]!, `tier ${i} is not wider than ${i - 1}`);
+  }
+});
+
 
 test("ladder returns the FIRST tier that meets MIN_COVERAGE_DEALERS (early stop)", async () => {
   const seen: number[] = [];
@@ -261,8 +271,11 @@ test("ladder escalates to the widest tier when no tier meets the threshold", asy
     return cov(r, 1); // never reaches 3
   };
   const r = await selectCoverageRadius("a1", { assess });
-  assert.equal(r.radiusMiles, 150);
-  assert.deepEqual(seen, [25, 50, 100, 150]); // tried all, returns widest
+  // Derived, not re-listed: the ladder's contents are pinned once above. What
+  // matters here is that EVERY rung is tried and the widest is returned — the
+  // property request-coverage-gate's "thin at the widest tier" soft-hold rests on.
+  assert.deepEqual(seen, [...RADIUS_TIERS]);
+  assert.equal(r.radiusMiles, RADIUS_TIERS[RADIUS_TIERS.length - 1]);
 });
 
 test("when the buyer can't be geocoded, all contactable candidates count (fail open)", async () => {
@@ -318,6 +331,6 @@ test("ZIP ladder escalates to the widest tier when no tier meets the threshold",
     return cov(r, 1);
   };
   const r = await selectCoverageRadiusForZip("75201", { assessZip });
-  assert.equal(r.radiusMiles, 150);
-  assert.deepEqual(seen, [25, 50, 100, 150]);
+  assert.deepEqual(seen, [...RADIUS_TIERS]);
+  assert.equal(r.radiusMiles, RADIUS_TIERS[RADIUS_TIERS.length - 1]);
 });
