@@ -104,7 +104,21 @@ later", "RLS is optional") conflicts with anything here, this skill wins.
    value in use. The canonical status enums (VehicleRequestStatus, AuctionStatus,
    DealStatus, DepositStatus, ESignStatus, PickupStatus, PreQualDecision, etc.)
    are contracts — extend, don't repurpose values.
-10. **Transactions for multi-write invariants.** Money clusters and state
+10. **`_prisma_migrations` is NOT authoritative — verify the physical schema.**
+    The ledger records what `prisma migrate deploy` did, not what the database
+    contains. A migration applied out of band leaves the ledger saying "pending"
+    while the schema says "applied", and `prisma migrate status` repeats that
+    wrong answer. **Before concluding a migration is unapplied, check
+    `information_schema.columns`, `pg_constraint`, `pg_indexes` and `pg_enum`.**
+    Reading the ledger alone produced a false P2022 exposure report three times
+    on this project; on 2026-09-03 six migrations were found physically applied
+    with no ledger row. Run `pnpm db:check-ledger`
+    (`scripts/check-ledger-drift.ts`) — it is the gate for this class, and it is
+    distinct from `pnpm db:check-drift`, which compares a chain-built database
+    against `schema.prisma` and never reads the ledger. Repair drift with
+    `prisma migrate resolve --applied <name>` (writes the row, no DDL), never
+    with `migrate deploy` (trusts the ledger, re-executes applied migrations).
+11. **Transactions for multi-write invariants.** Money clusters and state
     transitions run inside `prisma.$transaction` with the idempotency claim
     (see the Stripe webhook: claim + deposit PAID + auction create commit
     atomically). Keep transactions short; do network I/O outside them.

@@ -22,6 +22,49 @@ of two duplicated inline `where` clauses into one tested pure function.
 
 ---
 
+## RETRACTION — 2026-09-03: the P2022 warning was wrong, and both migrations are applied
+
+**Everything below that describes `20261104000000` and `20261105000000` as "written but not
+applied", and every P2022 exposure derived from that, is withdrawn.** Both migrations are
+physically present in production. There was never any P2022 risk on the admin inventory routes or
+the dealer analytics route, and nothing was ever about to 500.
+
+**Basis — the physical schema, queried read-only against production `aieybibvewmvrubcpthm`
+(PostgreSQL 17.6) on 2026-09-03.** Not the ledger, and not anyone's recollection:
+
+| Object | Source | Result |
+| --- | --- | --- |
+| `inventory_items` provenance columns | `information_schema.columns` | **7 of 7 present** — `external_dealer_street`, `external_dealer_zip`, `external_dealer_email`, `external_dealer_type`, `mc_rooftop_id`, `mc_dealer_id`, `rooftop_id` |
+| `inventory_sync_runs.api_calls_used` | `information_schema.columns` | **present** — `integer`, `DEFAULT 0`, `NOT NULL` |
+| `inventory_sources` market/budget columns | `information_schema.columns` | **12 of 12 present** |
+| `inventory_items_rooftop_id_fkey` | `pg_constraint` | **present**, `confdeltype='n'` (`ON DELETE SET NULL`) |
+| `inventory_items_rooftop_id_idx` | `pg_indexes` | **present** |
+| `SyncRunStatus.BUDGET_EXHAUSTED` | `pg_enum` | **present** |
+| `inventory_sources` MARKETCHECK row | table read | `center_zip=76011`, `radius_miles=100`, `monthly_call_budget=400` — the repoint UPDATE ran |
+| Ledger rows for either migration | `_prisma_migrations` | **neither recorded**; latest row is `20261103000000_apollo_reveal_empty_stage` |
+
+**`_prisma_migrations` is not authoritative and must never be treated as such.** It records what
+`prisma migrate deploy` did, not what the database contains. These migrations were applied out of
+band, so the ledger says "pending" while the schema says "applied". `prisma migrate status` reads
+the ledger, so it reports them pending too — it is the tool that produced this error, not a check
+against it. **Verify against `information_schema.columns`, `pg_constraint`, `pg_indexes` and
+`pg_enum` before concluding a migration is unapplied.**
+
+**The drift is larger than these two.** The same read found **six** migrations physically applied
+with no ledger row — `20261014000000`, `20261015000000`, both `20261016000000` directories, plus
+these two. Every object each creates was confirmed present.
+
+**Do not use `prisma migrate deploy` as the repair.** It would re-execute six migrations' DDL
+against production. Use `prisma migrate resolve --applied` for all six, in chronological order —
+it writes ledger rows and executes no DDL. See `frontend/scripts/check-ledger-drift.ts`, and
+`pnpm db:check-ledger`, which now gates this class of drift.
+
+**What is *not* retracted.** The narrowed `select`s added on the inventory read paths stay. They
+were never load-bearing against a risk that turns out not to have existed, but they are correct on
+their own terms and removing them would be churn. No further narrowing is warranted or authorised.
+
+---
+
 ## Global Constraints
 
 - **Do not apply the migration. Do not merge, deploy, or mutate production data.** The migration
@@ -927,16 +970,30 @@ non-trivial, say so explicitly rather than leaving it.
 
 `MARKETCHECK_API_KEY` already exists (`.env.example:196`).
 
-### Migration command
+### Migration command — SUPERSEDED 2026-09-03, see the retraction above
+
+~~`cd frontend && pnpm exec prisma migrate deploy`~~
+
+**Both migrations are already applied.** The remaining work is ledger repair, not migration. Six
+migrations are physically present with no `_prisma_migrations` row; `migrate deploy` would
+re-execute all six against production, so the repair is `resolve --applied`, which writes ledger
+rows and runs no DDL:
 
 ```bash
-cd frontend && pnpm exec prisma migrate deploy
+cd frontend
+pnpm exec prisma migrate resolve --applied 20261014000000_esign_envelope_history
+pnpm exec prisma migrate resolve --applied 20261015000000_esign_consent_and_executed_artifact
+pnpm exec prisma migrate resolve --applied 20261016000000_ai_action_intent_lifecycle
+pnpm exec prisma migrate resolve --applied 20261016000000_contract_scan_version_link
+pnpm exec prisma migrate resolve --applied 20261104000000_inventory_market_config_and_call_budget
+pnpm exec prisma migrate resolve --applied 20261105000000_inventory_dealer_provenance_and_call_accounting
+pnpm exec prisma migrate deploy    # must print: No pending migrations to apply.
+pnpm db:check-ledger               # must print: OK — every migration's ledger row agrees
 ```
 
-Pre-apply (read-only): list `information_schema.columns` for `inventory_sources`; list `pg_enum`
-labels for `SyncRunStatus`; `SELECT count(*) FROM inventory_sources WHERE type='MARKETCHECK'`
-(expect 1). Post-apply: `SELECT center_zip, radius_miles, monthly_call_budget, max_calls_per_run,
-rows_per_call FROM inventory_sources WHERE type='MARKETCHECK'` → expect `76011 / 100 / 400 / 10 / 50`.
+The post-apply verification below already passes: `SELECT center_zip, radius_miles,
+monthly_call_budget, max_calls_per_run, rows_per_call FROM inventory_sources WHERE
+type='MARKETCHECK'` returned `76011 / 100 / 400 / 10 / 50` on 2026-09-03.
 
 ### Rollout — six phases, destructive step last
 
@@ -955,14 +1012,18 @@ rows_per_call FROM inventory_sources WHERE type='MARKETCHECK'` → expect `76011
 > months, and two more days of them costs nothing next to shipping an empty catalogue.
 
 1. **Env only, no deploy.** Nothing reads them yet. *Rollback:* delete the variables.
-2. **Deploy the code, migration still unapplied.** Market resolves from env to DFW (the `10001`
-   literal is gone); config read hits P2022 → `configSource:"env"`, static 10-call budget; sweep is
+2. **Deploy the code.** *(Corrected 2026-09-03: the migration is already applied, so the P2022
+   fallback described here never engages — config resolves from the `inventory_sources` row, and
+   `configSource` reads `"row"`, not `"env"`. The env tier remains as a fallback and is harmless.)*
+   Market resolves to DFW (the `10001` literal is gone); sweep is
    `dry_run` and deactivates nothing; crons are already 1/day. Worst-case spend here is 10 × 31 =
    **310**, inside the cap. *This is why the code tolerates the unapplied migration: no deploy is
    coupled to a DBA action.* *Rollback:* Vercel instant rollback — but note it restores the
    28-call/day burn.
-3. **Apply the migration.** Purely additive; the running code handles both schema states. *Rollback:*
-   `rollback.sql`; the code falls back to phase-2 behaviour.
+3. ~~**Apply the migration.**~~ **Already applied — replaced by ledger repair.** Run the six
+   `prisma migrate resolve --applied` commands above, then `pnpm db:check-ledger`. No DDL executes
+   and no schema changes, so there is nothing to roll back; `rollback.sql` stays available for the
+   separate question of undoing the columns themselves.
 4. **Confirm config took effect.** Watch the first 08:00 UTC sweep: `apiCallsUsed ≤ 10`,
    `stopReason` ∈ {`PAGE_CAP`,`PROVIDER_CEILING`,`NUM_FOUND_REACHED`}, `status = COMPLETED`,
    `calls_used_this_cycle = 10`, **`maxDistMiles <= 100`**, and `external_dealer_state` starting to
