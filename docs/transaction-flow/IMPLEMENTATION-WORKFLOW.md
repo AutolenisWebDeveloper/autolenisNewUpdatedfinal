@@ -2167,6 +2167,43 @@ none and requires none to be applied. Its own merge, however, **is** gated on Ph
 applied and verified in both halves — see §8.1a.2 for why, and the phase report for which changes
 fail without it.
 
+#### 8.1e.1 Phase 5 DEPLOY SEQUENCE — the owner's, confirmed 2026-09-12
+
+Stated in the owner's own order and wording. **The flip is a SEPARATE DECISION after the deploy
+is confirmed stable — it is not part of the merge.**
+
+| # | Step | Artefact |
+| --- | --- | --- |
+| 1 | Merge `claude/fix-dealer-feed-notice-address` — independent, no schema | PR #421 |
+| 2 | Phase 5 preflight — only `CHECKED`, zero `BLOCK` | `phase-5-proof/preflight.sql` |
+| 3 | `pnpm exec prisma migrate deploy` — ledger 108 → 109 | — |
+| 4 | Verify BOTH halves — physical schema AND `_prisma_migrations` | `verify.sql` + `ledger.sql` |
+| 5 | Merge `claude/txflow-05-sourcing`, let it deploy | PR #422 |
+| 6 | Confirm production on the new SHA, zero cron failures | — |
+| 7 | Re-run the pre-flip census | `phase-5-proof/census.sql` |
+| 8 | **Only then** flip `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` | — |
+
+Steps 2, 4 and 7 are read-only and run in the mandated shape from *Production database access* in
+`CLAUDE.md` — the single-transaction, `SET TRANSACTION READ ONLY`, `ON_ERROR_STOP=1` form, with the
+file passed by `-f`. Nothing in this phase runs against production outside that shape and the
+per-run approval it requires.
+
+**Why step 7 exists as its own step.** The owner's reference census was taken at 2026-09-11
+00:04 UTC — `{CLOSED: 7}` auctions, zero PENDING, zero ACTIVE with no invitations, zero sourcing
+cases, 7 PAID deposits. That reading is hours older than the flip will be, and the state can move.
+`census.sql` re-reads it at the moment of the decision and returns `BLOCK` on exactly two
+conditions: a PENDING auction (stranded by the flip, because nothing drives it afterwards) and the
+Phase 5 migration not being recorded (flipping onto an unmigrated database holds every auction at
+PENDING). Everything else is a figure to compare, not a gate — a census that blocked on a count
+nobody had agreed a threshold for would stop a deploy over a number, and the owner is the one who
+decides what a number means.
+
+**Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
+migration's own header states the ordering, because this phase's code writes `initiator_role`,
+`sourcing_case_id` and the withheld firewall row on hot paths, and unmigrated the second of those
+HOLDS every auction at PENDING — a launch that cannot reach readiness, which is the one failure
+mode §7 says must surface a blocker rather than half-launch.
+
 **Phase 5's migration is AUTHORED AND PROVED, NOT APPLIED.** `20261113000000_phase5_sourcing_invitations`
 is additive and five changes wide, proved against a throwaway loopback PostgreSQL with
 `docs/transaction-flow/phase-5-proof/run-proof.sh`: 25/25 physical assertions, the ledger row, an
