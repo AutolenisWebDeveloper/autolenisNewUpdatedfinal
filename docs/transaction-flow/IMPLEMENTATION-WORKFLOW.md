@@ -1222,6 +1222,26 @@ is the corrected version, and the totals above were computed from the table rath
   stronger reason to treat that job as the authority than the pixel tolerance alone.
   The authoritative run is `visual.yml` on its pinned runner. Reported as **NOT VERIFIED in this
   environment** rather than as a pass.
+- **The E2E journeys DO run, and CI proves it — my own earlier claim that two were blocked was
+  WRONG and is retracted here.** CI's `E2E (dealer outreach)` job is **green on `f40d482`**, with
+  the Phase 5 spec exercised rather than skipped: the service database log shows
+  `LAUNCH_READINESS_BLOCKED:…:APPROVAL_ATTACHED+CONTACTS_SEND_SAFE+REFERENCES_EXIST` and
+  `PREQUAL_APPROVAL_EXPIRED` queue-item writes, which only `evaluateReadiness` under
+  `raiseOnFailure: true` produces and which only `launchFromCase` reaches. Playwright exits
+  non-zero on any failure, and the step passed.
+
+  Locally two journeys failed on `approval-recheck.ts`'s `@/lib/prisma`, reached through a runtime
+  `await import()` that escapes Playwright's transform. **PROBABLE CAUSE, stated as a hypothesis
+  rather than a finding:** the local `autolenis_e2e` accumulated rows across roughly six
+  consecutive runs — the destructive-command guard correctly refused `drop database`, so it was
+  never reset — which changes which readiness item fails first and can push execution down a
+  branch a fresh database never reaches. CI builds the database from scratch every run. I have not
+  proved that, and it is recorded as the likely explanation, not as established fact. What IS
+  established: on a clean database at 17.6, the spec passes.
+
+  The three seed defects fixed on the way there were real regardless of any of this —
+  `supabaseId` missing, `passwordHash` not a column on `User`, `nameKey` missing — and each was a
+  genuine bug in a helper that had never been executed.
 - **No surface was rendered in a browser.** Every Phase 5 surface is behind a buyer, dealer or admin
   session, and this repository has no legitimate non-production authenticated environment. The
   Playwright journeys are written (`tests/e2e/phase5-sourcing-journeys.spec.ts`) and wired into
