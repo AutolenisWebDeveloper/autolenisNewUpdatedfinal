@@ -198,9 +198,41 @@ SELECT 'D11 distinct rooftops reachable by a send-safe email',
 UNION ALL
 -- Defect 1's live population: addresses AutoLenis' own one-click unsubscribe suppressed
 -- with a SOFT reason, which the pre-phase invitation rail did not honour.
-SELECT 'D12 email_suppression rows with a soft reason (unsubscribed / admin_added)',
-       'CHECKED', count(*)::text || ' row(s)'
+--
+-- SPLIT IN TWO, AND THE REASON IS A RUNBOOK FAILURE RATHER THAN A STYLE PREFERENCE.
+-- `email_suppression` is the one table this file reads that is NOT in the Prisma chain: it
+-- is created by `frontend/migrations/01_phase1_foundation.sql:182`, one of the 15 numbered
+-- CRM files CI applies in a second pass (`.github/workflows/ci.yml:272-283`), and the app
+-- reaches it through Supabase rather than Prisma. Production has it; a database replayed
+-- from the Prisma chain ALONE does not.
+--
+-- PostgreSQL resolves relation names at PARSE time, so naming it inside this UNION made the
+-- whole statement unparseable wherever the table is absent — and under the mandated
+-- `--single-transaction -v ON_ERROR_STOP=1` that aborted the run having printed NOTHING.
+-- CLAUDE.md's rule is that no CHECKED row means the query did not run, and is a stop: so the
+-- one census figure that depends on an out-of-chain table would have taken every BLOCK
+-- verdict down with it. Found 2026-09-12 by rehearsing this file against a throwaway
+-- loopback chain database, which is the only place it CAN be rehearsed.
+--
+-- So: the PRESENCE probe stays in the UNION (parse-safe — `to_regclass` takes text and
+-- returns NULL rather than failing), and the COUNT is the separate trailing statement below.
+-- Every blocking check now prints regardless, and the operator is told in a row whether the
+-- trailer will run.
+SELECT 'D12 email_suppression present (created OUTSIDE the Prisma chain — 01_phase1_foundation.sql)',
+       'CHECKED',
+       CASE WHEN to_regclass('public.email_suppression') IS NULL
+            THEN 'ABSENT — expected in production; the D12a trailer will not run here'
+            ELSE 'present — the D12a trailer below reports the soft-reason count'
+       END
+ORDER BY 1
+;
+
+-- ── D12a — the soft-reason count. SEPARATE STATEMENT, deliberately. ─────────────────────
+-- Skip this one statement if D12 above reported ABSENT; everything that can BLOCK the
+-- deploy has already printed by this point, which is the whole point of the split.
+SELECT 'D12a email_suppression rows with a soft reason (unsubscribed / admin_added)' AS check_name,
+       'CHECKED' AS verdict,
+       count(*)::text || ' row(s)' AS detail
   FROM email_suppression
  WHERE reason IN ('unsubscribed', 'admin_added')
-ORDER BY 1
 ;

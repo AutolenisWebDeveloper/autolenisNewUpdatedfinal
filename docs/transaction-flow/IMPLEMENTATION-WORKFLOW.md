@@ -1084,6 +1084,36 @@ reported one.
 Findings 23–26 were non-material (comment accuracy, a dead import, two naming inconsistencies) and
 were applied without further note.
 
+**FINDING 27 — found at STOP 2 by rehearsing `preflight.sql` instead of only reading it, and it
+would have cost the owner the maintenance window.** `preflight.sql` is the gate on the production
+`migrate deploy`, and CLAUDE.md's rule is that **no `CHECKED` row means the query did not run — also
+a stop**. Its D12 census row read `email_suppression`, which is the one table this file touches that
+is **not in the Prisma chain**: it is created by `frontend/migrations/01_phase1_foundation.sql:182`,
+one of the 15 numbered CRM files CI applies in a second pass
+(`.github/workflows/ci.yml:272-283`), and the application reaches it through Supabase rather than
+Prisma. PostgreSQL resolves relation names at **parse** time, so naming it inside the single
+`UNION ALL` made the whole statement unparseable wherever the table is absent — and under the
+protocol's mandated `--single-transaction -v ON_ERROR_STOP=1` that aborted the run **having printed
+nothing at all**. Every `BLOCK` verdict in the file went down with one census figure.
+
+Production has the table, so this would not have produced a wrong answer — it would have produced
+**no answer**, at the one moment the answer is load-bearing. Fixed by splitting D12: the presence
+probe stays in the UNION (`to_regclass` takes text and returns NULL rather than failing, so it is
+parse-safe) and the count is a separate trailing statement the operator skips if the probe reports
+absent.
+
+Rehearsed both ways on a throwaway loopback PostgreSQL 16.13 this session:
+
+| Database shape | Result |
+| --- | --- |
+| Prisma chain only (108 migrations, Phase 5 deliberately not applied) | **all 23 rows print**, every A/B/C gate `CHECKED`, **0 `BLOCK`**, D12 reports `ABSENT — … the D12a trailer will not run here`, and only the trailer errors |
+| Chain **plus** the 15 numbered files — the shape CI's `migrations` job builds | **exit 0**, **24 `CHECKED`** rows, **0 `BLOCK`**, D12a reports `0 row(s)` |
+
+Before the fix the first of those printed **one line**: `ERROR: relation "email_suppression" does
+not exist`. This is the clearest argument in the phase for executing a verification artefact rather
+than reviewing it — the file had been read several times, by me and by the independent review, and
+reading cannot find a parse-time failure that only occurs in an environment nobody had stood up.
+
 **Two of my own errors are recorded here rather than quietly fixed**, because both were the kind
 that would have shipped a false claim. I wrote that `Number(band)` was `NaN` in the radius defect;
 it is not — the band values are `"100"`/`"150"`/`"250"` and parse fine. The two real defects are the
