@@ -1211,6 +1211,15 @@ is the corrected version, and the totals above were computed from the table rath
   4. Structurally the diff cannot reach those pages: no public route, layout, CSS, design token or
      build-config file is changed, and all six changed component files are **new additions** under
      `components/admin|buyer|dealer/` with no importer anywhere in the public tree.
+  5. **Re-run under `visual.yml`'s exact placeholder env** (`DATABASE_URL` pointed at a
+     non-existent `postgresql://placeholder…`, the degraded render the workflow header describes)
+     reproduces the identical 10 failures — so the cause is not database or render state, which
+     was the one remaining alternative explanation.
+  And a limitation worth recording rather than discovering twice: the spec's **copy freeze** and
+  **metadata freeze** assertions sit AFTER the screenshot assertion inside the same test, so when
+  the pixel gate throws they never execute. This environment therefore cannot report on them at
+  all — `visual.yml` on its pinned runner is the only place all three gates run, which is a
+  stronger reason to treat that job as the authority than the pixel tolerance alone.
   The authoritative run is `visual.yml` on its pinned runner. Reported as **NOT VERIFIED in this
   environment** rather than as a pass.
 - **No surface was rendered in a browser.** Every Phase 5 surface is behind a buyer, dealer or admin
