@@ -324,22 +324,20 @@ export async function POST(request: NextRequest, { params }: Props) {
   const emailVehicleMake = primaryVehicle?.make ?? "Vehicle";
   const emailVehicleModel = primaryVehicle?.model ?? "Requested";
   const emailVehicleTrim = primaryVehicle?.trim ?? null;
-  for (const d of dealers) {
-    if (!d.user?.email) continue;
-    void sendDealerAuctionInvitationEmail({
-      to: d.user.email,
-      contactName: d.dealershipName ?? "Dealer",
-      vehicleMake: emailVehicleMake,
-      vehicleModel: emailVehicleModel,
-      vehicleYear: emailVehicleYear,
-      vehicleTrim: emailVehicleTrim,
-      buyerCity,
-      buyerState,
-      auctionUrl: `${APP_URL}/dealer/auctions/${launched.id}`,
-      expiryHours: hours ?? AUCTION_DURATION_HOURS,
-      auctionId: launched.id,
-    }).catch(err => logger.error(`[launch-auction] dealer email failed (${d.id}):`, err));
-  }
+  // REGISTERED DEALERS ARE NOT EMAILED HERE. `issueInvitations` above already enqueued their
+  // invitation through the §27 dispatcher, with a tokenised, auction-and-rooftop-bound link.
+  //
+  // THIS LOOP USED TO RUN AS WELL, and it sent a SECOND email to the same dealership: the
+  // dispatcher's `dealer_invited_secure:email:<invitationId>` and this rail's
+  // `dealer-auction-invitation-<auctionId>-<to>` are different key namespaces, so nothing
+  // deduplicated them. The dealership received one email linking to its tokenised invitation and
+  // one linking to a generic dashboard, the second with the subject "… for Vehicle Requested"
+  // whenever no `vehicles[]` was supplied. Found by the independent review.
+  //
+  // A MOVE, NOT A REMOVAL: the invitation email still goes out, on the rail that applies
+  // suppression, records an outbox row, re-checks state at send time and can be cancelled.
+  // `sendDealerAuctionInvitationEmail` is retained below for the OUTSIDE pool, which
+  // `issueInvitations` does not cover.
 
   // Outside-dealer invitation emails (non-blocking, public token-gated URL)
   for (const inv of outsideInvites) {

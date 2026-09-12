@@ -43,6 +43,10 @@ interface Ctrl {
   cancelled: Array<string>;
   exceptions: Array<Record<string, unknown>>;
   nextId: number;
+  /** Rooftop ids whose INSERT loses a unique race — see the note in the `create` fake. */
+  createRaisesP2002For: Set<string>;
+  /** What the winning writer left behind, for the loser to re-read. */
+  rowsWrittenByTheWinner: InvRow[];
 }
 let ctrl: Ctrl;
 
@@ -63,6 +67,8 @@ beforeEach(() => {
     cancelled: [],
     exceptions: [],
     nextId: 1,
+    createRaisesP2002For: new Set<string>(),
+    rowsWrittenByTheWinner: [],
   };
 });
 
@@ -151,6 +157,17 @@ mock.module("@/lib/prisma", {
           ctrl.invitations.find((i) => i.id === args.where.id) ?? null,
         create: async (args: { data: Record<string, unknown> }) => {
           const d = args.data;
+          // THE RACE, SIMULATED. `createRaisesP2002For` makes the INSERT lose to a concurrent
+          // writer even though the pre-read saw nothing — which is the only way to reach the
+          // create-then-catch-P2002 branch, because `issueInvitations` pre-filters on an in-memory
+          // set and would otherwise never attempt the insert. `rowsWrittenByTheWinner` is what the
+          // losing writer then re-reads.
+          if (d.rooftopId && ctrl.createRaisesP2002For.has(String(d.rooftopId))) {
+            for (const row of ctrl.rowsWrittenByTheWinner) {
+              if (!ctrl.invitations.some((i) => i.id === row.id)) ctrl.invitations.push(row);
+            }
+            throw Object.assign(new Error("unique"), { code: "P2002" });
+          }
           // The real partial unique: one live invitation per (auction, rooftop).
           if (
             d.rooftopId &&
@@ -188,7 +205,14 @@ mock.module("@/lib/prisma", {
           if (row) Object.assign(row, args.data);
           return row ?? {};
         },
-        count: async () => ctrl.invitations.length,
+        // HONOURS ITS `where`. It used to return `ctrl.invitations.length` regardless, so
+        // `countReachedInvitations`' `status: { notIn: ["REPLACED","BOUNCED","EXPIRED"] }` — the
+        // clause its own doc comment calls load-bearing, because a bounced invitation reached
+        // nobody — could be deleted without failing a test. Found by the independent review.
+        count: async (args?: { where?: { status?: { notIn?: string[] } } }) => {
+          const notIn = args?.where?.status?.notIn ?? [];
+          return ctrl.invitations.filter((i) => !notIn.includes(String(i.status))).length;
+        },
       },
       outsideAuctionInvite: { count: async () => 0 },
       identityFirewallEntry: {
@@ -219,6 +243,18 @@ mock.module("@/lib/prisma", {
     },
   },
 });
+
+/** A complete `InvRow`, so a fixture cannot silently omit a column the code under test reads. */
+function invRow(over: Partial<InvRow> = {}): InvRow {
+  return {
+    id: "inv_x", auctionId: "a1", rooftopId: "rt_x", dealerId: null, email: "sales@example.com",
+    status: "SENT", tokenHash: "h", candidateIds: [], distanceMiles: 10, invitationScore: null,
+    reminder50SentAt: null, reminder90SentAt: null, declinedAt: null, offerSubmittedAt: null,
+    respondedAt: null, bouncedAt: null, dealershipName: "Example", contactName: "Sales",
+    phone: null, expiresAt: null,
+    ...over,
+  };
+}
 
 function target(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -429,17 +465,60 @@ test("defect 5a: the 50% and 90% reminders carry different, invitation-scoped ke
     },
   ];
 
-  // 95% elapsed: both reminders are due at once, which is exactly the overlap the legacy rails
-  // could not survive.
-  const at95 = new Date("2026-09-12T21:36:00Z");
-  const r = await sweepInvitationReminders(undefined, at95);
+  // TWO TICKS, BECAUSE ONE REMINDER FIRES PER TICK.
+  //
+  // An earlier version of this test drove the sweep once at 95% elapsed and asserted BOTH
+  // reminders went out together — which pinned a defect the independent review found: a cron that
+  // missed two hours and resumed at 95% sent "Halfway — 3h left" and "Closing soon — 3h left"
+  // seconds apart, one of them false. Past 90% the halfway reminder has nothing true to say.
+  //
+  // The test's real subject is the KEYS, and they are still proved: each is scoped to the
+  // invitation rather than to the address (defect 5's collision was an auction-scoped key against
+  // a globally unique `comms_outbox.dedup_key`), and the two are distinct so neither can suppress
+  // the other.
+  const at60 = new Date("2026-09-12T04:48:00Z"); // 60% elapsed
+  const first = await sweepInvitationReminders(undefined, at60);
+  assert.equal(first.enqueued50, 1);
+  assert.equal(first.enqueued90, 0, "the 90% reminder is not due at 60%");
 
-  assert.equal(r.enqueued50, 1);
-  assert.equal(r.enqueued90, 1);
+  // Carry the stamp forward the way the database would, then tick again past 90%.
+  ctrl.invitations[0]!.reminder50SentAt = at60;
+  const at95 = new Date("2026-09-12T21:36:00Z");
+  const second = await sweepInvitationReminders(undefined, at95);
+  assert.equal(second.enqueued90, 1);
+  assert.equal(second.enqueued50, 0, "the 50% reminder is not re-sent");
+
   const keys = ctrl.enqueued.map((e) => String(e.idempotencyKey));
   assert.equal(new Set(keys).size, 2, "two distinct keys — neither can suppress the other");
   assert.ok(keys.every((k) => k.includes("inv1")), "each key is scoped to the invitation, not the address");
   assert.ok(keys.some((k) => k.includes("reminder_50")) && keys.some((k) => k.includes("reminder_90")));
+});
+
+test("past 90%, the halfway reminder is NOT sent — one reminder per tick, the later one wins", async () => {
+  // The review's finding, pinned. A dealership must not be told the auction is halfway through
+  // when it has 5% of its window left.
+  const { sweepInvitationReminders } = await import("@/lib/services/auction/auction-invitation.service");
+  ctrl.auction = {
+    id: "a1", status: "ACTIVE",
+    startedAt: new Date("2026-09-11T00:00:00Z"),
+    endsAt: new Date("2026-09-13T00:00:00Z"),
+    vehicleRequestId: "vr1",
+  };
+  ctrl.invitations = [
+    {
+      id: "inv1", auctionId: "a1", rooftopId: "rt1", dealerId: null, email: "sales@example.com",
+      status: "SENT", tokenHash: "h", candidateIds: [], distanceMiles: 10, invitationScore: null,
+      reminder50SentAt: null, reminder90SentAt: null, declinedAt: null, offerSubmittedAt: null,
+      respondedAt: null, bouncedAt: null, dealershipName: "Example", contactName: "Sales",
+      phone: null, expiresAt: null,
+    },
+  ];
+
+  const r = await sweepInvitationReminders(undefined, new Date("2026-09-12T21:36:00Z"));
+  assert.equal(r.enqueued90, 1);
+  assert.equal(r.enqueued50, 0, "the halfway reminder fired on a 95%-elapsed auction");
+  assert.equal(ctrl.enqueued.length, 1, "two reminders reached the outbox in one tick");
+  assert.match(String(ctrl.enqueued[0]!.idempotencyKey), /reminder_90/);
 });
 
 test("defect 5b: reminders go to NONRESPONDERS only — respondedAt is honoured", async () => {
@@ -606,4 +685,52 @@ test("S7-14b: delivery events are MONOTONIC — an out-of-order webhook cannot w
   assert.equal(late.ok, true, "the event is still recorded — the fact happened");
   assert.equal(late.statusAdvanced, false);
   assert.equal(ctrl.invitations[0]!.status, "OPENED", "the status never goes backwards");
+});
+
+test("defect 6: a BOUNCED invitation is excluded from the reached count — it reached nobody", async () => {
+  // The exclusion the doc comment calls load-bearing, now actually provable: the fake's `count`
+  // honours its `where`. Deleting `status: { notIn: [...] }` from `countReachedInvitations` fails
+  // here, which it previously did not.
+  const { countReachedInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  ctrl.invitations = [
+    invRow({ id: "i1", rooftopId: "rt1", status: "SENT" }),
+    invRow({ id: "i2", rooftopId: "rt2", status: "BOUNCED" }),
+    invRow({ id: "i3", rooftopId: "rt3", status: "REPLACED" }),
+    invRow({ id: "i4", rooftopId: "rt4", status: "EXPIRED" }),
+    invRow({ id: "i5", rooftopId: "rt5", status: "OPENED" }),
+  ];
+
+  const counted = await countReachedInvitations("a1");
+  assert.equal(
+    counted.unified,
+    2,
+    "a bounced, replaced or expired invitation must not be counted as a dealership reached — " +
+      "otherwise the buyer is told a dealership is competing that was never contacted",
+  );
+  assert.equal(counted.total, 2);
+});
+
+test("the P2002 losing writer re-reads the winner's row rather than failing the field", async () => {
+  // THE CONCURRENCY PATH, PREVIOUSLY UNPROVEN. `issueInvitations` pre-filters on an in-memory
+  // `alreadyInvited` set, so the fake's unique violation was unreachable and the
+  // create-then-catch-P2002 branch — `withSavepoint` + re-read + `if (!won) throw err` — had no
+  // test at all. A regression there (a savepoint that does not roll back, so the re-read throws
+  // 25P02 on an aborted transaction) would have been caught by nothing. Found by the independent
+  // review.
+  //
+  // The race is simulated the way it actually happens: the pre-read sees nothing, and the INSERT
+  // loses to a concurrent writer.
+  const { issueInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  ctrl.invitations = [];
+  ctrl.createRaisesP2002For = new Set(["rt_raced"]);
+  ctrl.rowsWrittenByTheWinner = [invRow({ id: "inv_winner", rooftopId: "rt_raced", status: "QUEUED" })];
+
+  const res = await issueInvitations("a1", [target({ rooftopId: "rt_raced" })], undefined, NOW);
+
+  assert.equal(res.issued, 0, "the losing writer must not count the winner's row as its own issue");
+  assert.deepEqual(
+    res.skipped.map((s) => s.reason),
+    ["ALREADY_INVITED_CONCURRENTLY"],
+    "a lost race is a distinct, named outcome — not WRITE_FAILED and not silence",
+  );
 });

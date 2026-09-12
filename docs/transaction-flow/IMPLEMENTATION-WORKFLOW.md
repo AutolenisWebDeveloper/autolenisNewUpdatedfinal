@@ -1028,26 +1028,105 @@ guarded by a trailing `.catch()`, which covers a rejection but not a synchronous
 failure there would have failed the request, leaving the deadline moved while telling the operator
 it was not.
 
+#### The independent review, and the 26 findings it produced
+
+CLAUDE.md's `autolenis-code-verification` loop requires **two distinct reviews**, the second read
+from a clean context as though another engineer wrote the code. It was run over the full diff and
+produced **26 numbered findings, two of them blockers**. Both blockers and every material finding
+were fixed at the cause on this branch; the ones that were authorization changes or capability
+removals are REPORTED instead, named below. The review is the reason this section exists in its
+current form — including the correction to the capability map, which it found and I had not.
+
+**BLOCKER 1 — a paid buyer's auction could go ACTIVE with nobody emailed, silently.**
+`issueInvitations` wrote the rows and enqueued the notices in one pass, inside the window where the
+auction is still `PENDING`. §27's dispatcher performs a send-time state recheck, and a `proceed:
+false` recheck writes the outbox row `skipped`, which is **terminal and never retried**. So the
+sequence was: rows written · notices enqueued · recheck sees PENDING · every notice skipped
+permanently · auction flips ACTIVE · the buyer is told N dealerships are competing · none of them
+has been contacted, and nothing anywhere is red. Fixed by splitting the row write from the
+dispatch: `IssueInvitationsOptions.deferDispatch` returns the pending notices instead of enqueuing
+them, `launchFromCase` calls `dispatchInvitations` **after** the ACTIVE flip, a `WRITE_FAILED` row
+holds the launch rather than proceeding, and a dispatch failure after the flip raises an Operations
+task — because at that point the auction is live and the correct action is a human re-send, not a
+rollback.
+
+**BLOCKER 2 — role fit rejected a registered dealer's own contact.** Reproduced with a throwaway
+probe test before accepting it, and it is real but **narrower than the review claimed**: a
+non-sales job title does pass `titleSatisfiesRoleFit`; what failed was a registered dealer account
+with a null contact profile, which then had no title to satisfy. Fixed with an explicit
+`contactIsRegisteredAccount` short-circuit — a dealership that already holds an AutoLenis account
+has established role fit by holding it. Recorded here at the narrower scope rather than the
+reported one.
+
+| # | Finding | Fix, or why it is reported instead |
+| --- | --- | --- |
+| 3 | The 8-rooftop cap counted `alreadyInvited.size`, which holds only non-null `rooftop_id`s — so dealer-bound invitations did not count against the field | `MAX_INVITATION_FIELD - existing.length`, over every live invitation |
+| 4 | `invitationIds.push(row.id)` ran BEFORE the firewall write and the notice, so a row could be reported as invited with no §25.1 entry behind it | Pushed last; the id is the receipt for work that completed |
+| 5 | `EVENT_TIMESTAMP.EXPIRED` stamped `expiresAt` — the TOKEN's expiry, not an event time | `Record<InvitationEvent, string \| null>` with `EXPIRED: null`; expiry stamps nothing |
+| 6 | `reflectInvitationDeliveryEvent` had **no caller**. The per-invitation state machine, `INVITATION_BOUNCED` and the contact-replacement path were all built and unreachable | Wired into `/api/webhooks/resend`, best-effort and isolated so it can never cost the suppression write |
+| 7 | The reminder sweep sent the 50% and 90% reminders in one tick, and one failure aborted the whole sweep | One reminder per tick (the later wins; the 50% is stamped, not sent), per-invitation `try`/`catch`, `failed: string[]`, and `enqueueReminder` returns `false \| "NEW" \| "DUPLICATE"` so the count means "reached the outbox" |
+| 8 | `buildFieldFromCase` ranked with a second comparator, and readiness rendered the UNCAPPED field while the launch invited eight — so a 12-rooftop case showed twelve and a different eight went out | `compareRankedRooftops` exported from the ladder and shared; `.slice(0, MAX_INVITATION_FIELD)`; `DEALER_COUNT` tests the capped field so a wide case is not blocked by its own width |
+| 9 | **Three rows of the capability map were FALSE and the totals did not reconcile** (21/5/3 stated against 23/4/2 actual) | Corrected in place and the totals recomputed from the table — see the map below, which records each correction rather than quietly restating it |
+| 10 | `evaluateReadiness` raised a queue item as a side effect of a GET: rendering `/admin/sourcing/[caseId]` could write `PREQUAL_APPROVAL_EXPIRED` | `raiseOnFailure` defaults **false**; `launchFromCase` passes true, because a launch that holds SHOULD leave somebody a task |
+| 11 | `/dealer/invitation/[token]` accepted a ROOFTOP match as authorisation, while the offer and decline routes scope on `dealerId` alone — the page offered a control the server then refused with a bare 404 | Narrowed to the server's own predicate. **REPORTED, not widened:** an invited outside rooftop that later claims an account still cannot bid until `auction_invitations.dealer_id` is back-filled on claim. Widening the server is an authorization change and wants §13-D37's security batch |
+| 12 | `/dealer/invitation/resume/[invitationId]` authorised any authenticated dealer — one rooftop's reminder link showed another rooftop's brief | `inv.dealerId !== null && dealer.id === inv.dealerId` |
+| 13 | `DealerInvitationBrief` rendered "Your offer is in" before the session was considered, so a forwarded link disclosed that a rooftop had bid on a sealed auction | `alreadyBid && authorized` — §13-D35 applies to the fact of a bid, not only to its contents |
+| 14 | `callOnlyCount` had no reader: the phone-only disclosure was unreachable and the owner's "two counts, separately" ruling held on the Operations side only | `countCallOnlyRooftops` reads `sourcing_candidates.validation.channel` — a read, not a migration |
+| 15 | `NotifyActiveDealersResult.gated` was unconditionally `false` after §13-D44 retired the fan-out, so the public request path reported the $99 pre-payment boundary as satisfied for an UNPAID buyer | Field removed, with the reason recorded at the definition. `retired: true` is the honest statement |
+| 16 | `queue_items.detail` carried `Matched: <the buyer's actual phone number>` — the exact PII §25.2 redacts — onto a surface every admin role reads | `Pattern: <class>`; the matched value stays on `circumvention_attempts`, which is Operations-reviewed and not rendered on a shared queue |
+| 17 | Defect 6's `countReachedInvitations` existed with no production caller, so close-on-zero was still live for an auction contacted only through outside invites | Wired into `loadState` (failing toward NOT closing) and into the sweep predicate, where `outsideInvites: { none: {} }` is a RELATION filter — typecheck proved my first attempt wrong, which is recorded because the comment had called it a scalar |
+| 18 | The holding-rooftop map ignored `InventoryItem.isActive` | `isActive === false → continue`. The review also proposed filtering the listing by radius; that would have been **wrong** — radius is the rooftop's property, not the listing's — so only the `isActive` half was applied |
+| 19 | Band expansion narrowed the SQL scan with the inner bounding box, which would have dropped real candidates sitting in the box's corners | The **inscribed** box, `boundingBox(buyerCoords, inner / Math.SQRT2)`, so the annulus exclusion can never exclude a candidate inside the ring |
+| 20 | `poolCeiling` was counted over the bounding box, inflating §13-D8's market signal with rooftops outside the circle | Counted in the circle (haversine over the box prefilter) |
+| 21 | `resolveContact` could spend a paid credit with no `sourcingCaseId` to attribute it to | Threaded through; required for the live paid tier |
+| 22 | `sourcing-driver` let `authorizedRadiusMiles ?? requested` hand a stale, larger authorisation the decision, and had no terminal band | `Math.max(requested, authorized)` and an explicit at-ceiling branch to `AUTHORIZED` |
+
+Findings 23–26 were non-material (comment accuracy, a dead import, two naming inconsistencies) and
+were applied without further note.
+
+**Two of my own errors are recorded here rather than quietly fixed**, because both were the kind
+that would have shipped a false claim. I wrote that `Number(band)` was `NaN` in the radius defect;
+it is not — the band values are `"100"`/`"150"`/`"250"` and parse fine. The two real defects are the
+`??` letting an over-band authorisation win and a permitted radius of 0 disabling the distance
+filter entirely, and the code comment now says that. And my first draft of the flip test asserted
+`typeof sweepSourcingCases === "undefined"`, which proves nothing whatever about the flag; it was
+rewritten to exercise the real sweep in both flag positions and to assert the consequence — that
+the flag-off sweep opens no auction for a paid request — rather than the sweep's own report of
+itself.
+
 #### Before → after capability map
 
-Every route, control, action and workflow this phase touched, with its disposition. The counts
-reconcile: **34 accounted for — 21 KEPT · 5 MOVED · 3 REGROUPED · 2 PROGRESSIVE · 3 REMOVED.**
-All three REMOVED are owner-signed-off (D44, D35, and §8.2's own retirement of close-on-zero).
+Every route, control, action and workflow this phase touched, with its disposition.
+
+**The counts reconcile, and they were COUNTED rather than recalled: 37 accounted for —
+27 KEPT (of which 6 are new surfaces) · 4 MOVED · 2 REGROUPED ·
+3 PROGRESSIVE · 1 REMOVED.** The 1 REMOVED is §13-D44's outright
+retirement of the untargeted dealer broadcast, which the owner signed off on 2026-09-11. §13-D35's
+sealed-auction changes are PROGRESSIVE rather than removals: `offerCount` and the segment median are
+withheld while the auction is live and published once it closes.
+
+**THREE ROWS IN THE FIRST VERSION OF THIS TABLE WERE FALSE**, found by the independent review rather
+than by me, and corrected in place: `outside_auction_invites` writes are NOT stopped (three live admin
+write sites remain); the QStash dealer-SMS rail is NOT removed (`/api/jobs/dealer-invited` still exists
+and is still publishable); and the reconciler's close-on-zero branch is NOT retired — it stands down only
+when the flip is ON, which it is not. The stated totals were wrong too: 21/5/3 against an actual 23/4/2
+at the time. CLAUDE.md's rule is that the counts must reconcile or the map is wrong. It was wrong; this
+is the corrected version, and the totals above were computed from the table rather than written by hand.
 
 | Capability (before) | After | Disposition |
 | --- | --- | --- |
 | `POST /api/admin/buyers/[buyerId]/launch-auction` — admin hand-picks dealers | Same route; routes through `issueInvitations`, caps at 8, orders deterministically | KEPT |
 | `dealer-invitation.service.ts` `scoreDealerForAuction` | Called by the ladder for the ranking | KEPT |
 | `outside-invite.service.ts` token route `/dealer-offer-outside/[token]` | Reads kept; the 2 historical rows still resolve | KEPT |
-| `OutsideAuctionInvite` writes | Stopped — `issueInvitations` is the only invitation writer | MOVED |
+| `OutsideAuctionInvite` writes (`mintOutsideInvites`, and `admin/offers`) | **NOT STOPPED — CORRECTED 2026-09-11 after the independent review.** Three live write sites remain: `admin/buyers/[buyerId]/launch-auction`, `admin/buyers/[buyerId]/invite-outside-dealers` and `admin/offers`. §8.4 plans Phase 5 to neutralise new writes, and stopping these would remove three admin capabilities — which needs owner sign-off, so it is REPORTED rather than done. `countReachedInvitations` sums both pools, so a rooftop invited through both rails is counted twice; that is the cost of leaving both open and is the reason to close them | KEPT |
 | 50%/90% invitation reminders (direct Resend, auction-keyed) | `sweepInvitationReminders` → `comms_outbox`, invitation-keyed | MOVED |
 | `auction-close` cron's nonresponder reminder | Removed from that cron; the reminder rail owns it | MOVED |
 | `request-coverage-gate` soft hold below `MIN_COVERAGE_DEALERS` | Pre-payment gate KEPT and fixed to fail closed; §6c is the post-payment authority | KEPT |
 | `coverage.service.ts` counting (fail-open on a coordless dealer) | Fails CLOSED when the buyer is placeable; buyer-unplaceable unchanged | KEPT |
 | `deposit-activation` reconciler `create_auction` / `invite` | Behind the flip; readiness owns them when it is on | REGROUPED |
-| `deposit-activation` reconciler `close`-on-zero | Retired — the readiness hold replaces it (§8.2 Phase 5) | REMOVED |
+| `deposit-activation` reconciler `close`-on-zero | **CONDITIONAL, not retired — CORRECTED 2026-09-11.** The readiness hold replaces it only when `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON; with the flag OFF (the default, and §13-D52 is the owner's) the branch still runs. What Phase 5 did fix is the defect that made it fire wrongly: it now counts BOTH invitation pools (`countReachedInvitations`), so an auction contacted only through outside invites is no longer read as zero-invitation and closed at the grace | PROGRESSIVE |
 | `notifyActiveDealersOfOpportunity` (20-dealer broadcast) | Retired outright (§13-D44) | REMOVED |
-| QStash dealer-SMS rail | Retired with it | REMOVED |
+| QStash dealer-SMS rail (`/api/jobs/dealer-invited`) | **NOT REMOVED — CORRECTED 2026-09-11 after the independent review.** The route still exists and `lifecycle-scheduler.ts:160` can still publish to it; only `dealer-bid-reminder` was retired, and that was at the Phase 2 cutover, not here. §8.4 puts the QStash retirement in Phase 10. Reported rather than claimed | KEPT |
 | Dealer insights route `offerCount` while live | `null` while ACTIVE, published on CLOSED (§13-D35) | PROGRESSIVE |
 | Quick-offer page median | Deleted; `auction-insights-policy.ts` is the single authority, imported by route and page | REGROUPED |
 | Quick-offer page `_count` crash | `offerCount: number \| null`, renders "Sealed bidding" | KEPT |
@@ -1069,6 +1148,9 @@ All three REMOVED are owner-signed-off (D44, D35, and §8.2's own retirement of 
 | Identity firewall entry | Written WITHHELD at invitation; the LIFT stays Phase 7's (§11.6) | PROGRESSIVE |
 | `fulfillment-gate.ts` buyer-scoped predicate | Kept; `isRequestFulfillmentUnlocked` added alongside (the VR-scoped gate Phase 3 deferred) | KEPT |
 | `approval-recheck.ts` gates | Gains `"auction_launch"`, included in `postPaymentGate` | KEPT |
+| `sendDealerAuctionInvitationEmail` to REGISTERED dealers on the admin launch route | Removed from that loop — `issueInvitations` already enqueues their tokenised invitation through the dispatcher. It was sending a SECOND, generic-dashboard email under a different key namespace, so nothing deduplicated them. Retained for the OUTSIDE pool, which `issueInvitations` does not cover | MOVED |
+| Resend webhook delivery events | Now also reflected onto live `auction_invitations` (`reflectInvitationDeliveryEvent`), which is what makes S7-14b's state machine, S7-21's bounce exception and the contact replacement REACHABLE. They were built and had no trigger | KEPT |
+| `deposit-activation` reconciler's invitation count | Now `countReachedInvitations` (both pools) in `loadState` AND in the sweep predicate. Defect 6's fix existed and had no production caller, so the close-on-zero branch was still live for an auction contacted only through outside invites | KEPT |
 | `prisma migrate` chain | One additive migration; zero functional drift, structural drift exactly 344 | KEPT |
 
 #### What is NOT VERIFIED, and exactly what would verify it
@@ -1983,7 +2065,9 @@ and every §-citation in the Phase 5 record refers to the text §1 verified. Thi
 change during Phase 5, deliberately and only where the phase was authorised to correct it:
 
 - §8.4 rows 1 and 2 — the `LEGACY_PATH_WRITE` removal clock is measured over **non-concierge**
-  settlements, and `outside_auction_invites` writes are recorded as stopped with reads kept;
+  settlements, and `outside_auction_invites` writes are recorded as **NOT stopped** (three live
+  admin write sites, reported for owner sign-off) with reads kept — this bullet claimed the
+  opposite until 2026-09-12;
 - §13-D52's verification (b) — **non-concierge**, with the owner's 2026-09-11 ruling, the named
   guard, the §8.4 scope consequence, the concierge 23505 risk, and precondition (a)'s census;
 - §13-D35, D36 (plus the `operating_status` sub-ruling), D37, D42, D44 and D8 — the owner's rulings
@@ -2315,7 +2399,7 @@ on a month counter.
 - Launch readiness checklist (every §7 entry item) → 48-hour sealed auction; one tokenised, expiring,
   auction-and-rooftop-bound invitation per rooftop for registered **and** outside dealers via
   `auction_invitations`; `outside_auction_invites` writes stopped (monitored adapter keeps reads for the
-  two historical rows); invitation content carries no buyer identity; per-invitation tracking; 50%/90%
+  two historical rows) — **this scope item is NOT ACHIEVED; see §8.4 row 2 and §8.1e finding 9**; invitation content carries no buyer identity; per-invitation tracking; 50%/90%
   reminders and bounce replacement via dispatcher + queue; identity firewall lift deferred to Phase 7.
 - **Defects the sourcing verification surfaced (§10 *sourcing*), fixed at the cause here:** (1) the
   Resend transactional rail (`sendIdempotent`, `resend.service.ts:129-200`) applies **no suppression**,
@@ -2574,8 +2658,8 @@ the register has at least one enqueue/raise site.
 
 | Legacy path | Phase that neutralises new writes | Compatibility kept for | Removal |
 | --- | --- | --- | --- |
-| Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
-| `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5):** writes stopped — `issueInvitations` is the only invitation writer and targets `auction_invitations`; the two historical rows are still read |
+| Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, which it is not — §8.1e finding 17**) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
+| `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them |
 | `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI (writes canonical `offers`) | keep as intake; no drop |
 | Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |

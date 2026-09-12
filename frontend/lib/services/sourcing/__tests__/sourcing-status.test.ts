@@ -317,6 +317,123 @@ test("ranking puts registered rooftops first, then score, then distance — §6a
   assert.deepEqual(rankRooftops([lo, hi]).map((x) => x.rooftopId), ["hi", "lo"]);
 });
 
+// ── §6b role fit, and the registered dealer it was excluding ─────────────────
+
+test("a registered ACTIVE dealer with NO contact profile IS invitation-ready", async () => {
+  // FOUND BY THE INDEPENDENT REVIEW, REPRODUCED, AND FIXED AT THE CAUSE.
+  //
+  // Role fit was evaluated against `r.contact?.title` even when the contact email came from the
+  // registered dealer's own ACCOUNT. A rooftop with a registered ACTIVE dealer and no
+  // `dealer_contact_profiles` row has a null title, so it failed `NO_ROLE_FIT` and was never
+  // invitation-ready — and §6a step 1 is "registered dealerships within 100 miles", the FIRST rung
+  // of the ladder, which `rankRooftops` also puts first. They were structurally excluded from it.
+  //
+  // Silently, too: the channel is EMAIL rather than CALL_ONLY, so the rooftop was not counted in
+  // `callOnlyCount` either. It vanished with no Operations task and no buyer-visible number.
+  //
+  // §6b's role item exists for COLD outreach — it stops an invitation reaching a service advisor
+  // at a guessed address. An account email is the address the dealership gave AutoLenis to be
+  // contacted at, so there is no person's title to test and role fit holds by construction.
+  const { validateRooftop } = await import("@/lib/services/sourcing/rooftop-sourcing.service");
+  const v = await validateRooftop(
+    {
+      rooftop: {
+        rooftopId: "rt_reg",
+        displayName: "Registered Motors",
+        latitude: 32.8,
+        longitude: -96.8,
+        makes: ["Toyota"],
+        operatingStatus: null,
+        websiteHost: "reg.example",
+        dealer: {
+          id: "d1",
+          status: "ACTIVE",
+          currentAuctionLoad: 0,
+          email: "sales@reg.example",
+          dealershipName: "Registered Motors",
+        },
+        contact: null,
+      },
+      buyerCoords: { lat: 32.8, lng: -96.8 },
+      radiusMiles: 100,
+      servedCandidateIds: ["inv_1"],
+      candidateMakes: new Set(["Toyota"]),
+      alreadyCounted: new Set<string>(),
+      allowPaid: false,
+    },
+    { channelConfigured: () => true },
+  );
+  assert.equal(v.invitationReady, true, `failures were ${v.failures.join(",")}`);
+  assert.equal(v.roleFit, true);
+  assert.equal(v.contactSource, "registered_dealer_account");
+  assert.equal(v.contactEmail, "sales@reg.example");
+  assert.equal(v.channel, "EMAIL");
+});
+
+test("an OUTSIDE rooftop still needs a qualifying role — the fix is scoped to the account email", async () => {
+  // The other direction. Satisfying role fit for every rooftop would have removed §6b's item
+  // rather than corrected it: a cold-resolved address with no qualifying title must still fail.
+  const { validateRooftop } = await import("@/lib/services/sourcing/rooftop-sourcing.service");
+  const v = await validateRooftop(
+    {
+      rooftop: {
+        rooftopId: "rt_out",
+        displayName: "Outside Motors",
+        latitude: 32.8,
+        longitude: -96.8,
+        makes: ["Toyota"],
+        operatingStatus: null,
+        websiteHost: "out.example",
+        dealer: null,
+        contact: {
+          name: "Parts Desk",
+          title: "Parts Counter",
+          email: "parts@out.example",
+          phone: null,
+          emailVerificationStatus: "VERIFIED",
+          contactSource: "role_derived",
+        },
+      },
+      buyerCoords: { lat: 32.8, lng: -96.8 },
+      radiusMiles: 100,
+      servedCandidateIds: ["inv_1"],
+      candidateMakes: new Set(["Toyota"]),
+      alreadyCounted: new Set<string>(),
+      allowPaid: false,
+    },
+    {
+      resolveContact: async () => ({ contactable: true, email: "parts@out.example", status: "VERIFIED", source: "role_derived" }),
+      channelConfigured: () => true,
+    },
+  );
+  assert.equal(v.invitationReady, false);
+  assert.ok(v.failures.includes("NO_ROLE_FIT"), `failures were ${v.failures.join(",")}`);
+});
+
+// ── §6a's ranking key, shared between the ladder and the launch ───────────────
+
+test("compareRankedRooftops is total, and orders registered → score → distance → id", async () => {
+  const { compareRankedRooftops } = await import("@/lib/services/sourcing/rooftop-sourcing.service");
+  const reg = { isRegistered: true, score: 1, distanceMiles: 90, key: "z" };
+  const out = { isRegistered: false, score: 99, distanceMiles: 1, key: "a" };
+  assert.ok(compareRankedRooftops(reg, out) < 0, "§6a step 1 is registered within 100, before step 2");
+
+  const hi = { isRegistered: true, score: 80, distanceMiles: 50, key: "b" };
+  const lo = { isRegistered: true, score: 10, distanceMiles: 5, key: "a" };
+  assert.ok(compareRankedRooftops(hi, lo) < 0, "score outranks distance within a tier");
+
+  const near = { isRegistered: true, score: 10, distanceMiles: 5, key: "b" };
+  const far = { isRegistered: true, score: 10, distanceMiles: 50, key: "a" };
+  assert.ok(compareRankedRooftops(near, far) < 0, "nearer first at equal score");
+
+  // Totality: identical on every dimension but the key.
+  const x = { isRegistered: true, score: 10, distanceMiles: 5, key: "a" };
+  const y = { isRegistered: true, score: 10, distanceMiles: 5, key: "b" };
+  assert.ok(compareRankedRooftops(x, y) < 0);
+  assert.ok(compareRankedRooftops(y, x) > 0);
+  assert.equal(compareRankedRooftops(x, { ...x }), 0);
+});
+
 // ── the D36 sub-ruling on operating_status ────────────────────────────────────
 
 test("operating_status is a NEGATIVE filter: unknown is not closed", async () => {

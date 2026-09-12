@@ -143,9 +143,21 @@ function buildDetail(
   scope: PaidAuctionScope,
   attemptsInWindow: number,
 ): string {
+  // THE MATCHED TEXT DOES NOT GO ON THE QUEUE ROW.
+  //
+  // `matchedText` is the buyer's or the dealer's actual phone number or email address — the PII
+  // the redaction exists to remove from the thread. `queue_items.detail` is rendered by
+  // `/admin/queues`, which is gated by `requireAdmin()` only: every admin role reads it. Putting
+  // "Matched: 214-555-1234" there would publish to every admin exactly the string §25.2 redacts
+  // from the one place it was typed.
+  //
+  // The PATTERN CLASS is what an operator needs to triage ("PHONE_NUMBER", "EMAIL_ADDRESS") — it
+  // says what kind of contact exchange was attempted without reproducing it. The matched text
+  // itself stays on `circumvention_attempts.pattern`, which is the Operations-reviewed record and
+  // is not rendered on a shared queue surface.
   const parts = [
     `${input.flag} detected in thread ${input.threadId.slice(-8)}, initiated by ${input.initiatorRole.toLowerCase()}.`,
-    `Matched: ${input.matchedText ?? input.pattern}.`,
+    `Pattern: ${input.pattern}. The matched value is on the attempt record, not here.`,
   ];
 
   if (input.initiatorRole === "BUYER") {

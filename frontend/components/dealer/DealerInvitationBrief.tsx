@@ -265,7 +265,11 @@ export default function DealerInvitationBrief({
       {/* THE ACTION, BEHIND A SESSION. §13-D37: the token binds the invitation, the session
           authorises the portal. */}
       <div className="mt-6" data-testid="invitation-action">
-        {alreadyBid ? (
+        {/* `authorized` GATES THE BID NOTICE TOO. Whether a dealership has already submitted an
+            offer on a sealed auction is competitive information (§13-D35), and this branch used to
+            render for anyone holding the link — including a forwarded mailbox — before the session
+            was considered. */}
+        {alreadyBid && authorized ? (
           <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4" data-testid="invitation-already-bid">
             <p className="flex items-center gap-2 text-sm font-semibold text-emerald-900">
               <CheckCircle2 size={15} aria-hidden="true" /> Your offer is in

@@ -648,15 +648,44 @@ export async function recordRadiusAuthorization(
 
   // The authorisation is "a maximum ADDITIONAL distance" (§Stage 6), measured from the
   // 250-mile ceiling the ladder already reached.
-  const authorized = 250 + Math.max(0, Math.floor(additionalMiles));
+  const requested = 250 + Math.max(0, Math.floor(additionalMiles));
+
+  // A LATER, SMALLER AUTHORISATION NEVER NARROWS AN EARLIER ONE.
+  //
+  // Not politeness — data integrity. By the time a second authorisation arrives the ladder may
+  // already have validated and persisted `sourcing_candidates` rows out at the larger ceiling;
+  // shrinking it would leave the case carrying rooftops outside its own permitted radius, which
+  // is exactly what readiness item ROOFTOPS_IN_DISTANCE then blocks the launch on. A replay of
+  // the same request, or a buyer who answers twice with different numbers, must not be able to
+  // produce that state. The ceiling only ever widens. (ASSUMPTION, recorded: §6a specifies the
+  // ceiling and "never exceeded", and is silent on narrowing. Narrowing, if it is ever wanted,
+  // is an Operations action that can also clear the candidates it invalidates.)
+  const authorized = Math.max(requested, sourcingCase.authorizedRadiusMiles ?? 0);
+
+  // ── THE BAND MOVES ONLY WHEN THE LADDER HAS ACTUALLY REACHED THE CEILING ──
+  //
+  // This was unconditional, and it skipped bands. `BAND_INNER_MILES.AUTHORIZED` is 250, so a
+  // case sitting at band 100 that was moved straight to AUTHORIZED searched only the 250→N
+  // annulus on its next tick: every rooftop between 100 and 250 miles was never validated. A
+  // buyer asking for MORE coverage got LESS — and the path was reachable, because nothing
+  // required the case to be at its ceiling (the POST route checks ownership and bounds, and the
+  // screen renders for any non-closed case).
+  //
+  // Recording the ceiling early is safe and is kept: `effectiveRadiusMiles` is
+  // `min(bandOuter, authorized)`, so a 300-mile ceiling on band 100 still searches 100 and the
+  // ladder walks 150 → 250 → AUTHORIZED normally, honouring the buyer's intent without skipping
+  // anything. Only the BAND move is gated.
+  const atCeiling =
+    sourcingCase.band === SOURCING_BAND.B250 || sourcingCase.band === SOURCING_BAND.AUTHORIZED;
 
   const moved = await transitionCase(
     {
       caseId: sourcingCase.id,
       to: SOURCING_CASE_STATUS.ACTIVE_SOURCING,
-      reason: `buyer authorised ${additionalMiles} additional miles (ceiling ${authorized})`,
-      band: SOURCING_BAND.AUTHORIZED,
-      bandExpandedAt: now,
+      reason:
+        `buyer authorised ${additionalMiles} additional miles (ceiling ${authorized})` +
+        (atCeiling ? "" : `; band stays ${sourcingCase.band} — the ladder has not reached 250 yet`),
+      ...(atCeiling ? { band: SOURCING_BAND.AUTHORIZED, bandExpandedAt: now } : {}),
       authorizedRadiusMiles: authorized,
     },
     db,
@@ -674,7 +703,10 @@ export async function recordRadiusAuthorization(
   await cancelByKey(radiusCancelKey(sourcingCase.id), "buyer recorded a maximum distance", db);
 
   logger.info(
-    `[sourcing-driver] ${vehicleRequestId}: radius authorised to ${authorized}mi; resuming at band AUTHORIZED`,
+    `[sourcing-driver] ${vehicleRequestId}: radius authorised to ${authorized}mi; ` +
+      (atCeiling
+        ? "resuming at band AUTHORIZED"
+        : `band stays ${sourcingCase.band} — the ladder walks up to the ceiling rather than jumping to it`),
   );
   return { ok: true, authorizedRadiusMiles: authorized };
 }

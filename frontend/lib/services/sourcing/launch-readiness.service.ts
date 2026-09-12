@@ -47,6 +47,7 @@ import {
   MIN_AUTO_LAUNCH_FIELD,
   MIN_LIMITED_AUCTION_FIELD,
   MAX_INVITATION_FIELD,
+  compareRankedRooftops,
 } from "./rooftop-sourcing.service";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -84,6 +85,22 @@ export interface ReadinessResult {
  * Evaluate every §7 entry item. PURE with respect to the auction: it creates nothing and
  * sends nothing, so a surface can show the checklist without side effects.
  */
+export interface EvaluateReadinessOptions {
+  /**
+   * Whether a failed approval recheck may RAISE its §26 exception.
+   *
+   * This function's header calls it "PURE with respect to the auction", and it was not: a failed
+   * `recheckApproval` writes a `queue_items` row, and `/admin/sourcing/[caseId]` calls this on
+   * every GET — so opening the page for a buyer whose prequalification had expired raised
+   * `PREQUAL_APPROVAL_EXPIRED` as a side effect of rendering. Deduplication kept it to one open
+   * row, but a GET that mutates is not what the comment promised. Found by the independent review.
+   *
+   * `launchFromCase` passes true, because a launch that holds on an expired approval SHOULD leave
+   * a task. A read-only surface passes false.
+   */
+  raiseOnFailure?: boolean;
+}
+
 export async function evaluateReadiness(
   vehicleRequestId: string,
   sourcingCase: SourcingCaseRecord,
@@ -92,7 +109,11 @@ export async function evaluateReadiness(
   // through the whole launch. Every time-dependent item delegates its own comparison:
   // the approval check to `recheckApproval`, the deposit to the deposit predicate.
   _now: Date = new Date(),
+  options: EvaluateReadinessOptions = {},
 ): Promise<ReadinessResult> {
+  // Default FALSE: the caller that wants a task says so. A default of true is how a read-only
+  // surface came to write one.
+  const raiseOnFailure = options.raiseOnFailure === true;
   const items: ReadinessItem[] = [];
 
   // ── 1. "the $99 is settled and undisputed" ──
@@ -122,7 +143,7 @@ export async function evaluateReadiness(
   const buyerId = await requestBuyerId(vehicleRequestId, db);
   const { recheckApproval } = await import("@/lib/services/prequal/approval-recheck");
   const approval = buyerId
-    ? await recheckApproval(buyerId, "auction_launch", { raiseOnFailure: true, vehicleRequestId }, db)
+    ? await recheckApproval(buyerId, "auction_launch", { raiseOnFailure, vehicleRequestId }, db)
     : ({ ok: false, reason: "NO_APPLICATION", message: "No buyer on this request." } as const);
   items.push({
     key: "APPROVAL_ATTACHED",
@@ -331,9 +352,15 @@ async function buildFieldFromCase(
     },
   });
 
-  const targets: InvitationTarget[] = [];
+  const targets: Array<InvitationTarget & { rankIsRegistered: boolean; rankScore: number }> = [];
   for (const r of rows) {
-    const v = (r.validation ?? {}) as { contactEmail?: string | null; contactName?: string | null; invitationReady?: boolean };
+    const v = (r.validation ?? {}) as {
+      contactEmail?: string | null;
+      contactName?: string | null;
+      invitationReady?: boolean;
+      rankIsRegistered?: boolean;
+      rankScore?: number;
+    };
     if (v.invitationReady !== true) continue;
     const email = v.contactEmail;
     if (!email) continue;
@@ -347,22 +374,38 @@ async function buildFieldFromCase(
       phone: null,
       distanceMiles: r.distanceMiles,
       candidateIds: r.servedCandidateIds ?? [],
-      invitationScore: null,
+      invitationScore: v.rankScore ?? null,
+      // §6a's own order needs both of these, and the row stores them in the validation JSON
+      // precisely so this rebuild can use them. `dealer !== null` is the fallback for a candidate
+      // written before the ranking inputs were persisted.
+      rankIsRegistered: v.rankIsRegistered ?? dealer !== null,
+      rankScore: v.rankScore ?? 0,
     });
   }
 
-  // Deterministic, and the same key `rankRooftops` uses: nearer first, then rooftop id. The
-  // score is not re-read here because `sourcing_candidates` does not store it; `issueInvitations`
-  // re-sorts on the same total key, so the cap cuts identically either way.
-  targets.sort((a, b) => {
-    const da = a.distanceMiles ?? Number.POSITIVE_INFINITY;
-    const dbb = b.distanceMiles ?? Number.POSITIVE_INFINITY;
-    if (da !== dbb) return da - dbb;
-    const ka = a.rooftopId ?? a.dealerId ?? a.email;
-    const kb = b.rooftopId ?? b.dealerId ?? b.email;
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
-  return targets.slice(0, MAX_INVITATION_FIELD);
+  // THE SAME COMPARATOR §6c RANKED WITH, not a second one.
+  //
+  // This sorted by distance and rooftop id alone, while §6a/§6c rank registered-first then by
+  // score — so the eight that launched were not the eight the outcome was decided on. On a case
+  // with twelve ready rooftops, two registered dealerships at 90 miles were IN §6c's field and
+  // OUT of the launched eight, and the admin readiness panel rendered this field while the §6c
+  // outcome had been computed on the other. `compareRankedRooftops` is now the single key.
+  targets.sort((a, b) =>
+    compareRankedRooftops(
+      { isRegistered: a.rankIsRegistered, score: a.rankScore, distanceMiles: a.distanceMiles, key: a.rooftopId ?? a.dealerId ?? a.email },
+      { isRegistered: b.rankIsRegistered, score: b.rankScore, distanceMiles: b.distanceMiles, key: b.rooftopId ?? b.dealerId ?? b.email },
+    ),
+  );
+  // CAPPED HERE, and the cap is §6c's "More than 8 — rank and invite the best eight". It is not
+  // redundant with `issueInvitations`' own cap: `REFERENCES_EXIST` tests `field.length <=
+  // MAX_INVITATION_FIELD`, so an uncapped field would BLOCK a twelve-rooftop case at readiness
+  // instead of launching it with the best eight — turning §6c's most favourable row into a hold.
+  //
+  // The ranking helpers do not leave this function: `InvitationTarget` is what the invitation rail
+  // consumes, and `invitationScore` already carries the score it needs to re-sort identically.
+  return targets
+    .slice(0, MAX_INVITATION_FIELD)
+    .map(({ rankIsRegistered: _r, rankScore: _s, ...t }) => t);
 }
 
 /**
@@ -420,7 +463,11 @@ export async function launchFromCase(
   db: PrismaClient = defaultPrisma as PrismaClient,
   now: Date = new Date(),
 ): Promise<LaunchResult> {
-  const readiness = await evaluateReadiness(vehicleRequestId, sourcingCase, db, now);
+  // A LAUNCH MAY RAISE. Unlike the admin surface, this path is the one §26's exception is for: an
+  // approval that expired between payment and launch is a real blocker with a real owner.
+  const readiness = await evaluateReadiness(vehicleRequestId, sourcingCase, db, now, {
+    raiseOnFailure: true,
+  });
   if (!readiness.ready) {
     await holdWithBlockers(vehicleRequestId, sourcingCase, readiness, db);
     return { launched: false, auctionId: null, invitationsIssued: 0, blockers: readiness.blockers };
@@ -489,8 +536,28 @@ export async function launchFromCase(
     logger.warn(`[readiness] candidate promotion failed for auction ${auctionId}:`, err);
   }
 
-  // ── step 2: invitations, QUEUED, against a PENDING auction ──
-  const issued = await issueInvitations(auctionId, readiness.field, db, now);
+  // ── step 2: invitation ROWS, QUEUED, against a PENDING auction ──
+  //
+  // `deferDispatch` splits the row write from the notice, and the split is not cosmetic. The §27
+  // send-time recheck on `dealer_invited` refuses while the auction is not ACTIVE, and a refusal
+  // is TERMINAL — so enqueueing here, inside the PENDING window, meant a drain tick (every
+  // minute) landing before the flip marked those notices skipped forever while the auction went
+  // ACTIVE anyway. See `IssueInvitationsOptions.deferDispatch`.
+  const issued = await issueInvitations(auctionId, readiness.field, db, now, { deferDispatch: true });
+
+  // A ROW THAT COULD NOT BE COMPLETED IS A BLOCKER, NOT A LOG LINE. `WRITE_FAILED` means the
+  // invitation row committed but its firewall entry or its notice did not — §25.1's evidence
+  // missing for a dealership that is nonetheless in the field. Holding is the honest outcome: the
+  // auction stays PENDING and an operator sees which rooftops failed, rather than the buyer being
+  // told a dealership is competing that was never reached.
+  const incomplete = issued.skipped.filter((s) => s.reason === "WRITE_FAILED");
+  if (incomplete.length > 0) {
+    const blocker =
+      `${incomplete.length} invitation(s) were written but could not be completed ` +
+      `(rooftops: ${incomplete.map((s) => s.rooftopId).join(", ")}). The auction stays PENDING.`;
+    await holdWithBlockers(vehicleRequestId, sourcingCase, { ...readiness, blockers: [blocker] }, db);
+    return { launched: false, auctionId, invitationsIssued: issued.issued, blockers: [blocker] };
+  }
 
   // ── step 3: ACTIVE, in one transaction, ONLY with a real invitation row ──
   //
@@ -520,17 +587,47 @@ export async function launchFromCase(
     return { launched: false, auctionId, invitationsIssued: issued.issued, blockers: [blocker] };
   }
 
+  // ── step 4: the notices, now that the auction is ACTIVE and the recheck will pass ──
+  //
+  // AFTER the flip, deliberately. Before it, every one of these would have been refused by
+  // `skipIfInvitationNoLongerSendable` and marked skipped — terminal.
+  const { dispatchInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  const dispatch = await dispatchInvitations(issued.pendingDispatch, db);
+  if (dispatch.failed.length > 0) {
+    // The auction is ACTIVE and the rows exist, so this is not a reason to unwind it — but it IS
+    // a reason an operator must see: those dealerships hold an invitation nobody told them about.
+    // Raised rather than logged, because a log line is not a task.
+    await holdWithBlockers(
+      vehicleRequestId,
+      sourcingCase,
+      {
+        ...readiness,
+        blockers: [
+          `${dispatch.failed.length} invitation notice(s) could not be queued for auction ` +
+            `${auctionId} (invitations: ${dispatch.failed.join(", ")}). The auction is live; those ` +
+            `dealerships have not been contacted.`,
+        ],
+      },
+      db,
+    );
+  }
+
   await transitionCase(
     {
       caseId: sourcingCase.id,
       to: SOURCING_CASE_STATUS.LAUNCHED,
-      reason: `launched auction ${auctionId} with ${issued.issued} invitation(s)`,
+      reason:
+        `launched auction ${auctionId} with ${issued.issued} invitation(s), ` +
+        `${dispatch.dispatched} notice(s) queued`,
       coverageCount: issued.issued,
     },
     db,
   );
 
-  logger.info(`[readiness] auction ${auctionId} ACTIVE with ${issued.issued} invitation(s), closes ${endsAt.toISOString()}`);
+  logger.info(
+    `[readiness] auction ${auctionId} ACTIVE with ${issued.issued} invitation(s), ` +
+      `${dispatch.dispatched} notice(s) queued, closes ${endsAt.toISOString()}`,
+  );
   return { launched: true, auctionId, invitationsIssued: issued.issued, blockers: [] };
 }
 

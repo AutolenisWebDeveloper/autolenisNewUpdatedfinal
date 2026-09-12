@@ -78,7 +78,18 @@ export default async function AdminSourcingCasePage({ params }: Props) {
   let readiness: Awaited<ReturnType<typeof evaluateReadiness>> | null = null;
   let readinessError: string | null = null;
   try {
-    readiness = await evaluateReadiness(sourcingCase.vehicleRequestId, sourcingCase);
+    // READ-ONLY: `raiseOnFailure` stays false so rendering this page cannot write a queue item.
+    // It used to — a failed approval recheck raised `PREQUAL_APPROVAL_EXPIRED` as a side effect of
+    // a GET, which is not what `evaluateReadiness`' own "pure with respect to the auction" header
+    // promised. Found by the independent review. `launchFromCase` passes true, because a launch
+    // that holds on an expired approval SHOULD leave somebody a task.
+    readiness = await evaluateReadiness(
+      sourcingCase.vehicleRequestId,
+      sourcingCase,
+      undefined,
+      undefined,
+      { raiseOnFailure: false },
+    );
   } catch (err) {
     readinessError = err instanceof Error ? err.message : "Unknown error evaluating readiness";
   }

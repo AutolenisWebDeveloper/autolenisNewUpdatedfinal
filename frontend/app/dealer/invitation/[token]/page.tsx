@@ -94,14 +94,22 @@ export default async function DealerInvitationPage({ params }: Props) {
   const req = auction?.vehicleRequest ?? null;
   const dealer = await getAuthenticatedDealer();
 
-  // THE SESSION MUST MATCH THE INVITATION, not merely exist. A signed-in dealer holding another
-  // rooftop's link is authenticated but not authorised for THIS invitation, and treating any
-  // session as sufficient would make the token transferable between dealerships — the isolation
-  // failure the firewall exists to prevent.
+  // THE SESSION MUST MATCH THE INVITATION, not merely exist — and it must match it THE SAME WAY
+  // THE SERVER DOES.
+  //
+  // This accepted a ROOFTOP match as well as a dealer match, while every action behind it scopes
+  // on `dealerId` alone: `GET /api/dealer/auctions/[auctionId]` and the decline route both look
+  // up `{ auctionId, dealerId: dealer.id }`. So an outside rooftop that later claimed an account
+  // resolved to the same rooftop was shown "Submit your offer", followed it, and got a 404
+  // "Auction invitation not found" with no explanation — the UI offered a control the server
+  // refuses. Narrowed to the server's own predicate so the two cannot disagree.
+  //
+  // Widening the SERVER to accept a rooftop match would be the better product answer and is an
+  // authorization change (§13-D37's security batch), not something to slip in behind a page.
+  // REPORTED: an invited outside rooftop that claims an account still cannot bid on the auction
+  // it was invited to until `auction_invitations.dealer_id` is back-filled on claim.
   const sessionMatchesInvitation =
-    dealer !== null &&
-    ((invitation.dealerId !== null && dealer.id === invitation.dealerId) ||
-      (invitation.rooftopId !== null && dealer.rooftopId === invitation.rooftopId));
+    dealer !== null && invitation.dealerId !== null && dealer.id === invitation.dealerId;
 
   return (
     <DealerInvitationBrief

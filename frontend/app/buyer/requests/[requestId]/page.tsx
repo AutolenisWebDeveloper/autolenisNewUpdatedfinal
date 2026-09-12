@@ -12,7 +12,10 @@ import { ArrowRight, RefreshCw } from "lucide-react";
 import RequestElectionsClient from "@/components/buyer/RequestElectionsClient";
 import SourcingProgressPanel from "@/components/buyer/SourcingProgressPanel";
 import { getSourcingCase } from "@/lib/services/sourcing/sourcing-case.service";
-import { describeSourcingForBuyer } from "@/lib/services/sourcing/sourcing-buyer-view";
+import {
+  describeSourcingForBuyer,
+  countCallOnlyRooftops,
+} from "@/lib/services/sourcing/sourcing-buyer-view";
 import { OPEN_REQUEST_STATUSES } from "@/lib/services/vehicle-request/open-request.service";
 import { toBuyerLabel } from "@/lib/services/vehicle-request/vehicle-request.service";
 import { parseRequestNotes } from "@/lib/services/vehicle-request/notes-parser";
@@ -45,7 +48,12 @@ export default async function RequestDetailPage({ params }: Props) {
   // signal — no second predicate, and no panel promising a search on an unpaid request.
   // Null is the ordinary pre-payment state and renders nothing, not an error.
   const sourcingCase = await getSourcingCase(requestId);
-  const sourcingView = sourcingCase ? describeSourcingForBuyer(sourcingCase) : null;
+  // The phone-only count comes from the candidate rows the ladder persisted, not from the case —
+  // `sourcing_cases` has no column for it. Without this read the disclosure panel's call-only
+  // branch was unreachable and the owner's "two counts, separately" ruling held on the Operations
+  // side only.
+  const callOnly = sourcingCase ? await countCallOnlyRooftops(sourcingCase.id, prisma) : 0;
+  const sourcingView = sourcingCase ? describeSourcingForBuyer(sourcingCase, callOnly) : null;
 
   const hasOffer = req.status === "OFFER_SENT" && req.offers.length > 0;
   const isClosedNoMatch = req.status === "CLOSED_NO_MATCH";

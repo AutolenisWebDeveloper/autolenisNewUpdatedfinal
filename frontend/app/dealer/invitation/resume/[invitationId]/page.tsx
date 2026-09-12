@@ -115,12 +115,12 @@ export default async function ResumeInvitationPage({ params }: Props) {
     redirect(`/dealer/sign-in?next=${encodeURIComponent(`/dealer/invitation/resume/${invitationId}`)}`);
   }
 
-  // THE SESSION MUST MATCH THIS INVITATION. Authenticated is not authorised: a dealer holding
-  // another rooftop's reminder link must not be shown that rooftop's brief, or one dealership's
-  // reminder becomes another's view of the same auction.
-  const authorized =
-    (inv.dealerId !== null && dealer.id === inv.dealerId) ||
-    (inv.rooftopId !== null && dealer.rooftopId === inv.rooftopId);
+  // THE SESSION MUST MATCH THIS INVITATION, by the SERVER's predicate and not a looser one.
+  // Authenticated is not authorised: a dealer holding another rooftop's reminder link must not be
+  // shown that rooftop's brief. `dealerId` alone, because that is what the offer and decline
+  // routes scope on — see the note on the token page for why a rooftop match would offer a
+  // control the server then refuses.
+  const authorized = inv.dealerId !== null && dealer.id === inv.dealerId;
   if (!authorized) notFound();
 
   const now = new Date();

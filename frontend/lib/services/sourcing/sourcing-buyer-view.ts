@@ -19,6 +19,7 @@
 //
 // Run: pnpm test:sourcing
 
+import type { PrismaClient } from "@prisma/client";
 import {
   BAND_ORDER,
   BAND_OUTER_MILES,
@@ -106,12 +107,38 @@ export function bandRungs(sourcingCase: SourcingCaseRecord): BandRung[] {
 }
 
 /**
+ * Count the rooftops on a case that can only be reached by phone.
+ *
+ * WHY THIS EXISTS RATHER THAN A COLUMN. `callOnlyCount` is produced by a ladder STEP and
+ * `sourcing_cases` has no column for it, so the buyer surfaces had no way to obtain it and passed
+ * the default 0 — which made the phone-only disclosure in `SourcingProgressPanel` unreachable, and
+ * the owner's "two counts recorded separately" ruling true on the Operations side only. Found by the
+ * independent review.
+ *
+ * `sourcing_candidates.validation.channel` already records it per rooftop, so the count is a read
+ * rather than a migration: one query over the rows the ladder persisted. Excluded rows count too —
+ * a rooftop that is CALL_ONLY is excluded precisely BECAUSE it is call-only, and that is the thing
+ * being reported.
+ */
+export async function countCallOnlyRooftops(
+  sourcingCaseId: string,
+  db: Pick<PrismaClient, "sourcingCandidate">,
+): Promise<number> {
+  const rows = await db.sourcingCandidate.findMany({
+    where: { sourcingCaseId },
+    select: { validation: true },
+  });
+  return rows.filter((r) => (r.validation as { channel?: string } | null)?.channel === "CALL_ONLY")
+    .length;
+}
+
+/**
  * THE ONE PLACE a sourcing case becomes buyer-facing words.
  *
  * `callOnlyCount` is passed in rather than read, because it is a property of the LAST LADDER
  * STEP and not of the case row — `sourcing_cases` records `coverage_count` (the invitation-ready
- * field) and nothing else. A caller with no step result passes 0, which is honest: it means "we
- * are not currently reporting a phone-only count", not "there are none".
+ * field) and nothing else. Callers that want it read it with `countCallOnlyRooftops`; a caller
+ * that passes 0 is saying "not reporting one", never "there are none".
  */
 export function describeSourcingForBuyer(
   sourcingCase: SourcingCaseRecord,

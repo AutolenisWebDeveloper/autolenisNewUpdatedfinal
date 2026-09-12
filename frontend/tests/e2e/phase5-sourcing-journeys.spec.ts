@@ -431,6 +431,14 @@ test("journey 3: with the flag OFF the ladder stands down; with it ON the ladder
     const off = await sweepSourcingCases(prisma, new Date());
     expect(off.outcomes.FLAG_OFF).toBe(1);
     expect(off.casesConsidered).toBe(0);
+    // The count standing at zero is the sweep's own report of itself. This is the consequence
+    // that report is claiming, asserted against the case rather than against the counter: the
+    // flag-off sweep must not have opened an auction for this paid request, because the legacy
+    // webhook path is still the only thing allowed to.
+    expect(
+      await prisma.auction.findFirst({ where: { vehicleRequestId: f.requestId } }),
+      "the flag-off sweep created an auction the legacy path also creates",
+    ).toBeNull();
 
     // ON — what the owner's flip changes. The sweep reaches the case; whether that case then
     // launches depends on readiness, which journey 1 covers.

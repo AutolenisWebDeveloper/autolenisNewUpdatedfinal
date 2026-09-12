@@ -44,6 +44,13 @@ interface Ctrl {
   sequence: string[];
   /** The status the real `transitionCase` will read back — its compare-and-set runs for real. */
   caseStatusInDb: string;
+  /** True when `launchFromCase` asked for the notices to be deferred past the ACTIVE flip. */
+  deferRequested: boolean;
+  /** `skipped` entries `issueInvitations` returns — WRITE_FAILED must hold the launch. */
+  issueSkipped: Array<{ rooftopId: string; reason: string }>;
+  /** Invitation ids whose notice could not be queued. */
+  dispatchFailures: string[];
+  dispatched: number;
 }
 let ctrl: Ctrl;
 
@@ -89,6 +96,10 @@ beforeEach(() => {
     exceptions: [],
     sequence: [],
     caseStatusInDb: "READY_TO_LAUNCH",
+    deferRequested: false,
+    issueSkipped: [],
+    dispatchFailures: [],
+    dispatched: 0,
   };
 });
 
@@ -126,9 +137,31 @@ mock.module("@/lib/services/suppression.service", {
 
 mock.module("@/lib/services/auction/auction-invitation.service", {
   namedExports: {
-    issueInvitations: async () => {
-      ctrl.sequence.push("invite");
-      return { issued: ctrl.issuedCount, skipped: [], withheld: 0 };
+    // `deferDispatch` is the fix for the PENDING-window defect: the ROWS are written while the
+    // auction is PENDING (S7-07) and the NOTICES are enqueued after it goes ACTIVE, because the
+    // §27 send-time recheck refuses while the auction is not ACTIVE and a refusal is terminal.
+    // The fake records both steps separately so the ORDER can be asserted rather than assumed.
+    issueInvitations: async (
+      _auctionId: string,
+      field: unknown[],
+      _db: unknown,
+      _now: Date,
+      options?: { deferDispatch?: boolean },
+    ) => {
+      ctrl.sequence.push(options?.deferDispatch ? "write-rows" : "invite");
+      ctrl.deferRequested = options?.deferDispatch === true;
+      return {
+        issued: ctrl.issuedCount,
+        skipped: ctrl.issueSkipped,
+        invitationIds: Array.from({ length: ctrl.issuedCount }, (_, i) => `inv_${i}`),
+        pendingDispatch: Array.from({ length: ctrl.issuedCount }, (_, i) => ({ invitationId: `inv_${i}` })),
+        auctionId: _auctionId,
+      };
+    },
+    dispatchInvitations: async (notices: unknown[]) => {
+      ctrl.sequence.push("dispatch");
+      ctrl.dispatched = notices.length - ctrl.dispatchFailures.length;
+      return { dispatched: ctrl.dispatched, failed: ctrl.dispatchFailures };
     },
   },
 });
@@ -415,21 +448,57 @@ test("the field is capped at eight and ordered nearest-first, deterministically"
 // The launch sequence — S7-07
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("the launch sequence is PENDING → invite → read back → ACTIVE, in that order", async () => {
+test("the launch sequence is PENDING → rows → read back → ACTIVE → notices, in that order", async () => {
+  // THE NOTICES COME AFTER THE FLIP, AND THAT IS THE WHOLE CORRECTION.
+  //
+  // S7-07 requires the invitation ROWS while the auction is PENDING and the flip only once one
+  // can be read back. But `skipIfInvitationNoLongerSendable` — the §27 send-time recheck on
+  // `dealer_invited` — refuses while the auction is not ACTIVE, and a refusal marks the outbox row
+  // `skipped`, which is TERMINAL. The drain runs every minute, so enqueueing inside the PENDING
+  // window meant a tick landing before the flip killed those notices permanently — and the auction
+  // went ACTIVE anyway, because the ROWS existed, and the buyer was told N dealerships were
+  // competing when none had been emailed. The order below is what closes that window, so it is
+  // asserted as an ORDER and not as a set.
   const res = await launch();
   assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
   assert.equal(res.auctionId, "auc_1");
   assert.equal(res.invitationsIssued, 6);
-  // The order is the requirement, so it is asserted as an order rather than as a set.
+  assert.equal(ctrl.deferRequested, true, "the notices were enqueued inside the PENDING window");
   assert.deepEqual(ctrl.sequence, [
     "create:PENDING",
     "promote",
-    "invite",
+    "write-rows",
     "count",
     "activate:ACTIVE",
+    "dispatch",
     "transition:LAUNCHED",
   ]);
   assert.equal(ctrl.auctionUpdates[0].where.status, "PENDING", "the flip was not a compare-and-set");
+  assert.equal(ctrl.dispatched, 6);
+});
+
+test("a row written but not completed HOLDS the launch — WRITE_FAILED is a blocker, not a log line", async () => {
+  // `WRITE_FAILED` means the invitation row committed and its firewall entry or notice did not:
+  // §25.1's evidence missing for a dealership that is nonetheless in the field. Launching anyway
+  // would tell the buyer a dealership is competing that was never reached.
+  ctrl.issueSkipped = [{ rooftopId: "rt_3", reason: "WRITE_FAILED" }];
+  const res = await launch();
+  assert.equal(res.launched, false);
+  assert.ok(!ctrl.sequence.includes("activate:ACTIVE"), "the auction was activated with an incomplete invitation");
+  assert.ok(!ctrl.sequence.includes("dispatch"));
+  assert.match(res.blockers[0], /could not be completed/);
+  assert.equal(ctrl.exceptions.length, 1);
+});
+
+test("a notice that cannot be queued raises an Operations task — the auction stays live", async () => {
+  // The auction is ACTIVE and the rows exist, so unwinding it would be worse. But those
+  // dealerships hold an invitation nobody told them about, which is a task and not a log line.
+  ctrl.dispatchFailures = ["inv_2"];
+  const res = await launch();
+  assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
+  assert.equal(ctrl.auctions[0].status, "ACTIVE");
+  assert.equal(ctrl.exceptions.length, 1);
+  assert.match(String(ctrl.exceptions[0].detail), /have not been contacted/);
 });
 
 test("THE ONE THAT MATTERS: zero invitation rows leaves the auction PENDING, never ACTIVE", async () => {

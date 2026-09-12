@@ -133,6 +133,23 @@ export interface RooftopValidation {
   makeFitOverridden?: boolean;
   /** Which tier of the contact waterfall answered, for the spend record. */
   contactSource: string | null;
+  /**
+   * THE RANKING INPUTS, PERSISTED, so the field that launches is the field §6c ranked.
+   *
+   * `launch-readiness.service.ts` rebuilds the invitation field from `sourcing_candidates` at
+   * launch time, and `sourcing_candidates` has columns for the rooftop, the distance and the
+   * served candidates — and none for the score or whether the rooftop is registered. So the
+   * rebuild could only sort by distance, while §6a/§6c rank registered-first then by score. On a
+   * case with twelve ready rooftops that meant the two registered dealerships at 90 miles were
+   * in the field §6c decided and OUT of the eight that actually launched, and the admin readiness
+   * panel showed a different field from the one the outcome was computed on.
+   *
+   * `validation` is a JSON column, so carrying them here is additive and needs no migration.
+   * `compareRankedRooftops` is then the ONE comparator both paths use.
+   */
+  rankIsRegistered?: boolean;
+  rankScore?: number;
+  rankDisplayName?: string;
 }
 
 /**
@@ -239,12 +256,26 @@ export async function resolveCandidateRooftops(
     return d > inner && d <= radiusMiles;
   };
 
-  // ── the holding rooftop, "where mapped and in radius" (§6a step 0) ──
+  // ── the holding rooftop (§6a step 0) ──
+  //
+  // "IN RADIUS" IS THE ROOFTOP'S PROPERTY, NOT THE LISTING'S, and the comment here used to say
+  // otherwise — which the independent review rightly flagged as code not doing what it claims.
+  // The resolution is to correct the claim rather than the filter, and the reason is a real
+  // failure mode: `collectBandRooftops` decides band membership from the ROOFTOP's coordinates, and
+  // applying `inBand` to the LISTING's coordinates here would drop a rooftop that genuinely holds
+  // one of the buyer's shortlisted vehicles whenever the listing's own lat/long is absent or stale
+  // relative to its rooftop's. This map answers only "which shortlisted candidates can this rooftop
+  // serve"; whether the rooftop is in band is settled elsewhere, once, on better data.
+  //
+  // `isActive` IS the listing's own property and is applied: a rooftop cannot serve a candidate
+  // whose listing has been deactivated, and `inventory_items.is_active` was selected here and never
+  // read.
   for (const l of listings) {
     if (!l.rooftopId) {
       unmappedCandidateIds.push(l.id);
       continue;
     }
+    if (l.isActive === false) continue;
     holding.set(l.rooftopId, [...(holding.get(l.rooftopId) ?? []), l.id]);
   }
 
@@ -417,10 +448,40 @@ export async function collectBandRooftops(
   }
 
   const bb = boundingBox(buyerCoords, radiusMiles);
+
+  // ── THE SCAN WINDOW IS THE ANNULUS, NOT THE DISC ──
+  //
+  // The outer box plus `take: MAX_ROOFTOPS_PER_BAND` plus `orderBy: id` meant that in a dense
+  // market the later rungs of the ladder returned NOTHING NEW: band 150's box contains the whole
+  // 100-mile disc, so the first 200 rows by id were again almost all inside 100 miles and were
+  // dropped by the annulus filter below. `excludeRooftopIds` only removes the rooftops already
+  // PERSISTED, not the hundreds never reached. A buyer in a metro with >200 rooftops inside 100
+  // miles therefore walked 150 → 250 finding nothing and arrived at
+  // RADIUS_AUTHORIZATION_REQUIRED in a market full of dealerships, while `poolCeiling` reported
+  // hundreds. Found by the independent review.
+  //
+  // THE INSCRIBED BOX, NOT THE INNER BOUNDING BOX, and the distinction is the whole correctness
+  // argument. A rooftop inside the inner bounding box can still be OUTSIDE the inner circle — in
+  // the box's corners — and so can legitimately belong to the annulus; excluding that box would
+  // drop real candidates. The box INSCRIBED in the inner circle has half-width `inner / √2`, and
+  // every point inside it is within `inner` miles by construction. Excluding it is therefore
+  // exact: it removes only rooftops the annulus filter would have removed anyway, and it removes
+  // most of them, which is what gives the 200-row window reach on the later bands.
+  const inner = BAND_INNER_MILES[band];
+  const innerSafe = inner > 0 ? boundingBox(buyerCoords, inner / Math.SQRT2) : null;
+
   const rows = await db.dealerRooftop.findMany({
     where: {
       latitude: { gte: bb.minLat, lte: bb.maxLat },
       longitude: { gte: bb.minLng, lte: bb.maxLng },
+      ...(innerSafe
+        ? {
+            NOT: {
+              latitude: { gt: innerSafe.minLat, lt: innerSafe.maxLat },
+              longitude: { gt: innerSafe.minLng, lt: innerSafe.maxLng },
+            },
+          }
+        : {}),
       ...(excludeRooftopIds.size > 0 ? { id: { notIn: [...excludeRooftopIds] } } : {}),
     },
     select: {
@@ -455,7 +516,16 @@ export async function collectBandRooftops(
     take: MAX_ROOFTOPS_PER_BAND,
   });
 
-  const inner = BAND_INNER_MILES[band];
+  // SATURATION IS REPORTED, NOT SILENT. If the scan filled its window there may be more of this
+  // band left unexamined, and an operator reading "thin field" needs to know the difference
+  // between "we looked and found few" and "we stopped looking at 200".
+  if (rows.length >= MAX_ROOFTOPS_PER_BAND) {
+    logger.warn(
+      `[sourcing] band ${band} scan saturated at ${MAX_ROOFTOPS_PER_BAND} rooftops within ` +
+        `${radiusMiles}mi — the band may hold more than this pass examined`,
+    );
+  }
+
   const out: PoolRooftop[] = [];
   for (const r of rows) {
     if (r.latitude == null || r.longitude == null) continue; // fail closed
@@ -645,8 +715,26 @@ export async function validateRooftop(
   }
 
   // ── a relevant role ──
+  //
+  // §6b's role item is "a relevant sales, Internet Sales, BDC, or management role", and its
+  // purpose is COLD outreach: it stops an invitation going to a service advisor or a parts desk
+  // at an address a resolver guessed. It is a property of the PERSON the waterfall found.
+  //
+  // A REGISTERED DEALER'S OWN ACCOUNT EMAIL IS NOT THAT. It is the address the dealership gave
+  // AutoLenis to be contacted at, which is what an account email is for — so role fit is
+  // satisfied by construction and there is no person's title to test.
+  //
+  // THE BUG THIS FIXES was narrow and total. `titleSatisfiesRoleFit(r.contact?.title, …)` was
+  // evaluated even when the email came from `r.dealer.email`, so a registered ACTIVE dealer on a
+  // rooftop with NO `dealer_contact_profiles` row — title null — failed `NO_ROLE_FIT` and was
+  // never invitation-ready. §6a step 1 is "registered dealerships within 100 miles", the FIRST
+  // rung of the ladder, and `rankRooftops` puts registered first; they were structurally
+  // excluded from it. Worse silently: the channel is EMAIL rather than CALL_ONLY, so the rooftop
+  // was not counted in `callOnlyCount` either and vanished with no Operations task and no
+  // buyer-visible number. Reproduced and pinned in `sourcing-status.test.ts`.
+  const contactIsRegisteredAccount = contactSource === "registered_dealer_account";
   const roleFit = contactEmail
-    ? titleSatisfiesRoleFit(r.contact?.title, emailVerificationStatus)
+    ? contactIsRegisteredAccount || titleSatisfiesRoleFit(r.contact?.title, emailVerificationStatus)
     : false;
   if (contactEmail && !roleFit) failures.push("NO_ROLE_FIT");
 
@@ -718,16 +806,36 @@ export interface RankedRooftop {
  * outside is step 1 before step 2; nearer before farther is the ladder's own direction; and
  * score orders within those, using the platform's existing dealer score.
  */
+/**
+ * §6a/§6c's ranking key, as ONE comparator.
+ *
+ * Exported, and used by `rankRooftops` here AND by `buildFieldFromCase` in
+ * `launch-readiness.service.ts`. A second derivation is how the field §6c decided and the field
+ * that launched came to be different sets — see `RooftopValidation.rankIsRegistered`.
+ *
+ * TOTAL, ending at a unique key, which is defect 4's root cause: without a final unique
+ * comparison `Array.prototype.sort`'s stability leaves equal elements in input order, and for a
+ * `findMany` with no `orderBy` that is database order.
+ */
+export function compareRankedRooftops(
+  a: { isRegistered: boolean; score: number; distanceMiles: number | null; key: string },
+  b: { isRegistered: boolean; score: number; distanceMiles: number | null; key: string },
+): number {
+  if (a.isRegistered !== b.isRegistered) return a.isRegistered ? -1 : 1;
+  if (b.score !== a.score) return b.score - a.score;
+  const da = a.distanceMiles ?? Number.POSITIVE_INFINITY;
+  const db_ = b.distanceMiles ?? Number.POSITIVE_INFINITY;
+  if (da !== db_) return da - db_;
+  return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+}
+
 export function rankRooftops(candidates: RankedRooftop[]): RankedRooftop[] {
-  return [...candidates].sort((a, b) => {
-    if (a.isRegistered !== b.isRegistered) return a.isRegistered ? -1 : 1;
-    if (b.score !== a.score) return b.score - a.score;
-    const da = a.validation.distanceMiles ?? Number.POSITIVE_INFINITY;
-    const db_ = b.validation.distanceMiles ?? Number.POSITIVE_INFINITY;
-    if (da !== db_) return da - db_;
-    // The total tie-break. Defect 4's root cause was the absence of this line.
-    return a.rooftopId < b.rooftopId ? -1 : a.rooftopId > b.rooftopId ? 1 : 0;
-  });
+  return [...candidates].sort((a, b) =>
+    compareRankedRooftops(
+      { isRegistered: a.isRegistered, score: a.score, distanceMiles: a.validation.distanceMiles, key: a.rooftopId },
+      { isRegistered: b.isRegistered, score: b.score, distanceMiles: b.validation.distanceMiles, key: b.rooftopId },
+    ),
+  );
 }
 
 export type SourcingOutcome =
@@ -968,15 +1076,30 @@ export async function advanceSourcing(
   // ── the band's rooftops, annulus only, minus everything already validated ──
   const pool = await collectBandRooftops(buyerCoords, band, radiusMiles, alreadyCounted, db);
 
-  // §13-D8's pool ceiling: every rooftop inside the permitted radius regardless of band or
+  // §13-D8's pool ceiling: every rooftop inside the permitted RADIUS regardless of band or
   // validation. Under match-only this is what AutoLenis holds, not what the market contains.
-  const bb = boundingBox(buyerCoords, radiusMiles);
-  const poolCeiling = await db.dealerRooftop.count({
+  //
+  // COUNTED IN THE CIRCLE, NOT THE BOX. This was a bounding-box `count`, which overstates a disc by
+  // 4/π — about 27% — and the number is operator-facing: `THIN_DEALER_COVERAGE`'s detail tells an
+  // operator "N rooftop(s) exist in range before validation" and explicitly invites them to read the
+  // gap against the ready count as a validation or contact shortfall. A ceiling 27% high makes that
+  // gap look like a problem that is not there. Found by the independent review. The box is still the
+  // SQL prefilter — it is what an index can serve — and the haversine cut is applied to its result,
+  // the same shape `collectBandRooftops` uses.
+  const ceilingBox = boundingBox(buyerCoords, radiusMiles);
+  const ceilingRows = await db.dealerRooftop.findMany({
     where: {
-      latitude: { gte: bb.minLat, lte: bb.maxLat },
-      longitude: { gte: bb.minLng, lte: bb.maxLng },
+      latitude: { gte: ceilingBox.minLat, lte: ceilingBox.maxLat },
+      longitude: { gte: ceilingBox.minLng, lte: ceilingBox.maxLng },
     },
+    select: { latitude: true, longitude: true },
   });
+  const poolCeiling = ceilingRows.filter(
+    (r) =>
+      r.latitude != null &&
+      r.longitude != null &&
+      haversineMiles(buyerCoords, { lat: r.latitude, lng: r.longitude }) <= radiusMiles,
+  ).length;
 
   // ── §6b on each, then persist ──
   const ranked: RankedRooftop[] = [];
@@ -1006,6 +1129,11 @@ export async function advanceSourcing(
     );
     if (validation.channel === "CALL_ONLY") callOnlyCount += 1;
     const score = rt.dealer ? await scoreDealer(rt.dealer.id, [...candidateMakes]) : 0;
+    // The ranking inputs go INTO the validation JSON, because that is the only part of a
+    // candidate row that survives to launch time. See `RooftopValidation.rankIsRegistered`.
+    validation.rankIsRegistered = !!rt.dealer;
+    validation.rankScore = score;
+    validation.rankDisplayName = rt.displayName;
     ranked.push({
       rooftopId: rt.rooftopId,
       validation,
@@ -1024,6 +1152,15 @@ export async function advanceSourcing(
   await persistCandidates(existingCase.id, ranked, db);
 
   // ── merge the reused rows back in, so §6c sees the whole field ──
+  //
+  // THE RANKING INPUTS ARE RESTORED FROM THE STORED VALIDATION, not reset.
+  //
+  // They were hard-coded `isRegistered: false, score: 0, displayName: ""`, which meant the
+  // ranking DEGRADED on every band expansion: a registered dealer validated at band 100 with a
+  // score of 80 came back on the band-150 tick as an unregistered rooftop scoring zero, and
+  // `rankRooftops` then put it below every newly found outside rooftop. §6a's "registered
+  // dealerships first" held for one band and was silently lost on the second — so a case that
+  // expanded once no longer invited the field §6a describes.
   const reused: RankedRooftop[] = existing
     .filter((e) => e.rooftopId)
     .map((e) => {
@@ -1040,14 +1177,19 @@ export async function advanceSourcing(
           contactEmail: v.contactEmail ?? null,
           contactName: v.contactName ?? null,
           contactSource: v.contactSource ?? null,
+          rankIsRegistered: v.rankIsRegistered,
+          rankScore: v.rankScore,
+          rankDisplayName: v.rankDisplayName,
         },
         band,
         servedCandidateIds: e.servedCandidateIds ?? [],
         source: e.source === "HOLDING" ? "HOLDING" : "COMPARABLE",
-        isRegistered: false,
+        // Restored from the stored validation. Absent on a row written before this fix, in which
+        // case the old defaults apply — which is a ranking that degrades rather than a crash.
+        isRegistered: v.rankIsRegistered ?? false,
         dealerId: null,
-        score: 0,
-        displayName: "",
+        score: v.rankScore ?? 0,
+        displayName: v.rankDisplayName ?? "",
         contactEmail: v.contactEmail ?? null,
         contactName: v.contactName ?? null,
       } satisfies RankedRooftop;

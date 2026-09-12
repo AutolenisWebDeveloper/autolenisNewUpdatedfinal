@@ -138,6 +138,32 @@ async function loadState(depositId: string): Promise<LoadedState | null> {
   if (!deposit) return null;
   const a = deposit.auction;
   const ageMin = a ? (Date.now() - a.createdAt.getTime()) / 60000 : 0;
+
+  // DEFECT 6 — BOTH POOLS, OR THE CLOSE-ON-ZERO BRANCH IS STILL LIVE.
+  //
+  // `_count.invitations` counts `auction_invitations` only. `Auction.outsideInvites` is counted
+  // nowhere — not here and not in the sweep predicate below — so an auction contacted ONLY through
+  // outside invites read as zero-invitation and was auto-closed at the grace, after which every
+  // live token is rejected AUCTION_INACTIVE. The trigger is ordinary: `DEALER_REMOVED` hard-deletes
+  // invitation rows, so removing the last registered dealer from an auction carrying live outside
+  // invites drops this count to zero.
+  //
+  // Phase 5 wrote `countReachedInvitations` to fix exactly that, and the independent review found
+  // it had NO production caller — the fix existed and the defect was still live. This is the
+  // caller. It also excludes REPLACED/BOUNCED/EXPIRED, because an invitation that bounced reached
+  // nobody and counting it would keep an unreachable auction open.
+  let reachedInvitations = a?._count.invitations ?? 0;
+  if (a) {
+    try {
+      const { countReachedInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+      reachedInvitations = (await countReachedInvitations(a.id, prisma)).total;
+    } catch (err) {
+      // FAIL TOWARD NOT CLOSING. A count we could not establish must never be read as zero: that
+      // is the close-on-zero branch firing on an outage. The `_count` fallback above is the
+      // narrower of the two and only ever under-reports outside invites, so the auction stays open.
+      logger.warn(`[deposit-activation] reached-invitation count failed for auction ${a.id}:`, err);
+    }
+  }
   return {
     buyerId: deposit.buyerId,
     auctionId: a?.id ?? null,
@@ -146,7 +172,9 @@ async function loadState(depositId: string): Promise<LoadedState | null> {
       depositRefunded: !!deposit.refundedAt,
       hasAuction: !!a,
       auctionStatus: a?.status,
-      invitationCount: a?._count.invitations ?? 0,
+      // BOTH POOLS. See the note above: this was `_count.invitations` alone, which is what made
+      // the close-on-zero branch fire on an auction contacted only through outside invites.
+      invitationCount: reachedInvitations,
       offerCount: a?._count.offers ?? 0,
       auctionAgeMinutes: ageMin,
       noDealerCloseGraceMinutes: NO_DEALER_CLOSE_GRACE_MINUTES,
@@ -331,7 +359,16 @@ export async function reconcileStuckActivations(opts?: {
         createdAt: { lt: cutoff },
         OR: [
           { status: 'PENDING' },
-          { status: 'ACTIVE', invitations: { none: {} }, offers: { none: {} } },
+          // SAME TWO POOLS AS loadState. `invitations: { none: {} }` matched an auction whose only
+          // contact was an outside invite, and the grace then closed it. `Auction.outsideInvites`
+          // is a RELATION (`schema.prisma:506`), so the second pool is `none: {}` as well: empty on
+          // BOTH is the only shape that means nobody was reached.
+          {
+            status: 'ACTIVE',
+            invitations: { none: {} },
+            offers: { none: {} },
+            outsideInvites: { none: {} },
+          },
         ],
       },
       select: { depositId: true },

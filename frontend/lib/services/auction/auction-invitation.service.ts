@@ -105,6 +105,57 @@ export interface IssueInvitationsResult {
   skipped: Array<{ rooftopId: string; reason: string }>;
   /** Raw tokens are returned ONLY so the caller can build links; never persisted or logged. */
   invitationIds: string[];
+  /**
+   * Set when `deferDispatch` was requested: the notices that have NOT been enqueued yet, for
+   * the caller to hand to `dispatchInvitations` once the auction is ACTIVE. See
+   * `IssueInvitationsOptions.deferDispatch` for why that order exists.
+   *
+   * EACH CARRIES A RAW TOKEN and is therefore never logged, never persisted and never returned
+   * past the caller that asked for it.
+   */
+  pendingDispatch: PendingInvitationDispatch[];
+}
+
+/** One un-enqueued invitation notice. Carries a raw token — see `pendingDispatch`. */
+export interface PendingInvitationDispatch {
+  invitationId: string;
+  auctionId: string;
+  vehicleRequestId: string | null;
+  rawToken: string;
+  target: InvitationTarget;
+  /**
+   * Always a real date: `auction.endsAt ?? issued.expiresAt`, and the token minter always
+   * supplies one. Typed non-nullable so the renderer never has to handle a deadline-less
+   * invitation, which would be an invitation with no stated close time.
+   */
+  deadline: Date;
+  unsubscribeUrl: string;
+}
+
+export interface IssueInvitationsOptions {
+  /**
+   * Write the invitation rows but do NOT enqueue their notices — return them instead.
+   *
+   * WHY THIS EXISTS, because it looks like an awkward seam and is load-bearing.
+   *
+   * S7-07 requires the invitation ROWS while the auction is PENDING, and the flip to ACTIVE
+   * only once at least one row can be read back. But `skipIfInvitationNoLongerSendable` — the
+   * §27 send-time recheck on `dealer_invited` — refuses while the auction is not ACTIVE, and a
+   * recheck that says no marks the outbox row `skipped`, which is TERMINAL and never retried
+   * (`transactional-dispatcher.service.ts`).
+   *
+   * The drain runs every minute. So enqueueing inside the PENDING window meant that a drain
+   * tick landing between the first enqueue and the flip marked those notices skipped forever —
+   * and the auction then went ACTIVE anyway, because the ROWS existed, and the case recorded
+   * LAUNCHED, and the buyer was told N dealerships were competing. None of them had been
+   * emailed, nothing retried, and no exception was raised. A paid buyer watching a live auction
+   * nobody was invited to is precisely the §7.1 incident this phase exists to prevent, and the
+   * window was ~one second per rooftop wide.
+   *
+   * So: rows while PENDING (the spec), notices after ACTIVE (the recheck). `launchFromCase`
+   * sets this; the admin hand-pick path does not, because there the auction is already ACTIVE.
+   */
+  deferDispatch?: boolean;
 }
 
 /**
@@ -127,9 +178,11 @@ export async function issueInvitations(
   targets: InvitationTarget[],
   db: Db = defaultPrisma,
   now: Date = new Date(),
+  options: IssueInvitationsOptions = {},
 ): Promise<IssueInvitationsResult> {
   const skipped: Array<{ rooftopId: string; reason: string }> = [];
   const invitationIds: string[] = [];
+  const pendingDispatch: PendingInvitationDispatch[] = [];
 
   const auction = await db.auction.findUnique({
     where: { id: auctionId },
@@ -144,7 +197,18 @@ export async function issueInvitations(
     select: { rooftopId: true, dealerId: true },
   });
   const alreadyInvited = new Set(existing.map((e) => e.rooftopId).filter(Boolean) as string[]);
-  const room = Math.max(0, MAX_INVITATION_FIELD - alreadyInvited.size);
+  // THE FIELD IS EVERY LIVE INVITATION, NOT JUST THE ROOFTOP-BOUND ONES.
+  //
+  // `room` was `MAX_INVITATION_FIELD - alreadyInvited.size`, and `alreadyInvited` holds only
+  // non-null rooftop ids — so a dealer-bound invitation with `rooftopId: null` consumed no
+  // budget at all. That is not hypothetical: this service's own note above records that 2 of 2
+  // production dealers predate the rooftop graph, and the admin hand-pick path invites exactly
+  // those. An auction already holding eight such invitations read as a field of ZERO, and a
+  // second call would have written eight more — sixteen dealerships on one $99 deposit.
+  //
+  // `existing.length` is the field. The partial unique enforces one-per-rooftop; nothing in the
+  // database enforces eight-per-auction, so this count is the only thing that does.
+  const room = Math.max(0, MAX_INVITATION_FIELD - existing.length);
 
   const alreadyInvitedDealers = new Set(existing.map((e) => e.dealerId).filter(Boolean) as string[]);
 
@@ -268,8 +332,6 @@ export async function issueInvitations(
         skipped.push({ rooftopId: t.rooftopId ?? "(none)", reason: "WRITE_FAILED" });
         continue;
       }
-      invitationIds.push(row.id);
-
       // §25.1 / 25-10 — the firewall state, written WITH the invitation. Phase 7 lifts it at
       // reaffirmation; nothing here writes LIFTED.
       //
@@ -282,18 +344,32 @@ export async function issueInvitations(
       }
 
       // The emailed link carries the RAW token. It is never persisted and never logged.
-      await enqueueDealerInvitation(
-        {
-          invitationId: row.id,
-          auctionId,
-          vehicleRequestId: auction.vehicleRequestId,
-          rawToken: issued.rawToken,
-          target: t,
-          deadline: expiresAt,
-          unsubscribeUrl,
-        },
-        db,
-      );
+      const notice: PendingInvitationDispatch = {
+        invitationId: row.id,
+        auctionId,
+        vehicleRequestId: auction.vehicleRequestId,
+        rawToken: issued.rawToken,
+        target: t,
+        deadline: expiresAt,
+        unsubscribeUrl,
+      };
+      if (options.deferDispatch) pendingDispatch.push(notice);
+      else await enqueueDealerInvitation(notice, db);
+
+      // COUNTED LAST, AND THAT ORDER IS THE FIX.
+      //
+      // `invitationIds.push` used to happen immediately after the insert, before the firewall
+      // write and the enqueue. A throw in either — a missing
+      // `identity_firewall_entries_auction_id_rooftop_id_key`, say, if the migration had not
+      // been applied — left a committed QUEUED row that was COUNTED as issued and had no notice
+      // and no firewall record. `launchFromCase` then saw `live >= 1`, flipped the auction
+      // ACTIVE, and reported a dealership competing that knew nothing about it, while §25.1's
+      // own guarantee ("an invitation sent without it would leave no evidence the firewall ever
+      // applied") was inverted: the invitation existed and the evidence did not.
+      //
+      // Counting last means the catch below records WRITE_FAILED for exactly those rows, and
+      // `launchFromCase` treats a WRITE_FAILED as a blocker rather than a log line.
+      invitationIds.push(row.id);
     } catch (err) {
       // One rooftop failing must not abandon the field. The readiness check re-runs and the
       // rooftop is retried, because the upsert is keyed rather than appended.
@@ -310,7 +386,36 @@ export async function issueInvitations(
     `[invitation] auction ${auctionId}: issued ${invitationIds.length}, skipped ${skipped.length} ` +
       `(field was ${alreadyInvited.size}, room ${room})`,
   );
-  return { auctionId, issued: invitationIds.length, skipped, invitationIds };
+  return { auctionId, issued: invitationIds.length, skipped, invitationIds, pendingDispatch };
+}
+
+/**
+ * Enqueue the notices `issueInvitations` deferred, now that the auction is ACTIVE.
+ *
+ * SEPARATE FROM THE ROW WRITE on purpose — see `IssueInvitationsOptions.deferDispatch`. One
+ * notice failing must not abandon the rest: each is isolated, and the count of what actually
+ * reached the outbox is returned so the caller can tell "eight invited" from "eight rows, six
+ * emailed".
+ */
+export async function dispatchInvitations(
+  notices: PendingInvitationDispatch[],
+  db: Db = defaultPrisma,
+): Promise<{ dispatched: number; failed: string[] }> {
+  const failed: string[] = [];
+  let dispatched = 0;
+  for (const notice of notices) {
+    try {
+      await enqueueDealerInvitation(notice, db);
+      dispatched += 1;
+    } catch (err) {
+      logger.error(
+        `[invitation] notice for invitation ${notice.invitationId} could not be enqueued:`,
+        err,
+      );
+      failed.push(notice.invitationId);
+    }
+  }
+  return { dispatched, failed };
 }
 
 /**
@@ -515,7 +620,16 @@ export type InvitationEvent =
   | "OFFER_SUBMITTED"
   | "EXPIRED";
 
-const EVENT_TIMESTAMP: Record<InvitationEvent, string> = {
+/**
+ * Which column each event stamps. `null` means the event advances the STATUS and stamps nothing.
+ *
+ * EXPIRED STAMPS NOTHING, and that is a correction. It mapped to `expiresAt` — the TOKEN's expiry,
+ * set from the auction's `endsAt` at issue time — so recording an EXPIRED event would have moved
+ * that expiry to `now`, rewriting the fact the column holds. Latent rather than live (nothing
+ * passes "EXPIRED" today) and fixed before something does. There is no `expiredAt` column; the
+ * status carries the fact and `expiresAt` already says when it became true.
+ */
+const EVENT_TIMESTAMP: Record<InvitationEvent, string | null> = {
   SENT: "sentAt",
   DELIVERED: "deliveredAt",
   OPENED: "openedAt",
@@ -523,7 +637,7 @@ const EVENT_TIMESTAMP: Record<InvitationEvent, string> = {
   DECLINED: "declinedAt",
   RESPONDED: "respondedAt",
   OFFER_SUBMITTED: "offerSubmittedAt",
-  EXPIRED: "expiresAt",
+  EXPIRED: null,
 };
 
 export interface RecordEventResult {
@@ -555,8 +669,11 @@ export async function recordInvitationEvent(
   const eventRank = STATUS_RANK[event] ?? 0;
   const advance = eventRank > currentRank;
 
-  const data: Record<string, unknown> = { [EVENT_TIMESTAMP[event]]: now };
+  const column = EVENT_TIMESTAMP[event];
+  const data: Record<string, unknown> = column ? { [column]: now } : {};
   if (advance) data.status = event;
+  // An event that neither advances the status nor stamps a column would be an empty update.
+  if (Object.keys(data).length === 0) return { ok: true, statusAdvanced: false };
 
   await db.auctionInvitation.update({ where: { id: invitationId }, data });
 
@@ -566,6 +683,66 @@ export async function recordInvitationEvent(
     );
   }
   return { ok: true, statusAdvanced: advance };
+}
+
+/**
+ * S7-14b / S7-21 — reflect a provider delivery event onto every live invitation at that address.
+ *
+ * THE REASON THIS EXISTS: the per-invitation state machine, the bounce→Operations path and the
+ * contact replacement were all BUILT AND UNREACHABLE. Nothing advanced an invitation past QUEUED,
+ * because the Resend webhook only touched `email_logs`, `dealer_outreach_log` and the suppression
+ * store. So `auction_invitations.status` never left QUEUED; `INVITATION_BOUNCED` was never raised;
+ * `countReachedInvitations`' exclusion of BOUNCED could never exclude anything, which means the
+ * buyer-facing "dealerships invited" count included rooftops that were never reached; and the
+ * 50%/90% sweep kept chasing a dead mailbox, because a bounced invitation stayed in
+ * `OPEN_INVITATION_STATUSES`. Found by the independent review of this phase.
+ *
+ * MATCHED BY ADDRESS, ACROSS EVERY LIVE AUCTION. The webhook carries the recipient and the
+ * provider's message id, not an invitation id — and a hard bounce at an address is a fact about
+ * THAT ADDRESS, so it applies to every live invitation sent to it rather than to one. Scoped to
+ * ACTIVE auctions so a historical invitation is not walked backwards by a late event.
+ *
+ * BEST-EFFORT AND ISOLATED, like every other effect in that webhook: a failure here must never
+ * cost the suppression write, which is the one thing that must always happen on a bounce.
+ */
+export async function reflectInvitationDeliveryEvent(
+  recipientEmail: string,
+  providerEvent: "delivered" | "opened" | "bounced" | "complained",
+  db: Db = defaultPrisma,
+  now: Date = new Date(),
+): Promise<{ matched: number; event: InvitationEvent | null }> {
+  // A complaint is not a delivery failure — the message arrived and the recipient objected — so it
+  // maps to BOUNCED for the invitation's purposes (do not keep mailing this rooftop) rather than to
+  // a delivery state. The suppression store is what actually stops future sends; this is the
+  // invitation's own record of why it went quiet.
+  const event: InvitationEvent | null =
+    providerEvent === "delivered"
+      ? "DELIVERED"
+      : providerEvent === "opened"
+        ? "OPENED"
+        : "BOUNCED";
+
+  const live = await db.auctionInvitation.findMany({
+    where: {
+      email: recipientEmail,
+      status: { notIn: ["REPLACED", "EXPIRED", "BOUNCED"] },
+      auction: { status: "ACTIVE" },
+    },
+    select: { id: true },
+  });
+  if (live.length === 0) return { matched: 0, event };
+
+  for (const inv of live) {
+    try {
+      if (event === "BOUNCED") await handleInvitationBounce(inv.id, db, now);
+      else await recordInvitationEvent(inv.id, event, db, now);
+    } catch (err) {
+      // Isolated per invitation: one failure must not stop the others, and must not propagate into
+      // the webhook and cost the suppression write.
+      logger.warn(`[invitation] could not reflect ${providerEvent} onto invitation ${inv.id}:`, err);
+    }
+  }
+  return { matched: live.length, event };
 }
 
 /**
@@ -666,9 +843,16 @@ export async function replaceInvitation(
 
 export interface ReminderSweepResult {
   auctionsConsidered: number;
+  /** Counts only rows the outbox ACCEPTED — a deduplicated re-emit is not a second reminder. */
   enqueued50: number;
   enqueued90: number;
   skipped: number;
+  /**
+   * Invitations whose reminder threw. Isolated rather than fatal: one transient failure must not
+   * cost every other auction its reminder for the hour, and a cron that reports zero failures
+   * when one happened is worse than one that reports the failure.
+   */
+  failed: string[];
 }
 
 /**
@@ -711,7 +895,9 @@ export async function sweepInvitationReminders(
   db: Db = defaultPrisma,
   now: Date = new Date(),
 ): Promise<ReminderSweepResult> {
-  const result: ReminderSweepResult = { auctionsConsidered: 0, enqueued50: 0, enqueued90: 0, skipped: 0 };
+  const result: ReminderSweepResult = {
+    auctionsConsidered: 0, enqueued50: 0, enqueued90: 0, skipped: 0, failed: [],
+  };
 
   const auctions = await db.auction.findMany({
     where: { status: "ACTIVE", endsAt: { gt: now }, startedAt: { not: null } },
@@ -746,36 +932,72 @@ export async function sweepInvitationReminders(
     });
 
     for (const inv of open) {
+      // ONE REMINDER PER TICK, AND THE LATER ONE WINS.
+      //
+      // Both used to be able to fire in the same pass: a cron that missed two hours (a deploy, an
+      // outage) and resumed at 95% elapsed sent "Halfway — 3h left" and "Closing soon — 3h left"
+      // seconds apart, one of which was false. Past 90% the halfway reminder has nothing true to
+      // say, so it is stamped as handled rather than sent — the dealership gets the urgent one,
+      // which is the one with the bid-conversion value, and is not told the auction is halfway
+      // through when it has 5% left.
       const due: Array<50 | 90> = [];
-      if (elapsed >= 0.5 && !inv.reminder50SentAt) due.push(50);
-      if (elapsed >= 0.9 && !inv.reminder90SentAt) due.push(90);
+      if (elapsed >= 0.9) {
+        if (!inv.reminder90SentAt) due.push(90);
+      } else if (elapsed >= 0.5 && !inv.reminder50SentAt) {
+        due.push(50);
+      }
       if (due.length === 0) {
         result.skipped += 1;
         continue;
       }
-      for (const pct of due) {
-        const ok = await enqueueReminder(
-          { auctionId: a.id, vehicleRequestId: a.vehicleRequestId, endsAt: a.endsAt, invitation: inv, percentElapsed: pct },
-          db,
-          now,
-        );
-        if (!ok) continue;
-        await db.auctionInvitation.update({
-          where: { id: inv.id },
-          data: pct === 50 ? { reminder50SentAt: now } : { reminder90SentAt: now },
-        });
-        if (pct === 50) result.enqueued50 += 1;
-        else result.enqueued90 += 1;
+      // ISOLATED PER INVITATION. Every other writer in this phase isolates per item
+      // (`persistCandidates`, `issueInvitations`, `sweepSourcingCases`); this loop did not, so one
+      // transient `vehicleRequest.findUnique` failure or one update conflict escaped the whole
+      // sweep — `withCronRun` recorded a failed run and NO auction got its reminder that hour.
+      try {
+        for (const pct of due) {
+          const enqueued = await enqueueReminder(
+            { auctionId: a.id, vehicleRequestId: a.vehicleRequestId, endsAt: a.endsAt, invitation: inv, percentElapsed: pct },
+            db,
+            now,
+          );
+          if (!enqueued) continue;
+          // Stamped whether or not the outbox ACCEPTED the row: a refused duplicate means the
+          // reminder already exists, and re-deriving it next tick would ask again forever.
+          await db.auctionInvitation.update({
+            where: { id: inv.id },
+            data: pct === 50 ? { reminder50SentAt: now } : { reminder90SentAt: now },
+          });
+          // COUNTS WHAT ACTUALLY REACHED THE OUTBOX. `enqueueReminder` returned true for a
+          // deduplicated row as well as a new one, so two overlapping sweeps reported two
+          // reminders for one email and the cron's own output overstated send volume.
+          if (enqueued === "NEW") {
+            if (pct === 50) result.enqueued50 += 1;
+            else result.enqueued90 += 1;
+          }
+        }
+      } catch (err) {
+        logger.error(`[invitation] reminder failed for invitation ${inv.id} on auction ${a.id}:`, err);
+        result.failed.push(inv.id);
       }
     }
   }
 
   logger.info(
     `[invitation] reminder sweep: ${result.auctionsConsidered} auction(s), ` +
-      `50%=${result.enqueued50} 90%=${result.enqueued90} skipped=${result.skipped}`,
+      `50%=${result.enqueued50} 90%=${result.enqueued90} skipped=${result.skipped}` +
+      (result.failed.length ? ` failed=${result.failed.length}` : ""),
   );
   return result;
 }
+
+/**
+ * What happened to one reminder. `false` means it could not be built (no address, no opt-out
+ * channel, no renderable content) and nothing was stamped; `"NEW"` means the outbox accepted a
+ * row; `"DUPLICATE"` means one already existed for this key, which is still a reason to stamp and
+ * stop asking but is NOT a second message.
+ */
+type ReminderEnqueueOutcome = false | "NEW" | "DUPLICATE";
 
 async function enqueueReminder(
   input: {
@@ -793,7 +1015,7 @@ async function enqueueReminder(
   // Kept in the signature for symmetry with every other writer here and so a test can pin a
   // clock; the reminder's own timing comes from the auction's `endsAt`, not from `now`.
   _now: Date,
-): Promise<boolean> {
+): Promise<ReminderEnqueueOutcome> {
   const inv = input.invitation;
   if (!inv.email) return false;
   const unsubscribeUrl = buildUnsubscribeUrl(inv.email);
@@ -835,7 +1057,7 @@ async function enqueueReminder(
     percentElapsed: input.percentElapsed,
   });
 
-  await enqueueTransactional(
+  const written = await enqueueTransactional(
     {
       triggerEvent: `auction.invitation.reminder.${input.percentElapsed}`,
       templateKey: key,
@@ -866,7 +1088,10 @@ async function enqueueReminder(
     },
     db,
   );
-  return true;
+  // "NEW" vs "DUPLICATE" is the difference between a reminder sent and a reminder that already
+  // existed. Both mean "stop asking" — hence the stamp either way — but only one is a message,
+  // and the cron reports send volume.
+  return written.enqueued ? "NEW" : "DUPLICATE";
 }
 
 /**

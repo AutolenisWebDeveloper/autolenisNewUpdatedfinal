@@ -47,8 +47,16 @@ export interface NotifyActiveDealersInput {
 
 export interface NotifyActiveDealersResult {
   notified: number;
-  /** True when the $99 gate held the fan-out (no PAID deposit). Always false now. */
-  gated: boolean;
+  /**
+   * `gated` IS GONE, deliberately, and this note is why rather than a silent deletion.
+   *
+   * It meant "the $99 gate held the fan-out (no PAID deposit)" and became unconditionally false
+   * when §13-D44 retired the fan-out — so the public request path saw `gated: false` for an UNPAID
+   * buyer, and any log line or response built from it misreported the pre-payment boundary as
+   * satisfied. A field whose name asserts a fact it no longer establishes is worse than no field.
+   * Found by the independent review. `retired: true` is the honest statement of the same thing:
+   * nothing fans out, so nothing is gated.
+   */
   /** §13-D44: this fan-out is retired. Always true. */
   retired: true;
 }
@@ -66,5 +74,5 @@ export async function notifyActiveDealersOfOpportunity(
     `[dealer-opportunity-notify] retired (§13-D44) — no broadcast for opportunity ` +
       `${input.opportunityId}. Dealers are reached only through §7 auction invitations.`,
   );
-  return { notified: 0, gated: false, retired: true };
+  return { notified: 0, retired: true };
 }
