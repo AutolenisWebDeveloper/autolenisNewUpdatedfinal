@@ -107,6 +107,8 @@ test(
             status: "SUBMITTED",
             otdPriceCents: 3_000_000 + i,
             vehiclePriceCents: 2_800_000 + i,
+            // Phase 6 §9a lineage: the Deal copies VIN and out-the-door from the offer it binds.
+            vin: `1HGCM82633A${String(i).padStart(6, "0")}`,
           },
         });
         offerIds.push(offer.id);
@@ -147,6 +149,63 @@ test(
 
       const finalAuction = await prisma.auction.findUnique({ where: { id: auction.id } });
       assert.equal(finalAuction?.status, "CLOSED", `round ${round}: auction must be CLOSED`);
+
+      // ── PHASE 6, Stage 9 / §9a — the lineage, asserted against a REAL database ────────────
+      //
+      // This is the only database-backed exercise of the selection path, so it is where the
+      // Stage 9 record is proved rather than mocked. Every claim below was false before Phase 6:
+      // the transaction wrote `{ buyerId, offerId, status }` and nothing else.
+      const won = deals[0];
+
+      // §13-D41: new deals enter at DEALER_CONFIRMATION, not FINANCING_PENDING — a Deal created
+      // straight into financing asserts a dealership confirmation that has not happened.
+      assert.equal(won.status, "DEALER_CONFIRMATION", `round ${round}: Deal entry state`);
+
+      assert.equal(won.auctionId, auction.id, `round ${round}: lineage — auction`);
+      assert.equal(won.depositId, deposit.id, `round ${round}: lineage — deposit (the $99)`);
+      assert.equal(won.dealerId, acceptedOffers[0].dealerId, `round ${round}: lineage — dealership`);
+      assert.equal(won.vin, acceptedOffers[0].vin, `round ${round}: lineage — VIN`);
+      assert.equal(
+        won.otdCentsConfirmed, acceptedOffers[0].otdPriceCents,
+        `round ${round}: lineage — out-the-door amount`,
+      );
+
+      // §9a's thirteenth lineage item, and §11.6 ruling 8's Phase 6 half. The composite FK
+      // `deals.(id, current_plan_snapshot_id) -> plan_snapshots.(deal_id, id)` means a snapshot
+      // pointed at by a Deal necessarily belongs to it — so this also proves the write ORDER.
+      assert.ok(won.currentPlanSnapshotId, `round ${round}: no locked plan snapshot on the Deal`);
+      const snapshot = await prisma.planSnapshot.findUnique({
+        where: { id: won.currentPlanSnapshotId! },
+      });
+      assert.equal(snapshot?.dealId, won.id, `round ${round}: plan snapshot is not bound to this Deal`);
+      assert.equal(snapshot?.touchpoint, "deal_created", `round ${round}: snapshot touchpoint`);
+
+      // The transition INTO the first state — previously the only one with no history row.
+      const history = await prisma.dealStatusHistory.findMany({ where: { dealId: won.id } });
+      assert.equal(history.length, 1, `round ${round}: expected one creation history row`);
+      assert.equal(history[0].toStatus, "DEALER_CONFIRMATION", `round ${round}: history target state`);
+
+      // Selection IS this auction's post-close processing. Without the marker the close
+      // reconciler claims the auction on its next tick and tells a buyer who has already
+      // selected that their offers are ready.
+      assert.ok(
+        finalAuction?.postCloseProcessedAt,
+        `round ${round}: postCloseProcessedAt not stamped — the close cron would re-process this auction`,
+      );
+
+      // §9: "Every non-selected candidate closes." DECLINED, not NOT_SELECTED — §8.1a keeps that
+      // label WITHHELD and the D39 ruling did not change it.
+      const declined = await prisma.offer.findMany({
+        where: { auctionId: auction.id, status: "DECLINED" },
+      });
+      assert.equal(
+        declined.length, OFFERS_PER_AUCTION - 1,
+        `round ${round}: every losing offer must close, found ${declined.length}`,
+      );
+      const stillLive = await prisma.offer.findMany({
+        where: { auctionId: auction.id, status: "SUBMITTED" },
+      });
+      assert.equal(stillLive.length, 0, `round ${round}: a losing offer outlived the selection`);
     }
     });
   },

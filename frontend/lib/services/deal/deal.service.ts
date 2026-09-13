@@ -36,7 +36,22 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // OUT of them is defined either. An empty list is fail-closed: canTransition() refuses to
   // leave a state whose exits have not been designed. The phases that own each state (the
   // deal-lifecycle waves) replace these with the real edges.
-  DEALER_CONFIRMATION: [],
+  // §13-D41, ruled 2026-09-13. Phase 6 creates every new Deal here, so leaving the exit list empty
+  // would make each one stuck by construction: `canTransition` refuses to leave a state with no
+  // edges, and only CANCELLED/REFUNDED are reachable from anywhere.
+  //
+  // THE EDGE EXISTS; NOTHING IN PHASE 6 TAKES IT — also the ruling, and for the same reason
+  // K27-1328 was decided against: a path that can be taken before anything can enforce it is the
+  // defect, not the fix. Phase 7 owns the `dealer_reaffirmations` flow and wires the caller behind
+  // it. No Phase 6 code path calls `advanceDealStatus` out of this state.
+  //
+  // It is also what makes a revert safe. `FINANCING_PENDING` is now reachable from BOTH the legacy
+  // entry (ACTIVE, for deals created before this phase) and the new one, so reverting Phase 6
+  // leaves any in-flight Deal in a legal state rather than stranded behind an edge that vanished.
+  //
+  // If you are reading this in a later phase and see an unused edge: it is deliberate, not an
+  // oversight. Recorded in §8.1f's AS BUILT record.
+  DEALER_CONFIRMATION: ["FINANCING_PENDING"],
   RECAP_PENDING: [],
   DEALER_EXECUTED: [],
   FUNDING_PENDING: [],

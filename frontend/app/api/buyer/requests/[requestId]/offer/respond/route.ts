@@ -2,7 +2,9 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
-import { VehicleRequestStatus } from "@prisma/client";
+import { DealStatus, VehicleRequestStatus } from "@prisma/client";
+import { recheckApproval } from "@/lib/services/prequal/approval-recheck";
+import { writeDealCreationRecord } from "@/lib/services/deal/deal-creation";
 import { sendDealSelectedEmail } from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ requestId: string }> }
@@ -40,6 +42,50 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   const acceptedOffer = vehicleRequest.offers[0]!;
+
+  // ── PHASE 6 (§10.7 row L4a): this path minted a Deal "without lock/prequal/dealer" ─────────
+  //
+  // §8.2 Phase 6 defect (3) says "selection exists only on the buyer route", which reads as if
+  // there were one. There are TWO, and this is the second: a buyer accepting a staff-entered
+  // `VehicleRequestOffer` created a Deal at FINANCING_PENDING with no approval recheck, no
+  // serialization, and no lineage beyond the offer id. §8b's "approval is rechecked ... on
+  // selection" does not distinguish between the two ways a buyer can select.
+  //
+  // The ceiling check comes FIRST, before anything is written: an approval that lapsed between
+  // the offer being sent and the buyer accepting it is exactly the case §26's "approval expires
+  // mid-transaction" row exists for, and discovering it after the acceptance has committed costs
+  // a reversal instead of a renewal.
+  if (response === "ACCEPT") {
+    const approval = await recheckApproval(buyer.id, "offer_selection", {
+      raiseOnFailure: true,
+      vehicleRequestId: requestId,
+    });
+    if (!approval.ok) {
+      return errorResponse("APPROVAL_REQUIRED", approval.message, 409);
+    }
+
+    // The serialization this path never had. There is no auction row to lock, so the guard is the
+    // invariant itself: one Deal per Vehicle Request. `vehicleRequestOfferId` is @unique, which
+    // already blocked re-accepting the SAME offer — it did nothing about accepting a DIFFERENT
+    // offer on the same request, which is the case that produced two competing Deals.
+    const existingDeal = await prisma.deal.findFirst({
+      where: {
+        OR: [
+          { vehicleRequestId: requestId },
+          { vehicleRequestOffer: { requestId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (existingDeal) {
+      return errorResponse(
+        "ALREADY_SELECTED",
+        "You have already accepted an offer for this request.",
+        409,
+      );
+    }
+  }
+
   const newRequestStatus = response === "ACCEPT"
     ? VehicleRequestStatus.OFFER_ACCEPTED
     : VehicleRequestStatus.OFFER_DECLINED;
@@ -77,15 +123,44 @@ export async function POST(request: NextRequest, { params }: Props) {
     });
     if (response !== "ACCEPT") return null;
     // offerId is nullable on Deal; concierge deals carry vehicleRequestOfferId.
-    // Same entry status as the auction path (select-offer.service).
-    return tx.deal.create({
+    // Same entry status as the auction path (select-offer.service) — §13-D41 moved BOTH to
+    // DEALER_CONFIRMATION, because a Deal created straight into financing asserts a dealership
+    // confirmation that has not happened on either path.
+    //
+    // The lineage this path can carry is thinner than the auction path's and is stated rather than
+    // faked: `VehicleRequestOffer` has no dealer, rooftop, VIN or auction — it is a staff-entered
+    // price with a `vehicleInfo` blob (`prisma/schema.prisma`, model VehicleRequestOffer). What it
+    // DOES have is the request, the out-the-door amount and the buyer, so those are written and the
+    // rest stay null rather than being invented. Row L4b retires this model into the canonical
+    // spine at Phase 10, which is where the missing lineage arrives.
+    const buyerRow = await tx.buyer.findUnique({
+      where: { id: buyer.id },
+      select: { plan: true },
+    });
+    const coBuyer = await tx.coBuyer.findFirst({
+      where: { vehicleRequestId: requestId },
+      select: { id: true },
+      orderBy: { id: "asc" },
+    });
+    const created = await tx.deal.create({
       data: {
         buyerId:               buyer.id,
         vehicleRequestOfferId: offerId,
-        status:                "FINANCING_PENDING",
+        status:                DealStatus.DEALER_CONFIRMATION,
+        vehicleRequestId:      requestId,
+        otdCentsConfirmed:     acceptedOffer.priceCents,
+        coBuyerId:             coBuyer?.id ?? null,
       },
       select: { id: true },
     });
+    await writeDealCreationRecord(tx, {
+      dealId: created.id,
+      buyerId: buyer.id,
+      plan: buyerRow?.plan ?? "STANDARD",
+      vehicleRequestId: requestId,
+      reason: "Buyer accepted a Vehicle Request offer (§9).",
+    });
+    return created;
   });
 
   // DECLINE: return immediately

@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { z } from "zod";
 
 export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
@@ -13,71 +12,26 @@ export async function GET(request: NextRequest) {
   return adminSuccess({ deals });
 }
 
-const createSchema = z.object({
-  offerId:  z.string().min(1),
-  buyerId:  z.string().min(1),
-  reason:   z.string().min(1),
-});
-
-// POST /api/admin/deals — admin creates deal from winning offer
-export async function POST(request: NextRequest) {
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-
-  let body: unknown;
-  try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
-
-  const { offerId, buyerId, reason } = parsed.data;
-
-  const offer = await prisma.offer.findFirst({ where: { id: offerId, status: { in: ["SUBMITTED", "ACCEPTED"] } } });
-  if (!offer) return adminError("OFFER_NOT_FOUND", "Offer not found or not submitted", 404);
-
-  // Check offer not already in a deal
-  const existingDeal = await prisma.deal.findFirst({ where: { offerId } });
-  if (existingDeal) return adminError("DEAL_EXISTS", "A deal already exists for this offer", 400);
-
-  const buyer = await prisma.buyer.findUnique({ where: { id: buyerId } });
-  if (!buyer) return adminError("NOT_FOUND", "Buyer not found", 404);
-
-  // Start on the same driven state as the other two creation paths
-  // (select-offer.service and the concierge offer/respond route). ACTIVE is a dead
-  // state: nothing in the codebase performs ACTIVE → FINANCING_PENDING, so a deal
-  // born here previously sat un-driven until an admin manually moved it, and the
-  // buyer's financing routes (which target FEE_PENDING) would throw
-  // DealTransitionError against it.
-  const deal = await prisma.deal.create({
-    data: { buyerId, offerId, status: "FINANCING_PENDING" },
-  });
-
-  // Mark offer as accepted
-  await prisma.offer.update({ where: { id: offerId }, data: { status: "ACCEPTED" } });
-
-  // Notify buyer
-  await prisma.notification.create({
-    data: {
-      buyerId,
-      type: "DEAL_STAGE_CHANGED",
-      channel: "IN_APP",
-      title: "Your deal has been created",
-      body: "Congratulations! Admin has matched you with a dealer. Check your deal details.",
-      actionUrl: "/buyer/deal",
-    },
-  });
-
-  await prisma.adminAuditLog.create({
-    data: {
-      adminId: admin.adminId,
-      adminEmail: admin.email,
-      action: "DEAL_CREATED",
-      entityType: "Deal",
-      entityId: deal.id,
-      reason,
-      metadata: { buyerId, offerId, dealerId: offer.dealerId },
-    },
-  });
-
-  return adminSuccess({ deal: { id: deal.id, buyerId, offerId, status: deal.status } }, 201);
-}
-
+// ── POST RETIRED — §9: "No system, algorithm, or administrator selects on the buyer's behalf." ──
+//
+// This route took `buyerId` and `offerId` from the request body and minted a Deal, marking the
+// offer ACCEPTED. That is an ADMINISTRATOR SELECTING THE WINNER, which §9 forbids in as many
+// words, and §8.2 Phase 6 defect (3) retires it: "selection exists only on the buyer route".
+//
+// WHAT WAS LOST, stated rather than assumed. Nothing reachable: a repo-wide search for callers of
+// the collection endpoint found none — every `/api/admin/deals` hit in the codebase is a
+// `/[dealId]/…` sub-route, plus one SSRF fixture string in
+// `contract-shield/__tests__/contract-document-ref.test.ts:39`. No admin screen, script or test
+// drove it. GET is untouched and still backs the admin deals list.
+//
+// It also bypassed every guard the buyer path has: no `SELECT … FOR UPDATE` on the auction, so two
+// concurrent calls could each mint a Deal; no approval recheck; no auction-status check, so a
+// PENDING or CANCELLED auction's offer was selectable; and no lineage beyond buyer and offer.
+//
+// REVERTING is restoring this block from git history — §8.2's rollback paragraph says exactly
+// that: "Retiring the admin selection route is a delete: reverting restores it." Operations
+// recovering a stuck selection uses `POST /api/admin/deals/[dealId]/action`, which is audited and
+// state-machine guarded, or asks the buyer to select.
+//
+// An admin needing to correct a wrong winner has no self-service path and should not: that is a
+// buyer decision with money attached, and §26 routes it through an Operations case.
