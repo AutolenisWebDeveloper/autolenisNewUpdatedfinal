@@ -20,6 +20,10 @@ const notifications: Array<Record<string, unknown>> = [];
 
 /** Rows the sweep's SELECT returns. */
 let staleRows: Array<Record<string, unknown>> = [];
+/** Active dealers with a feed config, for the feed-failure branch. */
+let dealersWithFeeds: Array<Record<string, unknown>> = [];
+/** How many fresh inventory items a dealer has — 0 is what makes a feed look dead. */
+let freshItemCount = 1;
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -38,10 +42,12 @@ mock.module("@/lib/prisma", {
       inventoryItem: {
         findMany: async (args: unknown) => { itemCalls.findMany.push(args); return staleRows; },
         updateMany: async (args: unknown) => { itemCalls.updateMany.push(args); return { count: staleRows.length }; },
-        count: async () => 1,
+        count: async () => freshItemCount,
       },
       dealer: {
-        findMany: async () => [],
+        // Drivable, so the feed-failure branch can be exercised. It used to return [] always,
+        // which made that whole branch — and both of its defects — unreachable from any test.
+        findMany: async () => dealersWithFeeds,
         findUnique: async () => ({ id: "d1", dealershipName: "Metroplex Ford", user: { email: "ops@metroplex.test" } }),
       },
       notification: {
@@ -89,6 +95,8 @@ beforeEach(() => {
   itemCalls.findMany = []; itemCalls.updateMany = [];
   removalEmails.length = 0; failureEmails.length = 0; notifications.length = 0;
   staleRows = [];
+  dealersWithFeeds = [];
+  freshItemCount = 1;
   delete process.env.INVENTORY_SWEEP_MAX_DEACTIVATIONS;
 });
 afterEach(() => {
@@ -183,8 +191,50 @@ test("dealer-owned removals are emailed, and only on a real deactivation", async
   assert.match(String(enqueued[0]!.idempotencyKey), /^dealer_stale_listing_removal:d1:\d{4}-\d{2}-\d{2}$/,
     "keyed on the DAY: the retired direct call keyed on Date.now(), which is no idempotency at all");
   assert.equal(removalEmails.length, 0, "and it must not ALSO send directly");
+  // THE ADDRESS IS IN THE PAYLOAD, which is the only place the drain can read it.
+  // `comms_outbox` has no recipient-address column, so `to` is validated at enqueue and then
+  // discarded; `deliverEmail` reads `payload.email` for both the suppression lookup and the
+  // send. This row carried `to` and no `payload.email`, so every nightly sweep queued a
+  // notification that checked suppression for `undefined` and asked the provider to mail
+  // `undefined` — and the call site looked right, because `to` was there.
+  const removalPayload = enqueued[0]!.payload as Record<string, unknown>;
+  assert.equal(removalPayload.email, "ops@metroplex.test");
+  assert.equal(enqueued[0]!.to, removalPayload.email, "the validated address and the sent address must be one address");
   // This is the regression the new predicate had to protect: pinning dealerId: null in the
   // sweep would have made this notification structurally unreachable dead code.
+});
+
+test("the feed-failure notice carries its address and links to a page that exists", async () => {
+  // Two defects in one email, both of which made it useless rather than merely imperfect:
+  // no `payload.email`, so it was delivered to `undefined`; and a call to action pointing at
+  // `/dealer/inventory/feed`, which has never existed — the page is
+  // `app/dealer/inventory/feed-setup/page.tsx`. A dealer whose feed has stopped sending data
+  // needs exactly one working link, and that was the one.
+  process.env.INVENTORY_STALE_SWEEP_MODE = "enforce";
+  staleRows = [];
+  dealersWithFeeds = [
+    {
+      id: "d2",
+      dealershipName: "Lakeside Toyota",
+      user: { email: "feeds@lakeside.test" },
+      feedConfig: { lastSyncAt: new Date("2026-09-01T00:00:00Z") },
+    },
+  ];
+  freshItemCount = 0;
+
+  const { GET } = await import("@/app/api/cron/inventory-stale-sweep/route");
+  await GET(cronReq());
+
+  const feedRow = enqueued.find((e) => e.templateKey === "dealer_inventory_sync_failure");
+  assert.ok(feedRow, "no feed-failure notice was enqueued");
+  const payload = feedRow.payload as Record<string, unknown>;
+  assert.equal(payload.email, "feeds@lakeside.test");
+  assert.equal(feedRow.to, payload.email);
+  assert.match(String(payload.html), /\/dealer\/inventory\/feed-setup/);
+  assert.ok(
+    !/\/dealer\/inventory\/feed["'\s]/.test(String(payload.html)),
+    "the 404 target is still in the rendered email",
+  );
 });
 
 test("the FS-G suppression survives: no feed-failure email when no sync was ever attempted", async () => {
