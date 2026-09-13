@@ -111,11 +111,55 @@ python3 scripts/schema_drift_audit.py     # regenerates scripts/drift_check.sql
 `scripts/expected_schema.json` is the committed snapshot of the expected schema
 for quick diffing.
 
+## Verifying the LEDGER (`_prisma_migrations` is not authoritative)
+
+`_prisma_migrations` records what `prisma migrate deploy` did — **not what the
+database contains**. A migration applied out of band leaves the ledger saying
+"pending" while the physical schema says "applied". `prisma migrate status` reads
+the ledger, so it repeats the same wrong answer with more confidence.
+
+**Before concluding a migration is unapplied, check the physical schema:**
+`information_schema.columns`, `pg_constraint`, `pg_indexes`, `pg_enum`.
+
+```bash
+cd frontend
+DATABASE_URL=<target> pnpm db:check-ledger
+```
+
+`scripts/check-ledger-drift.ts` does this for every migration directory that has
+no ledger row: it parses the objects the migration creates and asks the database
+whether they are already there.
+
+| Verdict | Meaning | Gate |
+| --- | --- | --- |
+| `APPLIED_NOT_RECORDED` | every object exists, no ledger row | **fail** |
+| `PARTIAL` | some objects exist, no ledger row | **fail** |
+| `RECORDED_NOT_ON_DISK` | ledger row, no directory | **fail** |
+| `PENDING` | no object exists — normal before a deploy | pass |
+| `UNVERIFIABLE` | migration creates nothing checkable | pass, reported |
+
+**Repairing ledger drift.** Use `prisma migrate resolve --applied <name>` for each
+affected migration in chronological order. It writes the ledger row and executes
+no DDL. Do **not** use `prisma migrate deploy` for this — it trusts the ledger and
+would re-execute already-applied migrations against the target database.
+
+This is distinct from `pnpm db:check-drift`, which compares a **chain-built**
+database against `schema.prisma` and never reads the ledger.
+
 ## Migration history hygiene
 
 - Migration timestamps must be unique going forward; never rename or edit a
   migration after it has been applied (it changes the checksum). Add a new
   migration instead.
 - The production `_prisma_migrations` ledger was reconciled on 2026-06-20 to
-  match the repo 1:1 (correct checksums, no orphans, no duplicate rolled-back
-  rows). `prisma migrate status` should report the database is up to date.
+  match the repo 1:1.
+- **That reconciliation has since lapsed.** On 2026-09-03 a read-only check of
+  production found **six** migrations physically applied with no ledger row:
+  `20261014000000_esign_envelope_history`,
+  `20261015000000_esign_consent_and_executed_artifact`,
+  `20261016000000_ai_action_intent_lifecycle`,
+  `20261016000000_contract_scan_version_link`,
+  `20261104000000_inventory_market_config_and_call_budget`, and
+  `20261105000000_inventory_dealer_provenance_and_call_accounting`. Every object
+  each creates was confirmed present. Until they are resolved,
+  `prisma migrate status` reports six pending migrations that are **not** pending.
