@@ -207,3 +207,69 @@ an enum member is DDL that belongs in a migration. The record is instead: the ru
 names every deleted id, and which the per-run protocol already requires be reported in full) and a
 `vehicle_request_events` row per cleared request, where `event_type` is a free string and can say
 what actually happened.
+
+## The sweep repair did not hold — and what the next run decides (2026-09-13)
+
+`sweep-failure-diagnostic.sql` was run read-only against production on 2026-09-10 and diagnosed
+the daily MarketCheck sweep: the provider answered with 50 listings per call, `normalize()` dropped
+all 50, and the run recorded `FAILED · api_calls_used 1 · vehicles_fetched 0`. Phase 4's three
+`include_*` flags were merged as the repair. **They did not repair it.**
+
+**Chronology, measured rather than recalled.** The flag commit `5027864` is 2026-09-10 13:42 UTC and
+the merge `d943e192` is 21:58 UTC, so the 09-10 08:00:06 failure **predates the fix by about
+fourteen hours** and says nothing about it. Only **09-11 and 09-12** are post-deploy runs, and both
+failed identically. The failure is **continuous from 09-03 through 09-12** — ten runs. Earlier
+framings of "three identical failures" and of a cause "confirmed by eight" are both wrong and are
+corrected here and in `IMPLEMENTATION-WORKFLOW.md` §8.2.
+
+**What is established, and what is not.**
+
+| Claim | Status |
+| --- | --- |
+| The three `include_*` flags reach the outgoing request | **VERIFIED** — by building the URL, not by reading the source line |
+| No cached or alternate code path serves the sweep | **VERIFIED** — `orchestrator.ts:35` is a single-adapter singleton; one builder, one fetch, one endpoint |
+| Phase 4 introduced the `listing.build` dependency | **FALSE** — the pre-fix adapter already read `build?.year/make/model` |
+| "1 call" is the cause | **NO** — `params.maxCalls ?? 1` at `marketcheck.adapter.ts:354`; one call is by design |
+| The provider's response lacks `build` | **NOT VERIFIED** — and not verifiable from this repository |
+
+The last row is the open question, and two things kept it open. The fix's evidence base was the
+MarketCheck **MCP's own key and package**, which `../verification/marketcheck-contract-verification.md:8`
+states is *not proven to be the same package* as the production `MARKETCHECK_API_KEY`. And
+`normalize()` returned a bare `null`, discarding the reason — so the error string could name all
+four candidate fields (`year/make/model/price`) and distinguish none. `price` was absent on 5 of 15
+listings in the probe sample, so build-absent and price-absent are both live.
+
+**The owner's ruling, 2026-09-13: instrument, do not probe.** A further MCP probe spends paid
+credits on a package that still cannot speak for production's — the same weakness that let the
+original fix ship unproven. Instead the drop reason is now recorded: a **bounded** tally
+(`DROP_SAMPLE_LIMIT = 25`), on the **failure path only**, surfaced as a **counted breakdown** on
+the run's own error string.
+
+```
+normalization dropped 50 of 50 listings (missing year/make/model/price)
+  — sampled 25: build absent 25, year 25, make 25, model 25, price 0, threw 0
+```
+
+There are **three** readings, not two:
+
+| The run says | What it means | Next step |
+| --- | --- | --- |
+| `build absent 25` | The response does not carry the object the request asked for, on every sampled row | Provider-side. A MarketCheck conversation, not a code change |
+| `build absent 0, price 25` | `build` arrived; `price` did not | Price-side. The predicate, the plan's field set, or a `price` of 0 |
+| **the clause is absent entirely** (`sampled 0`) | normalize() rejected **nothing** — the loss is downstream of it | Dedup or coverage, not normalization. See the note below |
+
+That third reading is the one the old message could never produce, and it matters: gate 2 compares
+`vehicles.length` — which is **deduped** — against the listings offered, so a page of 50 in which 40
+are duplicate `sourceKey`s trips the normalization floor while normalize() dropped none of them.
+Until now that read as a normalization failure. An absent breakdown now says it was not one.
+**Reported, not fixed here:** correcting gate 2 to measure pre-dedup normalize output is a change to
+what the gate means, and that is the owner's call, not a side effect of adding an instrument. The existing sentence is
+unchanged and the breakdown is appended, so the production record stays comparable run to run, and
+an adapter that does not tally reads exactly as it did.
+
+**The next 08:00 UTC run is the experiment**, at no extra provider spend. Nothing here changes which
+listings are dropped or whether the run fails — only what the failure says about itself.
+
+**The catalogue purge stays held behind a green sweep.** `catalogue-purge-delete.sql` refuses on an
+empty catalogue and that refusal is meant to hold; the 221 stale rows have been stale since
+2026-09-02 and stay that way until a sweep succeeds.

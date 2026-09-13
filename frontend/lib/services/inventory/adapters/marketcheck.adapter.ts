@@ -35,7 +35,12 @@ import {
   MAX_RADIUS_MILES, MAX_ROWS_PER_CALL, MAX_CALLS_PER_SWEEP,
   PROVIDER_PAGINATION_LIMIT, DEFAULT_RADIUS_MILES,
 } from "../inventory-source-config.service";
-import { classifyYield } from "../sync-yield";
+import {
+  classifyYield,
+  newDropTally,
+  recordDrop,
+  type NormalizeDropTally,
+} from "../sync-yield";
 
 /** 250ms between calls = 4 req/s, under the 5 req/s free-tier limit. */
 const MIN_INTER_CALL_MS = 250;
@@ -365,6 +370,10 @@ export class MarketCheckAdapter implements IInventoryAdapter {
     let numFound: number | null = null;
     let maxDist: number | null = null;
     let outOfRadiusDropped = 0;
+    // Bounded, failure-path-only record of WHICH required field was missing on the
+    // listings normalize() rejects. Handed to classifyYield, which is where the run's
+    // error string is built. A healthy run writes to it and nothing reads it.
+    const dropTally = newDropTally();
     let throttle: ThrottleSignal | undefined;
     let stopReason: StopReason | null = null;
     let outcome: AdapterOutcome = "SUCCESS";
@@ -466,7 +475,7 @@ export class MarketCheckAdapter implements IInventoryAdapter {
           continue;
         }
         if (typeof l.dist === "number") maxDist = Math.max(maxDist ?? 0, l.dist);
-        const v = this.normalize(l);
+        const v = this.normalize(l, dropTally);
         if (!v) continue;
         const existing = seen.get(v.sourceKey);
         if (!existing) { seen.set(v.sourceKey, v); newKeys++; }
@@ -502,6 +511,7 @@ export class MarketCheckAdapter implements IInventoryAdapter {
       // A radius rejection is a policy decision, not a response-shape failure. Without this
       // the normalization gate reads every dropped row as normalize() failing on it.
       radiusRejected: outOfRadiusDropped,
+      dropTally,
     });
 
     return {
@@ -641,13 +651,30 @@ export class MarketCheckAdapter implements IInventoryAdapter {
     return `https://api.marketcheck.com/v2/search/car/active?${query.toString()}`;
   }
 
-  private normalize(listing: MarketCheckListing): NormalizedVehicle | null {
+  private normalize(
+    listing: MarketCheckListing,
+    tally?: NormalizeDropTally,
+  ): NormalizedVehicle | null {
     try {
       const year = listing.build?.year;
       const make = listing.build?.make;
       const model = listing.build?.model;
       const price = listing.price;
-      if (!year || !make || !model || !price || price <= 0) return null;
+      if (!year || !make || !model || !price || price <= 0) {
+        // Failure path only, and bounded. `build` is recorded separately from the three
+        // fields read off it because an absent `build` fails year, make and model together:
+        // the counts alone cannot otherwise tell "the provider sent no build object" from
+        // "it sent one with empty fields", and those have different causes and different
+        // fixes. Nothing here changes which listings are dropped.
+        recordDrop(tally, {
+          buildAbsent: !listing.build,
+          year: !year,
+          make: !make,
+          model: !model,
+          price: !price || price <= 0,
+        });
+        return null;
+      }
 
       // `dealer` and `mc_dealership` are independent siblings and either may be absent, so
       // the shared facts are read from whichever arrived. Both carried identical values on
@@ -730,6 +757,9 @@ export class MarketCheckAdapter implements IInventoryAdapter {
       vehicle.sourceKey = buildSourceKey(vehicle);
       return vehicle;
     } catch {
+      // Not a predicate failing, and counted so `sampled` stays a true partition of what was
+      // inspected rather than a total with an unexplained remainder.
+      recordDrop(tally, { threw: true });
       return null;
     }
   }

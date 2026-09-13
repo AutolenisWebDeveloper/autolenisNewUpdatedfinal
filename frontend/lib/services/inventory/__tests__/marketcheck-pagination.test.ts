@@ -601,3 +601,71 @@ test("a page that is mostly OUT OF RADIUS is not reported as a normalization fai
     "ten good cars is a healthy run — the normalization gate measures SHAPE loss, not policy rejections");
   assert.equal(res.error, undefined, "and it must not be given a false root cause");
 });
+
+
+// ── Drop-reason instrumentation, end to end (owner-approved 2026-09-13) ──────
+//
+// Tomorrow's 08:00 run is the experiment. These assert that the run's error string would
+// actually discriminate the two live hypotheses, because an instrument that cannot tell them
+// apart is not worth a day of waiting.
+
+test("a response with NO build object says so: build absent, on a bounded sample", async () => {
+  // The production shape, reproduced: 50 listings, every one missing `build`. Eight
+  // consecutive failures (09-03 to 09-10) and two more after the include-flag fix reported
+  // "missing year/make/model/price" and could not say which.
+  const listings = Array.from({ length: 50 }, (_, i) => {
+    const { build: _build, ...rest } = listing(i);
+    return rest;
+  });
+  stubFetch(() => ({ numFound: 50, listings }));
+
+  const res = await new MarketCheckAdapter().search({ ...DFW, rowsPerCall: 50, maxCalls: 1 });
+
+  assert.equal(res.outcome, "FAILED");
+  assert.equal(res.vehicles.length, 0);
+  assert.match(String(res.error), /normalization dropped 50 of 50 listings/,
+    "the existing sentence is unchanged");
+  assert.match(String(res.error), /sampled 25: build absent 25, year 25, make 25, model 25, price 0, threw 0/,
+    "and now names the predicate: build absent on every sampled row is a provider-side finding");
+});
+
+test("a response WITH build but no price reads differently — the distinction the old message could not make", async () => {
+  const listings = Array.from({ length: 50 }, (_, i) => {
+    const { price: _price, ...rest } = listing(i);
+    return rest;
+  });
+  stubFetch(() => ({ numFound: 50, listings }));
+
+  const res = await new MarketCheckAdapter().search({ ...DFW, rowsPerCall: 50, maxCalls: 1 });
+
+  assert.equal(res.outcome, "FAILED");
+  assert.match(String(res.error), /sampled 25: build absent 0, year 0, make 0, model 0, price 25, threw 0/,
+    "build arrived; price did not. Same old message, opposite conclusion.");
+});
+
+test("the sample is bounded: 50 dropped listings are counted 25 times, not 50", async () => {
+  const listings = Array.from({ length: 50 }, (_, i) => {
+    const { build: _build, ...rest } = listing(i);
+    return rest;
+  });
+  stubFetch(() => ({ numFound: 50, listings }));
+
+  const res = await new MarketCheckAdapter().search({ ...DFW, rowsPerCall: 50, maxCalls: 1 });
+
+  assert.match(String(res.error), /sampled 25:/, "capped at DROP_SAMPLE_LIMIT");
+  assert.doesNotMatch(String(res.error), /sampled 50:/);
+  assert.match(String(res.error), /dropped 50 of 50/,
+    "the TOTAL stays honest — only the breakdown is sampled, and the string says so");
+});
+
+test("the tally is inert on a healthy run", async () => {
+  // Failure path only. A run where every listing normalizes must carry no breakdown, and no
+  // error at all.
+  stubFetch(() => ({ numFound: 50, count: 50 }));
+
+  const res = await new MarketCheckAdapter().search({ ...DFW, rowsPerCall: 50, maxCalls: 1 });
+
+  assert.equal(res.outcome, "SUCCESS");
+  assert.equal(res.vehicles.length, 50);
+  assert.equal(res.error, undefined, "no breakdown, no clause, no error");
+});
