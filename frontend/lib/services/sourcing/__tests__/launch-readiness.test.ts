@@ -572,3 +572,44 @@ test("the case only reaches LAUNCHED when the auction actually went ACTIVE", asy
     "the case was marked LAUNCHED for an auction that stayed PENDING",
   );
 });
+
+// ── #422 review: the buyer-facing count (found by Copilot, confirmed, fixed) ──
+//
+// The §27 dispatch split closed the SILENCE — a failed dispatch raises an Operations task
+// instead of vanishing. It did not close the MISSTATEMENT. `dispatchInvitations` returns the
+// count that reached the outbox, and its own docstring says that exists "so the caller can tell
+// 'eight invited' from 'eight rows, six emailed'" — and then `launchFromCase` returned
+// `invitationsIssued: issued.issued` and dropped it, so `sourcing-driver` rendered the buyer's
+// "N dealerships are competing" from ROWS WRITTEN. `dealershipsInvited` was asserted by no test
+// in the repository, which is how it survived two reviews.
+
+test("REPRODUCTION: a partial dispatch failure must not report the full field as contacted", async () => {
+  ctrl.dispatchFailures = ["inv_2", "inv_4"];
+
+  const res = await launch();
+
+  assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
+  assert.equal(res.invitationsIssued, 6, "six rows WERE written, and that stays true");
+  assert.equal(res.noticesDispatched, 4, "but only four notices reached the outbox");
+  assert.ok(
+    ctrl.exceptions.length > 0,
+    "and Operations is still told — this fix adds to that guard, it does not replace it",
+  );
+});
+
+test("a clean launch reports the same number twice, so the distinction is invisible when it should be", async () => {
+  ctrl.dispatchFailures = [];
+  const res = await launch();
+  assert.equal(res.launched, true);
+  assert.equal(res.noticesDispatched, res.invitationsIssued,
+    "nothing failed, so rows and notices agree and the buyer sees the whole field");
+});
+
+test("a launch held before dispatch reports zero notices, not the rows it wrote", async () => {
+  // WRITE_FAILED holds the auction PENDING at step 2, so step 4 never runs. Returning the row
+  // count as notices here would claim a dispatch that never happened.
+  ctrl.issueSkipped = [{ rooftopId: "r_1", reason: "WRITE_FAILED" }];
+  const res = await launch();
+  assert.equal(res.launched, false);
+  assert.equal(res.noticesDispatched, 0, "no dispatch ran, so no notice was queued");
+});

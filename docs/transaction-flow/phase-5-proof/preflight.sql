@@ -222,17 +222,7 @@ SELECT 'D12 email_suppression present (created OUTSIDE the Prisma chain — 01_p
        'CHECKED',
        CASE WHEN to_regclass('public.email_suppression') IS NULL
             THEN 'ABSENT — expected in production; the D12a trailer will not run here'
-            ELSE 'present — the D12a trailer below reports the soft-reason count'
+            ELSE 'present — now run preflight-d12a.sql for the soft-reason count'
        END
 ORDER BY 1
-;
-
--- ── D12a — the soft-reason count. SEPARATE STATEMENT, deliberately. ─────────────────────
--- Skip this one statement if D12 above reported ABSENT; everything that can BLOCK the
--- deploy has already printed by this point, which is the whole point of the split.
-SELECT 'D12a email_suppression rows with a soft reason (unsubscribed / admin_added)' AS check_name,
-       'CHECKED' AS verdict,
-       count(*)::text || ' row(s)' AS detail
-  FROM email_suppression
- WHERE reason IN ('unsubscribed', 'admin_added')
 ;

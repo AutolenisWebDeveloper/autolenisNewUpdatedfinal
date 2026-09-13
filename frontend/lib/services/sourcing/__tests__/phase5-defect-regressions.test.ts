@@ -16,6 +16,7 @@
 
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 // Type-only: the shapes under test, so the fixtures below cannot drift from them.
 import type { SourcingCaseRecord } from "@/lib/services/sourcing/sourcing-case.service";
 
@@ -840,3 +841,29 @@ function txFake() {
     },
   };
 }
+
+// ── #422 review ratchets: two single lines whose regression is SILENT ─────────
+//
+// Both of these were wrong in the reviewed branch and neither had a test. They are pinned at
+// source level, the same idiom as `no-direct-transactional-send.test.ts` and
+// `nav-capability-preservation.test.ts`, because the harm in each case is a value that reaches a
+// person — a buyer's count, a buyer's ZIP — through a path no unit assertion was watching.
+
+test("the buyer's auction-launched notice is rendered from NOTICES DISPATCHED, not rows written", () => {
+  const src = readFileSync("lib/services/sourcing/sourcing-driver.service.ts", "utf8");
+  assert.match(
+    src,
+    /dealershipsInvited:\s*launch\.noticesDispatched/,
+    "a dealership holding an invitation row nobody emailed is not competing for this buyer",
+  );
+  assert.doesNotMatch(src, /dealershipsInvited:\s*launch\.invitationsIssued/);
+});
+
+test("the dealer-facing general location never falls back to the buyer's ZIP", () => {
+  const src = readFileSync("lib/services/auction/auction-invitation.service.ts", "utf8");
+  const chain = /const generalLocation =\s*\n?\s*\[req\.city, req\.state\]\.filter\(Boolean\)\.join\(", "\)\s*\|\|\s*([^;]+);/
+    .exec(src);
+  assert.ok(chain, "the generalLocation fallback chain moved — re-pin this assertion");
+  assert.doesNotMatch(chain[1]!, /req\.zip/,
+    "§25.1 permits a general location, and a ZIP is narrower than the city/state it replaces");
+});

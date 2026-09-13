@@ -478,8 +478,16 @@ interface EnqueueInvitationInput {
 async function enqueueDealerInvitation(input: EnqueueInvitationInput, db: Db): Promise<void> {
   const content = await buildInvitationContent(input, db);
   if (!content) {
-    logger.warn(`[invitation] no content for invitation ${input.invitationId} — not enqueued`);
-    return;
+    // THROW, do not return. Found by review on #422: this returned void, so neither caller
+    // could tell "enqueued" from "skipped" — `dispatchInvitations` counted the no-op as
+    // dispatched and `issueInvitations` counted the row as issued, which meant a live auction
+    // could hold an invitation nobody was told about and still report that dealership reached.
+    // Throwing routes it into the accounting that already exists: `failed` at the dispatch
+    // call site, `WRITE_FAILED` at the issue call site, and the Operations task either way.
+    throw new Error(
+      `[invitation] no content for invitation ${input.invitationId} — ` +
+        `the auction has no linked vehicle request, so no notice can be built`,
+    );
   }
   const rendered = renderDealerInvitation(content);
   await enqueueTransactional(
@@ -550,8 +558,14 @@ async function buildInvitationContent(
   });
   if (!req) return null;
 
+  // §25.1 PERMITS GENERAL LOCATION, AND A ZIP IS NOT ONE. Found by review on #422: the old
+  // fallback chain ended `|| req.zip || "the local area"`, so a request with no city and no
+  // state put the buyer's EXACT ZIP into a dealer-facing invitation — narrower than the
+  // city/state this is allowed to disclose, on the one path the firewall exists to guard.
+  // `"the local area"` was already the next link in the chain, so nothing is lost by removing
+  // the ZIP rather than replacing it.
   const generalLocation =
-    [req.city, req.state].filter(Boolean).join(", ") || req.zip || "the local area";
+    [req.city, req.state].filter(Boolean).join(", ") || "the local area";
 
   return {
     dealershipName: input.target.dealershipName,
