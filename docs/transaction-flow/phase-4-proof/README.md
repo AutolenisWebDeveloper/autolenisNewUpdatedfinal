@@ -270,6 +270,48 @@ an adapter that does not tally reads exactly as it did.
 **The next 08:00 UTC run is the experiment**, at no extra provider spend. Nothing here changes which
 listings are dropped or whether the run fails — only what the failure says about itself.
 
+### THE EXPERIMENT RAN. It is the PRICE side. — 2026-09-13 08:00 UTC
+
+The instrumentation fired on the first scheduled sweep after it shipped, and it answered the
+question in one run:
+
+```
+2026-09-13T08:00:06  FAILED  1 call  0 fetched  0 upserted
+"normalization dropped 50 of 50 listings (missing year/make/model/price)
+   — sampled 25: build absent 0, year 0, make 0, model 0, price 25, threw 0"
+```
+
+**Reading 2 of the three above.** `build absent 0` on every sampled row; `year`, `make` and `model`
+all 0; `price` 25 of 25; nothing threw.
+
+**THE CORRECTED DIAGNOSIS, and it reverses ten days of it.** `build absent 0` means the response
+DID carry the object the request asked for — so **`include_build_object` was the right fix and it
+works.** Year, make and model resolve. Every listing is being dropped on **price alone**. Ten days
+of diagnosis, the owner's and mine both, pointed at the build half; the build half was already
+fixed. The counted breakdown is what made the difference: the old bare `null` from `normalize()`
+named all four candidate fields and distinguished none, so a working fix and a broken one produced
+the same sentence.
+
+**What this evidence does NOT establish**, stated so the next reader does not over-read it:
+
+- **Why `price` is missing.** The predicate is `!price || price <= 0`, so the counter cannot tell
+  absent from `null` from `0` from negative. All four collapse into one tally. Whoever picks this
+  up needs a value, not a count — the plan's field set, the response shape, and a `price` of zero
+  are all still live and this instrument cannot separate them.
+- **All 50 listings.** `DROP_SAMPLE_LIMIT` is 25 and the run dropped 50, so the breakdown describes
+  the first 25 drops. Uniform across that sample; formally still a sample.
+- **The provider package.** Nothing here re-opens whether the production `MARKETCHECK_API_KEY` and
+  the MCP's key are the same package. It no longer matters for THIS question — the answer came from
+  production's own run rather than from a probe — but the caveat in
+  `../verification/marketcheck-contract-verification.md:8` stands wherever else it is cited.
+
+**NOT INVESTIGATED — owner's instruction, 2026-09-13, and the reasoning is recorded because a
+future reader will otherwise think it was dropped.** The price side is deferred until after the
+§13-D52 flip. The catalogue has been stale since 2026-09-02 and **nothing downstream reads it**:
+zero sourcing cases, zero new vehicle requests. A stale catalogue with no consumer is not an
+incident, and the flip is the work with a deadline. The instrument stays in place, so the next
+sweep after someone picks it up will say whether their fix landed without another experiment.
+
 **The catalogue purge stays held behind a green sweep.** `catalogue-purge-delete.sql` refuses on an
 empty catalogue and that refusal is meant to hold; the 221 stale rows have been stale since
 2026-09-02 and stay that way until a sweep succeeds.

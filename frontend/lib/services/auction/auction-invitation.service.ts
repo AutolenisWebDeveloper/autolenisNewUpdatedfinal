@@ -343,6 +343,35 @@ export async function issueInvitations(
         await writeWithheldFirewallEntry(auctionId, t.rooftopId, t.dealerId, db, now);
       }
 
+      // THE +1 THAT `releaseAuctionLoad` WILL LATER TAKE BACK.
+      //
+      // `releaseAuctionLoad` (`dealer-invitation.service.ts:471`) decrements
+      // `currentAuctionLoad` for EVERY invitation on a closing auction that names a dealer — no
+      // status filter — and `processAuctionClose` calls it for every auction whatever rail issued
+      // the invitations. The two older rails increment when they invite
+      // (`dealer-invitation.service.ts:404`, `launch-auction/route.ts:224`). This service, the one
+      // Stage 7 routes everything through, did not, so every registered-dealer invitation it
+      // issued was an unmatched `-1` at close and the dealer's load drifted BELOW its true value.
+      // The capacity gate (`auction-capacity.service.ts:27`), the score penalty
+      // (`dealer-invitation.service.ts:73-74`) and the coverage filter (`coverage.service.ts:130`)
+      // all read that number, so the drift makes a busy dealership look empty and over-invites it.
+      //
+      // Latent while nothing had gone through this rail; live the moment §13-D52 flips.
+      //
+      // BEFORE the enqueue and before the count, deliberately. A throw here then lands in the same
+      // WRITE_FAILED branch as a failed firewall write — no notice is sent, the row is not counted
+      // as issued, and `launchFromCase` treats it as a blocker. Charging after the enqueue would
+      // mean a dealership holding an emailed invitation the field does not count.
+      //
+      // An outside rooftop has no dealer to charge, and its NULL `dealer_id` is never decremented
+      // at close either, so the pairing holds on both sides.
+      if (t.dealerId) {
+        await db.dealer.update({
+          where: { id: t.dealerId },
+          data: { currentAuctionLoad: { increment: 1 } },
+        });
+      }
+
       // The emailed link carries the RAW token. It is never persisted and never logged.
       const notice: PendingInvitationDispatch = {
         invitationId: row.id,

@@ -2246,6 +2246,47 @@ rooftop. **§13-D52's flip does not go on until 110 lands** (owner's instruction
 bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not something to
 discover with a paid buyer waiting.
 
+**THE AUCTION-LOAD ASYMMETRY, fixed before the flip on the owner's promotion (2026-09-13).**
+Surfaced by the Ruling B review and promoted out of the queue rather than deferred, because it goes
+live the moment §13-D52 flips. `releaseAuctionLoad`
+(`lib/services/auction/dealer-invitation.service.ts:471`) decrements `currentAuctionLoad` for EVERY
+invitation on a closing auction that names a dealer — no status filter — and `processAuctionClose`
+calls it for every auction whatever rail issued the invitations. The two older rails increment when
+they invite (`dealer-invitation.service.ts:404`, `launch-auction/route.ts:224`). `issueInvitations`,
+the one Stage 7 routes everything through, did not. **Every Phase 5 registered-dealer invitation was
+therefore an unmatched `-1` at close**, drifting the dealer BELOW their true load — and the capacity
+gate (`auction-capacity.service.ts:27`), the score penalty (`dealer-invitation.service.ts:73-74`)
+and the coverage filter (`coverage.service.ts:130`) all read that number, so a busy dealership reads
+as empty and is over-invited. Latent only because nothing had gone through the rail:
+`sourcing_cases` 0, no invitation ever issued through it.
+
+The `+1` now sits **after the firewall write and before the enqueue and the count**, inside the
+per-target `try`, so a failure lands in the same `WRITE_FAILED` branch as a failed firewall write:
+no notice is sent, the row is not counted as issued, and `launchFromCase` treats it as a blocker.
+Charging after the enqueue would leave a dealership holding an emailed invitation the field does not
+count. An outside rooftop has no dealer to charge and its NULL `dealer_id` is never decremented at
+close either, so the pairing holds on both sides. A row lost to a concurrent writer
+(`ALREADY_INVITED_CONCURRENTLY`) is not charged — the winner's own issue did that, and charging
+again would be the mirror defect.
+
+**Two residuals, reported not fixed.**
+
+1. If the load write itself throws, the invitation row is already committed and
+   `releaseAuctionLoad` will still decrement it at close, because it filters on `auction_id` alone.
+   That is the same `-1`-without-`+1` as before, now confined to a logged failure rather than being
+   the normal path. Closing it means either deleting the row or making `releaseAuctionLoad`
+   status-aware — both larger than this fix.
+2. **`DEALER_REMOVED` leaks the `+1` the other way, and this fix is what makes that reachable from
+   the Phase 5 rail.** `app/api/admin/auctions/[auctionId]/action/route.ts:131` hard-deletes the
+   invitation with `deleteMany` and never decrements — the defect this service's own header has
+   named since Phase 5 (`auction-invitation.service.ts:19-22`), because `releaseAuctionLoad`
+   derives its list from the SURVIVING rows. Both older rails already leak this way. Before this
+   change a Phase 5 invitation had no `+1` to leak; now it does. The exposure is a manual admin
+   action on a rail with zero rows in production, so it is REPORTED rather than folded in: the fix
+   is four lines (`decrement` by the `deleteMany` count when the removed rows named a dealer) and
+   would also repair the two older rails, but it is a change to an admin route outside the finding
+   the owner promoted, and that promotion is the owner's to make.
+
 **Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
 migration's own header states the ordering, because this phase's code writes `initiator_role`,
 `sourcing_case_id` and the withheld firewall row on hot paths, and unmigrated the second of those
@@ -2580,8 +2621,17 @@ across three rounds · `docs/transaction-flow/phase-4-proof/run-proof.sh` 8 step
 non-production authenticated environment); `pnpm test:visual` and the Playwright buyer journey;
 **PostgreSQL 17.6** — every database proof ran on 16.13 and is reported DEGRADED, because this
 environment's network policy denies every postgresql.org host; the purge, the diagnostic and the
-migration against production, all of which are owner-run under the per-run protocol; and the live
-sweep's actual failure cause, which `sweep-failure-diagnostic.sql` query 2 settles.
+migration against production, all of which are owner-run under the per-run protocol.
+
+**The live sweep's failure cause is now SETTLED, and it reverses the standing diagnosis.** The
+08:00 UTC run on 2026-09-13 — the first after the drop-reason instrumentation shipped — reported
+`sampled 25: build absent 0, year 0, make 0, model 0, price 25, threw 0`. `build absent 0` means
+the `include_build_object` fix WORKS and year/make/model resolve; every listing is dropped on
+**price alone**. Ten days of diagnosis, the owner's and mine, pointed at the build half, which was
+already fixed. The price side is **deferred by owner instruction until after the §13-D52 flip** —
+the catalogue has been stale since 2026-09-02 and nothing downstream reads it (zero sourcing cases,
+zero new vehicle requests). Full record, including what the tally cannot distinguish, in
+`docs/transaction-flow/phase-4-proof/README.md`.
 
 ##### The live sweep failure, as far as the record can take it
 
