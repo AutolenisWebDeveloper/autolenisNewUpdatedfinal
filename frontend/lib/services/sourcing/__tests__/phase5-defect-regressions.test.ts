@@ -16,6 +16,7 @@
 
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 // Type-only: the shapes under test, so the fixtures below cannot drift from them.
 import type { SourcingCaseRecord } from "@/lib/services/sourcing/sourcing-case.service";
 
@@ -840,3 +841,45 @@ function txFake() {
     },
   };
 }
+
+// ── #422 review ratchets: two single lines whose regression is SILENT ─────────
+//
+// Both of these were wrong in the reviewed branch and neither had a test. They are pinned at
+// source level, the same idiom as `no-direct-transactional-send.test.ts` and
+// `nav-capability-preservation.test.ts`, because the harm in each case is a value that reaches a
+// person — a buyer's count, a buyer's ZIP — through a path no unit assertion was watching.
+
+test("the buyer's auction-launched notice is rendered from NOTICES DISPATCHED, not rows written", () => {
+  const src = readFileSync("lib/services/sourcing/sourcing-driver.service.ts", "utf8");
+  assert.match(
+    src,
+    /dealershipsInvited:\s*launch\.noticesDispatched/,
+    "a dealership holding an invitation row nobody emailed is not competing for this buyer",
+  );
+  assert.doesNotMatch(src, /dealershipsInvited:\s*launch\.invitationsIssued/);
+});
+
+test("the dealer-facing general location never falls back to the buyer's ZIP", () => {
+  const src = readFileSync("lib/services/auction/auction-invitation.service.ts", "utf8");
+  const chain = /const generalLocation =\s*\n?\s*\[req\.city, req\.state\]\.filter\(Boolean\)\.join\(", "\)\s*\|\|\s*([^;]+);/
+    .exec(src);
+  assert.ok(chain, "the generalLocation fallback chain moved — re-pin this assertion");
+  assert.doesNotMatch(chain[1]!, /req\.zip/,
+    "§25.1 permits a general location, and a ZIP is narrower than the city/state it replaces");
+});
+
+test("submitting an offer stamps offerSubmittedAt, the field four Phase 5 gates read", () => {
+  // Found by review on #422. `offerSubmittedAt` was read by `skipIfInvitationNoLongerSendable`
+  // (state-recheck-registry.ts), by `alreadyBid` on the token page, by the resume-link gate and
+  // by the decline route — and written by nothing on the dealer's normal submission path, which
+  // set only `respondedAt`. All four gates were therefore inert: a dealer who had already bid
+  // still received the 24h and 72h reminders.
+  //
+  // `respondedAt` cannot stand in for it: a decline is also a response.
+  const src = readFileSync("lib/services/offer/offer.service.ts", "utf8");
+  const update = /tx\.auctionInvitation\.update\(\{[\s\S]*?\}\);/.exec(src);
+  assert.ok(update, "the invitation update in submitOffer moved — re-pin this assertion");
+  assert.match(update[0], /offerSubmittedAt:\s*new Date\(\)/,
+    "without this write, every gate that reads offerSubmittedAt is dead code");
+  assert.match(update[0], /respondedAt:\s*new Date\(\)/, "and respondedAt must still be set");
+});

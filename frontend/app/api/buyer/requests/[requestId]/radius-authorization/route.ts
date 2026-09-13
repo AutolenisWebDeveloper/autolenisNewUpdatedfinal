@@ -44,10 +44,25 @@ export async function POST(
     return errorResponse("VALIDATION_ERROR", "A JSON body with additionalMiles is required", 400);
   }
 
+  // A JSON body of literal `null` PARSES, so the try/catch above does not catch it and
+  // `body.additionalMiles` threw a TypeError past this handler — a 500 on a buyer endpoint for
+  // input the route is supposed to reject with a 400. Found by review on #422.
+  if (typeof body !== "object" || body === null) {
+    return errorResponse("VALIDATION_ERROR", "A JSON body with additionalMiles is required", 400);
+  }
+
   const raw = body.additionalMiles;
   const additionalMiles = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(additionalMiles) || additionalMiles <= 0) {
-    return errorResponse("VALIDATION_ERROR", "additionalMiles must be a positive number", 400);
+  // INTEGER, not merely finite. `recordRadiusAuthorization` floors what it stores, so `1.5`
+  // was acknowledged to the buyer and audited as 1.5 while the case kept 1, and `0.5` stored
+  // zero — which could move a case to AUTHORIZED with no additional radius at all. Rejecting
+  // the fraction is honest; silently flooring it is not.
+  if (!Number.isInteger(additionalMiles) || additionalMiles <= 0) {
+    return errorResponse(
+      "VALIDATION_ERROR",
+      "additionalMiles must be a positive whole number of miles",
+      400,
+    );
   }
   if (additionalMiles > MAX_ADDITIONAL_MILES) {
     return errorResponse(

@@ -382,7 +382,10 @@ async function launchAndReport(
     (firstName) =>
       renderAuctionLaunched({
         firstName,
-        dealershipsInvited: launch.invitationsIssued,
+        // NOTICES QUEUED, not rows written. A dealership that holds an invitation row nobody
+        // emailed is not competing for this buyer's business, and telling the buyer otherwise
+        // is the half of the §27 dispatch defect that the Operations task did not cover.
+        dealershipsInvited: launch.noticesDispatched,
         closesAt: auction?.endsAt ?? now,
         dashboardUrl: `${APP_URL}/buyer/dashboard`,
       }),

@@ -446,7 +446,19 @@ async function recheckSendSafety(
 export interface LaunchResult {
   launched: boolean;
   auctionId: string | null;
+  /** Invitation ROWS written. A row is not a notice — see `noticesDispatched`. */
   invitationsIssued: number;
+  /**
+   * Notices that actually reached the outbox.
+   *
+   * Found by review on #422. `dispatchInvitations` already returned this count, and its own
+   * docstring says it exists "so the caller can tell 'eight invited' from 'eight rows, six
+   * emailed'" — and then this result discarded it and the buyer notice was rendered from
+   * `invitationsIssued`. A paid buyer could therefore be told eight dealerships were competing
+   * when six were emailed. The dispatch failure raised an Operations task, so it was not
+   * silent; the buyer-facing number was still wrong.
+   */
+  noticesDispatched: number;
   blockers: string[];
 }
 
@@ -470,13 +482,19 @@ export async function launchFromCase(
   });
   if (!readiness.ready) {
     await holdWithBlockers(vehicleRequestId, sourcingCase, readiness, db);
-    return { launched: false, auctionId: null, invitationsIssued: 0, blockers: readiness.blockers };
+    return {
+      launched: false, auctionId: null, invitationsIssued: 0, noticesDispatched: 0,
+      blockers: readiness.blockers,
+    };
   }
 
   const deposit = await settledDepositForRequest(vehicleRequestId);
   if (!deposit) {
     // Re-checked because readiness ran before this point and the gate is the money.
-    return { launched: false, auctionId: null, invitationsIssued: 0, blockers: ["Deposit no longer settled."] };
+    return {
+      launched: false, auctionId: null, invitationsIssued: 0, noticesDispatched: 0,
+      blockers: ["Deposit no longer settled."],
+    };
   }
 
   const request = await db.vehicleRequest.findUnique({
@@ -484,7 +502,10 @@ export async function launchFromCase(
     select: { buyerId: true },
   });
   if (!request) {
-    return { launched: false, auctionId: null, invitationsIssued: 0, blockers: ["Request no longer exists."] };
+    return {
+      launched: false, auctionId: null, invitationsIssued: 0, noticesDispatched: 0,
+      blockers: ["Request no longer exists."],
+    };
   }
 
   // ── step 1: the auction, PENDING, with BOTH references (S7-17) ──
@@ -499,7 +520,10 @@ export async function launchFromCase(
   if (existing) {
     if (existing.status === "ACTIVE" || existing.status === "CLOSED") {
       logger.info(`[readiness] auction ${existing.id} already ${existing.status} for deposit ${deposit.id}`);
-      return { launched: false, auctionId: existing.id, invitationsIssued: 0, blockers: [] };
+      return {
+        launched: false, auctionId: existing.id, invitationsIssued: 0, noticesDispatched: 0,
+        blockers: [],
+      };
     }
     auctionId = existing.id;
   } else {
@@ -556,7 +580,11 @@ export async function launchFromCase(
       `${incomplete.length} invitation(s) were written but could not be completed ` +
       `(rooftops: ${incomplete.map((s) => s.rooftopId).join(", ")}). The auction stays PENDING.`;
     await holdWithBlockers(vehicleRequestId, sourcingCase, { ...readiness, blockers: [blocker] }, db);
-    return { launched: false, auctionId, invitationsIssued: issued.issued, blockers: [blocker] };
+    // Nothing was dispatched: the auction stays PENDING and step 4 never runs.
+    return {
+      launched: false, auctionId, invitationsIssued: issued.issued, noticesDispatched: 0,
+      blockers: [blocker],
+    };
   }
 
   // ── step 3: ACTIVE, in one transaction, ONLY with a real invitation row ──
@@ -584,7 +612,11 @@ export async function launchFromCase(
         ? "No invitation row exists, so the auction stays PENDING rather than launching with nobody invited."
         : "The auction was no longer PENDING when the activation ran.";
     await holdWithBlockers(vehicleRequestId, sourcingCase, { ...readiness, blockers: [blocker] }, db);
-    return { launched: false, auctionId, invitationsIssued: issued.issued, blockers: [blocker] };
+    // Activation did not happen, so step 4 never runs and no notice was queued.
+    return {
+      launched: false, auctionId, invitationsIssued: issued.issued, noticesDispatched: 0,
+      blockers: [blocker],
+    };
   }
 
   // ── step 4: the notices, now that the auction is ACTIVE and the recheck will pass ──
@@ -628,7 +660,13 @@ export async function launchFromCase(
     `[readiness] auction ${auctionId} ACTIVE with ${issued.issued} invitation(s), ` +
       `${dispatch.dispatched} notice(s) queued, closes ${endsAt.toISOString()}`,
   );
-  return { launched: true, auctionId, invitationsIssued: issued.issued, blockers: [] };
+  return {
+    launched: true,
+    auctionId,
+    invitationsIssued: issued.issued,
+    noticesDispatched: dispatch.dispatched,
+    blockers: [],
+  };
 }
 
 /**
