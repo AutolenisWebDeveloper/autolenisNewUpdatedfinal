@@ -207,6 +207,12 @@ describe("admin IA — page inventory", () => {
     //     flip is the owner's review of exactly this report. A HUB rather than a
     //     rail entry because it is read before one configuration decision, not a
     //     daily working surface.
+    //   /admin/sourcing/[caseId]          — Phase 5's Operations destination for one
+    //     sourcing case: the §7 readiness checklist with each blocker and its owner, the
+    //     §6a ladder, and §6c's audited limited-auction approval. A DETAIL drill-down
+    //     parented to /admin/requests/[requestId] and linked from it, NOT a rail entry —
+    //     a menu cannot usefully list "a sourcing case". Its other entry point is the §26
+    //     queue item (THIN_DEALER_COVERAGE, LAUNCH_READINESS_BLOCKED) that names the case.
     const baseline = new Set(BASELINE_ADMIN_ROUTES);
     const added = ROUTES.filter((r) => !baseline.has(r));
     assert.deepEqual(
@@ -216,6 +222,7 @@ describe("admin IA — page inventory", () => {
         "/admin/dealer-outreach/coverage",
         "/admin/dealer-outreach/queue",
         "/admin/settings/rbac-shadow",
+        "/admin/sourcing/[caseId]",
       ],
       "an unlisted admin page appeared — add it here deliberately, with its IA placement",
     );

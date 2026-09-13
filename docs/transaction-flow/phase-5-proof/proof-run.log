@@ -1,0 +1,108 @@
+== server_version=16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) ==
+   NOTE: production runs PostgreSQL 17.x. This run is 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1), so it proves the
+   DDL and the idempotency but NOT 17.x-specific behaviour. Every statement in
+   this migration (ADD COLUMN IF NOT EXISTS, ALTER COLUMN SET/DROP NOT NULL,
+   SET DEFAULT, UPDATE, CREATE [UNIQUE] INDEX IF NOT EXISTS) is invariant across
+   11-17, and NULLS DISTINCT has been the unique-index default since long before
+   15 made NULLS NOT DISTINCT an option — but the 17.6 run is CI's
+   `migrations` job on the pull request, not this script.
+
+== 1. empty database ==
+== 2. apply the chain UP TO BUT NOT INCLUDING Phase 5 ==
+   chain applied: 108 migrations
+== 2b. BEFORE snapshot: the five objects must all be MISSING ==
+   before: 6 PRESENT / 19 MISSING
+   every Phase 5 object confirmed absent beforehand
+   RLS state captured before: apollo_reveals:rls=true:policies=0 auction_invitations:rls=false:policies=0 circumvention_attempts:rls=false:policies=0 identity_firewall_entries:rls=false:policies=0 sourcing_candidates:rls=true:policies=0 
+== 3. restore Phase 5 and apply it ==
+The following migration(s) have been applied:
+  └─ 20261113000000_phase5_sourcing_invitations/
+All migrations have been successfully applied.
+== 4. verify — physical schema ==
+   PRESENT  circumvention_attempts.initiator_role                                        text
+   PRESENT  circumvention_attempts.after_paid_auction                                    boolean
+   PRESENT  circumvention_attempts.after_paid_auction is nullable with no default        YES / default=none
+   PRESENT  circumvention_attempts.resolution                                            text
+   PRESENT  circumvention_attempts.resolved_at                                           timestamp without time zone
+   PRESENT  index circumvention_attempts_dealer_id_detected_at_idx                       CREATE INDEX circumvention_attempts_dealer_id_detected_at_idx ON public.circumvention_attempts USING btree (dealer_id, detected_at)
+   PRESENT  identity_firewall_entries.auction_id                                         text
+   PRESENT  identity_firewall_entries.rooftop_id                                         text
+   PRESENT  identity_firewall_entries.state                                              text
+   PRESENT  identity_firewall_entries.lifted_at                                          timestamp without time zone
+   PRESENT  identity_firewall_entries.lifted_by                                          text
+   PRESENT  identity_firewall_entries.flag is nullable (the one relaxation)              YES
+   PRESENT  unique identity_firewall_entries_auction_id_rooftop_id_key                   CREATE UNIQUE INDEX identity_firewall_entries_auction_id_rooftop_id_key ON public.identity_firewall_entries USING btree (auction_id, rooftop_id)
+   PRESENT  apollo_reveals.sourcing_case_id                                              text / nullable=YES
+   PRESENT  index apollo_reveals_sourcing_case_id_idx                                    CREATE INDEX apollo_reveals_sourcing_case_id_idx ON public.apollo_reveals USING btree (sourcing_case_id)
+   PRESENT  apollo_reveals has no FK on sourcing_case_id (deliberate, soft key)          no FK, as intended
+   PRESENT  unique sourcing_candidates_sourcing_case_id_rooftop_id_key                   CREATE UNIQUE INDEX sourcing_candidates_sourcing_case_id_rooftop_id_key ON public.sourcing_candidates USING btree (sourcing_case_id, rooftop_id)
+   PRESENT  index sourcing_candidates_rooftop_id_idx                                     CREATE INDEX sourcing_candidates_rooftop_id_idx ON public.sourcing_candidates USING btree (rooftop_id)
+   PRESENT  index sourcing_candidates_case_idx still present (redundant, reported not dropped) CREATE INDEX sourcing_candidates_case_idx ON public.sourcing_candidates USING btree (sourcing_case_id)
+   PRESENT  auction_invitations.candidate_ids is NOT NULL                                NO
+   PRESENT  auction_invitations.candidate_ids DEFAULT is an empty text[]                 ARRAY[]::text[]
+   PRESENT  auction_invitations has no NULL candidate_ids row                            0 NULL rows
+   PRESENT  Phase 1 auction_invitations_auction_rooftop_key survives untouched           CREATE UNIQUE INDEX auction_invitations_auction_rooftop_key ON public.auction_invitations USING btree (auction_id, rooftop_id) WHERE (rooftop_id IS NOT NULL)
+   PRESENT  Phase 1 sourcing_cases_band_check survives untouched                         CHECK ((band = ANY (ARRAY['100'::text, '150'::text, '250'::text, 'AUTHORIZED'::text])))
+   PRESENT  zero RLS policies on every table altered here                                0 policy/policies found
+   all 25 assertions PRESENT
+== 4b. RLS untouched — the comparison, not an absolute ==
+   identical: apollo_reveals:rls=true:policies=0 auction_invitations:rls=false:policies=0 circumvention_attempts:rls=false:policies=0 identity_firewall_entries:rls=false:policies=0 sourcing_candidates:rls=true:policies=0 
+== 5. verify — _prisma_migrations ==
+               migration_name               |          started_at           |          finished_at          | rolled_back_at | applied_steps_count | verdict 
+--------------------------------------------+-------------------------------+-------------------------------+----------------+---------------------+---------
+ 20261113000000_phase5_sourcing_invitations | 2026-09-11 00:18:50.530081+00 | 2026-09-11 00:18:50.542671+00 |                |                   1 | OK
+
+ ledger_row_presence 
+---------------------
+ OK — one ledger row
+
+               migration_name                |          finished_at          | applied_steps_count 
+---------------------------------------------+-------------------------------+---------------------
+ 20261113000000_phase5_sourcing_invitations  | 2026-09-11 00:18:50.542671+00 |                   1
+ 20261112000000_stage4_trade_election        | 2026-09-11 00:18:48.661435+00 |                   1
+ 20261111000000_deposit_status_disputed      | 2026-09-11 00:18:48.657132+00 |                   1
+ 20261110000000_claim_token_purpose          | 2026-09-11 00:18:48.65333+00  |                   1
+ 20261106000100_transaction_spine_foundation | 2026-09-11 00:18:48.64808+00  |                   1
+ 20261106000000_transaction_spine_enums      | 2026-09-11 00:18:48.431221+00 |                   1
+
+                chain_health                 
+---------------------------------------------
+ OK — no unfinished or rolled-back migration
+
+== 6. idempotency: re-apply the migration BY HAND and prove the no-op ==
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:103: NOTICE:  column "initiator_role" of relation "circumvention_attempts" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:103: NOTICE:  column "after_paid_auction" of relation "circumvention_attempts" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:103: NOTICE:  column "resolution" of relation "circumvention_attempts" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:103: NOTICE:  column "resolved_at" of relation "circumvention_attempts" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:109: NOTICE:  relation "circumvention_attempts_dealer_id_detected_at_idx" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:153: NOTICE:  column "auction_id" of relation "identity_firewall_entries" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:153: NOTICE:  column "rooftop_id" of relation "identity_firewall_entries" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:153: NOTICE:  column "state" of relation "identity_firewall_entries" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:153: NOTICE:  column "lifted_at" of relation "identity_firewall_entries" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:153: NOTICE:  column "lifted_by" of relation "identity_firewall_entries" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:165: NOTICE:  relation "identity_firewall_entries_auction_id_rooftop_id_key" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:194: NOTICE:  column "sourcing_case_id" of relation "apollo_reveals" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:197: NOTICE:  relation "apollo_reveals_sourcing_case_id_idx" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:223: NOTICE:  relation "sourcing_candidates_sourcing_case_id_rooftop_id_key" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261113000000_phase5_sourcing_invitations/migration.sql:229: NOTICE:  relation "sourcing_candidates_rooftop_id_idx" already exists, skipping
+   digest before re-apply: 5cc4a4d23a1de317c65846f6afa9609c
+   digest after  re-apply: 5cc4a4d23a1de317c65846f6afa9609c
+   identical — the migration is idempotent
+== 7. verify again after the re-apply ==
+   verification output byte-identical across the re-apply
+== 8. drift gate — the chain must still match schema.prisma ==
+  ok       missing table: 0
+  ok       missing column: 0
+  ok       missing enum value: 0
+
+  structural statements: 344 (baseline 344)
+  deferred by explicit exception: 4 statement(s) across 4 entr(ies)
+    - [Phase 8 (owns e-sign; lands the Prisma relation with the uniqueness cutover)] "e_sign_envelopes" DROP COLUMN "co_buyer_id"
+    - [Phase 8] DROP CONSTRAINT "e_sign_envelopes_co_buyer_id_fkey"
+    - [Phase 8] DROP COLUMN "signer_kind"
+    - [Phase 8] DROP INDEX "e_sign_envelopes_deal_id_signer_kind_key"
+
+OK — no functional drift; structural drift at baseline.
+
+== PHASE 5 MIGRATION PROOF: PASS on PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) ==
+   apply -> verify (physical + ledger) -> re-apply -> no-op -> verify -> drift at baseline

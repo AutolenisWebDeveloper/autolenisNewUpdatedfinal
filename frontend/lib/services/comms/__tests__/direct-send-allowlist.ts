@@ -85,7 +85,13 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/api/crm/dispatch/sms/route.ts", reasons: ["sms"], senders: [], removalPhase: 10 },
   { file: "app/api/cron/amips-digest/route.ts", reasons: ["direct-sender"], senders: ["sendCustomAdminEmail"], removalPhase: 10 },
   { file: "app/api/cron/auction-close/route.ts", reasons: ["direct-sender"], senders: ["sendDealerAuctionReminderEmail", "sendDealerOfferRevisionClosingEmail"], removalPhase: 10 },
-  { file: "app/api/cron/dealer-invitation-reminder/route.ts", reasons: ["direct-sender"], senders: ["sendDealerAuctionReminderEmail"], removalPhase: 10 },
+  // DELISTED IN PHASE 5 (S7-20). The 50%/90% invitation reminders now go through
+  // `sweepInvitationReminders` → `enqueueTransactional`, keyed per INVITATION rather than per
+  // auction. The direct rail applied no suppression, so a dealership that bounced or used its
+  // own one-click unsubscribe was re-emailed on every sweep — and the route's previous key
+  // collided across rails, so one auction could emit at most one reminder no matter how many
+  // rooftops were invited. Delisted ahead of the §8.4 Phase 10 clock because Phase 5 owns this
+  // cron and the rule is that every communication goes through the dispatcher.
   { file: "app/api/cron/dealer-scorecard-snapshot/route.ts", reasons: ["direct-sender"], senders: ["sendDealerWeeklyScorecardEmail"], removalPhase: 10 },
   // DELISTED IN PHASE 4 (jobs/I-22). The stale sweep's two dealer notices —
   // sendDealerStaleListingRemovalEmail and sendDealerInventorySyncFailureEmail — now go
@@ -117,7 +123,11 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/auth/callback/route.ts", reasons: ["direct-sender"], senders: ["sendEmailVerifiedEmail"], removalPhase: 10 },
   { file: "lib/auth/actions.ts", reasons: ["direct-sender"], senders: ["sendPasswordResetEmail", "sendWelcomeEmail"], removalPhase: 10 },
   { file: "lib/qstash/notify.ts", reasons: ["resend-sdk", "twilio-sdk", "sms"], senders: [], removalPhase: 10 },
-  { file: "lib/services/acquisition/dealer-opportunity-notification.service.ts", reasons: ["direct-sender"], senders: ["sendDealerNewBuyerOpportunityEmail"], removalPhase: 10 },
+  // DELISTED IN PHASE 5 (§13-D44, RETIRE OUTRIGHT). `notifyActiveDealersOfOpportunity` emailed
+  // the first twenty ACTIVE dealers with no radius and no invitation, from the public request
+  // route. It is now a stub that assembles no dealer pool at all, so there is no send to
+  // allowlist — and a stale entry here would be a hole: the next direct send added to that file
+  // would pass unnoticed.
   { file: "lib/services/acquisition/intake-pipeline.service.ts", reasons: ["direct-sender"], senders: ["sendBuyerOpportunityConfirmationEmail", "sendFounderHotLeadAlertEmail"], removalPhase: 10 },
   { file: "lib/services/acquisition/twilio.service.ts", reasons: ["twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   { file: "lib/services/affiliate/digest.service.ts", reasons: ["direct-sender"], senders: ["sendAffiliateWeeklyDigest"], removalPhase: 10 },

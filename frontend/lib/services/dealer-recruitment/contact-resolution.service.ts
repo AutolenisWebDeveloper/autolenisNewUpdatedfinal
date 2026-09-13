@@ -78,6 +78,11 @@ export interface ContactCandidate {
   // coverage / Y2 path never sets it, so a paid reveal can only fire when a
   // caller (post-deposit, dealer selected for a live auction) opts in.
   allowPaid?: boolean;
+  /**
+   * The sourcing case that authorises a paid reveal. REQUIRED whenever `allowPaid`
+   * is true: see the tier-4 block below for why an unlinked live spend is refused.
+   */
+  sourcingCaseId?: string | null;
 }
 
 export type ContactStatus = "VERIFIED" | "ROLE_DERIVED";
@@ -327,7 +332,21 @@ export async function resolveContactableEmail(
   // + budget ledger to. The pre-deposit coverage / Y2 path never sets allowPaid,
   // so a paid reveal can never fire there (the pre-deposit leak is closed). The
   // reveal itself is off/capped until enabled + the probe sets the ledger cap.
-  if (candidate.allowPaid && candidate.rooftopId) {
+  //
+  // AND IT FIRES ONLY WITH A SOURCING CASE TO BILL IT TO. `allowPaid` alone says
+  // "the caller believes payment happened"; `sourcingCaseId` is the evidence, and
+  // only `advanceSourcing` can supply one — it refuses to run at all until
+  // `isRequestFulfillmentUnlocked` proves a settled deposit is bound to the request
+  // (`rooftop-sourcing.service.ts`). Without the id the spend would be real and its
+  // authorisation would be a log line, which is how paid credits came to be drawn
+  // with no link to a paid request in the first place. Refuse and say so: a missing
+  // link is a programming error in the caller, not a reason to spend anyway.
+  if (candidate.allowPaid && candidate.rooftopId && !candidate.sourcingCaseId) {
+    logger.warn(
+      `[contact-resolution] paid tier refused for ${candidate.id}: allowPaid with no sourcingCaseId — a live reveal must be billable to a case with a settled deposit`,
+    );
+  }
+  if (candidate.allowPaid && candidate.rooftopId && candidate.sourcingCaseId) {
     const revealed = await revealRooftopContactFn(
       {
         rooftopId: candidate.rooftopId,
@@ -336,6 +355,7 @@ export async function resolveContactableEmail(
         city: candidate.city,
         state: candidate.state,
         consumer: "live",
+        sourcingCaseId: candidate.sourcingCaseId,
       },
       { prisma },
     );

@@ -98,10 +98,10 @@ beforeEach(() => {
   state.createCalls = 0;
 });
 
-test("the catalogue covers §26's 48 rows plus the three the Markdown states elsewhere", async () => {
+test("the catalogue covers §26's 48 rows plus the five the Markdown states elsewhere", async () => {
   const { EXCEPTION_CATALOGUE } = await cat();
-  assert.equal(EXCEPTION_CATALOGUE.length, 51);
-  // §26 proper: 48 rows. The three additions are each stated in the Markdown, just
+  assert.equal(EXCEPTION_CATALOGUE.length, 53);
+  // §26 proper: 48 rows. The five additions are each stated in the Markdown, just
   // not as a §26 row:
   //   • COMMS_TERMINAL_FAILURE — §27, rendered in the HTML register (§2 diff D2)
   //   • LINEAGE_ORPHAN         — §3, the transaction spine
@@ -109,7 +109,20 @@ test("the catalogue covers §26's 48 rows plus the three the Markdown states els
   //     raised as LINEAGE_ORPHAN, which told the operator to re-parent a record —
   //     instructions for a different condition — and counted it among the orphans
   //     the reparent route reports as outstanding.
-  const extraCodes = ["COMMS_TERMINAL_FAILURE", "LINEAGE_ORPHAN", "POSSIBLE_DUPLICATE_BUYER"];
+  //   • THIN_DEALER_COVERAGE — Stage 6c's decision table, the "1–2" row
+  //     ("Continue expansion, source manually, or close after review"). §26 carries
+  //     rows for zero coverage and for no coverage at 250 miles, and nothing for the
+  //     case where a field exists but is too small to launch. Added Phase 5 (S6-25).
+  //   • LAUNCH_READINESS_BLOCKED — Stage 7's failure clause ("A launch that cannot
+  //     reach readiness holds and surfaces the blocker with an owner"). Added Phase 5
+  //     (S7-22).
+  const extraCodes = [
+    "COMMS_TERMINAL_FAILURE",
+    "LINEAGE_ORPHAN",
+    "POSSIBLE_DUPLICATE_BUYER",
+    "THIN_DEALER_COVERAGE",
+    "LAUNCH_READINESS_BLOCKED",
+  ];
   const extras = EXCEPTION_CATALOGUE.filter((d) => extraCodes.includes(d.code));
   assert.equal(extras.length, extraCodes.length, "each addition must be present exactly once");
   assert.equal(EXCEPTION_CATALOGUE.length - extras.length, 48);

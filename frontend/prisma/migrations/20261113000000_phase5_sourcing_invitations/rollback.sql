@@ -1,0 +1,115 @@
+-- Rollback for 20261113000000_phase5_sourcing_invitations.
+--
+-- ROLL THE CODE BACK. DO NOT DROP ANYTHING BY REFLEX.
+--
+-- Five changes, and they do not have one rollback shape. Three are inert once the code
+-- reverts, one is a CONSTRAINT that a revert makes stricter than the reverted code needs,
+-- and one holds a financial record. Taken in that order.
+--
+-- WHAT ROLLING THE CODE BACK ACHIEVES, ON ITS OWN. With Phase 5's writers reverted:
+-- nothing scans a dealer message, so nothing writes `initiator_role` /
+-- `after_paid_auction` / `resolution`; nothing reaches launch readiness, so nothing
+-- writes an `identity_firewall_entries` state row; nothing calls paid enrichment from a
+-- case, so nothing writes `sourcing_case_id`; and `sourcing_candidates` returns to
+-- having no writer at all. Every column added here goes inert. No row is rewritten and
+-- nothing reads a value it does not understand -- which is the reverse of the deploy-order
+-- hazard in migration.sql, and the reason that hazard is one-directional.
+--
+-- §8.2 Phase 5's own rollback note holds and is worth restating: invitations are written
+-- to `auction_invitations`, which Phase 1 created and which the legacy
+-- `outside_auction_invites` reader still covers, so a revert falls back to the existing
+-- invite path. The sourcing case is a new record consulted only by new code.
+--
+-- ONE THING A CODE REVERT DOES NOT UNDO, AND IT IS THE IMPORTANT ONE. Suppression on the
+-- invitation rail is a strictly safer default. Reverting it RE-ENABLES sends that this
+-- phase filtered -- specifically, it restores mailing dealer addresses carrying
+-- `email_suppression.reason = 'unsubscribed'`, which the pre-phase hard-only tier did not
+-- honour, and it removes the List-Unsubscribe header from the invitation rail. That is a
+-- CAN-SPAM and bulk-sender exposure re-opening, not a feature going away. If this phase
+-- is reverted, the suppression tier and the header are the two things to carry forward
+-- separately rather than revert with the rest.
+--
+-- ===========================================================================
+-- 1, 3. Inert columns -- leave them
+-- ===========================================================================
+--
+-- `circumvention_attempts.initiator_role` / `after_paid_auction` / `resolution` /
+-- `resolved_at`, and `apollo_reveals.sourcing_case_id`. All nullable, all unread by
+-- reverted code. Dropping them destroys evidence: an attribution row says which party
+-- initiated a circumvention attempt, and a reveal's case link is the only record of which
+-- paid credit was authorised by which settled deposit. Both are facts, and reverting a
+-- feature must not delete a fact.
+--
+--   -- SELECT id, dealer_id, flag, initiator_role, after_paid_auction, resolution
+--   --   FROM "circumvention_attempts" WHERE "initiator_role" IS NOT NULL;
+--   -- SELECT rooftop_id, sourcing_case_id, credits_cost, status
+--   --   FROM "apollo_reveals" WHERE "sourcing_case_id" IS NOT NULL;
+--
+--   -- ALTER TABLE "circumvention_attempts"
+--   --   DROP COLUMN IF EXISTS "initiator_role",
+--   --   DROP COLUMN IF EXISTS "after_paid_auction",
+--   --   DROP COLUMN IF EXISTS "resolution",
+--   --   DROP COLUMN IF EXISTS "resolved_at";
+--   -- ALTER TABLE "apollo_reveals" DROP COLUMN IF EXISTS "sourcing_case_id";
+--
+-- The indexes may be dropped freely if they are genuinely unwanted -- an index holds no
+-- facts:
+--
+--   -- DROP INDEX IF EXISTS "circumvention_attempts_dealer_id_detected_at_idx";
+--   -- DROP INDEX IF EXISTS "apollo_reveals_sourcing_case_id_idx";
+--
+-- ===========================================================================
+-- 2. identity_firewall_entries -- restoring NOT NULL is the trap
+-- ===========================================================================
+--
+-- The columns are inert after a revert, as above. The RELAXATION is not symmetrical:
+--
+--   -- ALTER TABLE "identity_firewall_entries" ALTER COLUMN "flag" SET NOT NULL;  -- NO
+--
+-- That statement FAILS if this phase wrote any withheld-state row, because those rows
+-- carry `flag` NULL by design. Restoring the constraint therefore requires deleting the
+-- firewall state first, which deletes the record of which auctions withheld buyer
+-- identity -- a compliance record under §25.1, not a feature flag. Leave `flag`
+-- nullable. Nothing is harmed by a nullable column on a table whose only writer is gone,
+-- and Phase 7 needs it nullable anyway to record the lift.
+--
+-- If the constraint must genuinely be restored, it is an owner decision taken with the
+-- rows in front of you:
+--
+--   -- SELECT id, auction_id, rooftop_id, state, flag FROM "identity_firewall_entries";
+--   -- (then, only if every row carries a flag)
+--   -- ALTER TABLE "identity_firewall_entries" ALTER COLUMN "flag" SET NOT NULL;
+--
+--   -- DROP INDEX IF EXISTS "identity_firewall_entries_auction_id_rooftop_id_key";
+--
+-- ===========================================================================
+-- 4. sourcing_candidates -- drop the unique, keep the index
+-- ===========================================================================
+--
+-- Safe in both directions and the least consequential change here: the table had no rows
+-- before this phase and holds only derived sourcing state. Dropping the unique loses a
+-- concurrency backstop, not data.
+--
+--   -- DROP INDEX IF EXISTS "sourcing_candidates_sourcing_case_id_rooftop_id_key";
+--   -- DROP INDEX IF EXISTS "sourcing_candidates_rooftop_id_idx";
+--
+-- ===========================================================================
+-- 5. auction_invitations.candidate_ids -- reverse in the opposite order
+-- ===========================================================================
+--
+-- This is the one change whose forward statements must be undone in reverse, and the only
+-- one where the reverted code is actually INCOMPATIBLE with the migrated column if you
+-- get it wrong. The pre-phase Prisma client declares `candidateIds String[]`, which is
+-- satisfied by a NOT NULL column with a default -- so the common case needs no rollback
+-- at all and this section is here for completeness.
+--
+-- If it must be reversed, drop NOT NULL before the default; the column then accepts NULL
+-- again and the rows already backfilled to `{}` stay as they are, which is correct either
+-- way:
+--
+--   -- ALTER TABLE "auction_invitations" ALTER COLUMN "candidate_ids" DROP NOT NULL;
+--   -- ALTER TABLE "auction_invitations" ALTER COLUMN "candidate_ids" DROP DEFAULT;
+--
+-- DO NOT re-NULL the backfilled rows. `{}` and NULL mean the same thing to every reader
+-- -- "this invitation serves no recorded candidate" -- and NULL is the one of the two
+-- that crashes a client typed `String[]`.

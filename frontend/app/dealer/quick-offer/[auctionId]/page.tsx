@@ -21,7 +21,15 @@ interface AuctionContext {
   id: string;
   status: string;
   endsAt: string | null;
-  _count: { offers: number };
+  /**
+   * §13-D35 — NULL while the auction is live, a number once it closes.
+   *
+   * This used to be typed `_count: { offers: number }` and read as `auctionCtx._count.offers`,
+   * which THREW: the route destructures `_count` away and returns `offerCount`, so `_count` was
+   * always `undefined` on the wire. The line below that rendered it is gone for the other half
+   * of the same ruling — a live offer count is competitive information in a sealed auction.
+   */
+  offerCount: number | null;
 }
 
 export default function QuickOfferPage() {
@@ -173,7 +181,10 @@ export default function QuickOfferPage() {
               {hoursLeft}h left
             </div>
           )}
-          <div className="text-xs text-slate-400 shrink-0">{auctionCtx._count.offers} offer{auctionCtx._count.offers !== 1 ? "s" : ""} so far</div>
+          {/* §13-D35: no live offer count. A dealership that knows it is the only bidder bids
+              differently from one that knows there are seven, and §Stage 7 calls this auction
+              sealed. The deadline below is what a bidder legitimately needs. */}
+          <div className="text-xs text-slate-400 shrink-0">Sealed bidding</div>
         </div>
       )}
 

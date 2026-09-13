@@ -152,7 +152,14 @@ test("the allowlist shrinks, never grows, without a deliberate edit", () => {
   // static half of the same measurement.
   assert.equal(
     DIRECT_SEND_ALLOWLIST.length,
-    97,
+    // 97 → 95 in Phase 5. TWO PATHS MIGRATED, both off a SCHEDULED or untargeted rail:
+    //   · app/api/cron/dealer-invitation-reminder/route.ts — the 50%/90% invitation reminders
+    //     now go through `sweepInvitationReminders` → `enqueueTransactional`, keyed per
+    //     invitation. The direct rail applied no suppression, so a dealership that bounced or
+    //     unsubscribed was re-emailed on every sweep.
+    //   · lib/services/acquisition/dealer-opportunity-notification.service.ts — retired
+    //     outright under §13-D44; it assembles no dealer pool at all now.
+    95,
     "The direct-send count changed. Going DOWN is the goal — update this number and say which path was migrated. " +
       "Going UP means a new direct send was added and needs justifying."
   );

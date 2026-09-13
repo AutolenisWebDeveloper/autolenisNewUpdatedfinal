@@ -39,7 +39,20 @@ interface InvitationScore {
   factors: Record<string, number>;
 }
 
-async function scoreDealerForAuction(dealerId: string, vehicleTypes: string[]): Promise<number> {
+/**
+ * EXPORTED FOR PHASE 5, otherwise unchanged.
+ *
+ * §6c's "rank and invite the best eight" needs a dealer score, and this is the one the
+ * platform already has — base 50, tier bonus, load penalty, hard zero at capacity,
+ * scorecard win-rate and junk-fee ratio, make-match bonus. The sourcing ladder ranks
+ * ROOFTOPS rather than dealers, so it calls this for the rooftop's registered dealer and
+ * supplies its own deterministic ordering for rooftops that have none; writing a second
+ * scorer would let the legacy invite path and the sourcing ladder disagree about which
+ * dealer is better, which is exactly the drift the reuse rule exists to prevent.
+ *
+ * Visibility is the only change. No caller of the legacy path is affected.
+ */
+export async function scoreDealerForAuction(dealerId: string, vehicleTypes: string[]): Promise<number> {
   const dealer = await prisma.dealer.findUnique({
     where: { id: dealerId },
     include: {

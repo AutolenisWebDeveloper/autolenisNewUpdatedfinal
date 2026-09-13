@@ -5,6 +5,7 @@
 
 import { requireDealer } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
+import { mayPublishSegmentMedian } from "@/lib/services/auction/auction-insights-policy";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { TrendingDown, DollarSign, Clock, Star, AlertTriangle, Lightbulb } from "lucide-react";
@@ -51,7 +52,20 @@ export default async function DealerAuctionInsightsPage({ params }: Props) {
   });
 
   const offerCount = allSubmittedOffers.length;
-  const medianOtd = allSubmittedOffers.length > 0
+
+  // §13-D35 — KEEP SEALED (owner ruling, 2026-09-11). The guard the API route has always had,
+  // applied here too.
+  //
+  // This page recomputed the median with `length > 0`, so at n=2 the "segment median" IS the one
+  // other losing dealership's exact out-the-door price, and the card below renders a percentage
+  // against it — which hands a dealer a competitor's number to within a rounding error. The
+  // equivalent API route (`app/api/dealer/auctions/[auctionId]/insights/route.ts`) withholds the
+  // median below a sample of four for exactly this reason; the two disagreed, and the page was
+  // the one that leaked. An auction that discloses one rival's number is not sealed.
+  //
+  // The threshold lives in `lib/services/auction/auction-insights-policy.ts`, which both this
+  // page and the API route import, so they cannot drift apart again.
+  const medianOtd = mayPublishSegmentMedian(allSubmittedOffers.length)
     ? allSubmittedOffers.map(o => o.otdPriceCents).sort((a, b) => a - b)[Math.floor(allSubmittedOffers.length / 2)]
     : 0;
 

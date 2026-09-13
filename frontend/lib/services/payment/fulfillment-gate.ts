@@ -69,6 +69,70 @@ export async function isFulfillmentUnlocked(
   return paid !== null;
 }
 
+/**
+ * PAY-30 / PAY-40 / §10.6 S7-01b — the REQUEST-SCOPED gate the comment above deferred.
+ *
+ * "The VR-bearing callers arrive with Phase 5's sourcing-case and invitation services
+ * (PAY-40), and that is where the scoping belongs." They have arrived, so it is scoped
+ * here rather than in a second module: the sourcing ladder and the launch-readiness
+ * checklist both hold a Vehicle Request, and §Stage 6's entry is "settled, undisputed
+ * payment ATTACHED TO THE REQUEST".
+ *
+ * WHY A SEPARATE FUNCTION RATHER THAN A PARAMETER. The buyer-scoped predicate still has
+ * three legitimate callers that hold no request (post-intake outreach, the
+ * dealer-opportunity fan-out, the AI action policy), and the deferral note was explicit
+ * that adding a parameter nothing supplies ships a narrowing that never narrows. Two
+ * named predicates say which question is being asked; one predicate with an optional
+ * argument does not.
+ *
+ * THE DIFFERENCE FROM THE BUYER-SCOPED VERSION IS NOT COSMETIC. A buyer with two requests
+ * and one deposit passes the buyer-scoped gate for BOTH. §Stage 6 requires the payment be
+ * attached to THIS request, and §33 step 29's "one deposit buys one invitation budget" is
+ * meaningless if a second request can spend the first one's deposit. `deposits.vehicle_request_id`
+ * is the Phase 1 column that makes the question answerable at all.
+ *
+ * Returns false — never throws — for a missing id, which is the same shape as its sibling.
+ * A database failure propagates: a gate that answers "locked" because a query failed is
+ * indistinguishable from one that answered on the facts.
+ */
+export async function isRequestFulfillmentUnlocked(
+  vehicleRequestId: string | null | undefined,
+): Promise<boolean> {
+  if (!vehicleRequestId) return false;
+  const paid = await prisma.deposit.findFirst({
+    where: {
+      vehicleRequestId,
+      status: "PAID",
+      refundedAt: null,
+      ...depositNotOnHold(),
+    },
+    select: { id: true },
+  });
+  return paid !== null;
+}
+
+/**
+ * The settled deposit bound to this request, or null. Same predicate as
+ * `isRequestFulfillmentUnlocked`, returning the id because launch readiness must write
+ * `auctions.deposit_id` (S7-17: "`auctions` linked to the Vehicle Request AND the
+ * deposit") and the paid-enrichment gate records which deposit authorised a spend.
+ */
+export async function settledDepositForRequest(
+  vehicleRequestId: string | null | undefined,
+): Promise<{ id: string } | null> {
+  if (!vehicleRequestId) return null;
+  return prisma.deposit.findFirst({
+    where: {
+      vehicleRequestId,
+      status: "PAID",
+      refundedAt: null,
+      ...depositNotOnHold(),
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // WHICH fulfillment a settled $99 belongs to.
 //

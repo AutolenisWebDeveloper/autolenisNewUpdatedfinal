@@ -8,10 +8,20 @@ interface Props { params: Promise<{ auctionId: string }> }
 // GET /api/dealer/auctions/[auctionId]
 //
 // Anonymization contract:
-//   - dealer CAN see: vehicle specs, anonymized buyer budget range,
-//     deadline, offer count, their own submitted offer (read-only)
-//   - dealer CANNOT see: buyer name/contact, exact buyer budget,
-//     other dealers' offers, internal foreign keys
+//   - dealer CAN see: vehicle specs, anonymized buyer budget range, deadline, their own
+//     submitted offer (read-only), and the offer count ONLY AFTER THE AUCTION CLOSES
+//   - dealer CANNOT see: buyer name/contact, exact buyer budget, other dealers' offers,
+//     internal foreign keys, or HOW MANY offers stand while the auction is still live
+//
+// S13-D35 -- KEEP SEALED (owner ruling, 2026-09-11). The offer count used to be returned during
+// an ACTIVE auction, and the contract above used to list it as something a dealer CAN see.
+// Stage 7 calls this a 48-hour SEALED auction, and a live count is competitive information: a
+// dealership that knows it is the only bidder bids differently from one that knows there are
+// seven. The BUYER sees the count as it grows (Stage 7's "Buyer sees") -- that is the buyer's
+// own auction, and it is not the same disclosure.
+//
+// After close the count is published, which is the other half of the ruling: "publish position
+// only after close."
 export async function GET(request: NextRequest, { params }: Props) {
   const { auctionId } = await params;
   const dealer = await getRequestDealer(request);
@@ -113,8 +123,11 @@ export async function GET(request: NextRequest, { params }: Props) {
   const { buyerId: _buyerId, _count, ...auctionPublic } = auction;
   void _buyerId;
 
+  // Sealed while live; published once closed.
+  const offerCount = auction.status === "CLOSED" ? _count.offers : null;
+
   return successResponse({
-    auction: { ...auctionPublic, offerCount: _count.offers },
+    auction: { ...auctionPublic, offerCount },
     invitation,
     budgetRange,
     myOffer,

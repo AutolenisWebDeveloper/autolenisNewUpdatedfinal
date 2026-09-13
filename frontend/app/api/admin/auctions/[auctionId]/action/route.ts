@@ -69,6 +69,40 @@ export async function POST(request: NextRequest, { params }: Props) {
         data: { endsAt: newEnd, extendedAt: new Date(), extendedBy: admin.adminId, extendReason: reason },
       });
 
+      // THE EXTENSION LOG ROW, which this path never wrote. Phase 5, alongside S13-D35.
+      //
+      // `AuctionExtensionLog` exists and `requestExtension`
+      // (lib/services/auction/auction-extension.service.ts:5) writes it -- but this route
+      // bypasses both that service and `extendAuction`, updating `endsAt` directly. So every
+      // admin extension since the route was written moved a sealed auction's deadline with no
+      // row in the table built to record it, and `getExtensionHistory` returned an empty list
+      // for an auction that had genuinely been extended.
+      //
+      // That matters for more than tidiness. Section 29 requires the anti-snipe safeguard not to
+      // be weakened, and the auto-extension path writes its own history; an UNAUDITED manual
+      // extension is indistinguishable from no extension when someone later asks why a deadline
+      // moved. The write is best-effort because the extension itself has already been applied --
+      // failing the request here would leave the deadline moved and tell the operator it was not.
+      // TRY/CATCH AND NOT A TRAILING `.catch()`. "Best-effort" has to mean best-effort for a
+      // THROW as well as for a rejection, and a `.catch()` chained onto the call only covers the
+      // second: anything that throws before a promise exists propagates straight past it and
+      // fails the request — leaving the deadline moved and telling the operator it was not,
+      // which is the exact outcome this block is written to avoid.
+      try {
+        await prisma.auctionExtensionLog.create({
+          data: {
+            auctionId,
+            extendedBy: admin.adminId,
+            hoursAdded: addHours,
+            originalEnd: currentEnd,
+            newEnd,
+            reason,
+          },
+        });
+      } catch (err) {
+        logger.error(`[auction-action] extension applied but NOT logged for ${auctionId}:`, err);
+      }
+
       // Notify every invited dealer that the deadline moved — they have more time to bid.
       const invitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });
       // `dealer_id` is nullable from the Phase 1 wave on (S7-18). A notification row with a NULL

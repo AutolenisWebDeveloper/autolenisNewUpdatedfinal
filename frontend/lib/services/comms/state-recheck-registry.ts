@@ -369,3 +369,188 @@ const skipIfFeedRecovered: StateRecheckFn = async (ctx) => {
 
 registerStateRecheck(INVENTORY_DEALER_TEMPLATES.STALE_LISTING_REMOVAL, skipIfDealerNoLongerActive);
 registerStateRecheck(INVENTORY_DEALER_TEMPLATES.INVENTORY_SYNC_FAILURE, skipIfFeedRecovered);
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Stage 6 sourcing and Stage 7 invitations.
+//
+// §27.1's sourcing/auction rows, plus the two buyer notices §6c and §26 require.
+// Nine keys, because the 50%/90% dealer reminders and the 24h/72h radius reminders are
+// distinct messages at distinct times and each needs its own dedup key.
+//
+// EVERY DEALER INVITATION AND REMINDER IS HERE RATHER THAN ON THE DIRECT RESEND RAIL, and
+// that is defect 1's fix. The direct rail applies only HARD suppression
+// (`resend.service.ts:168` → `isEmailHardSuppressed`, reasons bounced/complained/spam_trap),
+// so a dealer who used AutoLenis' own one-click unsubscribe — which writes reason
+// 'unsubscribed' and deliberately does not set `do_not_contact`
+// (`app/api/public/dealer-unsubscribe/route.ts:15-26`) — stayed fully mailable by every
+// invitation and every reminder, on addresses that never opted in, with no List-Unsubscribe
+// header anywhere on that rail.
+// ---------------------------------------------------------------------------
+
+/** Template keys Phase 5 enqueues. §27.1 sourcing/auction rows; §6c and §26 buyer notices. */
+export const PHASE_5_TEMPLATES = {
+  /** §27.1 "Radius authorization needed" → Buyer. */
+  RADIUS_AUTHORIZATION_NEEDED: "radius_authorization_needed",
+  /** §Stage 6 "Remind at 24 and 72 hours". */
+  RADIUS_AUTHORIZATION_REMINDER_24H: "radius_authorization_reminder_24h",
+  RADIUS_AUTHORIZATION_REMINDER_72H: "radius_authorization_reminder_72h",
+  /** §27.1 "Sourcing completed" → Buyer, "Auction preparation status". */
+  SOURCING_COMPLETED: "sourcing_completed",
+  /** §6c "disclosure of the field size to the buyer" on an audited limited auction. */
+  SOURCING_LIMITED_FIELD: "sourcing_limited_field",
+  /** §26 "Zero dealer coverage → ... buyer notice". Closure and refund stay separate. */
+  SOURCING_NO_COVERAGE: "sourcing_no_coverage",
+  /** §27.1 "Auction launched" → Buyer, "48-hour timeline and next step". */
+  AUCTION_LAUNCHED: "auction_launched",
+  /** §27.1 "Dealer invited" → Dealership. Carries NO buyer identity (§25.1). */
+  DEALER_INVITED: "dealer_invited_secure",
+  /** §Stage 7 "Nonresponders are reminded at 50% and 90% of the window". */
+  DEALER_INVITATION_REMINDER_50: "dealer_invitation_reminder_50",
+  DEALER_INVITATION_REMINDER_90: "dealer_invitation_reminder_90",
+  /** §27.1 "Dealer invitation bounced" → Operations. */
+  DEALER_INVITATION_BOUNCED: "dealer_invitation_bounced",
+} as const;
+
+export type Phase5TemplateKey = (typeof PHASE_5_TEMPLATES)[keyof typeof PHASE_5_TEMPLATES];
+
+/**
+ * The buyer authorised a wider radius, or the case moved on, between the enqueue and the
+ * drain — so asking for authorisation has become false.
+ *
+ * The canonical §27 recheck shape: re-read the fact the message asserts. Here the fact is
+ * "your request is waiting on your permission to search further", and the case status is
+ * what makes it true.
+ */
+const skipIfRadiusAuthorizationResolved: StateRecheckFn = async (ctx) => {
+  if (!ctx.vehicleRequestId) return { proceed: true };
+  const c = await ctx.db.sourcingCase.findUnique({
+    where: { vehicleRequestId: ctx.vehicleRequestId },
+    select: { status: true, authorizedRadiusMiles: true },
+  });
+  if (!c) return { proceed: false, reason: "no sourcing case for this request" };
+  if (c.status !== "RADIUS_AUTHORIZATION_REQUIRED") {
+    return { proceed: false, reason: `sourcing case is ${c.status}, no longer awaiting authorisation` };
+  }
+  if (c.authorizedRadiusMiles !== null) {
+    return { proceed: false, reason: "the buyer has already recorded a maximum distance" };
+  }
+  return { proceed: true };
+};
+
+/** A closed case has nothing to report progress on. */
+const skipIfSourcingCaseClosed: StateRecheckFn = async (ctx) => {
+  if (!ctx.vehicleRequestId) return { proceed: true };
+  const c = await ctx.db.sourcingCase.findUnique({
+    where: { vehicleRequestId: ctx.vehicleRequestId },
+    select: { status: true },
+  });
+  if (!c) return { proceed: false, reason: "no sourcing case for this request" };
+  if (c.status === "CLOSED") return { proceed: false, reason: "sourcing case is closed" };
+  return { proceed: true };
+};
+
+/**
+ * Coverage was found between the notice being enqueued and the drain.
+ *
+ * §26's zero-coverage row says "Review, then close or expand" — expansion is an expected
+ * outcome, and a buyer who has just been told there is no coverage while an auction is being
+ * prepared for them has been told something false.
+ */
+const skipIfCoverageFound: StateRecheckFn = async (ctx) => {
+  if (!ctx.vehicleRequestId) return { proceed: true };
+  const c = await ctx.db.sourcingCase.findUnique({
+    where: { vehicleRequestId: ctx.vehicleRequestId },
+    select: { status: true, coverageCount: true },
+  });
+  if (!c) return { proceed: false, reason: "no sourcing case for this request" };
+  if (c.coverageCount > 0) {
+    return { proceed: false, reason: `coverage has since reached ${c.coverageCount}` };
+  }
+  if (c.status === "CLOSED") return { proceed: false, reason: "sourcing case is closed" };
+  return { proceed: true };
+};
+
+/** An auction that is no longer live is not one to announce as live. */
+const skipIfAuctionNotActive: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: true };
+  const a = await ctx.db.auction.findUnique({
+    where: { id: ctx.auctionId },
+    select: { status: true },
+  });
+  if (!a) return { proceed: false, reason: "auction no longer exists" };
+  if (a.status !== "ACTIVE") return { proceed: false, reason: `auction is ${a.status}` };
+  return { proceed: true };
+};
+
+/**
+ * The invitation itself must still be live, and so must the auction.
+ *
+ * THE MOST LOAD-BEARING RECHECK IN THIS PHASE. An invitation row can be REPLACED between
+ * enqueue and drain — §Stage 7's "An undeliverable contact or rooftop is replaced early in
+ * the auction window" — and sending the superseded one would hand a dealership a token that
+ * has been rotated away from them. It can also have been DECLINED, or the dealership
+ * suspended under §13-D42, or the auction closed early because every dealer responded.
+ *
+ * Keyed on `payload.invitationId` rather than on `recipientId`, because the recipient is a
+ * rooftop contact that may not be a platform user at all — an outside dealership has no
+ * `Dealer` row to look up.
+ */
+const skipIfInvitationNoLongerSendable: StateRecheckFn = async (ctx) => {
+  const invitationId = ctx.payload.invitationId;
+  if (typeof invitationId !== "string") {
+    // Refuse rather than send blind. A dealer-facing invitation with no invitation id cannot
+    // be re-checked, and §25.1 makes an unverifiable dealer send the wrong thing to guess at.
+    return { proceed: false, reason: "payload carries no invitationId to re-check" };
+  }
+  const inv = await ctx.db.auctionInvitation.findUnique({
+    where: { id: invitationId },
+    select: {
+      status: true,
+      tokenHash: true,
+      declinedAt: true,
+      offerSubmittedAt: true,
+      auction: { select: { status: true, endsAt: true } },
+      dealer: { select: { status: true } },
+    },
+  });
+  if (!inv) return { proceed: false, reason: "invitation no longer exists" };
+  if (inv.status === "REPLACED") return { proceed: false, reason: "invitation was replaced" };
+  if (inv.status === "EXPIRED") return { proceed: false, reason: "invitation expired" };
+  if (inv.declinedAt) return { proceed: false, reason: "dealer declined" };
+  if (inv.offerSubmittedAt) return { proceed: false, reason: "dealer has already submitted an offer" };
+  if (!inv.tokenHash) {
+    // §Stage 7 requires a tokenised link. An invitation with no token would send a dealer a
+    // message with nowhere to go.
+    return { proceed: false, reason: "invitation has no token" };
+  }
+  if (!inv.auction || inv.auction.status !== "ACTIVE") {
+    return { proceed: false, reason: `auction is ${inv.auction?.status ?? "missing"}` };
+  }
+  if (inv.auction.endsAt && inv.auction.endsAt.getTime() <= Date.now()) {
+    return { proceed: false, reason: "the submission deadline has passed" };
+  }
+  // §13-D42's enforcement point, read at send time as well as at readiness: a dealership
+  // suspended from invitations between enqueue and drain is not mailed.
+  if (inv.dealer && inv.dealer.status !== "ACTIVE") {
+    return { proceed: false, reason: `dealer is ${inv.dealer.status}` };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_5_TEMPLATES.RADIUS_AUTHORIZATION_NEEDED, skipIfRadiusAuthorizationResolved);
+registerStateRecheck(PHASE_5_TEMPLATES.RADIUS_AUTHORIZATION_REMINDER_24H, skipIfRadiusAuthorizationResolved);
+registerStateRecheck(PHASE_5_TEMPLATES.RADIUS_AUTHORIZATION_REMINDER_72H, skipIfRadiusAuthorizationResolved);
+registerStateRecheck(PHASE_5_TEMPLATES.SOURCING_COMPLETED, skipIfSourcingCaseClosed);
+registerStateRecheck(PHASE_5_TEMPLATES.SOURCING_LIMITED_FIELD, skipIfSourcingCaseClosed);
+registerStateRecheck(PHASE_5_TEMPLATES.SOURCING_NO_COVERAGE, skipIfCoverageFound);
+registerStateRecheck(PHASE_5_TEMPLATES.AUCTION_LAUNCHED, skipIfAuctionNotActive);
+registerStateRecheck(PHASE_5_TEMPLATES.DEALER_INVITED, skipIfInvitationNoLongerSendable);
+registerStateRecheck(PHASE_5_TEMPLATES.DEALER_INVITATION_REMINDER_50, skipIfInvitationNoLongerSendable);
+registerStateRecheck(PHASE_5_TEMPLATES.DEALER_INVITATION_REMINDER_90, skipIfInvitationNoLongerSendable);
+registerStateRecheck(
+  PHASE_5_TEMPLATES.DEALER_INVITATION_BOUNCED,
+  alwaysSend(
+    "a bounce has already happened and the Operations task is to replace the contact; no later state unmakes the bounce"
+  ),
+  "operations alert"
+);

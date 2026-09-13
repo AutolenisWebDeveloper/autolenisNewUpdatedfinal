@@ -184,6 +184,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ ok: true, skipped: 'no_recipient' });
     }
 
+    // Phase 5 / S7-14b + S7-21 — reflect the event onto live auction invitations at this address.
+    //
+    // WITHOUT THIS, THE WHOLE PER-INVITATION STATE MACHINE WAS UNREACHABLE. Nothing advanced an
+    // `auction_invitations` row past QUEUED, so `INVITATION_BOUNCED` was never raised, the
+    // contact-replacement path had no trigger, the reminder sweep kept chasing dead mailboxes
+    // (a bounced invitation stayed in the open statuses), and the buyer-facing "dealerships
+    // invited" count included rooftops that were never reached. Found by the independent review.
+    //
+    // Best-effort and isolated, like the dealer-outreach-log update above: the suppression write
+    // below is the one effect that must always happen on a bounce, and nothing here may cost it.
+    if (['email.delivered', 'email.opened', 'email.bounced', 'email.complained'].includes(payload.type)) {
+      try {
+        const { reflectInvitationDeliveryEvent } = await import(
+          '@/lib/services/auction/auction-invitation.service'
+        );
+        await reflectInvitationDeliveryEvent(
+          recipient,
+          payload.type.replace('email.', '') as 'delivered' | 'opened' | 'bounced' | 'complained',
+        );
+      } catch (err) {
+        logger.error('[resend.webhook] invitation delivery reflection failed', err);
+      }
+    }
+
     switch (payload.type) {
       case 'email.bounced':
         await SuppressionService.suppressEmail(supabase, recipient, 'bounced', payload.data);

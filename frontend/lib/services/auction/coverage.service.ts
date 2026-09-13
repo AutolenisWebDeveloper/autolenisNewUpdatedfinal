@@ -132,15 +132,43 @@ export async function assessCoverageForZip(
     select: { id: true, latitude: true, longitude: true, rooftopId: true },
   });
   let registered = 0;
+  let coordlessExcluded = 0;
   for (const d of dealers) {
-    // Registered dealers with unknown coords are INCLUDED (they're not cold; this
-    // mirrors the existing invite geo-filter's fail-open for missing coords).
-    const include = !buyerCoords || d.latitude == null || d.longitude == null
-      ? true
-      : haversine(buyerCoords, { lat: d.latitude, lng: d.longitude }) <= radiusMiles;
-    if (!include) continue;
+    // FAIL CLOSED ON A COORDLESS DEALER WHEN THE BUYER IS PLACEABLE. Phase 5 / §13-D36.
+    //
+    // This used to INCLUDE a registered dealer with null coordinates even when the buyer
+    // WAS placeable, on the stated grounds that it "mirrors the existing invite geo-filter's
+    // fail-open for missing coords". That premise was wrong: `pickNearbyDealers`
+    // (`dealer-invitation.service.ts:103-108`) excludes every entry whose coords are null,
+    // and it always has. So the two halves disagreed in the one direction that costs a buyer
+    // money — coverage could reach MIN_COVERAGE_DEALERS at 25 miles entirely on dealers the
+    // invite path would then discard, no soft hold fired, the deposit was taken, and
+    // `recordZeroInvitations(NO_DEALER_IN_RANGE)` followed. That is the incident class
+    // recorded at `buyer-location.service.ts:5-13`, reached THROUGH the gate built to
+    // prevent it.
+    //
+    // The buyer-unplaceable case is UNCHANGED and still fails open: with no buyer coordinates
+    // nothing can be radius-filtered at all, and `buyerGeocoded: false` is how a caller sees
+    // that the number is unfiltered. Narrowing that too would soft-hold every buyer the
+    // geocoder cannot place, which is the opposite mistake.
+    if (!buyerCoords) {
+      registered += 1;
+      if (d.rooftopId) countedRooftops.add(d.rooftopId);
+      continue;
+    }
+    if (d.latitude == null || d.longitude == null) {
+      coordlessExcluded += 1;
+      continue;
+    }
+    if (haversine(buyerCoords, { lat: d.latitude, lng: d.longitude }) > radiusMiles) continue;
     registered += 1;
     if (d.rooftopId) countedRooftops.add(d.rooftopId);
+  }
+  if (coordlessExcluded > 0) {
+    logger.warn(
+      `[coverage] ${label}: excluded ${coordlessExcluded} registered dealer(s) with no coordinates ` +
+        `— the invite path would discard them too, so counting them would overstate coverage`,
+    );
   }
 
   // Prospects can only count if the caller wants them (the invite ladder doesn't)

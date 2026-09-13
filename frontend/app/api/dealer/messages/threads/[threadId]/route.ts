@@ -3,6 +3,7 @@
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
+import { sendMessage } from "@/lib/services/messaging/messaging.service";
 import { z } from "zod";
 
 interface Props {
@@ -59,30 +60,35 @@ export async function POST(request: NextRequest, { params }: Props) {
     return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
   }
 
-  const message = await prisma.message.create({
-    data: {
-      threadId,
-      senderId: dealer.userId,
-      content: parsed.data.content,
-      isRedacted: false,
-    },
-  });
-
-  await prisma.messageThread.update({
-    where: { id: threadId },
-    data: { lastMessageAt: new Date() },
-  });
+  // §25.2 / DEFECT 7 — the SECOND dealer writer, scanned for the same reason as the first.
+  // Both went straight to `prisma.message.create` with `isRedacted: false` hard-coded, and there
+  // is no Prisma middleware that could have caught either (`lib/prisma.ts` is a bare
+  // `new PrismaClient`), so the bypass was total rather than partial.
+  const message = await sendMessage(threadId, dealer.userId, parsed.data.content);
 
   return successResponse(
     {
       message: {
         id: message.id,
         threadId: message.threadId,
-        senderId: message.senderId,
+        senderId: dealer.userId,
         senderRole: "DEALER",
-        content: message.content,
+        // The REDACTED body when a pattern matched — what the buyer will see. Echoing the
+        // original back would tell the dealership their message went through intact.
+        content: message.isRedacted
+          ? "[Message redacted — possible policy violation]"
+          : parsed.data.content,
+        isRedacted: message.isRedacted,
         sentAt: message.sentAt.toISOString(),
       },
+      ...(message.isRedacted
+        ? {
+            notice:
+              "Your message was held back because it looked like contact details or an " +
+              "off-platform arrangement. Keep the conversation on AutoLenis — buyer contact " +
+              "details are released to the winning dealership at reaffirmation.",
+          }
+        : {}),
     },
     201,
   );

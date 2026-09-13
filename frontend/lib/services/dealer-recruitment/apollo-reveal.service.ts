@@ -65,6 +65,22 @@ export interface RevealInput {
   city?: string | null;
   state?: string | null;
   consumer?: CreditConsumer;
+  /**
+   * The sourcing case that authorised this spend (§5 no-spend-before-payment).
+   *
+   * WHY IT IS HERE AND NOT OPTIONAL-IN-SPIRIT: a `consumer: "live"` reveal is a paid
+   * draw made on behalf of one buyer's request. Before Phase 5 nothing recorded WHICH
+   * request, so a live credit could be spent with no auditable link to a settled
+   * deposit — the credits left the ledger and the only record of why was a log line.
+   * `resolveContactableEmail` now REFUSES the live paid tier without this id, and the
+   * id is stamped on the claim row, so `apollo_reveals.sourcing_case_id` is the
+   * standing proof that every live spend traces to a case whose deposit settled.
+   *
+   * `consumer: "backfill"` is the other, separate rail: it has no per-request caller
+   * by design (it is an unattended gap-fill behind `backfillSpendEnabled()`), so it
+   * carries no case id and none is demanded of it.
+   */
+  sourcingCaseId?: string | null;
 }
 
 export interface RevealResult {
@@ -117,7 +133,18 @@ export async function revealRooftopContact(
   let claimId: string;
   try {
     const claim = await prisma.apolloReveal.create({
-      data: { rooftopId: input.rooftopId, cycleKey, consumer, status: "PENDING", creditsCost: 0 },
+      data: {
+        rooftopId: input.rooftopId,
+        cycleKey,
+        consumer,
+        status: "PENDING",
+        creditsCost: 0,
+        // Stamped on the CLAIM, not on the success path: the claim is the row that
+        // exists for every attempt that could draw, including the ones that end EMPTY
+        // or PENDING. Linking only successful reveals would leave drawn-but-empty
+        // credits unattributed, which is precisely the spend hardest to account for.
+        sourcingCaseId: input.sourcingCaseId ?? null,
+      },
     });
     claimId = claim.id;
   } catch {

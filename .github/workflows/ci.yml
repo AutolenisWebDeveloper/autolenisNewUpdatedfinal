@@ -472,6 +472,24 @@ jobs:
       - name: E2E — Lane 1 intake journeys
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase2-lane1-intake.spec.ts
 
+      # The Phase 5 sourcing journeys (§12.4): paid request → case → readiness → launch, zero
+      # coverage → radius authorisation, and the §13-D52 flip in both positions. Same server and
+      # same throwaway autolenis_e2e database the two steps above use.
+      #
+      # LISTED HERE DELIBERATELY. `tests/e2e/` is not globbed by any step — each spec is named —
+      # so a spec that is written and not added here is a spec CI never runs, which is exactly the
+      # defect the Lane 1 step's own comment records.
+      - name: E2E — Phase 5 sourcing journeys
+        # `--conditions=react-server` is REQUIRED, not a tuning knob. This is the first e2e spec
+        # that calls services in-process (the others drive the app over HTTP and assert database
+        # state with Prisma), and those services transitively import `server-only`, whose whole
+        # job is to throw outside a React Server Component. Its package exports map a
+        # `react-server` condition to an empty module, so the condition turns the marker back into
+        # the no-op it is meant to be in a server context. Without it the spec cannot even load.
+        env:
+          NODE_OPTIONS: --conditions=react-server
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase5-sourcing-journeys.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

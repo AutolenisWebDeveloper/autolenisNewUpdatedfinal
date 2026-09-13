@@ -33,6 +33,8 @@ interface Ctrl {
   auctionUpdates: Array<Record<string, unknown>>;
   notifications: number;
   audits: Array<Record<string, unknown>>;
+  /** Rows written to `auction_extension_log` — Phase 5 made this path write them. */
+  extensionLogs: Array<Record<string, unknown>>;
   gateEnforced: boolean;
 }
 let ctrl: Ctrl;
@@ -69,6 +71,16 @@ mock.module("@/lib/prisma", {
       buyer: { findUnique: async () => ({ city: "Austin", state: "TX" }) },
       auctionVehicle: { findFirst: async () => null },
       offer: { count: async () => 0 },
+      // Phase 5: AUCTION_EXTENDED now writes the history row it always should have. Before this,
+      // an admin extension moved a sealed auction's deadline with nothing in the table built to
+      // record it, and `getExtensionHistory` returned an empty list for an auction that had
+      // genuinely been extended. Captured rather than stubbed, so the next test can assert on it.
+      auctionExtensionLog: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          ctrl.extensionLogs.push(data);
+          return {};
+        },
+      },
     },
   },
 });
@@ -114,6 +126,7 @@ beforeEach(() => {
     auctionUpdates: [],
     notifications: 0,
     audits: [],
+    extensionLogs: [],
     gateEnforced: false,
   };
 });
@@ -215,4 +228,59 @@ test("AUCTION_EXTENDED still succeeds on a live ACTIVE auction with positive hou
   const res = (await POST(req({ action: "AUCTION_EXTENDED", reason: "give more time", hours: 12 }), { params })) as unknown as { __kind: string };
   assert.equal(res.__kind, "success");
   assert.equal(ctrl.auctionUpdates.length, 1);
+});
+
+test("AUCTION_EXTENDED writes the history row — an unaudited extension is indistinguishable from none", async () => {
+  // Phase 5. This route bypasses both `requestExtension` and `extendAuction` and moves `endsAt`
+  // directly, so every admin extension since it was written left no row in the table built to
+  // record it and `getExtensionHistory` returned an empty list for an auction that HAD been
+  // extended. §29 requires the anti-snipe safeguard not to be weakened, and the auto-extension
+  // path writes its own history — so a manual extension with no row cannot be told apart from no
+  // extension at all when someone later asks why a deadline moved.
+  const POST = await loadPOST();
+  const res = (await POST(
+    req({ action: "AUCTION_EXTENDED", reason: "dealer asked for more time", hours: 6 }),
+    { params },
+  )) as unknown as { __kind: string };
+  assert.equal(res.__kind, "success");
+  assert.equal(ctrl.extensionLogs.length, 1);
+  const row = ctrl.extensionLogs[0]!;
+  assert.equal(row.auctionId, "auc_1");
+  assert.equal(row.extendedBy, "adm_1");
+  assert.equal(row.hoursAdded, 6);
+  assert.equal(row.reason, "dealer asked for more time");
+  assert.ok(row.originalEnd instanceof Date, "the original deadline is recorded, not inferred");
+  assert.ok(row.newEnd instanceof Date);
+});
+
+test("a failed history write does NOT fail the extension — the deadline has already moved", async () => {
+  // BEST-EFFORT HAS TO MEAN BEST-EFFORT FOR A THROW TOO. The write used to be guarded by a
+  // trailing `.catch()`, which covers a rejection and not a synchronous throw — so anything
+  // throwing before the promise existed propagated past it and failed the request, leaving the
+  // deadline moved while telling the operator it was not. That is the exact outcome the
+  // best-effort guard exists to prevent, so it is asserted in both shapes.
+  const POST = await loadPOST();
+
+  const { prisma } = (await import("@/lib/prisma")) as unknown as {
+    prisma: { auctionExtensionLog: { create: (a: unknown) => Promise<unknown> } };
+  };
+  const original = prisma.auctionExtensionLog.create;
+
+  // 1. a rejection
+  prisma.auctionExtensionLog.create = async () => { throw new Error("rejected"); };
+  let res = (await POST(
+    req({ action: "AUCTION_EXTENDED", reason: "r", hours: 2 }),
+    { params },
+  )) as unknown as { __kind: string };
+  assert.equal(res.__kind, "success", "a rejected history write failed the extension");
+
+  // 2. a synchronous throw, which the trailing `.catch()` could not see
+  prisma.auctionExtensionLog.create = (() => { throw new Error("sync"); }) as never;
+  res = (await POST(
+    req({ action: "AUCTION_EXTENDED", reason: "r", hours: 2 }),
+    { params },
+  )) as unknown as { __kind: string };
+  assert.equal(res.__kind, "success", "a synchronously throwing history write failed the extension");
+
+  prisma.auctionExtensionLog.create = original;
 });
