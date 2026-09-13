@@ -1,5 +1,5 @@
 -- Phase 1 wave ENUM census. Read-only. Run inside the server-enforced read-only transaction:
---   psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction \
+--   psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \
 --     -c "SET TRANSACTION READ ONLY" -f docs/transaction-flow/phase-1-proof/enum-census.sql
 --
 -- WHY THIS FILE EXISTS. `verify.sql` asserts 49 wave enum labels by name and the cardinality of only

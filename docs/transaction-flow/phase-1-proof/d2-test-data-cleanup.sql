@@ -30,7 +30,7 @@
 -- given, and a collision must stop the run rather than cancel the wrong rows.
 --
 -- Run:
---   psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 -f d2-test-data-cleanup.sql
+--   psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 -f d2-test-data-cleanup.sql
 
 BEGIN;
 

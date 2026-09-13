@@ -100,7 +100,7 @@ SECRET_VARS='DATABASE_URL|DIRECT_URL|PROD_READONLY_URL|SUPABASE_SERVICE_ROLE_KEY
 # quote), followed by whitespace, after `--` comments are stripped — preflight.sql
 # legitimately says "never ... with an UPDATE" in a comment.
 WRITE_SQL='update|insert|delete|alter|create|drop|truncate|grant|revoke|merge|copy|vacuum|reindex|cluster|refresh|lock|call|do'
-RO_SHAPE='psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction -c "SET TRANSACTION READ ONLY" -f <file.sql>'
+RO_SHAPE='psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction -c "SET TRANSACTION READ ONLY" -f <file.sql>'
 INTERPRETERS='bash|sh|zsh|ksh|dash|python|python3|node|nodejs|tsx|ts-node|bun|deno|perl|ruby|php|psql|pgcli|mysql|sqlite3'
 # process.env.X / process.env["X"] / os.environ["X"] / os.environ.get("X") / getenv("X") / ENV["X"] / $ENV{X}
 ENV_READ_RE="process\.env(\.|\[\\\\?[\"'])(${SECRET_VARS})|environ(\.get\(|\[)\\\\?[\"'](${SECRET_VARS})|getenv\(\\\\?[\"'](${SECRET_VARS})|ENV\[\\\\?[\"'](${SECRET_VARS})|\\\$ENV\{(${SECRET_VARS})"

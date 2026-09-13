@@ -368,14 +368,34 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
   }
 
   // Create invitations
+  // FIND-THEN-WRITE, not upsert, and the reason is 20261114000000. `upsert` keyed on the compound
+  // unique `@@unique([auctionId, dealerId])`, which that migration replaced with a PARTIAL unique
+  // excluding REPLACED rows so contact replacement can re-invite a rooftop after a bounce. Prisma's
+  // DSL cannot express a partial index, so the generated `auctionId_dealerId` input no longer
+  // exists and there is nothing for `upsert` to key on.
+  //
+  // The behaviour is unchanged, including the race protection: "already invited" now means "holds a
+  // LIVE invitation", which is exactly what the partial index enforces, and a concurrent
+  // double-create still fails with P2002 against that index just as it did against the old one.
+  // A REPLACED row no longer counts as already-invited — which is the point of the migration.
+  //
+  // This is the legacy pre-§8.2 rail that §13-D52's flag retires; it is corrected rather than
+  // extended.
   const invitations = await Promise.all(
-    topDealers.map(({ dealerId, score }) =>
-      prisma.auctionInvitation.upsert({
-        where: { auctionId_dealerId: { auctionId, dealerId } },
-        create: { auctionId, dealerId, invitationScore: score, sentAt: new Date() },
-        update: { invitationScore: score },
-      })
-    )
+    topDealers.map(async ({ dealerId, score }) => {
+      const live = await prisma.auctionInvitation.findFirst({
+        where: { auctionId, dealerId, status: { not: "REPLACED" } },
+        select: { id: true },
+      });
+      return live
+        ? prisma.auctionInvitation.update({
+            where: { id: live.id },
+            data: { invitationScore: score },
+          })
+        : prisma.auctionInvitation.create({
+            data: { auctionId, dealerId, invitationScore: score, sentAt: new Date() },
+          });
+    })
   );
 
   // Update dealer auction load
