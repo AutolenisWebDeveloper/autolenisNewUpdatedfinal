@@ -2246,8 +2246,15 @@ rooftop. **§13-D52's flip does not go on until 110 lands** (owner's instruction
 bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not something to
 discover with a paid buyer waiting.
 
-**110 MERGED 2026-09-13 15:26:11Z** — PR #425 at `22675e9`, into `main` at `38f0e89`. Applying it to
-production remains the owner's, under the per-run protocol. **What CI retired, and what it did not.**
+**110 MERGED 2026-09-13 15:26:11Z** — PR #425 at `22675e9`, into `main` at `38f0e89`.
+
+**110 APPLIED TO PRODUCTION 2026-09-13 17:07:21Z, owner-run under the per-run protocol, in 343ms.**
+Both halves verified: `verify.sql` V1–V5 all PRESENT, `ledger.sql` one applied row, `chain_health`
+OK. **The rewritten gates were the point and they held:** A1 and A3 PASSED rather than blocking on
+migration 109's two rolled-back retry rows, and `chain_health` did not flag them either. The
+versions those files carried before `0d81063` would have BLOCKED this run on that retry history —
+a gate refusing the recovery path `migrate resolve --rolled-back` exists to permit, which is worse
+than no gate because it teaches the operator to override it. **What CI retired, and what it did not.**
 The 16.13 DEGRADED note on 110's proof stands on three axes of four: run 34738396937's
 `Migration chain (empty DB -> schema)` job asserts PostgreSQL major 17 before it touches anything,
 then applies the whole chain including 110 to an asserted-empty database, re-applies it as a no-op,
@@ -2361,16 +2368,27 @@ again would be the mirror defect.
    That is the same `-1`-without-`+1` as before, now confined to a logged failure rather than being
    the normal path. Closing it means either deleting the row or making `releaseAuctionLoad`
    status-aware — both larger than this fix.
-2. **`DEALER_REMOVED` leaks the `+1` the other way, and this fix is what makes that reachable from
-   the Phase 5 rail.** `app/api/admin/auctions/[auctionId]/action/route.ts:131` hard-deletes the
-   invitation with `deleteMany` and never decrements — the defect this service's own header has
-   named since Phase 5 (`auction-invitation.service.ts:19-22`), because `releaseAuctionLoad`
-   derives its list from the SURVIVING rows. Both older rails already leak this way. Before this
-   change a Phase 5 invitation had no `+1` to leak; now it does. The exposure is a manual admin
-   action on a rail with zero rows in production, so it is REPORTED rather than folded in: the fix
-   is four lines (`decrement` by the `deleteMany` count when the removed rows named a dealer) and
-   would also repair the two older rails, but it is a change to an admin route outside the finding
-   the owner promoted, and that promotion is the owner's to make.
+2. **`DEALER_REMOVED` leaked the `+1` the other way — FIXED, owner-promoted 2026-09-13.**
+   `app/api/admin/auctions/[auctionId]/action/route.ts` hard-deleted the invitation with
+   `deleteMany` and never decremented, so a row removed by an admin was never decremented at close
+   either: `releaseAuctionLoad` derives its list from the SURVIVING rows. The `+1` leaked **upward**,
+   leaving the dealer reading as busier than they are — the direction that stops them being invited,
+   because the capacity gate (`auction-capacity.service.ts:27`) and the coverage filter
+   (`coverage.service.ts:130`) exclude them and at load >= 5 the score function returns a hard zero.
+   This service's own header had named the leak since Phase 5 (`auction-invitation.service.ts:19-22`).
+   It was harmless for the Phase 5 rail only because that rail wrote no `+1`; the fix above gave it
+   one, which made this the third rail leaking, and the owner promoted it rather than queue it.
+
+   The decrement is **by the `deleteMany` count, not by one** — `(auction_id, dealer_id)` is unique
+   only among non-REPLACED rows since 110, so one dealer can legitimately hold a REPLACED row and a
+   live one on the same auction and both were charged at issue. Delete and decrement are in **one
+   transaction**, because a pair that can come apart is the defect being fixed; nothing external is
+   called inside it. The `dealer.update` cannot miss a row: `auction_invitations.dealer_id` is an FK
+   with `onDelete: Restrict`, so a row carrying the id proves the dealer exists, and the `count > 0`
+   guard is what makes that argument hold. Not floored at zero, matching `releaseAuctionLoad` —
+   a floor would hide pre-existing drift rather than correct it, and correcting historical drift is
+   a reconciliation, not a side effect of a delete. The row count now also reaches the admin audit
+   log, which records the action's `result` verbatim.
 
 #### Phase 3 — Payment gate, money model, plans, settlement opens the sourcing case
 - §5a eligibility recheck (named failure per missing item) → `PAYMENT_REQUIRED` — **seven conditions, not eight:

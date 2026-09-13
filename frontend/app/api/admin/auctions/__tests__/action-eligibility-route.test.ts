@@ -36,6 +36,10 @@ interface Ctrl {
   /** Rows written to `auction_extension_log` — Phase 5 made this path write them. */
   extensionLogs: Array<Record<string, unknown>>;
   gateEnforced: boolean;
+  /** How many invitation rows DEALER_REMOVED's deleteMany reports removing. */
+  invitationsDeletedCount: number;
+  /** `currentAuctionLoad` deltas per dealer, so the -1 can be proven paired with the +1. */
+  load: Record<string, number>;
 }
 let ctrl: Ctrl;
 
@@ -50,17 +54,33 @@ mock.module("@/lib/auth/admin-api", {
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
+      // DEALER_REMOVED pairs the delete and the decrement in ONE transaction, so the fake has to
+      // offer one. It hands the callback the same delegates, which is what a real interactive
+      // transaction does — and keeps the pair provable rather than assumed.
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        const { prisma } = await import("@/lib/prisma");
+        return fn(prisma);
+      },
       auction: {
         findUnique: async () => ctrl.auction,
         update: async ({ data }: { data: Record<string, unknown> }) => { ctrl.auctionUpdates.push(data); return {}; },
       },
       dealer: {
         findUnique: async () => ctrl.dealer,
+        update: async (args: {
+          where: { id: string };
+          data: { currentAuctionLoad?: { decrement?: number; increment?: number } };
+        }) => {
+          const d = args.data.currentAuctionLoad;
+          const by = (d?.increment ?? 0) - (d?.decrement ?? 0);
+          ctrl.load[args.where.id] = (ctrl.load[args.where.id] ?? 0) + by;
+          return {};
+        },
       },
       auctionInvitation: {
         findFirst: async () => (ctrl.invitationExists ? { id: "inv_existing" } : null),
         create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.invitationsCreated.push(data); return { id: "inv_new" }; },
-        deleteMany: async () => ({ count: 0 }),
+        deleteMany: async () => ({ count: ctrl.invitationsDeletedCount }),
         findMany: async () => [],
       },
       notification: {
@@ -128,6 +148,8 @@ beforeEach(() => {
     audits: [],
     extensionLogs: [],
     gateEnforced: false,
+    invitationsDeletedCount: 0,
+    load: {},
   };
 });
 
@@ -283,4 +305,61 @@ test("a failed history write does NOT fail the extension — the deadline has al
   assert.equal(res.__kind, "success", "a synchronously throwing history write failed the extension");
 
   prisma.auctionExtensionLog.create = original;
+});
+
+// ── DEALER_REMOVED must return the +1 it took ────────────────────────────────────────────────
+//
+// Owner-promoted 2026-09-13. `releaseAuctionLoad` (dealer-invitation.service.ts:471) derives its
+// decrement list from the SURVIVING invitation rows, so a row DELETED here is never decremented by
+// the close path — the `+1` its issue wrote leaks upward forever, and the dealer reads as busier
+// than they are: the capacity gate (`auction-capacity.service.ts:27`) and the coverage filter
+// (`coverage.service.ts:130`) then UNDER-invite them, and at load >= 5 the score function returns
+// a hard zero and they stop being invited at all.
+//
+// This service's own header has named the leak since Phase 5 (auction-invitation.service.ts:19-22).
+// It was harmless for the Phase 5 rail only because that rail wrote no `+1`; #427 gave it one, so
+// this is now the third rail leaking and it goes live at the §13-D52 flip.
+//
+// By the deleteMany COUNT, not by one: `(auction_id, dealer_id)` is unique only among
+// non-REPLACED rows since migration 110, so one dealer can legitimately hold a REPLACED row and a
+// live one on the same auction, and both were charged at issue.
+
+test("DEALER_REMOVED returns the invitation's +1 to the dealer's auction load", async () => {
+  ctrl.invitationsDeletedCount = 1;
+  const POST = await loadPOST();
+  const res = (await POST(req({ action: "DEALER_REMOVED", reason: "withdrew", dealerId: "d1" }), { params })) as unknown as { __kind: string };
+  assert.equal(res.__kind, "success");
+  assert.equal(ctrl.load.d1, -1, "the +1 written at issue must come back");
+});
+
+test("DEALER_REMOVED decrements ONCE PER ROW removed, not once per call", async () => {
+  // A REPLACED row plus a live one for the same dealer on the same auction — legal since 110,
+  // and both were charged at issue.
+  ctrl.invitationsDeletedCount = 2;
+  const POST = await loadPOST();
+  await POST(req({ action: "DEALER_REMOVED", reason: "withdrew", dealerId: "d1" }), { params });
+  assert.equal(ctrl.load.d1, -2);
+});
+
+test("DEALER_REMOVED on a dealer that held no invitation touches no load", async () => {
+  ctrl.invitationsDeletedCount = 0;
+  const POST = await loadPOST();
+  const res = (await POST(req({ action: "DEALER_REMOVED", reason: "withdrew", dealerId: "d1" }), { params })) as unknown as { __kind: string };
+  assert.equal(res.__kind, "success");
+  assert.deepEqual(ctrl.load, {}, "nothing was charged, so nothing may be returned");
+});
+
+// The pair must be ATOMIC, and that is a structural property no state-free fake can prove: a
+// two-statement implementation passes the three tests above exactly as the transactional one does.
+// So it is pinned in source, the same idiom as `no-second-exception-writer.test.ts`. A delete that
+// commits while its decrement does not is the identical leak, reached a different way.
+test("the delete and the decrement are in ONE transaction", async () => {
+  const { read } = await import("@/lib/testing/source-scan");
+  const src = read(process.cwd(), "app/api/admin/auctions/[auctionId]/action/route.ts");
+  const tx = src.match(/const removed = await prisma\.\$transaction\(async \(tx\) => \{[\s\S]*?\n      \}\);/);
+  assert.ok(tx, "DEALER_REMOVED no longer wraps its delete and decrement in a transaction");
+  assert.match(tx[0], /tx\.auctionInvitation\.deleteMany/, "the delete left the transaction");
+  assert.match(tx[0], /tx\.dealer\.update/, "the decrement left the transaction");
+  assert.match(tx[0], /currentAuctionLoad: \{ decrement: r\.count \}/,
+    "the decrement is no longer by the deleteMany count");
 });
