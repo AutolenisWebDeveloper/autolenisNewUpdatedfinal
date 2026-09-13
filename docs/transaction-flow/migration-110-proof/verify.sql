@@ -7,7 +7,13 @@
 -- Every row returns PRESENT or MISSING. A MISSING row is REPORTED, never repaired with DDL: the
 -- repair is a new forward migration or an owner-approved `migrate resolve`.
 --
--- Read-only. Same mandated shape as the preflight.
+-- Read-only. Run in the shape CLAUDE.md mandates —
+--   the `-P pager=off` is load-bearing, not cosmetic: an open pager leaves the session IDLE IN
+--   TRANSACTION holding AccessShareLock on everything it read, which is what made migration 109
+--   time out twice (02:54 and 03:01 UTC, 2026-09-13) waiting out `statement_timeout`.
+--
+--   psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \
+--     -c "SET TRANSACTION READ ONLY" -f docs/transaction-flow/migration-110-proof/verify.sql
 
 \pset footer off
 

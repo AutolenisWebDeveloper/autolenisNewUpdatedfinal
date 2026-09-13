@@ -852,6 +852,130 @@ export async function replaceInvitation(
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
+// Ruling B (owner, 2026-09-13) — the invited OUTSIDE rooftop that claims an account
+// ───────────────────────────────────────────────────────────────────────────────
+//
+// An outside dealership is invited as an `auction_invitations` row carrying a `rooftop_id`
+// and a NULL `dealer_id`. Every dealer-portal action scopes on `dealer_id`. So once that
+// rooftop claims an account the session is authorised but nothing connects it to the
+// invitation, and it still cannot act on the auction it was invited to.
+//
+// The ruling is to make the DATA match the authorisation that already exists rather than to
+// widen the server to accept a rooftop match wherever it scopes on `dealer_id`. Widening is
+// an authorisation change with a blast radius of every dealer action, and wants §13-D37's
+// security batch; writing the id the gate already reads needs neither.
+//
+// This could not ship before migration 110. Writing `dealer_id` onto a row is the same
+// collision shape as an insert, and the status-blind `(auction_id, dealer_id)` unique let a
+// REPLACED sibling from contact replacement occupy the slot. Both uniques are now partial on
+// `status <> 'REPLACED'`, so the only collision left is the real one — the dealer already
+// holds a LIVE invitation to that auction, through their registered identity — and that is a
+// row to SKIP, never a reason to fail the dealer's claim.
+
+/** Auction states in which an invitation is still worth acting on. */
+const LINKABLE_AUCTION_STATUSES = ["PENDING", "ACTIVE", "REOPENED"] as const;
+
+export interface RooftopInvitationLinkResult {
+  /** Rows that gained this dealer's id. */
+  linked: number;
+  /** Rows skipped because the dealer already holds a live invitation to that auction. */
+  alreadyInvited: number;
+}
+
+/**
+ * Attach `dealerId` to the still-open invitations issued to `rooftopId`, so a dealership that
+ * was invited as an outside rooftop and has since claimed an account passes the `dealer_id`
+ * gate that already exists.
+ *
+ * Writes ONE column. `isRegisteredDealer` records what the invitation WAS when it was issued
+ * and is deliberately left alone — nothing reads it, and flipping it would restate history.
+ *
+ * Safe to call repeatedly: a row that already carries a `dealerId` is not a candidate, so a
+ * second call links nothing. Safe inside a transaction: each write is savepointed, so a P2002
+ * rolls back that statement alone and leaves the caller's transaction usable.
+ */
+export async function linkRooftopInvitationsToDealer(
+  rooftopId: string,
+  dealerId: string,
+  db: Db = defaultPrisma,
+  now: Date = new Date(),
+): Promise<RooftopInvitationLinkResult> {
+  const candidates = await db.auctionInvitation.findMany({
+    where: {
+      rooftopId,
+      dealerId: null,
+      // Still waiting on the dealership. An answered, expired, bounced or replaced row is
+      // not something the dealer can act on, and linking it would only restate history.
+      status: { in: [...OPEN_INVITATION_STATUSES] },
+      auction: { status: { in: [...LINKABLE_AUCTION_STATUSES] } },
+      // The token expiry binds independently of the auction, exactly as `inviteRejection` and
+      // `resolveInvitationByToken` treat it.
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    select: { id: true, auctionId: true },
+  });
+
+  let linked = 0;
+  const collided: string[] = [];
+
+  for (const c of candidates) {
+    try {
+      // One row at a time, not `updateMany`: a single collision must not abandon the rest,
+      // and `updateMany` gives no way to tell which row refused.
+      //
+      // The load increment is INSIDE the same savepoint as the link, and it is not optional.
+      // `releaseAuctionLoad` (dealer-invitation.service.ts:471) decrements `currentAuctionLoad`
+      // for every invitation on a closing auction that NAMES a dealer, and
+      // `processAuctionClose` calls it for every auction whatever rail issued the invitations.
+      // A row that gains a `dealer_id` here without a matching +1 would therefore be decremented
+      // at close against an increment that never happened, and the dealer's load would drift
+      // below its true value — making them look permanently under-loaded to the capacity gate
+      // and the invitation score. The dealership genuinely is carrying this auction now, so the
+      // +1 is also the honest number, not just the symmetric one.
+      //
+      // COMPARE-AND-SET, not a blind update. `dealerId: null` stays in the WHERE so the write
+      // only lands on a row that is still unlinked. Two overlapping runs — the daily pass has
+      // no overlap claim, unlike `processAuctionClose`'s `postCloseProcessedAt` — can both read
+      // this row as a candidate; PostgreSQL row-locks the second, which then re-evaluates the
+      // predicate against the committed row, matches nothing, and does NOT increment. Without
+      // the predicate the loser would silently double-count the dealer's load.
+      const claimed = await withSavepoint(db, async () => {
+        const res = await db.auctionInvitation.updateMany({
+          where: { id: c.id, dealerId: null },
+          data: { dealerId },
+        });
+        if (res.count === 1) {
+          await db.dealer.update({
+            where: { id: dealerId },
+            data: { currentAuctionLoad: { increment: 1 } },
+          });
+        }
+        return res.count === 1;
+      });
+      if (claimed) linked++;
+    } catch (err) {
+      if ((err as { code?: string })?.code === "P2002") {
+        // The dealer is already invited to this auction under their registered identity.
+        // Their portal already shows it; the rooftop row is redundant, not a failure. The
+        // auction is named so an operator can see WHICH one, rather than only a count.
+        collided.push(c.auctionId);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (linked > 0 || collided.length > 0) {
+    logger.info(
+      `[invitation-link] rooftop ${rooftopId} -> dealer ${dealerId}: ${linked} linked` +
+        (collided.length ? `, already invited to ${collided.join(", ")}` : ""),
+    );
+  }
+
+  return { linked, alreadyInvited: collided.length };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
 // S7-16 / defect 5 — ONE reminder schedule, at 50% and 90% of the window
 // ───────────────────────────────────────────────────────────────────────────────
 

@@ -2246,6 +2246,75 @@ rooftop. **§13-D52's flip does not go on until 110 lands** (owner's instruction
 bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not something to
 discover with a paid buyer waiting.
 
+**110 MERGED 2026-09-13 15:26:11Z** — PR #425 at `22675e9`, into `main` at `38f0e89`. Applying it to
+production remains the owner's, under the per-run protocol. **What CI retired, and what it did not.**
+The 16.13 DEGRADED note on 110's proof stands on three axes of four: run 34738396937's
+`Migration chain (empty DB -> schema)` job asserts PostgreSQL major 17 before it touches anything,
+then applies the whole chain including 110 to an asserted-empty database, re-applies it as a no-op,
+and runs `pnpm db:check-drift` — so **application, idempotency and drift are proven on 17.6**. The
+fourth axis is not: the behavioural proof (retire-then-reinvite SUCCEEDS; two LIVE rows for one
+rooftop still REJECTED 23505) cloned the deployed predicates onto a scratch table on **16.13**, and
+CI never inserts a row. Partial-index semantics are identical across 16 and 17, but that is
+reasoning, not a measurement, and it is recorded as reasoning.
+
+**RULING B IMPLEMENTED — the invited outside rooftop that claims an account** (owner ruling
+2026-09-13, built after 110 landed as instructed). Stage 7 invites outside dealerships as
+`auction_invitations` rows carrying a `rooftop_id` and a NULL `dealer_id`, and every dealer surface
+scopes on `dealer_id` — `app/api/dealer/auctions/[auctionId]/route.ts:31-33` is the gate, in its own
+words *"Gate: dealer must be invited to this auction"*, and `decline/route.ts:27`,
+`insights/route.ts:16` and `leads/route.ts:12` are the same shape. So an invited rooftop that claimed
+an account held an authorised session and still could not act on the auction it was invited to.
+
+The ruling was **option 1 of two**: make the DATA match the authorisation that already exists, rather
+than widen the server to accept a rooftop match wherever it scopes on `dealer_id`. Widening is an
+authorisation change whose blast radius is every dealer action and wants §13-D37's security batch;
+writing the id the gate already reads needs neither. `linkRooftopInvitationsToDealer`
+(`lib/services/auction/auction-invitation.service.ts`) writes ONE column onto still-open invitations
+for the rooftop, on live auctions, whose own token has not expired.
+
+**It is wired at TWO moments, because the write needs two facts and either can arrive last:** the
+account being claimed (`app/api/dealer/claim/route.ts`) and the dealer being resolved to its rooftop
+(the daily `dealer-contact-backfill` Phase 0 pass, the only writer of `Dealer.rooftopId`). A dealer
+approved and claimed the same day has no `rooftopId` yet, so a claim-only hook would have been inert
+for exactly the fresh dealers it is meant to serve.
+
+**Why it could not ship before 110:** writing `dealer_id` onto a row is the same collision shape as an
+insert, and the status-blind `(auction_id, dealer_id)` unique let a REPLACED sibling occupy the slot.
+The only collision left is the real one — the dealer already holds a LIVE invitation to that auction
+under their registered identity — which the service SKIPS (savepointed, so it cannot abort the
+dealer's claim) and counts separately.
+
+**The auction-load pairing, found by the second review, not the first.** `releaseAuctionLoad`
+(`lib/services/auction/dealer-invitation.service.ts:471`) decrements `currentAuctionLoad` for every
+invitation on a closing auction that NAMES a dealer, and `processAuctionClose` calls it for every
+auction whatever rail issued the invitation. A link with no matching `+1` is a guaranteed `-1` at
+close, drifting the dealer below their true load and making them look permanently under-loaded to
+the capacity gate and the invitation score. The link therefore increments inside the same savepoint.
+
+**And the third read found the other half.** A blind `update` plus an increment can double-count if
+two daily ticks overlap — that job wraps in `withCronRun`, which RECORDS a run but claims nothing,
+unlike `processAuctionClose`'s atomic `postCloseProcessedAt`. The write is now a **compare-and-set**:
+`dealerId: null` stays in the `WHERE`, PostgreSQL row-locks the second writer, it re-evaluates the
+predicate against the committed row, matches nothing, and increments nothing.
+
+**Reported, not fixed — three findings this batch surfaced and did not action:**
+
+1. **The Phase 5 rail never increments `currentAuctionLoad` at all.** `issueInvitations` writes
+   registered-dealer invitations with `dealer_id` set and never increments; measured, the only two
+   increments in the repository are `dealer-invitation.service.ts:404` and
+   `launch-auction/route.ts:224`, both older rails. `releaseAuctionLoad` decrements them at close
+   regardless, so **every Phase 5 registered-dealer invitation is an unmatched `-1`**. Latent while
+   `sourcing_cases` is 0 and no invitation has gone through the rail; it becomes real at the flip.
+2. **Rooftop identity now buys auction access.** The rooftop↔dealer link is `resolveRooftop`'s, on
+   strong keys (website host, name+zip) with a host-conflict veto. A dealership whose name+zip
+   collided with a rooftop holding a live outside invitation would inherit it. Reaching that requires
+   passing manual admin approval of licence and identity — the human gate — so the practical risk is
+   low, but this change is what gives an identity collision a consequence it did not have before.
+3. **A partial failure at claim time is logged and never retried.** The daily pass selects only
+   dealers with a NULL `rooftopId`, so a dealer whose claim-time link half-failed has one and is never
+   revisited. The error names both ids so it can be reconciled by hand; a retry sweep would be new
+   surface and was not built.
+
 **Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
 migration's own header states the ordering, because this phase's code writes `initiator_role`,
 `sourcing_case_id` and the withheld firewall row on hot paths, and unmigrated the second of those

@@ -19,6 +19,7 @@ import {
   validateClaimToken,
   consumeClaimToken,
 } from "@/lib/services/dealer-recruitment/account-claim.service";
+import { linkRooftopInvitationsToDealer } from "@/lib/services/auction/auction-invitation.service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -49,6 +50,8 @@ async function loadDealerForToken(dealerId: string) {
     select: {
       id: true,
       dealershipName: true,
+      // Ruling B — the rooftop is how a pre-existing outside invitation is found.
+      rooftopId: true,
       user: { select: { id: true, email: true, supabaseId: true } },
     },
   });
@@ -144,6 +147,32 @@ export async function POST(request: NextRequest) {
   await prisma.user
     .update({ where: { id: dealer.user.id }, data: { requiresPasswordChange: false } })
     .catch((err) => logger.error("[dealer/claim] clear requiresPasswordChange failed:", err));
+
+  // RULING B (owner, 2026-09-13) — an outside rooftop that was invited to an auction and has
+  // now claimed its account. Its invitation carries `rooftop_id` and a NULL `dealer_id`, and
+  // every dealer action scopes on `dealer_id`, so without this the dealer holds an authorised
+  // session and still cannot act on the auction it was invited to. Writing the id the gate
+  // already reads is a DATA fix, not an authorisation change.
+  //
+  // NOT inside a database transaction spanning the steps above, deliberately: those steps make
+  // a network call to Supabase, and a transaction held open across it is the idle-in-transaction
+  // shape that cost migration 109 two `statement_timeout` failures. The linker is atomic and
+  // idempotent per row on its own, and runs only once the claim has genuinely succeeded.
+  //
+  // Non-fatal, like the audit and CRM steps below it: the account IS claimed by this point, and
+  // failing the request would tell the dealer their claim did not work when it did. The daily
+  // rooftop-resolution pass links any invitation missed here.
+  if (dealer.rooftopId) {
+    await linkRooftopInvitationsToDealer(dealer.rooftopId, dealer.id).catch((err) =>
+      // Both ids, because this is the only record of a link that did not happen: the daily
+      // pass selects dealers with a NULL rooftopId, so a dealer who fails here has one and is
+      // never revisited. An operator needs to know WHICH rooftop and dealer to reconcile.
+      logger.error(
+        `[dealer/claim] linking rooftop invitations failed (rooftop ${dealer.rooftopId}, dealer ${dealer.id}):`,
+        err,
+      ),
+    );
+  }
 
   // Audit the self-service claim (no admin actor — system/dealer-self).
   await prisma.adminAuditLog
