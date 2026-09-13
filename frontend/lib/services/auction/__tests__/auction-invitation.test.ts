@@ -47,6 +47,10 @@ interface Ctrl {
   createRaisesP2002For: Set<string>;
   /** What the winning writer left behind, for the loser to re-read. */
   rowsWrittenByTheWinner: InvRow[];
+  /** `currentAuctionLoad` deltas per dealer, so the +1 can be proven paired with the -1. */
+  load: Record<string, number>;
+  /** Dealer ids whose load UPDATE throws, to reach the failure path. */
+  loadRaisesFor: Set<string>;
 }
 let ctrl: Ctrl;
 
@@ -69,6 +73,8 @@ beforeEach(() => {
     nextId: 1,
     createRaisesP2002For: new Set<string>(),
     rowsWrittenByTheWinner: [],
+    load: {},
+    loadRaisesFor: new Set<string>(),
   };
 });
 
@@ -212,6 +218,17 @@ mock.module("@/lib/prisma", {
         count: async (args?: { where?: { status?: { notIn?: string[] } } }) => {
           const notIn = args?.where?.status?.notIn ?? [];
           return ctrl.invitations.filter((i) => !notIn.includes(String(i.status))).length;
+        },
+      },
+      dealer: {
+        update: async (args: {
+          where: { id: string };
+          data: { currentAuctionLoad?: { increment?: number } };
+        }) => {
+          if (ctrl.loadRaisesFor.has(args.where.id)) throw new Error("load update failed");
+          const by = args.data.currentAuctionLoad?.increment ?? 0;
+          ctrl.load[args.where.id] = (ctrl.load[args.where.id] ?? 0) + by;
+          return {};
         },
       },
       outsideAuctionInvite: { count: async () => 0 },
@@ -733,4 +750,108 @@ test("the P2002 losing writer re-reads the winner's row rather than failing the 
     ["ALREADY_INVITED_CONCURRENTLY"],
     "a lost race is a distinct, named outcome — not WRITE_FAILED and not silence",
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE AUCTION-LOAD ASYMMETRY — a -1 at close against a +1 that never happened
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `releaseAuctionLoad` (dealer-invitation.service.ts:471) decrements
+// `currentAuctionLoad` for EVERY invitation on a closing auction that names a dealer, with no
+// status filter, and `processAuctionClose` calls it for every auction whatever rail issued the
+// invitations. The two older rails increment when they invite — `dealer-invitation.service.ts:404`
+// and `launch-auction/route.ts:224`. This service, the one Stage 7 routes everything through, did
+// not. So every registered-dealer invitation it issues was an unmatched -1 at close, and the
+// dealer's load drifts BELOW its true value: the capacity gate
+// (`auction-capacity.service.ts:27`, `>= maxLoad`), the score penalty
+// (`dealer-invitation.service.ts:73-74`) and the coverage filter (`coverage.service.ts:130`) all
+// then read them as emptier than they are, and over-invite them.
+//
+// Latent while nothing had gone through the Phase 5 rail. Live the moment §13-D52 flips, which is
+// why this is fixed before the flip rather than after.
+
+test("a registered-dealer invitation increments that dealer's auction load", async () => {
+  const { issueInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  const r = await issueInvitations(
+    "a1",
+    [target({ rooftopId: "rt1", dealerId: "dlr_1", email: "one@example.com" })],
+    undefined,
+    NOW,
+  );
+  assert.equal(r.issued, 1);
+  assert.equal(ctrl.load.dlr_1, 1, "the +1 that `releaseAuctionLoad` will later take back");
+});
+
+test("an OUTSIDE rooftop invitation touches no dealer load — there is no dealer to charge", async () => {
+  const { issueInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  const r = await issueInvitations(
+    "a1",
+    [target({ rooftopId: "rt1", dealerId: null, email: "one@example.com" })],
+    undefined,
+    NOW,
+  );
+  assert.equal(r.issued, 1);
+  assert.deepEqual(ctrl.load, {}, "a NULL dealer_id is never decremented at close either");
+});
+
+test("each invited dealer is incremented once, and only the ones actually issued", async () => {
+  const { issueInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  const r = await issueInvitations(
+    "a1",
+    [
+      target({ rooftopId: "rt1", dealerId: "dlr_1", email: "one@example.com" }),
+      target({ rooftopId: "rt2", dealerId: "dlr_2", email: "two@example.com" }),
+      target({ rooftopId: "rt3", dealerId: null, email: "three@example.com" }),
+    ],
+    undefined,
+    NOW,
+  );
+  assert.equal(r.issued, 3);
+  assert.deepEqual(ctrl.load, { dlr_1: 1, dlr_2: 1 });
+});
+
+test("a row lost to a concurrent writer is NOT charged — it is not this call's invitation", async () => {
+  // ALREADY_INVITED_CONCURRENTLY: the winning writer's own issue did the increment. Charging
+  // again here would be the mirror defect — a +1 with no -1 — and would push the dealer toward
+  // the capacity gate on an invitation they were never issued by us.
+  const { issueInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  ctrl.createRaisesP2002For = new Set(["rt1"]);
+  ctrl.rowsWrittenByTheWinner = [
+    {
+      id: "winner", auctionId: "a1", rooftopId: "rt1", dealerId: "dlr_1", email: "one@example.com",
+      status: "QUEUED", tokenHash: "h", candidateIds: [], distanceMiles: null, invitationScore: null,
+      reminder50SentAt: null, reminder90SentAt: null, declinedAt: null, offerSubmittedAt: null,
+      respondedAt: null, bouncedAt: null, dealershipName: null, contactName: null, phone: null,
+      expiresAt: null,
+    },
+  ];
+  const r = await issueInvitations(
+    "a1",
+    [target({ rooftopId: "rt1", dealerId: "dlr_1", email: "one@example.com" })],
+    undefined,
+    NOW,
+  );
+  assert.equal(r.issued, 0);
+  assert.equal(r.skipped[0]?.reason, "ALREADY_INVITED_CONCURRENTLY");
+  assert.deepEqual(ctrl.load, {}, "the loser must not charge the dealer a second time");
+});
+
+test("a failed load write makes the invitation WRITE_FAILED, not a silently uncharged one", async () => {
+  // The increment sits with the firewall write and the enqueue, BEFORE `invitationIds.push` —
+  // the "COUNTED LAST" discipline. A dealer charged nothing must not be counted as issued, or
+  // `launchFromCase` flips the auction ACTIVE on a field it has miscounted.
+  const { issueInvitations } = await import("@/lib/services/auction/auction-invitation.service");
+  ctrl.loadRaisesFor = new Set(["dlr_1"]);
+  const r = await issueInvitations(
+    "a1",
+    [
+      target({ rooftopId: "rt1", dealerId: "dlr_1", email: "one@example.com" }),
+      target({ rooftopId: "rt2", dealerId: "dlr_2", email: "two@example.com" }),
+    ],
+    undefined,
+    NOW,
+  );
+  assert.equal(r.issued, 1, "only the dealer that was charged counts as issued");
+  assert.equal(r.skipped.filter((s) => s.reason === "WRITE_FAILED").length, 1);
+  assert.deepEqual(ctrl.load, { dlr_2: 1 });
 });
