@@ -2246,6 +2246,22 @@ rooftop. **§13-D52's flip does not go on until 110 lands** (owner's instruction
 bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not something to
 discover with a paid buyer waiting.
 
+**Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
+migration's own header states the ordering, because this phase's code writes `initiator_role`,
+`sourcing_case_id` and the withheld firewall row on hot paths, and unmigrated the second of those
+HOLDS every auction at PENDING — a launch that cannot reach readiness, which is the one failure
+mode §7 says must surface a blocker rather than half-launch.
+
+**Phase 5's migration is AUTHORED AND PROVED, NOT APPLIED.** `20261113000000_phase5_sourcing_invitations`
+is additive and five changes wide, proved against a throwaway loopback PostgreSQL with
+`docs/transaction-flow/phase-5-proof/run-proof.sh`: 25/25 physical assertions, the ledger row, an
+identical catalog digest across a by-hand re-apply, byte-identical verification output, zero
+functional drift and structural drift at exactly 344. **Applying it to production is the owner's**
+under the per-run protocol in `CLAUDE.md`, and the ordering is stated in the migration's own header:
+**MIGRATION FIRST, WITHOUT EXCEPTION** — Prisma selects all declared scalars, so the new code reading
+`initiator_role`, `sourcing_case_id`, `state` or a non-null `candidate_ids` against an unmigrated
+database raises 42703/P2022 on a hot path.
+
 **THE AUCTION-LOAD ASYMMETRY, fixed before the flip on the owner's promotion (2026-09-13).**
 Surfaced by the Ruling B review and promoted out of the queue rather than deferred, because it goes
 live the moment §13-D52 flips. `releaseAuctionLoad`
@@ -2286,22 +2302,6 @@ again would be the mirror defect.
    is four lines (`decrement` by the `deleteMany` count when the removed rows named a dealer) and
    would also repair the two older rails, but it is a change to an admin route outside the finding
    the owner promoted, and that promotion is the owner's to make.
-
-**Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
-migration's own header states the ordering, because this phase's code writes `initiator_role`,
-`sourcing_case_id` and the withheld firewall row on hot paths, and unmigrated the second of those
-HOLDS every auction at PENDING — a launch that cannot reach readiness, which is the one failure
-mode §7 says must surface a blocker rather than half-launch.
-
-**Phase 5's migration is AUTHORED AND PROVED, NOT APPLIED.** `20261113000000_phase5_sourcing_invitations`
-is additive and five changes wide, proved against a throwaway loopback PostgreSQL with
-`docs/transaction-flow/phase-5-proof/run-proof.sh`: 25/25 physical assertions, the ledger row, an
-identical catalog digest across a by-hand re-apply, byte-identical verification output, zero
-functional drift and structural drift at exactly 344. **Applying it to production is the owner's**
-under the per-run protocol in `CLAUDE.md`, and the ordering is stated in the migration's own header:
-**MIGRATION FIRST, WITHOUT EXCEPTION** — Prisma selects all declared scalars, so the new code reading
-`initiator_role`, `sourcing_case_id`, `state` or a non-null `candidate_ids` against an unmigrated
-database raises 42703/P2022 on a hot path.
 
 #### Phase 3 — Payment gate, money model, plans, settlement opens the sourcing case
 - §5a eligibility recheck (named failure per missing item) → `PAYMENT_REQUIRED` — **seven conditions, not eight:
