@@ -126,7 +126,18 @@ export async function submitOffer(input: OfferInput) {
 
     await tx.auctionInvitation.update({
       where: { id: invitation.id },
-      data: { respondedAt: new Date() },
+      // BOTH, and `offerSubmittedAt` is the one that was missing. Found by review on #422.
+      // Four Phase 5 gates read `offerSubmittedAt` and NOTHING on this path wrote it, so every
+      // one of them was dead: `skipIfInvitationNoLongerSendable` (the §27 send-time recheck that
+      // stops a reminder reaching a dealer who already bid), `alreadyBid` on the tokenised
+      // invitation page, the resume-link gate, and the decline route. A dealer who submitted an
+      // offer therefore still got the 24h and 72h reminders, and the token page offered to take
+      // an offer it would then reject as a duplicate.
+      //
+      // `respondedAt` is not a substitute: a decline is also a response, so the gates cannot
+      // read it without treating a declining dealer as one who bid. Same family as
+      // `reflectInvitationDeliveryEvent` having had no caller — a field built and never written.
+      data: { respondedAt: new Date(), offerSubmittedAt: new Date() },
     });
 
     return created;

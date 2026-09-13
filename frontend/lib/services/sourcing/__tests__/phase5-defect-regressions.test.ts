@@ -867,3 +867,19 @@ test("the dealer-facing general location never falls back to the buyer's ZIP", (
   assert.doesNotMatch(chain[1]!, /req\.zip/,
     "§25.1 permits a general location, and a ZIP is narrower than the city/state it replaces");
 });
+
+test("submitting an offer stamps offerSubmittedAt, the field four Phase 5 gates read", () => {
+  // Found by review on #422. `offerSubmittedAt` was read by `skipIfInvitationNoLongerSendable`
+  // (state-recheck-registry.ts), by `alreadyBid` on the token page, by the resume-link gate and
+  // by the decline route — and written by nothing on the dealer's normal submission path, which
+  // set only `respondedAt`. All four gates were therefore inert: a dealer who had already bid
+  // still received the 24h and 72h reminders.
+  //
+  // `respondedAt` cannot stand in for it: a decline is also a response.
+  const src = readFileSync("lib/services/offer/offer.service.ts", "utf8");
+  const update = /tx\.auctionInvitation\.update\(\{[\s\S]*?\}\);/.exec(src);
+  assert.ok(update, "the invitation update in submitOffer moved — re-pin this assertion");
+  assert.match(update[0], /offerSubmittedAt:\s*new Date\(\)/,
+    "without this write, every gate that reads offerSubmittedAt is dead code");
+  assert.match(update[0], /respondedAt:\s*new Date\(\)/, "and respondedAt must still be set");
+});
