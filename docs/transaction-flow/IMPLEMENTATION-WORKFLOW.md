@@ -2053,8 +2053,10 @@ so zero fetched, so FAILED — every morning, while `cron_job_logs` said COMPLET
 
 **RETRACTED — this paragraph claimed "merging this phase repairs it", and it did not.**
 What stands: `include_build_object: "true"`, with `include_dealer_object` and
-`include_mc_dealership_object`, is at `marketcheck.adapter.ts:610` on this branch where
-`origin/main` sent none of the three, and the flags are verified to reach the wire. What does
+`include_mc_dealership_object`, is now on `main` as of `d943e192` — at
+`marketcheck.adapter.ts:620`, where the pre-merge adapter sent none of the three — and the
+flags are verified to reach the wire, established by building the URL rather than reading the
+line. What does
 not stand is the conclusion drawn from that. The include-flag defect was recorded in §9's
 corrections as a *probable* root cause inferred from a live payload probe, and this paragraph
 promoted it to *confirmed* on the strength of a fix that had not yet run in production once.
