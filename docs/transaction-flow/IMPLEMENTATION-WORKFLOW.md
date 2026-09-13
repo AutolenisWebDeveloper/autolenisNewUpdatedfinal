@@ -2172,16 +2172,23 @@ fail without it.
 Stated in the owner's own order and wording. **The flip is a SEPARATE DECISION after the deploy
 is confirmed stable — it is not part of the merge.**
 
-| # | Step | Artefact |
-| --- | --- | --- |
-| 1 | Merge `claude/fix-dealer-feed-notice-address` — independent, no schema | PR #421 |
-| 2 | Phase 5 preflight — only `CHECKED`, zero `BLOCK` | `phase-5-proof/preflight.sql` |
-| 3 | `pnpm exec prisma migrate deploy` — **109 distinct migrations; the ROW count went 108 → 111** (see the retry note below) | — |
-| 4 | Verify BOTH halves — physical schema AND `_prisma_migrations` | `verify.sql` + `ledger.sql` |
-| 5 | Merge `claude/txflow-05-sourcing`, let it deploy | PR #422 |
-| 6 | Confirm production on the new SHA, zero cron failures | — |
-| 7 | Re-run the pre-flip census | `phase-5-proof/census.sql` |
-| 8 | **Only then** flip `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` | — |
+**ALL EIGHT STEPS ARE DONE. Executed 2026-09-12 to 2026-09-13; this table is now a record, not a plan.**
+
+| # | Step | Artefact | Outcome |
+| --- | --- | --- | --- |
+| 1 | Merge `claude/fix-dealer-feed-notice-address` — independent, no schema | PR #421 | **DONE** |
+| 2 | Phase 5 preflight — only `CHECKED`, zero `BLOCK` | `phase-5-proof/preflight.sql` | **DONE** |
+| 3 | `pnpm exec prisma migrate deploy` — **109 distinct migrations; the ROW count went 108 → 111** (see the retry note below) | — | **DONE**, after two `statement_timeout` retries — the pager trap below |
+| 4 | Verify BOTH halves — physical schema AND `_prisma_migrations` | `verify.sql` + `ledger.sql` | **DONE** |
+| 5 | Merge `claude/txflow-05-sourcing`, let it deploy | PR #422 | **DONE** (plus #423, #424 for the seven fixes it merged without) |
+| 6 | Confirm production on the new SHA, zero cron failures | — | **DONE** — `c25c0ccf`, then `3f726a43` |
+| 7 | Re-run the pre-flip census | `phase-5-proof/census.sql` | **DONE** — 14 `CHECKED`, zero `BLOCK` |
+| 8 | **Only then** flip `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` | — | **DONE 2026-09-13** — see the Phase 5 close-out above |
+
+Migration **110** (`20261114000000_invitation_replacement_partial_unique`) is not in this table
+because it did not exist when the sequence was written: it was authored after step 5 exposed the
+`REPLACED`/P2002 collision, and applied on 2026-09-13 at 17:07:21Z under the same protocol, between
+steps 6 and 7. Ledger **112 rows / 110 distinct** after it. The flip was gated on it landing.
 
 Steps 2, 4 and 7 are read-only and run in the mandated shape from *Production database access* in
 `CLAUDE.md` — the single-transaction, `SET TRANSACTION READ ONLY`, `ON_ERROR_STOP=1` form, with the
@@ -2247,6 +2254,71 @@ bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not 
 discover with a paid buyer waiting.
 
 **110 MERGED 2026-09-13 15:26:11Z** — PR #425 at `22675e9`, into `main` at `38f0e89`.
+
+### PHASE 5 IS COMPLETE — step 8 flipped 2026-09-13, and two corrections to the record
+
+**§13-D52 IS ACTIONED. `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` IS ON IN PRODUCTION.** Owner-run,
+2026-09-13, after the fleet settled to `3f726a43`. The census ran BEFORE the flip, as §8.1a requires:
+**14 CHECKED, zero BLOCK**, F1 `pending_auctions` 0, F2 the Phase 5 migration recorded.
+
+Production immediately after, 17:38 UTC: `sourcing_cases` 0, `offers` 0, `deals` 0, `auctions`
+CLOSED 7, ledger **112 rows / 110 distinct**, zero cron failures.
+
+**THE FLIP IS ON AND UNEXERCISED, which is a state and not a defect.** Nothing has paid since it
+went on, so the new settlement path has not run once — and §13-D52's own verification (b) *"each
+non-concierge settlement after the flip produces exactly one `sourcing_cases` row and no `auctions`
+row"* and (c) *"the invitation service has invited at least one dealer for each such case"* are both
+**unsatisfiable until a settlement occurs**, not failed. The first non-concierge deposit after the
+flip is what discharges them. Until then the correct reading of `sourcing_cases 0` is "no input yet",
+never "the flip works".
+
+**CORRECTION 1 — the §8.4 clock baseline is 8, not 0, and the two numbers mean different things.**
+The census reads **G10 = 8** (`audit_logs WHERE action = 'LEGACY_PATH_WRITE'`, ALL kinds) and
+**G11 = 0** (the same, narrowed to `metadata ->> 'kind' = 'SETTLEMENT_AUCTION_LAUNCH'`). An earlier
+figure of zero was taken off `admin_audit_logs.action` rather than this query and was wrong; the
+census file is the authority, and it is worth noting WHY it is — `LEGACY_PATH_WRITE` is the enum
+label and the KIND lives in `metadata`, so a query that looks for the kind in `action` finds nothing
+and reads as a clean zero (`legacy-path-write.ts:119-124`; the census file's own comment records
+that `action IN ('LEGACY_PATH_WRITE','SETTLEMENT_AUCTION_LAUNCH')` fails with
+`invalid input value for enum "AdminActionType"` and takes the whole census down, which is how it
+was found — by running the file rather than reading it).
+
+What the two rows together establish, arithmetically and without guessing: **8 rows exist and none
+of them is the settlement path.** They belong to the adapter's OTHER wrapped choke points (§8.4
+wraps three, not one), each with its own §8.4 row and its own clock. So:
+
+- **§13-D52's removal clock does start from a true zero** — G11 = 0 means
+  `SETTLEMENT_AUCTION_LAUNCH` has never fired, which is the row that mattered for the flip and the
+  reason the flip was safe to make.
+- **Any clock measured on the AGGREGATE count must be time-bounded from its own flip**, because 8
+  pre-existing rows would otherwise read as "writes are still happening" forever. D52's verify (a)
+  is already written that way (`AND created_at > <flip time>`); §8.4's other rows must be read the
+  same way.
+- **Which kinds those 8 are is NOT established by these rows** and is not guessed here. The query
+  that settles it, for whoever picks up §8.4:
+  `SELECT metadata ->> 'kind', count(*) FROM audit_logs WHERE action = 'LEGACY_PATH_WRITE' GROUP BY 1 ORDER BY 2 DESC;`
+
+**CORRECTION 2 — a class of risk, not just the instance that exposed it.**
+
+> **A MIGRATION THAT NARROWS A CONSTRAINT CREATES NEW CORRECTNESS REQUIREMENTS IN CODE THAT
+> PREDATES IT.** The code does not change, does not fail to compile, and no test goes red — the
+> meaning of a database guarantee it silently relied on has moved underneath it.
+
+Migration 110 is the worked example. It made both uniques on `auction_invitations` partial on
+`status <> 'REPLACED'`. Before it, `(auction_id, dealer_id)` was unique **absolutely**, so "one
+invitation per dealer per auction" was a database fact and *"decrement the dealer's load by one when
+an invitation is removed"* was correct by construction. After it, one dealer can legitimately hold a
+`REPLACED` row **and** a live one on the same auction — both charged at issue — so a decrement-by-one
+leaves the load permanently high, and a dealership that reads as busier than it is gets excluded by
+the capacity gate, the coverage filter and a hard zero in the score function. That is a silent
+mis-invitation bug introduced by a migration into a route nobody edited.
+
+The general shape, worth checking on every future migration that narrows a unique, a check or a
+foreign key rather than only on this one: **list the code that relied on the OLD guarantee and
+re-derive its correctness, because nothing else will.** Cardinality assumptions are the common case
+— "at most one row" becoming "at most one LIVE row" turns every count, every `findFirst` and every
+`by one` into a question. `migrate diff` will not raise it, the type-checker cannot see it, and the
+tests that covered the old behaviour keep passing because the old behaviour is still legal.
 
 **110 APPLIED TO PRODUCTION 2026-09-13 17:07:21Z, owner-run under the per-run protocol, in 343ms.**
 Both halves verified: `verify.sql` V1–V5 all PRESENT, `ledger.sql` one applied row, `chain_health`
