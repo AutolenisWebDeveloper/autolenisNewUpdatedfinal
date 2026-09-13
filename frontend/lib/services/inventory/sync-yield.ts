@@ -43,6 +43,101 @@ export const NORMALIZE_MIN_RATIO = 0.25;
 /** Same anti-flap logic, on the normalization gate. */
 export const NORMALIZE_MIN_RAW = 25;
 
+/**
+ * How many REJECTED listings normalize() inspects before it stops counting.
+ *
+ * The tally answers exactly one question — which predicate failed — and one page of rejected
+ * listings answers it as well as ten. Capping the sample keeps a pathological run from
+ * accumulating per-listing work on a path that is, by definition, already going wrong.
+ */
+export const DROP_SAMPLE_LIMIT = 25;
+
+/**
+ * Which required field was absent when normalize() rejected a listing, counted over a bounded
+ * sample. FAILURE PATH ONLY: a listing that normalizes touches none of this.
+ *
+ * It exists because `reason` could say how MANY listings were dropped and never which field
+ * was missing, so "normalization dropped 50 of 50 listings (missing year/make/model/price)"
+ * named all four candidates and distinguished none. Eight consecutive production failures
+ * (2026-09-03 to 09-10, `phase-4-proof/sweep-failure-diagnostic.sql`) were read with that
+ * message and it could not settle the question; two more followed the include-flag fix.
+ *
+ * `buildAbsent` is counted SEPARATELY from the three fields read off `build`, and it is the
+ * discriminator the others cannot be. `year`, `make` and `model` are all `listing.build?.x`,
+ * so an absent `build` makes all three read falsy at once and is indistinguishable, from the
+ * counts alone, from a `build` that arrived carrying empty fields. The first is provider-side
+ * — the response does not contain the object the request asked for — and the second is not.
+ * `price` is `listing.price`, independent of `build`, so a price-weighted tally points
+ * somewhere else again.
+ *
+ * `threw` is normalize()'s `catch`, which is not a predicate failing. Counting it means
+ * `threw` plus the predicate rejections equals `sampled`, instead of leaving `sampled` with an
+ * unexplained remainder.
+ *
+ * **The five field counters are per-field prevalence over `sampled`, NOT a partition of it.**
+ * One listing missing year, make and model increments all three, so they can sum to more than
+ * `sampled` — `sampled 25: ... year 25, make 25, model 25` is 25 listings each missing three
+ * fields, not 75 listings. Read every count against `sampled`, never against their own sum.
+ */
+export interface NormalizeDropTally {
+  /**
+   * Rejected listings INSPECTED — never exceeds DROP_SAMPLE_LIMIT, and never the total
+   * dropped. The total is in the sentence this breakdown is appended to.
+   */
+  sampled: number;
+  buildAbsent: number;
+  year: number;
+  make: number;
+  model: number;
+  price: number;
+  threw: number;
+}
+
+export function newDropTally(): NormalizeDropTally {
+  return { sampled: 0, buildAbsent: 0, year: 0, make: 0, model: 0, price: 0, threw: 0 };
+}
+
+/**
+ * The ONLY way to write to a tally, and the only place the cap is enforced.
+ *
+ * Found in the second review: the cap was checked at each call site, so `sampled` stayed
+ * within DROP_SAMPLE_LIMIT only as long as every future rejection path remembered to check
+ * it. Here it is a property of the writer instead of a convention the callers share. A
+ * `tally` of `undefined` is the no-op case, so a caller that does not tally needs no branch.
+ */
+export function recordDrop(
+  tally: NormalizeDropTally | undefined,
+  missing: {
+    buildAbsent?: boolean;
+    year?: boolean;
+    make?: boolean;
+    model?: boolean;
+    price?: boolean;
+    threw?: boolean;
+  },
+): void {
+  if (!tally || tally.sampled >= DROP_SAMPLE_LIMIT) return;
+  tally.sampled++;
+  if (missing.buildAbsent) tally.buildAbsent++;
+  if (missing.year) tally.year++;
+  if (missing.make) tally.make++;
+  if (missing.model) tally.model++;
+  if (missing.price) tally.price++;
+  if (missing.threw) tally.threw++;
+}
+
+/**
+ * Every counter is emitted, zeros included. A zero is the most informative reading this can
+ * produce: `build absent 0` says the response DID carry the object, which is the opposite
+ * conclusion from `build absent 25` and would be unreadable if zeros were omitted.
+ */
+export function formatDropTally(t: NormalizeDropTally): string {
+  return (
+    `sampled ${t.sampled}: build absent ${t.buildAbsent}, year ${t.year}, ` +
+    `make ${t.make}, model ${t.model}, price ${t.price}, threw ${t.threw}`
+  );
+}
+
 export interface YieldEvidence {
   /** The outcome the adapter reached on its own merits, before any yield judgement. */
   outcome: AdapterOutcome;
@@ -65,6 +160,12 @@ export interface YieldEvidence {
    * INVENTORY_SWEEP_SHORTFALL with that false root cause. Found in review.
    */
   radiusRejected?: number;
+  /**
+   * Which predicate rejected a listing, over a bounded sample. Optional: an adapter that does
+   * not tally reports this message exactly as before, so the breakdown ADDS a clause and
+   * removes nothing.
+   */
+  dropTally?: NormalizeDropTally;
   /** Pages that returned 200. A failed page is NOT counted. */
   pagesFetched: number;
   rowsPerCall: number;
@@ -131,7 +232,11 @@ export function classifyYield(e: YieldEvidence): YieldVerdict {
       coverage: expected === null ? "UNKNOWN" : "OK",
       reason:
         `normalization dropped ${offered - e.normalized} of ${offered} listings ` +
-        `(missing year/make/model/price)`,
+        `(missing year/make/model/price)` +
+        // APPENDED, never substituted. The existing sentence is what the production record
+        // and its regression tests already match on, and a run whose adapter does not tally
+        // must keep reading exactly as it did.
+        (e.dropTally && e.dropTally.sampled > 0 ? ` — ${formatDropTally(e.dropTally)}` : ""),
     };
   }
 

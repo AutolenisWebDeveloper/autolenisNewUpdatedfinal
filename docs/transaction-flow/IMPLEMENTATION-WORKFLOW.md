@@ -2359,11 +2359,46 @@ Three things were true of production when this phase opened, and none of them wa
    fresh it is. Minting the row there would be a second write path into `inventory_items`, which
    this phase's own scope reserves for the canonical ingestion service.
 
-##### The live sweep failure — diagnosed from the production record, and fixed by this batch
+##### The live sweep failure — diagnosed from the production record; the repair shipped and did NOT hold
+
+> **CORRECTED 2026-09-13, owner-ruled.** Everything after this block was written on 2026-09-10
+> and claimed this batch fixes the sweep. **It did not.** The correction is stated first, because
+> a reader who stops after one paragraph must not leave with the wrong conclusion.
+>
+> **The chronology, measured rather than recalled.** The include-flag commit `5027864` is
+> 2026-09-10 **13:42 UTC**; the merge `d943e192` is **21:58 UTC**. The 09-10 08:00:06 run quoted
+> below therefore **predates the fix by about fourteen hours** and is not evidence about it. Of
+> the runs on record only **09-11 and 09-12** are post-deploy, and both failed identically. The
+> failure is **continuous from 09-03 through 09-12** — ten runs, not three and not eight. The
+> owner's framing of three identical failures, and this section's framing of a fix confirmed by
+> eight, are both corrected here.
+>
+> **Root cause: NARROWED, NOT CONFIRMED.** Verified: the three include flags *are* on the
+> outgoing request — established by building the URL rather than reading the source line; there
+> is no cached or alternate code path (`orchestrator.ts:35` holds a single-adapter singleton, and
+> there is one builder, one fetch, one endpoint); and Phase 4 did not introduce the
+> `listing.build` dependency, because the pre-fix adapter already read `build?.year/make/model`.
+> Not verified, and not verifiable from this repository: that the provider's response lacks
+> `build`. The fix's evidence base was the MarketCheck **MCP's own key and package**, which
+> `verification/marketcheck-contract-verification.md:8` states is *not proven to be the same
+> package* as the production `MARKETCHECK_API_KEY`; and `normalize()` returned a bare `null`, so
+> the drop reason was discarded — which is precisely why the message below can name four
+> candidate fields and distinguish none of them. `price` was absent on 5 of 15 listings in the
+> probe sample, so build-absent and price-absent are both live hypotheses.
+>
+> **The owner's ruling, 2026-09-13: instrument, do not probe.** A second MCP probe spends paid
+> credits on a package that still cannot speak for production's — the same weakness that let the
+> original fix ship unproven. The bounded, failure-path-only drop tally
+> (`sync-yield.ts` → `NormalizeDropTally` / `formatDropTally`; `marketcheck.adapter.ts` →
+> `normalize(listing, tally)`) makes the next 08:00 run the experiment at no extra provider
+> spend: `build absent 25` on the sample is a provider-side finding, while
+> `build absent 0, price 25` points somewhere else entirely. The catalogue purge stays held
+> behind a green sweep.
 
 **This is not reasoning about what might be wrong. The owner ran `phase-4-proof/sweep-failure-diagnostic.sql`
 read-only against production on 2026-09-10 and it answered.** Eight consecutive daily runs,
-2026-09-03 through 2026-09-10, identical:
+2026-09-03 through 2026-09-10, identical — and two more, 09-11 and 09-12, identical again
+*after* the fix deployed (see the correction above):
 
 ```
 status FAILED · api_calls_used 1 · vehicles_fetched 0 · health 0 · seconds 0
@@ -2375,11 +2410,17 @@ The provider was answering and returning 50 listings on every call. All 50 were 
 (`marketcheck.adapter.ts:646-648`) and the deployed adapter never asked for it. Zero normalized,
 so zero fetched, so FAILED — every morning, while `cron_job_logs` said COMPLETED.
 
-**Merging this phase repairs it.** `include_build_object: "true"`, with
-`include_dealer_object` and `include_mc_dealership_object`, is at `marketcheck.adapter.ts:610`
-on this branch; `origin/main` sends none of the three. The include-flag defect was recorded in
-§9's corrections as a *probable* root cause, inferred from a live payload probe. It is now the
-*confirmed* root cause of a failure that was live for at least eight days.
+**RETRACTED — this paragraph claimed "merging this phase repairs it", and it did not.**
+What stands: `include_build_object: "true"`, with `include_dealer_object` and
+`include_mc_dealership_object`, is now on `main` as of `d943e192` — at
+`marketcheck.adapter.ts:620`, where the pre-merge adapter sent none of the three — and the
+flags are verified to reach the wire, established by building the URL rather than reading the
+line. What does
+not stand is the conclusion drawn from that. The include-flag defect was recorded in §9's
+corrections as a *probable* root cause inferred from a live payload probe, and this paragraph
+promoted it to *confirmed* on the strength of a fix that had not yet run in production once.
+Two post-deploy runs later it is back to **probable**: a real defect, really repaired, that was
+either not the whole cause or not the cause.
 
 Two related facts came out of the same query and are registered rather than fixed here:
 

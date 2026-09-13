@@ -10,10 +10,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  classifyYield, expectedListings,
+  classifyYield, expectedListings, formatDropTally, newDropTally, recordDrop,
   COVERAGE_MIN_RATIO, MIN_ABSOLUTE_SHORTFALL, NORMALIZE_MIN_RATIO, NORMALIZE_MIN_RAW,
+  DROP_SAMPLE_LIMIT,
 } from "@/lib/services/inventory/sync-yield";
-import type { YieldEvidence } from "@/lib/services/inventory/sync-yield";
+import type { YieldEvidence, NormalizeDropTally } from "@/lib/services/inventory/sync-yield";
 
 const ev = (o: Partial<YieldEvidence>): YieldEvidence => ({
   outcome: "SUCCESS", numFound: null, rawListings: 0, normalized: 0,
@@ -123,4 +124,93 @@ test("the boundary is exactly where the thresholds put it", () => {
   // 25 — so it passes. 74 received is 26 short AND under 80, so it fails.
   assert.equal(classifyYield(ev({ numFound: 100, rawListings: 79, normalized: 70, pagesFetched: 2 })).outcome, "SUCCESS");
   assert.equal(classifyYield(ev({ numFound: 100, rawListings: 74, normalized: 70, pagesFetched: 2 })).outcome, "FAILED");
+});
+
+// ── The drop-reason breakdown (owner-approved 2026-09-13) ────────────────────
+//
+// The message could say how MANY listings were dropped and never WHICH field was missing. It
+// named all four candidates — year/make/model/price — and distinguished none, which is why ten
+// consecutive production failures could not settle whether the cause was provider-side.
+
+test("REPRODUCTION: without a tally the message still names four fields and no count", () => {
+  // The state of the world before this change, pinned so the regression is visible rather
+  // than remembered.
+  const v = classifyYield(ev({ numFound: 50, rawListings: 50, normalized: 0, pagesFetched: 1 }));
+  assert.equal(v.outcome, "FAILED");
+  assert.equal(
+    v.reason,
+    "normalization dropped 50 of 50 listings (missing year/make/model/price)",
+    "an adapter that does not tally must read EXACTLY as it did — the breakdown adds a clause, it does not replace one",
+  );
+});
+
+test("a tally appends a counted breakdown without disturbing the existing sentence", () => {
+  const dropTally: NormalizeDropTally = {
+    sampled: 25, buildAbsent: 25, year: 25, make: 25, model: 25, price: 0, threw: 0,
+  };
+  const v = classifyYield(ev({
+    numFound: 50, rawListings: 50, normalized: 0, pagesFetched: 1, dropTally,
+  }));
+  assert.equal(v.outcome, "FAILED");
+  // The original sentence survives verbatim — the production record and the assertions above
+  // both match on it.
+  assert.match(String(v.reason), /^normalization dropped 50 of 50 listings \(missing year\/make\/model\/price\)/);
+  assert.match(String(v.reason), /sampled 25: build absent 25, year 25, make 25, model 25, price 0, threw 0/);
+});
+
+test("build absent 0 and build absent 25 are the two readings that must differ", () => {
+  // This is the whole point. `year`, `make` and `model` are all read off `listing.build`, so
+  // an absent build fails all three at once and the three counts alone cannot tell "the
+  // provider sent no build object" from "it sent one with empty fields". Those have different
+  // causes and different fixes, and only `buildAbsent` separates them.
+  const providerSide = { ...newDropTally(), sampled: 25, buildAbsent: 25, year: 25, make: 25, model: 25 };
+  const fieldsEmpty  = { ...newDropTally(), sampled: 25, buildAbsent: 0,  year: 25, make: 25, model: 25 };
+  assert.match(formatDropTally(providerSide), /build absent 25/);
+  assert.match(formatDropTally(fieldsEmpty),  /build absent 0/);
+  assert.notEqual(formatDropTally(providerSide), formatDropTally(fieldsEmpty));
+});
+
+test("a price-weighted tally points somewhere other than the build object", () => {
+  // `price` is `listing.price`, independent of `build`. The live probe returned price on only
+  // 10 of 15 listings, so price-absent and build-absent are both live hypotheses and the
+  // breakdown has to be able to tell them apart.
+  const t = { ...newDropTally(), sampled: 25, buildAbsent: 0, price: 25 };
+  assert.match(formatDropTally(t), /build absent 0, year 0, make 0, model 0, price 25/);
+});
+
+test("zeros are emitted, because a zero is the informative reading", () => {
+  assert.equal(
+    formatDropTally(newDropTally()),
+    "sampled 0: build absent 0, year 0, make 0, model 0, price 0, threw 0",
+  );
+});
+
+test("a tally that sampled nothing adds no clause", () => {
+  // An adapter can hand over an empty tally — a coverage failure drops no listings at all.
+  // Printing "sampled 0:" on such a run would be noise asserting a measurement nobody made.
+  const v = classifyYield(ev({
+    numFound: 50, rawListings: 50, normalized: 0, pagesFetched: 1, dropTally: newDropTally(),
+  }));
+  assert.equal(v.reason, "normalization dropped 50 of 50 listings (missing year/make/model/price)");
+});
+
+test("the sample limit is bounded and small", () => {
+  // Not a magic number check: the tally runs on the failure path of every rejected listing,
+  // and the cap is what keeps a pathological run from doing per-listing work indefinitely.
+  assert.ok(DROP_SAMPLE_LIMIT > 0 && DROP_SAMPLE_LIMIT <= 50, "bounded, and within one page");
+});
+
+test("recordDrop is the only writer, and the cap is its property not the caller's", () => {
+  // Found in the second review. The cap used to be checked at each call site, so `sampled`
+  // stayed bounded only while every future rejection path remembered to check it.
+  const t = newDropTally();
+  for (let i = 0; i < DROP_SAMPLE_LIMIT * 3; i++) recordDrop(t, { buildAbsent: true, year: true });
+  assert.equal(t.sampled, DROP_SAMPLE_LIMIT, "sampled never exceeds the limit");
+  assert.equal(t.buildAbsent, DROP_SAMPLE_LIMIT);
+  assert.equal(t.year, DROP_SAMPLE_LIMIT);
+  assert.equal(t.price, 0, "a field that was present is never counted");
+});
+
+test("recordDrop on an absent tally is a no-op, so a caller that does not tally needs no branch", () => {
+  assert.doesNotThrow(() => recordDrop(undefined, { threw: true }));
 });
