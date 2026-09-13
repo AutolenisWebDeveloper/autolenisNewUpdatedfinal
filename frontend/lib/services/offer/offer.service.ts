@@ -5,7 +5,7 @@
 import { logger } from "@/lib/logger";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { OfferStatus } from "@prisma/client";
+import { OfferStatus, Prisma } from "@prisma/client";
 import { MAX_OFFER_REVISIONS } from "@/lib/constants";
 import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
 import { maybeExtendForAntiSnipe } from "@/lib/services/auction/anti-snipe.service";
@@ -15,6 +15,7 @@ import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifica
 // conversion path validates prices with the exact same assertion. Re-exported
 // here to keep offer.service's public surface unchanged for existing importers.
 import { assertOtdComponentsMatch } from "./otd";
+import { classifyFeeItems } from "./junk-fee.service";
 export { assertOtdComponentsMatch };
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
@@ -61,7 +62,12 @@ export interface OfferInput {
   vehiclePriceCents: number;
   taxCents: number;
   feesCents: number;
-  junkFeeItems?: Array<{ name: string; amount: number }>;
+  /**
+   * Itemised fees. Accepts `{name, amount}` (dollars, legacy), `{label, amount}` (the admin
+   * route's shape) or `{name, amountCents}` (canonical). `submitOffer` normalises to integer
+   * cents and stamps server-side `isJunk` before persisting — see `junk-fee-items.ts`.
+   */
+  junkFeeItems?: unknown;
   includesFinancing?: boolean;
   aprRate?: number;
   termMonths?: number;
@@ -79,6 +85,13 @@ export async function submitOffer(input: OfferInput) {
 
   // APR flag computed once for both the insert and any post-create updates.
   const aprFlag = input.aprRate && input.aprRate > APR_SUSPICIOUS_THRESHOLD ? "SUSPICIOUS_APR" : null;
+
+  // §8b's junk-fee evaluation, which had no caller until this phase. Server-side and before the
+  // transaction, so the admin's `JunkFeePattern` rows bind rather than the dealer UI's hardcoded
+  // keyword list — which was discarded before persistence anyway. Classification changes no
+  // arithmetic: `assertOtdComponentsMatch` above already reconciled every itemised fee, junk or
+  // not, so a reclassification moves an item between ranking dimensions and never between totals.
+  const classifiedFeeItems = await classifyFeeItems(input.junkFeeItems);
 
   // Wrap invitation lookup, auction validation, duplicate check, and offer
   // create into one Serializable transaction so two concurrent submissions
@@ -113,7 +126,7 @@ export async function submitOffer(input: OfferInput) {
         vehiclePriceCents: input.vehiclePriceCents,
         taxCents: input.taxCents,
         feesCents: input.feesCents,
-        junkFeeItems: input.junkFeeItems ?? [],
+        junkFeeItems: classifiedFeeItems as unknown as Prisma.InputJsonValue,
         includesFinancing: input.includesFinancing ?? false,
         aprRate: input.aprRate,
         termMonths: input.termMonths,
@@ -279,7 +292,7 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
     vehiclePriceCents: input.vehiclePriceCents ?? original.vehiclePriceCents,
     taxCents: input.taxCents ?? original.taxCents,
     feesCents: input.feesCents ?? original.feesCents,
-    junkFeeItems: (input.junkFeeItems ?? (original.junkFeeItems as unknown as Array<{ name: string; amount: number }>)) ?? [],
+    junkFeeItems: input.junkFeeItems ?? original.junkFeeItems ?? [],
     includesFinancing: input.includesFinancing ?? original.includesFinancing,
     aprRate: input.aprRate ?? original.aprRate ?? undefined,
     termMonths: input.termMonths ?? original.termMonths ?? undefined,
@@ -290,7 +303,11 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
 
   const aprFlag = merged.aprRate && merged.aprRate > APR_SUSPICIOUS_THRESHOLD ? "SUSPICIOUS_APR" : null;
 
-  // Atomic: create revision + withdraw original together.
+  // §8b's classification on the revision too. A dealer who revises must not be able to launder a
+  // junk fee past the ranking by resubmitting it, and a revision that carries the ORIGINAL's items
+  // forward re-classifies them — so a pattern the admin added between the two submissions binds on
+  // the version the buyer is actually shown.
+  const classifiedFeeItems = await classifyFeeItems(merged.junkFeeItems);
   const revised = await prisma.$transaction(async (tx) => {
     const stillOriginal = await tx.offer.findFirst({
       where: { id: offerId, dealerId, status: OfferStatus.SUBMITTED },
@@ -305,7 +322,7 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
         vehiclePriceCents: merged.vehiclePriceCents,
         taxCents: merged.taxCents,
         feesCents: merged.feesCents,
-        junkFeeItems: merged.junkFeeItems as object[],
+        junkFeeItems: classifiedFeeItems as unknown as Prisma.InputJsonValue,
         includesFinancing: merged.includesFinancing,
         aprRate: merged.aprRate,
         termMonths: merged.termMonths,

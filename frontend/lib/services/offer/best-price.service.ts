@@ -3,6 +3,7 @@
 // Weights from BestPriceWeightConfig (admin-configurable, fallback to defaults)
 
 import { prisma } from "@/lib/prisma";
+import { normalizeJunkFeeItems, junkFeeTotalCents } from "./junk-fee-items";
 
 export interface RankedOffer {
   offerId: string;
@@ -61,8 +62,12 @@ export async function rankOffers(
       ? calculateMonthly(o.otdPriceCents, o.aprRate, o.termMonths)
       : undefined;
 
-    const junkFeesCents = (o.junkFeeItems as Array<{amount: number}> | null)
-      ?.reduce((s, f) => s + f.amount, 0) ?? 0;
+    // §8.2 defect 1: this read `f.amount` — the DOLLARS field — into a variable named
+    // `junkFeesCents`, while `otd.ts` multiplied the same field by 100. A 100x divergence on one
+    // untyped Json column, which made every junk-fee ranking understated by two orders of
+    // magnitude. Both sides now go through `junk-fee-items.ts`, which owns the representation and
+    // reads the legacy shapes as well as the canonical one.
+    const junkFeesCents = junkFeeTotalCents(normalizeJunkFeeItems(o.junkFeeItems));
 
     return { offer: o, monthly, junkFeesCents };
   });

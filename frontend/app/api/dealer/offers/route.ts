@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { submitOffer } from "@/lib/services/offer/offer.service";
 import { z } from "zod";
+import { feeItemsSchema } from "@/lib/services/offer/junk-fee-items";
 import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 
@@ -11,7 +12,8 @@ const schema = z.object({
   vehiclePriceCents: z.number().int().min(100), taxCents: z.number().int().min(0),
   feesCents: z.number().int().min(0), includesFinancing: z.boolean().optional(),
   aprRate: z.number().optional(), termMonths: z.number().int().optional(),
-  junkFeeItems: z.array(z.object({ name: z.string(), amount: z.number() })).optional(),
+  // One schema for all three accepted shapes — see lib/services/offer/junk-fee-items.ts.
+  junkFeeItems: feeItemsSchema.optional(),
 });
 
 export async function GET(request: NextRequest) {

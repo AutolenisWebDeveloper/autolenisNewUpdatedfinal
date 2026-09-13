@@ -12,6 +12,7 @@ import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer"
 import { sendOutsideDealerAuctionOfferAdminNotification } from "@/lib/services/email/vehicle-offers.email";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { feeItemsSchema } from "@/lib/services/offer/junk-fee-items";
 
 const querySchema = z.object({
   auctionId: z.string().optional(),
@@ -69,7 +70,10 @@ const offerPriceFields = {
   vehiclePriceCents: z.number().int().positive(),
   taxCents:          z.number().int().min(0).default(0),
   feesCents:         z.number().int().min(0).default(0),
-  junkFeeItems:      z.array(z.object({ label: z.string(), amount: z.number().int() })).default([]),
+  // Was `{ label, amount }` — a shape no other writer used and no reader understood, which is
+  // why `otd.ts` printed `undefined` when rejecting a negative admin fee. The shared schema keeps
+  // accepting `label` so existing callers are not broken, and normalisation maps it to `name`.
+  junkFeeItems:      feeItemsSchema.default([]),
   includesFinancing: z.boolean().default(false),
   aprRate:           z.number().positive().optional(),
   termMonths:        z.number().int().positive().optional(),

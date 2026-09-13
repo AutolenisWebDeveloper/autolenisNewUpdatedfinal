@@ -117,11 +117,23 @@ export default function QuickOfferPage() {
         // otherwise fall back to the OTD total (fees and tax are tracked separately via feesCents/taxCents).
         vehiclePriceCents: vehiclePriceCents > 0 ? vehiclePriceCents : otdCents - taxCents - totalFeesCents > 0 ? otdCents - taxCents - totalFeesCents : otdCents,
         taxCents,
-        feesCents: totalFeesCents,
+        // §8.2 defect 1, the half that BLOCKED EVERY FEE-BEARING BID. This sent `totalFeesCents`
+        // here AND the whole `fees` list as `junkFeeItems` below, and `otd.ts` adds the two —
+        // so `expected` exceeded `otdPriceCents` by the entire fee total and
+        // `assertOtdComponentsMatch` threw for any non-zero fee. The dealer saw only "Failed to
+        // submit offer. Please try again.", so a dealer could bid only with zero fees.
+        //
+        // `feesCents` is now the UN-ITEMISED remainder and `junkFeeItems` carries the itemised
+        // fees, which is what §8a asks for ("itemized add-ons, each separately named and priced")
+        // and what makes the two sum to the total exactly once.
+        feesCents: totalFeesCents - junkFeesCents,
         includesFinancing,
         aprRate: includesFinancing && aprRate ? parseFloat(aprRate) : undefined,
         termMonths: includesFinancing && termMonths ? parseInt(termMonths) : undefined,
-        junkFeeItems: fees.map(f => ({ name: f.name, amount: f.amountCents / 100 })),
+        // CENTS, and only the junk subset — `junkFees`, computed above and until now unused.
+        // The server re-classifies with the admin's JunkFeePattern rows; `isJunk` here is a UX
+        // hint that never reaches the database.
+        junkFeeItems: junkFees.map(f => ({ name: f.name, amountCents: f.amountCents })),
       };
       await api.post("/api/dealer/offers", body);
       setSubmitted(true);

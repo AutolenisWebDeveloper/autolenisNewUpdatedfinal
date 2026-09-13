@@ -5,6 +5,7 @@ import { reviseOffer } from "@/lib/services/offer/offer.service";
 import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { feeItemsSchema } from "@/lib/services/offer/junk-fee-items";
 
 interface Props { params: Promise<{ offerId: string }> }
 
@@ -19,9 +20,8 @@ const schema = z.object({
   includesFinancing: z.boolean().optional(),
   aprRate: z.number().optional(),
   termMonths: z.number().int().optional(),
-  junkFeeItems: z
-    .array(z.object({ name: z.string(), amount: z.number() }))
-    .optional(),
+  // One schema for all three accepted shapes — see lib/services/offer/junk-fee-items.ts.
+  junkFeeItems: feeItemsSchema.optional(),
 });
 
 export async function PATCH(request: NextRequest, { params }: Props) {
