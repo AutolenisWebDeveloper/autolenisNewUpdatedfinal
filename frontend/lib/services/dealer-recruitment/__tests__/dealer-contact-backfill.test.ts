@@ -109,6 +109,19 @@ function resolveRooftopFake(
   }) as BackfillDeps["resolveRooftop"];
 }
 
+// Ruling B: the invitation linker, recording (rooftopId, dealerId) per call so the pass can be
+// proven to link the dealer it just resolved — and injected everywhere, because the real one
+// pulls the whole invitation/comms graph, which a Phase 0 unit test has no business loading.
+function linkFake(
+  calls: Array<{ rooftopId: string; dealerId: string }>,
+  linkedPerCall = 0,
+): BackfillDeps["linkRooftopInvitations"] {
+  return (async (rooftopId: string, dealerId: string) => {
+    calls.push({ rooftopId, dealerId });
+    return { linked: linkedPerCall, alreadyInvited: 0 };
+  }) as BackfillDeps["linkRooftopInvitations"];
+}
+
 function reconcileFake(
   ran: string[],
   nullIds: Set<string> = new Set(),
@@ -339,6 +352,7 @@ test("OFF → Phase 0 never queries the dealer/prospect population either", asyn
       prisma, now: NOW, enabled: () => false,
       resolveRooftop: resolveRooftopFake(order),
       reconcile: reconcileFake(ran),
+      linkRooftopInvitations: linkFake([]),
       reveal: revealFake(new Set(), []),
       remaining: (async () => 9999) as BackfillDeps["remaining"],
       upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
@@ -368,6 +382,7 @@ test("resolves registered dealers and prospects lacking a rooftop, then reconcil
       prisma, now: NOW, enabled: () => true,
       resolveRooftop: resolveRooftopFake(order),
       reconcile: reconcileFake(ran),
+      linkRooftopInvitations: linkFake([]),
       reveal: revealFake(new Set(), []),
       remaining: (async () => 9999) as BackfillDeps["remaining"],
       upsert: (async (id: string) => ({ id })) as BackfillDeps["upsert"],
@@ -399,6 +414,7 @@ test("registered dealers are resolved but never reconciled (reconcile is prospec
       prisma, now: NOW, enabled: () => true,
       resolveRooftop: resolveRooftopFake(order),
       reconcile: reconcileFake(ran),
+      linkRooftopInvitations: linkFake([]),
       reveal: revealFake(new Set(), []),
       remaining: (async () => 9999) as BackfillDeps["remaining"],
       upsert: (async (id: string) => ({ id })) as BackfillDeps["upsert"],
@@ -422,6 +438,7 @@ test("resolveLimit bounds total per-run resolution work (dealers first)", async 
       prisma, now: NOW, enabled: () => true,
       resolveRooftop: resolveRooftopFake(order),
       reconcile: reconcileFake(ran),
+      linkRooftopInvitations: linkFake([]),
       reveal: revealFake(new Set(), []),
       remaining: (async () => 9999) as BackfillDeps["remaining"],
       upsert: (async (id: string) => ({ id })) as BackfillDeps["upsert"],
@@ -446,6 +463,7 @@ test("a resolution failure is fail-open (counted, run continues to the reveal ph
       prisma, now: NOW, enabled: () => true,
       resolveRooftop: resolveRooftopFake(order, new Set(["p1"])),
       reconcile: reconcileFake(ran),
+      linkRooftopInvitations: linkFake([]),
       reveal: revealFake(new Set(["a"]), revealOrder),
       remaining: (async () => 9999) as BackfillDeps["remaining"],
       upsert: (async (id: string) => ({ id })) as BackfillDeps["upsert"],
@@ -555,6 +573,7 @@ test("flag OFF: Phase 0 still resolves, Phase 1 makes NO reveal call and reads N
       upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
       resolveRooftop: resolveRooftopFake(resolveOrder),
       reconcile: reconcileFake(reconciled),
+      linkRooftopInvitations: linkFake([]),
     },
   );
 
@@ -615,4 +634,73 @@ test("the paid tier OFF still short-circuits everything, before the spend gate i
   assert.equal(r.phase1Gated, false, "not gated — the whole job was off");
   assert.equal(spendChecks, 0, "the first gate decides alone");
   assert.equal(calls.dealerFindMany, 0, "Phase 0 does not run when the tier is off (unchanged)");
+});
+
+// ── Ruling B — the second half of the claim-time link ────────────────────────────────────────
+//
+// A dealer approved and claimed the same day has no `rooftopId` when they claim, so the
+// claim-time link finds nothing. This pass is where the rooftop becomes known, and it must
+// close the invitation then — otherwise the outside invitation keeps its NULL `dealer_id`
+// forever and the dealership can never act on the auction it was invited to.
+test("Phase 0 links a newly-resolved dealer's outside invitations, and reports the count", async () => {
+  const { prisma } = fakePrisma(
+    [rt("a")],
+    [],
+    { dealers: [{ id: "d1", dealershipName: "Athelus Motors" }, { id: "d2", dealershipName: "Beta Auto" }], prospects: [] },
+  );
+  const order: Array<{ kind: string; id: string }> = [];
+  const ran: string[] = [];
+  const links: Array<{ rooftopId: string; dealerId: string }> = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma, now: NOW, enabled: () => true, spendEnabled: () => false,
+      resolveRooftop: resolveRooftopFake(order),
+      reconcile: reconcileFake(ran),
+      linkRooftopInvitations: linkFake(links, 1),
+      reveal: revealFake(new Set(), []),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+  assert.equal(r.dealersResolved, 2);
+  assert.deepEqual(
+    links,
+    [
+      { rooftopId: "rooftop-of-d1", dealerId: "d1" },
+      { rooftopId: "rooftop-of-d2", dealerId: "d2" },
+    ],
+    "each resolved dealer must be linked to the rooftop it just resolved to",
+  );
+  assert.equal(r.invitationsLinked, 2, "the linked count must reach the run result");
+});
+
+test("a link failure is not a resolve failure and does not stop the pass", async () => {
+  const { prisma } = fakePrisma(
+    [rt("a")],
+    [],
+    { dealers: [{ id: "d1", dealershipName: "Athelus Motors" }, { id: "d2", dealershipName: "Beta Auto" }], prospects: [] },
+  );
+  const order: Array<{ kind: string; id: string }> = [];
+  const seen: string[] = [];
+  const r = await runDealerContactBackfill(
+    {},
+    {
+      prisma, now: NOW, enabled: () => true, spendEnabled: () => false,
+      resolveRooftop: resolveRooftopFake(order),
+      reconcile: reconcileFake([]),
+      linkRooftopInvitations: (async (rooftopId: string, dealerId: string) => {
+        seen.push(dealerId);
+        if (dealerId === "d1") throw new Error("P2002 storm");
+        return { linked: 1, alreadyInvited: 0 };
+      }) as BackfillDeps["linkRooftopInvitations"],
+      reveal: revealFake(new Set(), []),
+      remaining: (async () => 9999) as BackfillDeps["remaining"],
+      upsert: (async () => ({ id: "x" })) as BackfillDeps["upsert"],
+    },
+  );
+  assert.deepEqual(seen, ["d1", "d2"], "the second dealer must still be attempted");
+  assert.equal(r.dealersResolved, 2, "a link failure must not be counted as a resolve");
+  assert.equal(r.resolveFailed, 0, "a link failure must not be reported as a resolve failure");
+  assert.equal(r.invitationsLinked, 1, "only the successful link counts");
 });

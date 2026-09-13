@@ -69,6 +69,7 @@ import { revealRooftopContact, REVEAL_TOTAL_COST_CREDITS } from "./apollo-reveal
 import { remainingCredits, cycleKeyFor } from "./apollo-credit-ledger.service";
 import { upsertContactProfile, reconcileProspectContact } from "@/lib/services/dealer/dealer-contact-profile.service";
 import { resolveRooftop } from "@/lib/services/dealer/dealer-rooftop.service";
+import type { linkRooftopInvitationsToDealer } from "@/lib/services/auction/auction-invitation.service";
 
 /**
  * The unattended-spend switch for Phase 1. True only when the key is present AND
@@ -122,6 +123,13 @@ export interface BackfillDeps {
   // Phase 0 — injectable so unit tests never touch prisma / the real resolver.
   resolveRooftop: typeof resolveRooftop;
   reconcile: typeof reconcileProspectContact;
+  /**
+   * Ruling B, second half. Linking an outside invitation to a dealer needs BOTH facts — the
+   * account claimed, and the dealer resolved to its rooftop — and this pass is where the
+   * second one usually lands: a dealer approved and claimed the same day has no `rooftopId`
+   * yet, so the claim-time link finds nothing and this run is what closes it.
+   */
+  linkRooftopInvitations: typeof linkRooftopInvitationsToDealer;
 }
 
 export interface BackfillResult {
@@ -135,6 +143,8 @@ export interface BackfillResult {
   phase1Gated: boolean;
   // Phase 0 — canonical rooftop resolution.
   dealersResolved: number;
+  /** Ruling B — outside invitations that gained their now-known dealer id. */
+  invitationsLinked: number;
   prospectsResolved: number;
   contactsReconciled: number;
   resolveFailed: number;
@@ -155,6 +165,8 @@ export interface BackfillResult {
 
 interface ResolveCounts {
   dealersResolved: number;
+  /** Ruling B — outside invitations that gained their now-known dealer id. */
+  invitationsLinked: number;
   prospectsResolved: number;
   contactsReconciled: number;
   resolveFailed: number;
@@ -191,12 +203,13 @@ interface ProspectRow {
  * record gains a rooftopId and is not re-selected).
  */
 async function resolveDealerPopulation(
-  deps: Pick<BackfillDeps, "prisma" | "resolveRooftop" | "reconcile">,
+  deps: Pick<BackfillDeps, "prisma" | "resolveRooftop" | "reconcile" | "linkRooftopInvitations">,
   resolveLimit: number,
 ): Promise<ResolveCounts> {
-  const { prisma, resolveRooftop: resolve, reconcile } = deps;
+  const { prisma, resolveRooftop: resolve, reconcile, linkRooftopInvitations: link } = deps;
   const counts: ResolveCounts = {
     dealersResolved: 0,
+    invitationsLinked: 0,
     prospectsResolved: 0,
     contactsReconciled: 0,
     resolveFailed: 0,
@@ -222,7 +235,18 @@ async function resolveDealerPopulation(
         { kind: "dealer", id: d.id, name: d.dealershipName, zip: d.zip, city: d.city, state: d.state, phone: d.phone, latitude: d.latitude, longitude: d.longitude },
         { prisma },
       );
-      if (rid) counts.dealersResolved++;
+      if (rid) {
+        counts.dealersResolved++;
+        // The dealer is now known to be this rooftop. Any invitation issued to the rooftop
+        // before the account existed can finally carry the id the portal scopes on. Its own
+        // catch: a link failure is not a resolve failure, and must not stop the pass.
+        try {
+          const linked = await link(rid, d.id, prisma);
+          counts.invitationsLinked += linked.linked;
+        } catch (linkErr) {
+          logger.warn(`[dealer-contact-backfill] invitation link failed for dealer ${d.id}:`, linkErr);
+        }
+      }
     } catch (err) {
       counts.resolveFailed++;
       logger.warn(`[dealer-contact-backfill] rooftop resolve failed for dealer ${d.id}:`, err);
@@ -287,6 +311,15 @@ export async function runDealerContactBackfill(
   const upsert = deps?.upsert ?? upsertContactProfile;
   const remaining = deps?.remaining ?? remainingCredits;
   const resolve = deps?.resolveRooftop ?? resolveRooftop;
+  // Loaded on use, not at module load: the invitation service pulls the comms and email
+  // graph (and `server-only`) behind it, and this job has no business importing all of that
+  // to link a handful of rows. Same idiom as `replaceInvitation`'s dispatcher import.
+  const link: typeof linkRooftopInvitationsToDealer =
+    deps?.linkRooftopInvitations ??
+    (async (rooftopId, dealerId, db, now) => {
+      const mod = await import("@/lib/services/auction/auction-invitation.service");
+      return mod.linkRooftopInvitationsToDealer(rooftopId, dealerId, db, now);
+    });
   const reconcile = deps?.reconcile ?? reconcileProspectContact;
 
   const limit = params.limit ?? DEFAULT_BACKFILL_LIMIT;
@@ -298,6 +331,7 @@ export async function runDealerContactBackfill(
     enabled: false,
     phase1Gated: false,
     dealersResolved: 0,
+    invitationsLinked: 0,
     prospectsResolved: 0,
     contactsReconciled: 0,
     resolveFailed: 0,
@@ -319,8 +353,12 @@ export async function runDealerContactBackfill(
   // at the top level too: a Phase 0 breakage must not stop the Phase 1 gap-fill
   // over rooftops resolved on earlier runs.
   try {
-    const r0 = await resolveDealerPopulation({ prisma, resolveRooftop: resolve, reconcile }, resolveLimit);
+    const r0 = await resolveDealerPopulation(
+      { prisma, resolveRooftop: resolve, reconcile, linkRooftopInvitations: link },
+      resolveLimit,
+    );
     result.dealersResolved = r0.dealersResolved;
+    result.invitationsLinked = r0.invitationsLinked;
     result.prospectsResolved = r0.prospectsResolved;
     result.contactsReconciled = r0.contactsReconciled;
     result.resolveFailed = r0.resolveFailed;
@@ -456,7 +494,7 @@ export async function runDealerContactBackfill(
 
   logger.info(
     `[dealer-contact-backfill] cycle=${cycleKey} ` +
-      `resolved(dealers=${result.dealersResolved} prospects=${result.prospectsResolved} ` +
+      `resolved(dealers=${result.dealersResolved} invitesLinked=${result.invitationsLinked} prospects=${result.prospectsResolved} ` +
       `reconciled=${result.contactsReconciled} failed=${result.resolveFailed}) ` +
       `candidates=${result.candidates} attempted=${result.attempted} revealed=${result.revealed} ` +
       `skipped=${result.skipped} noHostSkipped=${result.noWebsiteHostSkipped} ` +
