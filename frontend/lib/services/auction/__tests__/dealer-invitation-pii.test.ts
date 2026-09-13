@@ -63,7 +63,15 @@ mock.module("@/lib/prisma", {
         }),
         updateMany: async () => ({ count: 1 }),
       },
-      auctionInvitation: { upsert: async ({ create }: { create: Record<string, unknown> }) => create },
+      // `upsert` became findFirst -> create/update in 20261114000000: the compound unique it
+      // keyed on is now a PARTIAL unique, which the Prisma DSL cannot express. `findFirst`
+      // returns null so the create path runs, which is what `upsert` did here.
+      auctionInvitation: {
+        findFirst: async () => null,
+        create: async ({ data }: { data: Record<string, unknown> }) => data,
+        update: async ({ data }: { data: Record<string, unknown> }) => data,
+        upsert: async ({ create }: { create: Record<string, unknown> }) => create,
+      },
       notification: { create: async () => ({}) },
     },
   },

@@ -2176,7 +2176,7 @@ is confirmed stable — it is not part of the merge.**
 | --- | --- | --- |
 | 1 | Merge `claude/fix-dealer-feed-notice-address` — independent, no schema | PR #421 |
 | 2 | Phase 5 preflight — only `CHECKED`, zero `BLOCK` | `phase-5-proof/preflight.sql` |
-| 3 | `pnpm exec prisma migrate deploy` — ledger 108 → 109 | — |
+| 3 | `pnpm exec prisma migrate deploy` — **109 distinct migrations; the ROW count went 108 → 111** (see the retry note below) | — |
 | 4 | Verify BOTH halves — physical schema AND `_prisma_migrations` | `verify.sql` + `ledger.sql` |
 | 5 | Merge `claude/txflow-05-sourcing`, let it deploy | PR #422 |
 | 6 | Confirm production on the new SHA, zero cron failures | — |
@@ -2197,6 +2197,54 @@ Phase 5 migration not being recorded (flipping onto an unmigrated database holds
 PENDING). Everything else is a figure to compare, not a gate — a census that blocked on a count
 nobody had agreed a threshold for would stop a deploy over a number, and the owner is the one who
 decides what a number means.
+
+**THE LEDGER ROW COUNT IS NOT THE MIGRATION COUNT, and on this database it never will be again.**
+Measured 2026-09-13 after migration 109: **111 rows, 109 distinct names, 109 finished, 2 rolled
+back** — `20261113000000_phase5_sourcing_invitations` holds **three** rows. Prisma APPENDS a row per
+attempt rather than replacing, so every timeout-and-retry leaves its attempt behind. A
+freshly-applied chain on a scratch database measures 109 rows, production measures 111, and **both
+are correct** — they count different things. Any assertion that equates row count with migration
+count now reads wrong forever here. The gates were rewritten to count *finished, non-rolled-back*
+rows instead (`migration-110-proof/preflight.sql` A1 and A3, and `ledger.sql`), and to report a
+rolled-back row sitting beside a success as retry history rather than as a failure. Before that
+rewrite, A3 would have **BLOCKED the migration 110 run on production** over migration 109's two
+healthy retries, and A1 would have blocked the retry that a rollback exists to permit.
+
+**`--single-transaction` PLUS AN OPEN PAGER MEANS THE TRANSACTION NEVER COMMITS.** This is what cost
+migration 109 two timeouts (02:54 and 03:01 UTC on 2026-09-13, each waiting out the 2-minute
+`statement_timeout`). A read-only preflight session left sitting in psql's pager stays **idle in
+transaction**, holding `AccessShareLock` on every table it read — and the next `ALTER` queues behind
+it until the timeout kills it. The session looks finished; the lock is not released.
+
+Every psql example in the proof packages, and the operator message in `guard-destructive.sh`, now
+carries **`-P pager=off`**:
+
+```
+psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \\
+  -c "SET TRANSACTION READ ONLY" -f <file.sql>
+```
+
+The guard still accepts it: its read-only matcher greps for `--single-transaction` and
+`set transaction read only` as substrings rather than matching the shape exactly, so the extra flag
+passes. **`CLAUDE.md`'s own "Read-only means server-enforced" block still shows the pager-less
+form** — that is the constitution and the owner's to change. It is the one remaining place that
+teaches the shape which caused this.
+
+**CONFIRM THE HEAD SHA AT THE MOMENT OF MERGING, not from the page you have open.** Owner's
+instruction, 2026-09-13, from what happened on #422: a review fix was pushed as `8d10dbf` and the
+merge landed about a minute later carrying `e94bc4d`, the commit before it. GitHub merged the head
+the loaded page knew about. The Phase 5 rail reached `main` without seven verified fixes, four of
+them on live paths, and the only reason that was recoverable is that the fixes went straight into a
+NEW pull request (#424) rather than an attempt to reopen the merged one. A merged pull request is
+finished and cannot carry follow-up work. Check `git merge-base --is-ancestor <pushed-sha> main`
+after any merge you expected to include a late push.
+
+**Migration 110 — `20261114000000_invitation_replacement_partial_unique`.** Authored and proven,
+NOT applied; proof package at `docs/transaction-flow/migration-110-proof/`. It makes both uniques on
+`auction_invitations` exclude `REPLACED` rows so contact replacement after a bounce can re-invite a
+rooftop. **§13-D52's flip does not go on until 110 lands** (owner's instruction, 2026-09-13):
+bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not something to
+discover with a paid buyer waiting.
 
 **Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
 migration's own header states the ordering, because this phase's code writes `initiator_role`,
@@ -2818,7 +2866,7 @@ the register has at least one enqueue/raise site.
 | Legacy path | Phase that neutralises new writes | Compatibility kept for | Removal |
 | --- | --- | --- | --- |
 | Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, which it is not — §8.1e finding 17**) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
-| `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them |
+| `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them. **OWNER RULING 2026-09-13: KEEP, and make the clock EVIDENCE-DRIVEN rather than calendar-driven.** Closing a capability in order to start a 30-day timer is the wrong trade; instead a write counter records when the path actually goes quiet, and the window starts from measured silence. **The §8.4 30-day zero-write window has NOT started.** *Write-site inventory corrected the same day — the list above names the admin ROUTES and is incomplete.* Measured: `app/api/admin/offers/route.ts:194,206` (update + create), `app/api/public/outside-dealer-offer/[token]/route.ts:90,116` (the outside dealer's OWN submission — the atomic `respondedAt` claim, then the offer write-back) and `lib/services/auction/outside-invite.service.ts:148` (the mint the admin routes call). Four writes across three files. The public token route is the half the earlier list missed, and it is the half with no rail equivalent — which is what makes KEEP the right call rather than a deferral. **THE RULING WAS MADE ON THE CORRECTED LIST, and that is load-bearing:** a list naming only the admin routes makes CLOSE look cheap, because every site on it has a rail equivalent. The outside dealer's own submission path does not, and it is the one the incomplete list omitted. Had the ruling been taken on the old list it would likely have gone the other way, and closed a capability no rail can yet replace |
 | `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI (writes canonical `offers`) | keep as intake; no drop |
 | Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |

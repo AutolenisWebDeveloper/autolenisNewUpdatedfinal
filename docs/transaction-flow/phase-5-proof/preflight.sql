@@ -9,7 +9,7 @@
 -- Read-only: every statement is a SELECT. Run inside the server-enforced read-only
 -- transaction shape CLAUDE.md mandates:
 --
---   psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction \
+--   psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \
 --     -c "SET TRANSACTION READ ONLY" -f docs/transaction-flow/phase-5-proof/preflight.sql
 
 \pset footer off
