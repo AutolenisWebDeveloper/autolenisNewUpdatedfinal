@@ -41,8 +41,11 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   // Precondition: don't stack a second unconsumed PAID deposit. An existing
   // PAID deposit not yet attached to an auction already unblocks the workflow.
+  // §13-D39: `auctions: { none: {} }` is the exact pre-D39 meaning of `auction: null` — a deposit
+  // that has never produced an auction. A relaunch-eligible deposit (original CLOSED) has been
+  // consumed by that auction and correctly does not block an override.
   const existingPaid = await prisma.deposit.findFirst({
-    where: { buyerId, status: "PAID", auction: null },
+    where: { buyerId, status: "PAID", auctions: { none: {} } },
     select: { id: true },
   });
   if (existingPaid) {

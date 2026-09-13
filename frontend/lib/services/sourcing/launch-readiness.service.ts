@@ -31,8 +31,13 @@
 // field never becomes ACTIVE, so there is no live zero-dealer auction left to close.
 
 import { logger } from "@/lib/logger";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { AuctionStatus, Prisma, PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import {
+  findLiveAuctionForDeposit,
+  findOriginalAuctionForDeposit,
+  RELAUNCH_LIMIT,
+} from "@/lib/services/auction/deposit-auction";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { settledDepositForRequest } from "@/lib/services/payment/fulfillment-gate";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
@@ -510,15 +515,31 @@ export async function launchFromCase(
 
   // ── step 1: the auction, PENDING, with BOTH references (S7-17) ──
   //
-  // `Auction.depositId` is `@unique`, so a redelivered launch cannot create a second auction
-  // for the same deposit — the constraint is the idempotency, not a check.
+  // §13-D39 CHANGED WHAT THIS QUERY MEANS. It used to read `findFirst({ where: { depositId } })`
+  // under the comment "`Auction.depositId` is `@unique`, so a redelivered launch cannot create a
+  // second auction for the same deposit — the constraint is the idempotency, not a check." Both
+  // halves of that broke at once, and TypeScript could not see either because `findFirst` on a
+  // non-unique column stays legal:
+  //
+  //   (a) UNORDERED. Once a deposit carries an original AND a relaunch, the row returned is
+  //       arbitrary — as likely the dead original as the live retry.
+  //   (b) REFUSED THE RELAUNCH. The branch below returned `launched: false` on a CLOSED row, so
+  //       once the original closed, the path that launches auctions would find the corpse, log
+  //       "already CLOSED", and refuse — meaning the §8c relaunch could never be launched by the
+  //       very service that launches.
+  //
+  // Corrected: ask only about the LIVE auction (newest first). A terminal original is not a reason
+  // to refuse; it is the precondition for a relaunch. The partial unique still refuses a second
+  // ORIGINAL, so redelivery idempotency survives — but it is now this query that expresses it,
+  // not a constraint that no longer says what the comment claimed.
   let auctionId: string;
-  const existing = await db.auction.findFirst({
-    where: { depositId: deposit.id },
-    select: { id: true, status: true },
-  });
+  const existing = await findLiveAuctionForDeposit<{ id: string; status: AuctionStatus }>(
+    db,
+    deposit.id,
+    { id: true, status: true },
+  );
   if (existing) {
-    if (existing.status === "ACTIVE" || existing.status === "CLOSED") {
+    if (existing.status === "ACTIVE") {
       logger.info(`[readiness] auction ${existing.id} already ${existing.status} for deposit ${deposit.id}`);
       return {
         launched: false, auctionId: existing.id, invitationsIssued: 0, noticesDispatched: 0,
@@ -527,6 +548,25 @@ export async function launchFromCase(
     }
     auctionId = existing.id;
   } else {
+    // ORIGINAL OR RELAUNCH — and this is not a style choice. `auctions_deposit_id_original_key`
+    // refuses a second row with `original_auction_id IS NULL` for the same deposit, so once an
+    // original exists (now terminal, since nothing live was found above), creating another plain
+    // row would raise P2002. The retry must declare its parentage, which is also what keeps the
+    // audit of what was invited when on two separate auctions rather than one.
+    const priorOriginal = await findOriginalAuctionForDeposit<{ id: string; relaunchCount: number }>(
+      db,
+      deposit.id,
+      { id: true, relaunchCount: true },
+    );
+    if (priorOriginal && priorOriginal.relaunchCount >= RELAUNCH_LIMIT) {
+      logger.info(
+        `[readiness] deposit ${deposit.id} has already used its §8c relaunch of auction ${priorOriginal.id}`,
+      );
+      return {
+        launched: false, auctionId: null, invitationsIssued: 0, noticesDispatched: 0,
+        blockers: ["This request has already used its one relaunch without a second $99."],
+      };
+    }
     const created = await db.auction.create({
       data: {
         buyerId: request.buyerId,
@@ -534,9 +574,19 @@ export async function launchFromCase(
         vehicleRequestId,
         sourcingCaseId: sourcingCase.id,
         status: "PENDING",
+        ...(priorOriginal ? { originalAuctionId: priorOriginal.id } : {}),
       },
       select: { id: true },
     });
+    if (priorOriginal) {
+      await db.auction.update({
+        where: { id: priorOriginal.id },
+        data: { relaunchedAt: now, relaunchCount: { increment: 1 } },
+      });
+      logger.info(
+        `[readiness] auction ${created.id} is the §8c relaunch of ${priorOriginal.id} on deposit ${deposit.id} — no second $99`,
+      );
+    }
     auctionId = created.id;
   }
 

@@ -28,6 +28,45 @@ export async function createAuction(buyerId: string, depositId: string, vehicleR
   });
 }
 
+/**
+ * §8c / §13-D39 — the ONE permitted relaunch, sharing the original's deposit so no second $99 is
+ * charged.
+ *
+ * A NEW auction row, never a reopen of the original. The ruling rejected reopening, and the schema
+ * shows why: `auction_invitations_auction_rooftop_active_key` is
+ * `(auction_id, rooftop_id) WHERE status <> 'REPLACED'`, so re-inviting a rooftop under the same
+ * auction id would have to mark the first invitation REPLACED — overwriting the record of what was
+ * invited when, which is the audit the relaunch exists to preserve.
+ *
+ * Both writes commit together: a retry row whose original was never stamped would let the next
+ * caller relaunch again. `auctions_original_auction_id_key` is the backstop under concurrency, so
+ * the loser of a race fails at the database rather than producing a second retry.
+ */
+export async function createRelaunchAuction(
+  buyerId: string,
+  depositId: string,
+  originalAuctionId: string,
+  vehicleRequestId?: string | null,
+  now: Date = new Date(),
+) {
+  return prisma.$transaction(async (tx) => {
+    const retry = await tx.auction.create({
+      data: {
+        buyerId,
+        depositId,
+        originalAuctionId,
+        status: AuctionStatus.PENDING,
+        ...(vehicleRequestId ? { vehicleRequestId } : {}),
+      },
+    });
+    await tx.auction.update({
+      where: { id: originalAuctionId },
+      data: { relaunchedAt: now, relaunchCount: { increment: 1 } },
+    });
+    return retry;
+  });
+}
+
 // Returns vehicleRequestId only when it belongs to buyerId; otherwise null. The
 // ownership scope lives in the query (id + buyerId), so a mistyped or hostile id
 // resolves to null rather than cross-linking another buyer's request.

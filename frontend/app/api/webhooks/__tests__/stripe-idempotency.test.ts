@@ -16,7 +16,7 @@ type DepositRow = {
   id: string; buyerId: string; stripePaymentIntentId: string | null;
   status: "PENDING" | "PAID" | "FAILED" | "REFUNDED" | "DISPUTED";
 };
-type AuctionRow = { id: string; buyerId: string; depositId: string; status: string };
+type AuctionRow = { id: string; buyerId: string; depositId: string; status: string; originalAuctionId?: string | null };
 
 interface Db {
   events: EventRow[];
@@ -77,11 +77,23 @@ function makeClient(state: Db) {
       },
     },
     auction: {
-      findUnique: async ({ where }: { where: { depositId: string } }) =>
-        state.auctions.find((a) => a.depositId === where.depositId) ?? null,
-      create: async ({ data }: { data: { buyerId: string; depositId: string; status: string } }) => {
+      // §13-D39: this fake modelled deposit->auction as a single-row `find` on depositId, which
+      // was faithful under the absolute unique and is not under a partial one. The settlement
+      // path now asks specifically for the ORIGINAL (`originalAuctionId: null`) via
+      // `findOriginalAuctionForDeposit`, because matching a RELAUNCH here would make a redelivered
+      // settlement skip creation and leave the original non-existent. A fake that ignores the rest
+      // of the `where` would keep this suite green while that regression shipped — core rule 11's
+      // named failure mode, and this was one of its two live instances in the repository.
+      findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+        state.auctions.find((a) => {
+          for (const [k, v] of Object.entries(where)) {
+            if (((a as Record<string, unknown>)[k] ?? null) !== (v ?? null)) return false;
+          }
+          return true;
+        }) ?? null,
+      create: async ({ data }: { data: { buyerId: string; depositId: string; status: string; originalAuctionId?: string | null } }) => {
         if (failAuctionCreate) throw new Error("simulated auction-create failure");
-        const row = { id: `auc_${state.auctions.length + 1}`, ...data };
+        const row = { originalAuctionId: null, id: `auc_${state.auctions.length + 1}`, ...data };
         state.auctions.push(row);
         return row;
       },
@@ -300,4 +312,38 @@ test("missing STRIPE_WEBHOOK_SECRET is a hard 500, not a silent empty-secret ver
   const res = await deliver("evt_5", "payment_intent.succeeded", DEPOSIT_SUCCEEDED);
   assert.equal(res.status, 500);
   assert.equal(db.events.length, 0, "nothing may be recorded before config is fixed");
+});
+
+// ── §13-D39 settlement regression ───────────────────────────────────────────────────────────────
+//
+// A relaunched deposit carries TWO auctions. The settlement path must anchor on the ORIGINAL —
+// the row `auctions_deposit_id_original_key` actually protects — and must not create a third.
+//
+// The pre-D39 handler read `findUnique({ where: { depositId } })`. That does not merely return the
+// wrong row here; once `@unique` is gone it is a compile error, which is why this site was one of
+// the six TypeScript found for free. What TypeScript could NOT check is which row the replacement
+// should return, and that is what this test pins: the retry is listed FIRST, so a query that
+// ignores `originalAuctionId` resolves to it.
+test("§13-D39: settlement anchors on the ORIGINAL auction and creates no third row", async () => {
+  db.auctions.push(
+    { id: "auc_retry", buyerId: "buyer_1", depositId: "dep_1", status: "ACTIVE", originalAuctionId: "auc_original" },
+    { id: "auc_original", buyerId: "buyer_1", depositId: "dep_1", status: "CLOSED", originalAuctionId: null },
+  );
+
+  const res = await deliver("evt_relaunch", "payment_intent.succeeded", DEPOSIT_SUCCEEDED);
+
+  assert.equal(res.status, 200);
+  assert.equal(db.deposits[0].status, "PAID");
+  assert.equal(
+    db.auctions.length, 2,
+    "settlement created a third auction on a deposit that already had an original and a relaunch",
+  );
+  assert.ok(
+    db.auctions.every((a) => a.id !== "auc_3"),
+    "a new auction row was minted despite an original already existing",
+  );
+  assert.equal(
+    launches, 0,
+    "settlement re-launched an auction it did not create — the `!existingAuction` gate resolved to the wrong row",
+  );
 });

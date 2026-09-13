@@ -32,7 +32,11 @@ interface Ctrl {
   suppressed: Set<string>;
   /** Throw from the suppression lookup, to prove readiness fails closed. */
   suppressionThrows: boolean;
-  auctions: Array<{ id: string; depositId: string; status: string }>;
+  auctions: Array<{
+    id: string; depositId: string; status: string;
+    originalAuctionId?: string | null; relaunchCount?: number;
+    relaunchedAt?: Date | null; createdAt?: Date;
+  }>;
   auctionCreates: Array<Record<string, unknown>>;
   auctionUpdates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   /** Invitations `issueInvitations` reports, and the count readable inside the txn. */
@@ -195,14 +199,63 @@ function db() {
     sourcingCandidate: { findMany: async () => ctrl.candidates },
     vehicleRequestDueDiligenceCheckpoint: { findMany: async () => ctrl.checkpoints },
     auction: {
-      findFirst: async ({ where }: { where: { depositId: string } }) =>
-        ctrl.auctions.find((a) => a.depositId === where.depositId) ?? null,
+      // §13-D39 MADE THIS FAKE A LIE, AND THAT IS THE POINT OF REWRITING IT.
+      //
+      // It used to be `ctrl.auctions.find((a) => a.depositId === where.depositId)` — a single-row
+      // lookup that ignored every other key in the `where`. Under the absolute unique that was
+      // faithful. Under a partial unique it is not: the service now asks three DIFFERENT questions
+      // through the same delegate ("the original", "the live one", "any"), and a fake that answers
+      // all three with the first match by depositId keeps every assertion green while production
+      // behaviour changes underneath. That is core rule 11's named failure mode, and this fake was
+      // one of the two live instances of it in this repository.
+      //
+      // It now filters on EVERY scalar key present (including `originalAuctionId: null` and
+      // `status: { in: [...] }`) and honours `orderBy: { createdAt: 'desc' }`.
+      findFirst: async ({ where, orderBy }: {
+        where: Record<string, unknown>;
+        orderBy?: { createdAt?: "asc" | "desc" };
+      }) => {
+        let rows = ctrl.auctions.filter((a) => {
+          for (const [k, v] of Object.entries(where)) {
+            const actual = (a as Record<string, unknown>)[k] ?? null;
+            if (v !== null && typeof v === "object" && "in" in (v as Record<string, unknown>)) {
+              if (!(v as { in: unknown[] }).in.includes(actual)) return false;
+            } else if ((v ?? null) !== actual) {
+              return false;
+            }
+          }
+          return true;
+        });
+        if (orderBy?.createdAt) {
+          const dir = orderBy.createdAt === "desc" ? -1 : 1;
+          rows = [...rows].sort(
+            (x, y) => dir * ((x.createdAt?.getTime() ?? 0) - (y.createdAt?.getTime() ?? 0)),
+          );
+        }
+        return rows[0] ?? null;
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         ctrl.sequence.push(`create:${String(data.status)}`);
         ctrl.auctionCreates.push(data);
-        const row = { id: "auc_1", depositId: String(data.depositId), status: String(data.status) };
+        const row = {
+          id: `auc_${ctrl.auctions.length + 1}`,
+          depositId: String(data.depositId),
+          status: String(data.status),
+          originalAuctionId: (data.originalAuctionId as string | undefined) ?? null,
+          relaunchCount: 0,
+          createdAt: new Date(2026, 0, 1 + ctrl.auctions.length),
+        };
         ctrl.auctions.push(row);
         return { id: row.id };
+      },
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        const target = ctrl.auctions.find((a) => a.id === args.where.id);
+        if (!target) return { count: 0 };
+        if (args.data.relaunchedAt !== undefined) target.relaunchedAt = args.data.relaunchedAt as Date;
+        const inc = (args.data.relaunchCount as { increment?: number } | undefined)?.increment;
+        if (inc) target.relaunchCount = (target.relaunchCount ?? 0) + inc;
+        ctrl.sequence.push("stamp-relaunch");
+        return target;
       },
       updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         ctrl.sequence.push(`activate:${String(args.data.status)}`);
@@ -546,9 +599,13 @@ test("a blocked readiness holds and raises ONE exception keyed to the blocker se
 });
 
 test("an auction already ACTIVE for the deposit is not launched twice", async () => {
-  // `Auction.depositId` is @unique, so the constraint is the idempotency — but a redelivered
-  // launch must also not re-invite, which is why this returns before `issueInvitations`.
-  ctrl.auctions = [{ id: "auc_existing", depositId: "dep_1", status: "ACTIVE" }];
+  // The comment here used to read "`Auction.depositId` is @unique, so the constraint IS the
+  // idempotency". §13-D39 relaxed that index to a partial one, so the claim is no longer true and
+  // this test would have gone on passing while saying something false — which is exactly why the
+  // fake above was rewritten. The idempotency is now the QUERY (`findLiveAuctionForDeposit`), and
+  // a redelivered launch must also not re-invite, which is why this returns before
+  // `issueInvitations`.
+  ctrl.auctions = [{ id: "auc_existing", depositId: "dep_1", status: "ACTIVE", originalAuctionId: null, relaunchCount: 0, createdAt: new Date(2026, 0, 1) }];
   const res = await launch();
   assert.equal(res.launched, false);
   assert.equal(res.auctionId, "auc_existing");
@@ -557,7 +614,7 @@ test("an auction already ACTIVE for the deposit is not launched twice", async ()
 });
 
 test("a PENDING auction from a partial prior run is reused, not duplicated", async () => {
-  ctrl.auctions = [{ id: "auc_pending", depositId: "dep_1", status: "PENDING" }];
+  ctrl.auctions = [{ id: "auc_pending", depositId: "dep_1", status: "PENDING", originalAuctionId: null, relaunchCount: 0, createdAt: new Date(2026, 0, 1) }];
   const res = await launch();
   assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
   assert.equal(res.auctionId, "auc_pending");
@@ -612,4 +669,63 @@ test("a launch held before dispatch reports zero notices, not the rows it wrote"
   const res = await launch();
   assert.equal(res.launched, false);
   assert.equal(res.noticesDispatched, 0, "no dispatch ran, so no notice was queued");
+});
+
+// ── §13-D39 relaunch regressions ────────────────────────────────────────────────────────────────
+//
+// FAILING-FIRST, and worth stating how: against the pre-D39 service these three tests fail for
+// three different reasons — the first because the unordered `findFirst` returned the dead original
+// and the CLOSED branch refused to launch at all; the second because the create had no
+// `originalAuctionId` and would have collided with the partial unique; the third because no
+// relaunch budget existed to exhaust. Seeding TWO auctions on one deposit is the shape the owner
+// asked for: a CLOSED original plus a live relaunch.
+
+test("§13-D39: a CLOSED original does not block the relaunch — the readiness path mints it", async () => {
+  ctrl.auctions = [{
+    id: "auc_original", depositId: "dep_1", status: "CLOSED",
+    originalAuctionId: null, relaunchCount: 0, createdAt: new Date(2026, 0, 1),
+  }];
+  const res = await launch();
+  assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
+  assert.equal(ctrl.auctionCreates.length, 1, "no relaunch auction was created");
+  assert.equal(
+    ctrl.auctionCreates[0].originalAuctionId, "auc_original",
+    "the retry was created without declaring its parent — it would collide with auctions_deposit_id_original_key",
+  );
+  assert.ok(ctrl.sequence.includes("stamp-relaunch"), "the original was never stamped as relaunched");
+  const original = ctrl.auctions.find((a) => a.id === "auc_original");
+  assert.equal(original?.relaunchCount, 1, "relaunch_count was not incremented on the original");
+});
+
+test("§13-D39: the live relaunch wins over the dead original, whatever order rows come back in", async () => {
+  // The dead original is listed FIRST so an unordered `findFirst` would return it. The corrected
+  // read asks only about LIVE auctions and orders newest-first, so it must find the retry.
+  ctrl.auctions = [
+    { id: "auc_original", depositId: "dep_1", status: "CLOSED",
+      originalAuctionId: null, relaunchCount: 1, relaunchedAt: new Date(2026, 0, 2),
+      createdAt: new Date(2026, 0, 1) },
+    { id: "auc_retry", depositId: "dep_1", status: "ACTIVE",
+      originalAuctionId: "auc_original", relaunchCount: 0, createdAt: new Date(2026, 0, 2) },
+  ];
+  const res = await launch();
+  assert.equal(res.launched, false, "an ACTIVE relaunch must not be launched again");
+  assert.equal(res.auctionId, "auc_retry", "the reconciler picked the dead original over the live retry");
+  assert.equal(ctrl.auctionCreates.length, 0, "a third auction was created on one deposit");
+});
+
+test("§13-D39: §8c's ONE relaunch — a second is refused with the buyer's money named", async () => {
+  ctrl.auctions = [
+    { id: "auc_original", depositId: "dep_1", status: "CLOSED",
+      originalAuctionId: null, relaunchCount: 1, relaunchedAt: new Date(2026, 0, 2),
+      createdAt: new Date(2026, 0, 1) },
+    { id: "auc_retry", depositId: "dep_1", status: "CLOSED",
+      originalAuctionId: "auc_original", relaunchCount: 0, createdAt: new Date(2026, 0, 2) },
+  ];
+  const res = await launch();
+  assert.equal(res.launched, false);
+  assert.equal(ctrl.auctionCreates.length, 0, "a second relaunch was minted on one $99");
+  assert.match(
+    res.blockers.join(" | "), /one relaunch without a second \$99/,
+    "the refusal did not name §8c's rule",
+  );
 });

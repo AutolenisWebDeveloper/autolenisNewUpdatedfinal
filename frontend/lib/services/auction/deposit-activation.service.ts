@@ -125,18 +125,25 @@ async function loadState(depositId: string): Promise<LoadedState | null> {
       buyerId: true,
       status: true,
       refundedAt: true,
-      auction: {
+      auctions: {
+        // §13-D39: a deposit can now carry its original AND one relaunch. The reconciler drives
+        // launch / invite / close-on-zero-dealers from this row, so an arbitrary pick could close
+        // the WRONG auction — on a relaunched deposit the original is dead and hours old, which is
+        // precisely the shape `classifyActivation` reads as "grace elapsed, no dealers".
+        // Newest-first, and the caller takes the head.
         select: {
           id: true,
           status: true,
           createdAt: true,
           _count: { select: { invitations: true, offers: true } },
         },
+        orderBy: { createdAt: "desc" },
+        take: 1,
       },
     },
   });
   if (!deposit) return null;
-  const a = deposit.auction;
+  const a = deposit.auctions[0] ?? null;
   const ageMin = a ? (Date.now() - a.createdAt.getTime()) / 60000 : 0;
 
   // DEFECT 6 — BOTH POOLS, OR THE CLOSE-ON-ZERO BRANCH IS STILL LIVE.
@@ -380,7 +387,11 @@ export async function reconcileStuckActivations(opts?: {
         status: 'PAID',
         refundedAt: null,
         createdAt: { lt: cutoff },
-        auction: { is: null },
+        // §13-D39: "deposit that never produced an auction". `none: {}` preserves exactly the
+        // pre-D39 meaning of `auction: { is: null }`. A relaunch-eligible deposit whose original
+        // is CLOSED is deliberately NOT swept back into automatic re-activation: a relaunch is an
+        // explicit Operations act under §8c, never something a reconciler infers.
+        auctions: { none: {} },
       },
       select: { id: true },
       orderBy: { createdAt: 'asc' },
