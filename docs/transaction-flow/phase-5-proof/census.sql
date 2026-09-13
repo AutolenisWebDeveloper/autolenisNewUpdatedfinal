@@ -7,7 +7,7 @@
 --
 -- READ-ONLY. Every statement is a SELECT. Run it in the protocol's mandated shape:
 --
---   psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction \
+--   psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \
 --     -c "SET TRANSACTION READ ONLY" -f docs/transaction-flow/phase-5-proof/census.sql
 --
 -- WHAT STOPS A FLIP. Two rows can return BLOCK, and both are conditions under which flipping

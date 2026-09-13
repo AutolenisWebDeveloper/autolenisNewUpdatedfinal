@@ -17,7 +17,7 @@
 --
 -- A separate file makes the skip real: the operator runs it, or does not.
 --
---   psql "$DIRECT_URL" -X -v ON_ERROR_STOP=1 --single-transaction \
+--   psql "$DIRECT_URL" -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \
 --     -c "SET TRANSACTION READ ONLY" -f docs/transaction-flow/phase-5-proof/preflight-d12a.sql
 --
 -- Read-only. Production HAS this table, so the owner's step 2 runs both files and both exit 0.

@@ -8,18 +8,31 @@
 \pset footer off
 
 SELECT migration_name, started_at, finished_at, rolled_back_at, applied_steps_count,
-       CASE WHEN finished_at IS NULL        THEN 'REPORT — started and never finished'
-            WHEN rolled_back_at IS NOT NULL THEN 'REPORT — rolled back'
-            WHEN applied_steps_count < 1    THEN 'REPORT — recorded with zero applied steps'
+       CASE WHEN rolled_back_at IS NOT NULL THEN 'retry attempt, rolled back — history, not a failure'
+            WHEN finished_at IS NULL         THEN 'REPORT — started and never finished'
+            WHEN applied_steps_count < 1     THEN 'REPORT — recorded with zero applied steps'
             ELSE 'OK' END AS verdict
   FROM _prisma_migrations
- WHERE migration_name = '20261114000000_invitation_replacement_partial_unique';
+ WHERE migration_name = '20261114000000_invitation_replacement_partial_unique'
+ ORDER BY started_at;
 
-SELECT CASE WHEN count(*) = 1 THEN 'OK — one ledger row'
-            WHEN count(*) = 0 THEN 'REPORT — NO LEDGER ROW for 20261114000000'
-            ELSE 'REPORT — ' || count(*)::text || ' rows (expected 1)' END AS ledger_row_presence
-  FROM _prisma_migrations
- WHERE migration_name = '20261114000000_invitation_replacement_partial_unique';
+-- ONE APPLIED ROW, any number of rolled-back attempts beside it. Prisma appends a row per attempt,
+-- so "expected 1 row" was wrong the moment a timeout happened: migration 109 holds 3 rows for one
+-- migration. What must be exactly one is the FINISHED, non-rolled-back row.
+SELECT CASE WHEN applied = 1 THEN 'OK — one applied row' ||
+                 CASE WHEN rolled_back > 0
+                      THEN ' (plus ' || rolled_back::text || ' rolled-back retry attempt(s))'
+                      ELSE '' END
+            WHEN applied = 0 THEN 'REPORT — NOT APPLIED: ' || total::text || ' row(s), none finished'
+            ELSE 'REPORT — ' || applied::text || ' applied rows (expected exactly 1)' END
+         AS ledger_row_presence
+  FROM (
+    SELECT count(*) AS total,
+           count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS applied,
+           count(*) FILTER (WHERE rolled_back_at IS NOT NULL) AS rolled_back
+      FROM _prisma_migrations
+     WHERE migration_name = '20261114000000_invitation_replacement_partial_unique'
+  ) c;
 
 -- The tail, so the ordering is visible rather than inferred. 110 must be last and its predecessor
 -- must be 20261113000000.
@@ -27,7 +40,14 @@ SELECT migration_name, finished_at, applied_steps_count
   FROM _prisma_migrations ORDER BY migration_name DESC LIMIT 4;
 
 -- `migrate deploy` refuses to run while a failed row stands, so this also gates the NEXT deploy.
-SELECT CASE WHEN count(*) = 0 THEN 'OK — no unfinished or rolled-back migration'
-            ELSE 'REPORT — ' || count(*)::text || ': ' || string_agg(migration_name, ', ') END AS chain_health
-  FROM _prisma_migrations
- WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL;
+-- STUCK, not merely rolled back — see preflight A3. A name with a success plus rolled-back
+-- attempts is the retry that fixed it, and flagging it would make this query read REPORT forever on
+-- this database.
+SELECT CASE WHEN count(*) = 0 THEN 'OK — every migration has a finished, non-rolled-back row'
+            ELSE 'REPORT — ' || count(*)::text || ' stuck: ' || string_agg(migration_name, ', ') END
+         AS chain_health
+  FROM (
+    SELECT migration_name FROM _prisma_migrations
+     GROUP BY migration_name
+    HAVING count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) = 0
+  ) stuck;
