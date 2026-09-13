@@ -60,6 +60,16 @@ mock.module("@/lib/prisma", {
         },
       },
       auctionInvitation: {
+        // `upsert` became findFirst -> create/update in 20261114000000: the compound unique it
+        // keyed on is now a PARTIAL unique excluding REPLACED rows. `findFirst` returns null so
+        // every dealer takes the create path, which is the behaviour this suite asserts — the
+        // recording moves with it so `invitedIds` still means "who was invited".
+        findFirst: async () => null,
+        create: async ({ data }: { data: { dealerId: string } }) => {
+          invitedIds.push(data.dealerId);
+          return data;
+        },
+        update: async ({ data }: { data: Record<string, unknown> }) => data,
         upsert: async ({ create }: { create: { dealerId: string } }) => {
           invitedIds.push(create.dealerId);
           return create;

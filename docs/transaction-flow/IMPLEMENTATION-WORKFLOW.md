@@ -2198,6 +2198,22 @@ PENDING). Everything else is a figure to compare, not a gate — a census that b
 nobody had agreed a threshold for would stop a deploy over a number, and the owner is the one who
 decides what a number means.
 
+**CONFIRM THE HEAD SHA AT THE MOMENT OF MERGING, not from the page you have open.** Owner's
+instruction, 2026-09-13, from what happened on #422: a review fix was pushed as `8d10dbf` and the
+merge landed about a minute later carrying `e94bc4d`, the commit before it. GitHub merged the head
+the loaded page knew about. The Phase 5 rail reached `main` without seven verified fixes, four of
+them on live paths, and the only reason that was recoverable is that the fixes went straight into a
+NEW pull request (#424) rather than an attempt to reopen the merged one. A merged pull request is
+finished and cannot carry follow-up work. Check `git merge-base --is-ancestor <pushed-sha> main`
+after any merge you expected to include a late push.
+
+**Migration 110 — `20261114000000_invitation_replacement_partial_unique`.** Authored and proven,
+NOT applied; proof package at `docs/transaction-flow/migration-110-proof/`. It makes both uniques on
+`auction_invitations` exclude `REPLACED` rows so contact replacement after a bounce can re-invite a
+rooftop. **§13-D52's flip does not go on until 110 lands** (owner's instruction, 2026-09-13):
+bounce contact-replacement hitting P2002 on the path §8.2 just wired up is not something to
+discover with a paid buyer waiting.
+
 **Step 4 is BOTH halves or it is not done**, and step 3 precedes step 5 without exception: the
 migration's own header states the ordering, because this phase's code writes `initiator_role`,
 `sourcing_case_id` and the withheld firewall row on hot paths, and unmigrated the second of those

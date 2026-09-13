@@ -630,7 +630,22 @@ model AuctionInvitation {
   // Phase 1 transaction spine (20261106000100) — foreign keys this wave adds.
   rooftop            DealerRooftop?          @relation(fields: [rooftopId], references: [id])
 
-  @@unique([auctionId, dealerId])
+  // BOTH uniques on this table live in SQL, not here, because each is PARTIAL and the Prisma DSL
+  // cannot express a `WHERE` clause on an index:
+  //
+  //   auction_invitations_auction_rooftop_active_key
+  //     (auction_id, rooftop_id) WHERE rooftop_id IS NOT NULL AND status <> 'REPLACED'
+  //   auction_invitations_auction_id_dealer_active_key
+  //     (auction_id, dealer_id)  WHERE dealer_id  IS NOT NULL AND status <> 'REPLACED'
+  //
+  // The rooftop one has been SQL-only since 20261106000100_transaction_spine_foundation:1093.
+  // `@@unique([auctionId, dealerId])` moved to join it in
+  // 20261114000000_invitation_replacement_partial_unique, because a status-blind unique makes the
+  // contact-replacement path collide with the row it just marked REPLACED.
+  //
+  // `prisma/drift-baseline.json` carries the enumerated exception for the statement this omission
+  // makes `migrate diff` propose. Do not re-add `@@unique` here: it would recreate the
+  // status-blind index and reintroduce the defect.
   @@map("auction_invitations")
 }
 
