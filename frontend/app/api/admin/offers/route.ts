@@ -7,7 +7,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
-import { getOffersForAuction } from "@/lib/services/offer/offer.service";
+import { getOffersForAuction, submitOffer } from "@/lib/services/offer/offer.service";
 import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer";
 import { sendOutsideDealerAuctionOfferAdminNotification } from "@/lib/services/email/vehicle-offers.email";
 import { prisma } from "@/lib/prisma";
@@ -77,6 +77,9 @@ const offerPriceFields = {
   includesFinancing: z.boolean().default(false),
   aprRate:           z.number().positive().optional(),
   termMonths:        z.number().int().positive().optional(),
+  // §8c candidate binding. Optional here because a custom request has no candidates; when the
+  // auction HAS active candidates `submitOffer` refuses an offer that names none.
+  auctionVehicleId:  z.string().min(1).optional(),
   reason:            z.string().min(1),
 };
 
@@ -119,9 +122,14 @@ export async function POST(request: NextRequest) {
   const { auctionId, otdPriceCents, vehiclePriceCents, taxCents, feesCents, junkFeeItems, includesFinancing, aprRate, termMonths, reason } = data;
   const isOutside = "outsideDealerName" in data;
 
+  // §8.2 Phase 6 defect (2). This route accepted `PENDING` auctions — an auction that has not
+  // launched, whose dealers have not been invited — and never checked `endsAt` at all, so an
+  // administrator could enter an offer on an auction that closed days earlier. `submitOffer`
+  // enforces ACTIVE and unexpired for both paths below; the check is left here too so the refusal
+  // carries an admin-shaped error rather than a thrown string.
   const auction = await prisma.auction.findUnique({ where: { id: auctionId } });
-  if (!auction || !["ACTIVE", "PENDING"].includes(auction.status)) {
-    return adminError("AUCTION_NOT_ACTIVE", "Auction is not active", 400);
+  if (!auction || auction.status !== "ACTIVE") {
+    return adminError("AUCTION_NOT_ACTIVE", "Auction is not ACTIVE — offers cannot be entered against it.", 400);
   }
 
   // ── Registered dealer path ───────────────────────────────────────────────
@@ -130,23 +138,28 @@ export async function POST(request: NextRequest) {
     const dealer = await prisma.dealer.findUnique({ where: { id: dealerId } });
     if (!dealer) return adminError("DEALER_NOT_FOUND", "Dealer not found", 404);
 
-    const offer = await prisma.offer.create({
-      data: {
+    let offer;
+    try {
+      offer = await submitOffer({
         auctionId,
         dealerId,
-        status: "SUBMITTED",
         otdPriceCents,
         vehiclePriceCents,
         taxCents,
         feesCents,
         junkFeeItems,
         includesFinancing,
-        aprRate: aprRate ?? null,
-        termMonths: termMonths ?? null,
-        submittedAt: new Date(),
+        aprRate: aprRate ?? undefined,
+        termMonths: termMonths ?? undefined,
+        auctionVehicleId: data.auctionVehicleId ?? null,
         submittedByAdminId: admin.adminId,
-      },
-    });
+        // Staff intake: an offer that arrived by phone or email has no invitation row. Narrow,
+        // audited below, and every other validation still applies.
+        allowWithoutInvitation: true,
+      });
+    } catch (err) {
+      return adminError("OFFER_REJECTED", err instanceof Error ? err.message : "Offer rejected", 400);
+    }
 
     await prisma.adminAuditLog.create({
       data: {
@@ -167,27 +180,36 @@ export async function POST(request: NextRequest) {
   const { outsideDealerName, outsideDealerEmail, outsideDealerPhone } = data;
   const outsideDealerId = await getOrCreateOutsideDealerId();
 
-  const offer = await prisma.$transaction(async (tx) => {
-    const created = await tx.offer.create({
-      data: {
-        auctionId,
-        dealerId: outsideDealerId,
-        status: "SUBMITTED",
-        otdPriceCents,
-        vehiclePriceCents,
-        taxCents,
-        feesCents,
-        junkFeeItems,
-        includesFinancing,
-        aprRate: aprRate ?? null,
-        termMonths: termMonths ?? null,
-        submittedAt: new Date(),
-        submittedByAdminId: admin.adminId,
-        externalDealerName: outsideDealerName,
-        externalDealerEmail: outsideDealerEmail,
-        externalDealerPhone: outsideDealerPhone ?? null,
-      },
+  let outsideOffer;
+  try {
+    outsideOffer = await submitOffer({
+      auctionId,
+      dealerId: outsideDealerId,
+      otdPriceCents,
+      vehiclePriceCents,
+      taxCents,
+      feesCents,
+      junkFeeItems,
+      includesFinancing,
+      aprRate: aprRate ?? undefined,
+      termMonths: termMonths ?? undefined,
+      auctionVehicleId: data.auctionVehicleId ?? null,
+      submittedByAdminId: admin.adminId,
+      // The outside dealership's identity. `submitOffer` keys its per-rooftop caps on this when
+      // there is no rooftop, because every outside offer shares ONE placeholder dealer id — so
+      // without it the second outside dealership on an auction would be refused as a duplicate of
+      // the first, which is the normal case for an outside-invite auction.
+      externalDealerName: outsideDealerName,
+      externalDealerEmail: outsideDealerEmail,
+      externalDealerPhone: outsideDealerPhone ?? null,
+      allowWithoutInvitation: true,
     });
+  } catch (err) {
+    return adminError("OFFER_REJECTED", err instanceof Error ? err.message : "Offer rejected", 400);
+  }
+
+  const offer = await prisma.$transaction(async (tx) => {
+    const created = await tx.offer.findUniqueOrThrow({ where: { id: outsideOffer.id } });
 
     // Look up or create an outsideAuctionInvite for this dealer/auction combo
     // and link it to the created offer for a complete audit trail.

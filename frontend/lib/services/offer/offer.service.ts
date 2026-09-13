@@ -16,9 +16,13 @@ import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifica
 // here to keep offer.service's public surface unchanged for existing importers.
 import { assertOtdComponentsMatch } from "./otd";
 import { classifyFeeItems } from "./junk-fee.service";
+import { recheckApproval } from "@/lib/services/prequal/approval-recheck";
 export { assertOtdComponentsMatch };
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
+
+/** §8b: "capped at three offers per rooftop". */
+const MAX_LIVE_OFFERS_PER_ROOFTOP = 3;
 
 function assertFinancingConsistent(input: {
   includesFinancing?: boolean;
@@ -37,22 +41,75 @@ function assertFinancingConsistent(input: {
   }
 }
 
-async function assertWithinBuyerBudget(auctionId: string, otdPriceCents: number) {
+/** §13-D40: an offer that cannot be qualified is RECORDED and flagged, never thrown away. */
+export type BudgetVerdict =
+  | { disqualified: false; approvedAmountCents: number }
+  | { disqualified: true; reason: string };
+
+/**
+ * §8b — "compliance with the buyer's approved budget ... current, unexpired, and sufficient."
+ *
+ * WHAT THIS REPLACED (§8.2 Phase 6 defect 7). `assertWithinBuyerBudget` had TWO fail-open early
+ * returns — no auction row and no prequal row each returned silently — and it selected `decision`
+ * and `expiresAt` without ever reading them. A buyer whose approval was DECLINED, or had expired
+ * months earlier, still authorised any price at or under a stale ceiling; a buyer with no
+ * prequalification at all authorised ANY price. "Fails open" understates it: the two fields that
+ * would have caught it were fetched and discarded.
+ *
+ * It now delegates to `recheckApproval`, the Phase 2 helper that owns the predicate — extended
+ * with the two offer gates rather than forked, so submit, revise, selection and the payment gate
+ * all produce the same §26 exception with the same owner and the same return point.
+ *
+ * IT NO LONGER THROWS ON AN OVER-CEILING OFFER, and that is §13-D40 ruled 2026-09-13: record and
+ * disqualify. Rejecting at submit throws away a dealer's work over an arithmetic slip and leaves
+ * Operations nothing to act on. The §22a ceiling still binds — a disqualified offer is excluded
+ * from the ranked report and refused at selection — so nothing is loosened by recording it.
+ *
+ * The same treatment covers an unusable APPROVAL, and for a stronger reason: that is not the
+ * dealer's mistake at all, and refusing their submission would punish them for the buyer's
+ * paused prequalification.
+ */
+async function evaluateBuyerBudget(
+  auctionId: string,
+  otdPriceCents: number,
+  gate: "offer_submit" | "offer_revision",
+): Promise<BudgetVerdict> {
   const auction = await prisma.auction.findUnique({
     where: { id: auctionId },
-    select: { buyerId: true },
+    select: { buyerId: true, vehicleRequestId: true },
   });
-  if (!auction) return;
-  const prequal = await prisma.preQualification.findUnique({
-    where: { buyerId: auction.buyerId },
-    select: { maxOtdAmountCents: true, decision: true, expiresAt: true },
+  // NOT a silent return. The callers verified the auction inside their transaction, so its
+  // absence here is a broken invariant rather than a policy outcome, and swallowing it is what
+  // let the old version authorise any price for an auction that did not exist.
+  if (!auction) throw new Error("Auction not found while checking the buyer's approved budget");
+
+  const approval = await recheckApproval(auction.buyerId, gate, {
+    raiseOnFailure: true,
+    vehicleRequestId: auction.vehicleRequestId ?? null,
   });
-  if (!prequal) return;
-  if (otdPriceCents > prequal.maxOtdAmountCents) {
-    throw new Error(
-      `OTD price exceeds buyer's approved budget of $${(prequal.maxOtdAmountCents / 100).toLocaleString()}`,
-    );
+  if (!approval.ok) {
+    return { disqualified: true, reason: approval.message };
   }
+
+  // A valid approval with NO ceiling fails the item — offer validation needs the number, and
+  // treating a null ceiling as "unlimited" is the same fail-open in a different disguise.
+  if (approval.approvedAmountCents == null) {
+    return {
+      disqualified: true,
+      reason: "This buyer's approval carries no approved amount, so the offer cannot be qualified.",
+    };
+  }
+
+  if (otdPriceCents > approval.approvedAmountCents) {
+    return {
+      disqualified: true,
+      reason:
+        `Out-the-door exceeds the buyer's approved amount of ` +
+        `$${(approval.approvedAmountCents / 100).toLocaleString()}.`,
+    };
+  }
+
+  return { disqualified: false, approvedAmountCents: approval.approvedAmountCents };
 }
 
 export interface OfferInput {
@@ -71,6 +128,43 @@ export interface OfferInput {
   includesFinancing?: boolean;
   aprRate?: number;
   termMonths?: number;
+  /**
+   * §8c — "Every offer binds to the candidate it answers, OR to the criteria set on a custom
+   * request." Nullable for the custom-request case (parity row C3b), which is exactly why the
+   * conditional matters: requiring it unconditionally would refuse every offer against a custom
+   * request, the path §22a routes buyers to when qualified results are thin.
+   */
+  auctionVehicleId?: string | null;
+  /** §8a — the rooftop that made the offer. Phase 1 shipped the column; nothing wrote it. */
+  rooftopId?: string | null;
+  /** §8a — "Offer expiration", a REQUIRED field. Defaults to the auction's own deadline. */
+  expiresAt?: Date | null;
+
+  // ── STAFF INTAKE (§8.2 Phase 6 defect 2) ──────────────────────────────────────────────────
+  //
+  // `POST /api/admin/offers` accepted PENDING auctions, never checked `endsAt`, persisted
+  // `aprRate` without computing `aprFlag`, persisted `includesFinancing` without terms, and wrote
+  // straight to `prisma.offer.create` without ever importing `assertOtdComponentsMatch`. It is now
+  // routed through this function, which required three things the dealer path does not have.
+
+  /** Set when an administrator entered this offer on a dealership's behalf. Audited by the route. */
+  submittedByAdminId?: string | null;
+  /** An OUTSIDE dealership's identity: it has no account and no rooftop. */
+  externalDealerName?: string | null;
+  externalDealerEmail?: string | null;
+  externalDealerPhone?: string | null;
+  /**
+   * STAFF INTAKE ONLY. The dealer path requires an `AuctionInvitation` — §7's proof that this
+   * rooftop was invited. An administrator entering an offer that arrived by phone or email has no
+   * such row, and an outside dealership has no account to hold one.
+   *
+   * This is a deliberate, narrow hole and it is NOT a general bypass: the route sets it, the
+   * caller is authenticated as an admin, and every use is written to `AdminAuditLog` with a
+   * mandatory reason. Every OTHER validation — arithmetic, financing consistency, the approval
+   * recheck, the caps, the candidate binding, auction ACTIVE and unexpired — applies unchanged,
+   * which is the whole point of routing the path through here.
+   */
+  allowWithoutInvitation?: boolean;
 }
 
 export async function submitOffer(input: OfferInput) {
@@ -81,7 +175,9 @@ export async function submitOffer(input: OfferInput) {
   // Financing offer internal consistency.
   assertFinancingConsistent(input);
   // OTD must not exceed buyer's approved budget.
-  await assertWithinBuyerBudget(input.auctionId, input.otdPriceCents);
+  // §13-D40: the verdict is RECORDED on the offer, not thrown. Computed before the transaction so
+  // a disqualified offer still commits in one write with its reason attached.
+  const budget = await evaluateBuyerBudget(input.auctionId, input.otdPriceCents, "offer_submit");
 
   // APR flag computed once for both the insert and any post-create updates.
   const aprFlag = input.aprRate && input.aprRate > APR_SUSPICIOUS_THRESHOLD ? "SUSPICIOUS_APR" : null;
@@ -101,21 +197,90 @@ export async function submitOffer(input: OfferInput) {
     const invitation = await tx.auctionInvitation.findFirst({
       where: { auctionId: input.auctionId, dealerId: input.dealerId },
     });
-    if (!invitation) throw new Error("Dealer not invited to this auction");
+    if (!invitation && !input.allowWithoutInvitation) {
+      throw new Error("Dealer not invited to this auction");
+    }
 
     const auction = await tx.auction.findUnique({ where: { id: input.auctionId } });
     if (!auction || auction.status !== "ACTIVE") throw new Error("Auction is not active");
     if (auction.endsAt && auction.endsAt < now) throw new Error("Auction has expired");
 
-    const existingOffer = await tx.offer.findFirst({
-      where: {
-        auctionId: input.auctionId,
-        dealerId: input.dealerId,
-        status: OfferStatus.SUBMITTED,
-      },
+    // ── §8c CANDIDATE BINDING (defect 10) ────────────────────────────────────────────────────
+    //
+    // "Every offer binds to the candidate it answers, OR to the criteria set on a custom request."
+    // `offers.auction_vehicle_id` shipped in the Phase 1 wave with NO WRITER, which had a second
+    // consequence nobody recorded: `offers_one_live_per_rooftop_candidate_key` is a partial unique
+    // on `(auction_id, rooftop_id, auction_vehicle_id) WHERE status = 'SUBMITTED'`, and PostgreSQL
+    // treats NULLs as distinct — so with all three columns unwritten the index was INERT. Writing
+    // the binding is what makes §8b's cap enforceable at the database rather than only in code.
+    const candidates = await tx.auctionVehicle.findMany({
+      where: { auctionId: input.auctionId, candidateStatus: "ACTIVE" },
+      select: { id: true },
     });
-    if (existingOffer) {
-      throw new Error("You have already submitted an offer for this auction. Use the revise endpoint to update it.");
+    if (candidates.length > 0) {
+      if (!input.auctionVehicleId) {
+        throw new Error("This auction has specific vehicles — your offer must name the one it answers.");
+      }
+      if (!candidates.some((c) => c.id === input.auctionVehicleId)) {
+        throw new Error("That vehicle is not an active candidate on this auction.");
+      }
+    }
+    // No candidates: a CUSTOM REQUEST, where §8c binds the offer to the criteria set instead. The
+    // binding stays null rather than being invented, per parity row C3b.
+    const auctionVehicleId = candidates.length > 0 ? input.auctionVehicleId ?? null : null;
+
+    // The rooftop is the invitation's, not the caller's: §7 issues one invitation per rooftop, so
+    // that row is the authority on which rooftop this dealer is bidding for. Taking it from the
+    // request body would let a dealer spend another rooftop's offer budget.
+    const rooftopId = input.rooftopId ?? invitation?.rooftopId ?? null;
+
+    // ── §8b's TWO CAPS ───────────────────────────────────────────────────────────────────────
+    //
+    // "One live offer per rooftop per candidate, capped at three offers per rooftop."
+    //
+    // The old guard was ONE SUBMITTED offer per (auction, dealer) — a different and stricter rule
+    // that also broke the outside-dealer path, where every outside offer is written against a
+    // single shared placeholder dealer id (`lib/services/offer/outside-dealer.ts`). Two outside
+    // dealerships bidding on one auction is the normal case for an outside-invite auction, and the
+    // second was told "You have already submitted an offer for this auction."
+    //
+    // Keyed on the ROOFTOP where one is known, falling back to the dealer otherwise so an auction
+    // with no rooftop data keeps its old protection rather than losing it.
+    // THE IDENTITY A CAP IS KEYED ON, in order of how well it identifies a dealership:
+    //
+    //   rooftopId             §7 issues one invitation per rooftop, so this is the real subject.
+    //   externalDealerEmail   An OUTSIDE dealership has no rooftop and no account. Every outside
+    //                         offer is written against ONE shared placeholder dealer id
+    //                         (`outside-dealer.ts`), so keying on `dealerId` would make the second
+    //                         outside dealership on an auction collide with the first — which is
+    //                         the normal case for an outside-invite auction, and exactly why the
+    //                         admin path could not simply be routed through here before.
+    //   dealerId              A registered dealer with no rooftop on file. Preserves the old
+    //                         protection rather than dropping it.
+    const liveScope = rooftopId
+      ? { auctionId: input.auctionId, rooftopId, status: OfferStatus.SUBMITTED }
+      : input.externalDealerEmail
+        ? {
+            auctionId: input.auctionId,
+            externalDealerEmail: input.externalDealerEmail,
+            status: OfferStatus.SUBMITTED,
+          }
+        : { auctionId: input.auctionId, dealerId: input.dealerId, status: OfferStatus.SUBMITTED };
+
+    const liveForScope = await tx.offer.findMany({
+      where: liveScope,
+      select: { id: true, auctionVehicleId: true },
+    });
+
+    if (liveForScope.some((o) => o.auctionVehicleId === auctionVehicleId)) {
+      throw new Error(
+        "You already have a live offer for this vehicle on this auction. Use the revise endpoint to update it.",
+      );
+    }
+    if (liveForScope.length >= MAX_LIVE_OFFERS_PER_ROOFTOP) {
+      throw new Error(
+        `A dealership may hold at most ${MAX_LIVE_OFFERS_PER_ROOFTOP} live offers on one auction (§8b).`,
+      );
     }
 
     const created = await tx.offer.create({
@@ -134,10 +299,22 @@ export async function submitOffer(input: OfferInput) {
         status: OfferStatus.SUBMITTED,
         version: 1,
         submittedAt: new Date(),
+        isDisqualified: budget.disqualified,
+        disqualifiedReason: budget.disqualified ? budget.reason : null,
+        auctionVehicleId,
+        rooftopId,
+        submittedByAdminId: input.submittedByAdminId ?? null,
+        externalDealerName: input.externalDealerName ?? null,
+        externalDealerEmail: input.externalDealerEmail ?? null,
+        externalDealerPhone: input.externalDealerPhone ?? null,
+        // §8a makes the expiration a required field. Defaulting to the auction's own deadline is
+        // the honest floor: an offer cannot outlive the window it was made in, and a dealer who
+        // states a shorter one is taken at their word.
+        expiresAt: input.expiresAt ?? auction.endsAt ?? null,
       },
     });
 
-    await tx.auctionInvitation.update({
+    if (invitation) await tx.auctionInvitation.update({
       where: { id: invitation.id },
       // BOTH, and `offerSubmittedAt` is the one that was missing. Found by review on #422.
       // Four Phase 5 gates read `offerSubmittedAt` and NOTHING on this path wrote it, so every
@@ -299,7 +476,7 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
   };
   assertOtdComponentsMatch(merged);
   assertFinancingConsistent(merged);
-  await assertWithinBuyerBudget(original.auctionId, merged.otdPriceCents);
+  const budget = await evaluateBuyerBudget(original.auctionId, merged.otdPriceCents, "offer_revision");
 
   const aprFlag = merged.aprRate && merged.aprRate > APR_SUSPICIOUS_THRESHOLD ? "SUSPICIOUS_APR" : null;
 
@@ -331,6 +508,11 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
         version: original.version + 1,
         originalOfferId: offerId,
         submittedAt: new Date(),
+        // A revision is re-qualified from scratch: the ceiling may have moved, or the approval may
+        // have lapsed, between the two submissions. Carrying the original's flag forward would let
+        // a stale verdict decide whether the buyer can pick this version.
+        isDisqualified: budget.disqualified,
+        disqualifiedReason: budget.disqualified ? budget.reason : null,
       },
     });
 
