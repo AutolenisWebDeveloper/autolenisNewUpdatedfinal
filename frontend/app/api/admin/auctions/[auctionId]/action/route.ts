@@ -128,8 +128,40 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
     case "DEALER_REMOVED": {
       if (!dealerId) return adminError("DEALER_ID_REQUIRED", "dealerId is required", 400);
-      await prisma.auctionInvitation.deleteMany({ where: { auctionId, dealerId } });
-      result = { dealerRemoved: dealerId };
+      // RETURN THE `+1` THIS ROW TOOK AT ISSUE. `releaseAuctionLoad`
+      // (`lib/services/auction/dealer-invitation.service.ts:471`) derives its decrement list from
+      // the SURVIVING invitation rows, so a row deleted here is never decremented at close and the
+      // increment its issue wrote leaks upward forever — leaving the dealer reading as busier than
+      // they are, which is the direction that stops them being invited: the capacity gate
+      // (`auction-capacity.service.ts:27`) and the coverage filter (`coverage.service.ts:130`)
+      // exclude them, and at load >= 5 the score function returns a hard zero.
+      //
+      // BY THE COUNT, not by one. `(auction_id, dealer_id)` is unique only among non-REPLACED rows
+      // since migration 110, so one dealer can legitimately hold a REPLACED row and a live one on
+      // the same auction — and both were charged at issue.
+      //
+      // Not floored at zero, matching `releaseAuctionLoad`: a floor would hide pre-existing drift
+      // rather than correct it, and correcting historical drift is a reconciliation, not a delete.
+      //
+      // ONE TRANSACTION, because a pair that can come apart is the defect this is fixing. Two
+      // statements would leave the delete committed and the load unreturned if the second failed —
+      // the same leak, reached a different way. Nothing external is called inside it, so it cannot
+      // become the idle-in-transaction shape that cost migration 109 two statement timeouts.
+      //
+      // The `dealer.update` cannot miss: `auction_invitations.dealer_id` is an FK with
+      // `onDelete: Restrict`, so a row carrying this id proves the dealer row exists, and the
+      // `count > 0` guard is what makes that argument hold.
+      const removed = await prisma.$transaction(async (tx) => {
+        const r = await tx.auctionInvitation.deleteMany({ where: { auctionId, dealerId } });
+        if (r.count > 0) {
+          await tx.dealer.update({
+            where: { id: dealerId },
+            data: { currentAuctionLoad: { decrement: r.count } },
+          });
+        }
+        return r;
+      });
+      result = { dealerRemoved: dealerId, invitationsRemoved: removed.count };
       break;
     }
     case "DEALER_INVITED": {
