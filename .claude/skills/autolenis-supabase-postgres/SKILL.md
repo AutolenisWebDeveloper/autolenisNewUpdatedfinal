@@ -108,6 +108,18 @@ later", "RLS is optional") conflicts with anything here, this skill wins.
     transitions run inside `prisma.$transaction` with the idempotency claim
     (see the Stripe webhook: claim + deposit PAID + auction create commit
     atomically). Keep transactions short; do network I/O outside them.
+11. **NARROWING a constraint changes code you did not touch.** When a migration
+    makes a unique, a check or an FK stricter or more conditional, list the code
+    that relied on the OLD guarantee and re-derive its correctness. `migrate diff`
+    will not raise it, the type-checker cannot see it, and the tests covering the
+    old behaviour keep passing — the old behaviour is still legal. Cardinality is
+    the common case: "at most one row" becoming "at most one LIVE row" turns every
+    count, every `findFirst` and every "by one" into a question. Worked example —
+    `20261114000000_invitation_replacement_partial_unique` made
+    `(auction_id, dealer_id)` unique only among non-`REPLACED` rows, so one dealer
+    can hold a `REPLACED` row and a live one on the same auction; the
+    `DEALER_REMOVED` admin action's decrement-by-one then left `currentAuctionLoad`
+    permanently high, quietly excluding that dealership from every later invitation.
 
 ## Workflows
 
@@ -229,6 +241,8 @@ client. Cross-tenant admin/CRM operation after authz → `getServiceSupabase`
       data.
 - [ ] Backfill is batched, idempotent, resumable, and off the request path.
 - [ ] Enum changes are additive; all exhaustive switches updated.
+- [ ] If the change NARROWS a unique / check / FK: the code relying on the old
+      guarantee is listed and re-derived (rule 11) — cardinality assumptions first.
 - [ ] Multi-write invariants wrapped in `$transaction`; no long network I/O
       inside transactions.
 - [ ] Correct access client chosen (Prisma vs RLS-scoped vs service role).
