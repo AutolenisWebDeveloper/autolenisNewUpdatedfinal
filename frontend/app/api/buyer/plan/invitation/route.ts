@@ -180,8 +180,9 @@ async function scheduleFollowUp(buyerId: string, vehicleRequestId: string, dealI
     // For raising, which is what this does: the code is about the CHANNEL, not the message's
     // commercial importance. The fact discovered here — this buyer can receive no email at all —
     // is the same fact the close path discovers about the same buyer, and §23.2b's "safe outcome"
-    // governs whether to ASK, not whether to REPORT. This was also the only one of the five sites
-    // with no log line at all: the condition was discovered and discarded in total silence.
+    // governs whether to ASK, not whether to REPORT. This site carried no log line at all — as did
+    // the dealer no-winner branch and the selection reminder, three of the five — so the condition
+    // was discovered and discarded in total silence.
     await raiseNoDeliverableChannel({
       templateKey: PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP,
       channel: "email",

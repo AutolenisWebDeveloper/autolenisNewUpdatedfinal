@@ -19,6 +19,8 @@ let activityEvents: Rec[];
 let suppression: Rec;
 let enqueued: Rec[];
 let buyerRow: Rec | null;
+let noChannel: Rec[];
+let enqueueThrows: Error | null;
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -65,7 +67,17 @@ mock.module("@/lib/services/plan/upgrade-window.service", {
 
 mock.module("@/lib/services/comms/transactional-dispatcher.service", {
   namedExports: {
-    enqueueTransactional: async (input: Rec) => { enqueued.push(input); return { enqueued: true, id: "co_1", dedupKey: "" }; },
+    enqueueTransactional: async (input: Rec) => {
+      if (enqueueThrows) throw enqueueThrows;
+      enqueued.push(input);
+      return { enqueued: true, id: "co_1", dedupKey: "" };
+    },
+    // REGISTERED, AND THE OMISSION WAS THE DEFECT. Without this the route's `raiseNoDeliverableChannel`
+    // import is `undefined`, the call throws a TypeError, and the caller's `.catch` absorbs it — so
+    // the no-mailbox test below passed BECAUSE the code under test failed. Every assertion it made
+    // (`200`, `recorded: true`, `enqueued.length === 0`) holds identically whether the raise runs or
+    // explodes, which is exactly why a green suite proved nothing about this branch.
+    raiseNoDeliverableChannel: async (input: Rec) => { noChannel.push(input); },
   },
 });
 
@@ -74,6 +86,8 @@ beforeEach(() => {
   activityEvents = [];
   suppression = { suppressed: false };
   enqueued = [];
+  noChannel = [];
+  enqueueThrows = null;
   buyerRow = { firstName: "Ada", user: { email: "ada@test.local" } };
 });
 
@@ -176,11 +190,41 @@ test("only a dismissal is accepted here — a conversion is not a client's word"
   assert.equal(enqueued.length, 0);
 });
 
-test("a follow-up that cannot be scheduled does not fail the dismissal", async () => {
-  // §23.2b treats a missing ask as the safe outcome; the buyer's deal is unaffected either way.
+test("a buyer with no mailbox raises the Operations row instead of discarding the follow-up", async () => {
+  // §23.2b treats a missing ask as the safe outcome; the buyer's deal is unaffected either way —
+  // and under the 2026-09-14 ruling the lost ask is REPORTED rather than discarded.
+  //
+  // RENAMED AND RE-ASSERTED, because the old version of this test was green for the wrong reason.
+  // It was written when this branch was `if (!email) return;` and asserted only the three things
+  // that are true either way — 200, `recorded: true`, nothing enqueued. When the branch became a
+  // raise, the module mock did not export the new function, the call threw, the route's `.catch`
+  // swallowed it, and all three assertions still held. The suite reported 9/9 while the site it
+  // was supposed to cover did nothing at all.
+  //
+  // `noChannel.length` is the assertion that cannot pass unless the site actually ran.
   buyerRow = { firstName: "Ada", user: null };
   const { status, json } = await dismiss();
   assert.equal(status, 200);
   assert.equal((json.data as Rec).recorded, true);
   assert.equal(enqueued.length, 0);
+  assert.equal(noChannel.length, 1, "the lost follow-up was discarded silently");
+  assert.equal(noChannel[0].templateKey, "premium_follow_up");
+  assert.equal(noChannel[0].channel, "email");
+  assert.equal(
+    noChannel[0].outboxKey,
+    "premium_follow_up:email:vr_1",
+    "request-scoped: §23.4 gives a second Vehicle Request its own fresh plan election",
+  );
+  assert.equal(noChannel[0].recipientKind, "buyer");
+});
+
+test("a follow-up that fails to SCHEDULE still does not fail the dismissal", async () => {
+  // The coverage the renamed test above used to claim, now on a path that really is a scheduling
+  // failure: the buyer HAS a mailbox, and the enqueue itself throws. §23.2b's safe outcome is that
+  // the buyer's dismissal is still recorded and the deal is untouched.
+  enqueueThrows = new Error("outbox unavailable");
+  const { status, json } = await dismiss();
+  assert.equal(status, 200);
+  assert.equal((json.data as Rec).recorded, true);
+  assert.equal(noChannel.length, 0, "a transport failure is not a missing channel");
 });

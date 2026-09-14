@@ -270,6 +270,88 @@ export function applyToDocument(docText, ledger) {
   return docText.slice(0, start) + block + docText.slice(stop + END.length);
 }
 
+/**
+ * THE SECTION-10 HEADINGS, which nothing generated and nothing checked.
+ *
+ * Each `### 10.x` heading types a row count, and the line under it types a status and phase tally.
+ * They are hand-maintained, they sit right next to the rows they describe, and they were wrong three
+ * times in one phase: §10.11 drifted six figures, §10.1 four, §10.5 two — each discovered by a human
+ * counting, which is exactly the labour this file exists to abolish. `embedded_matches_source` could
+ * not see any of it: it compares ROWS between the two copies and never reads a heading.
+ *
+ * This needs no area mapping. A section's own rows are the authority for its own heading, so the
+ * check is self-contained: parse the 13-cell rows between one `### 10.x` and the next, tally them,
+ * and compare to what the heading and its tally line claim.
+ */
+export function checkSectionHeadings(docText) {
+  const problems = [];
+  const lines = docText.split('\n');
+  const starts = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^### (10\.\d+) (.*?) — (\d+) rows\s*$/);
+    if (m) starts.push({ i, id: m[1], title: m[2], declared: Number(m[3]) });
+  }
+  for (let k = 0; k < starts.length; k++) {
+    const { i, id, declared } = starts[k];
+    const stop = k + 1 < starts.length ? starts[k + 1].i : lines.length;
+    const body = lines.slice(i, stop);
+
+    const rows = [];
+    for (const line of body) {
+      if (!line.startsWith('|')) continue;
+      const cells = splitCells(line);
+      // `COLUMNS.length`, NOT `COLUMNS` — it is the array of column NAMES. The first version of this
+      // guard compared against the array itself, so every row was rejected, every section fell
+      // through the zero-row branch below, and `--check` reported "no drift" over thirteen
+      // unexamined sections. A guard that cannot fail is worse than no guard, which is the whole
+      // reason this function exists; it would have been embarrassing to ship it twice.
+      if (cells.length !== COLUMNS.length || isSeparator(cells) || isHeader(cells)) continue;
+      rows.push(cells);
+    }
+    if (rows.length === 0) {
+      // LOUD, not silent. Every `### 10.x` heading in this document introduces a ledger table; a
+      // section with none means the parser has lost the rows, not that the section is prose.
+      problems.push(`§${id}: heading declares ${declared} rows and the parser found NONE — the section parser is broken`);
+      continue;
+    }
+
+    if (rows.length !== declared) {
+      problems.push(`§${id} heading: declares ${declared} rows, section holds ${rows.length}`);
+    }
+
+    const tallyLine = body.find((l) => l.startsWith('Status counts:'));
+    if (!tallyLine) {
+      problems.push(`§${id}: no "Status counts:" line to check`);
+      continue;
+    }
+    const actualStatus = {};
+    const actualPhase = {};
+    for (const s of STATUSES) actualStatus[s] = 0;
+    for (const p of PHASES) actualPhase[p] = 0;
+    for (const cells of rows) {
+      actualStatus[classify(cells[4], STATUSES)] = (actualStatus[classify(cells[4], STATUSES)] ?? 0) + 1;
+      actualPhase[phaseOf(cells[7])] = (actualPhase[phaseOf(cells[7])] ?? 0) + 1;
+    }
+    const declaredOf = (label) => {
+      const m = tallyLine.match(new RegExp(`${label.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}\\s+(\\d+)`));
+      return m ? Number(m[1]) : null;
+    };
+    for (const s of STATUSES) {
+      const d = declaredOf(s);
+      if (d !== null && d !== actualStatus[s]) {
+        problems.push(`§${id} status ${s}: declares ${d}, section holds ${actualStatus[s]}`);
+      }
+    }
+    for (const ph of PHASES) {
+      const d = declaredOf(`P${ph}`);
+      if (d !== null && d !== actualPhase[ph]) {
+        problems.push(`§${id} phase P${ph}: declares ${d}, section holds ${actualPhase[ph]}`);
+      }
+    }
+  }
+  return problems;
+}
+
 /** Extract every JSON payload the document displays, for the drift check. */
 export function readDisplayedLedger(docText) {
   const m = docText.match(/```json parity-ledger\n([\s\S]*?)\n```/);
@@ -418,6 +500,8 @@ function main() {
     // The rendered tables are displayed totals too. Checking only the JSON payload would let a
     // human-readable number drift while the machine-readable one stayed right — which is exactly
     // the failure mode this guard exists to prevent.
+    for (const p of checkSectionHeadings(doc)) problems.push(p);
+
     const pairs = new Map(readDisplayedTablePairs(doc));
     cmp('table "Source ledger rows"', pairs.get('Source ledger rows'), ledger.source_ledger_rows);
     cmp('table "Embedded ledger rows (section 10)"', pairs.get('Embedded ledger rows (section 10)'), ledger.embedded_ledger_rows);

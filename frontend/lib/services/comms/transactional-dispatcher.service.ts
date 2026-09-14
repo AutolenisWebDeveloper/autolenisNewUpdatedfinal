@@ -597,9 +597,12 @@ async function terminalFail(
  * THE TRY/CATCH IS IN HERE, NOT AT THE CALL SITES, and that placement is the point.
  * `queue-item.service.ts` states the contract: "a caller on a request hot path that must not fail
  * because of the queue wraps this call itself — the writer does not silently drop an exception on
- * the caller's behalf." EVERY caller of this helper is either inside `processAuctionClose`'s
- * claimed block or on a buyer request path, so every one of them needs the wrap; putting it in one
- * place is what stops the fifth call site forgetting it.
+ * the caller's behalf." No caller of this helper can afford a throw: three sit inside
+ * `processAuctionClose`'s claimed block, one is on a buyer request path, and the fifth is inside
+ * `sweepUnselectedAuctions`'s per-auction best-effort catch, where a throw would skip `swept++` and
+ * report a buyer as swept whose terminal `BUYER_DOES_NOT_SELECT` marker has already landed — so the
+ * auction never becomes a candidate again. Putting the wrap in one place is what stops the sixth
+ * call site forgetting it.
  *
  * That matters more than it looks. A throw out of `enqueueCloseNotice` releases the post-close
  * claim and is rethrown, and the condition is DURABLE — a missing mailbox does not appear on its

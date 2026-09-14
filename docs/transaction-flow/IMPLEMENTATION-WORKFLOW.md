@@ -1452,9 +1452,14 @@ manual close. One reportable defect would have become five. `raiseCloseException
 1. **§23.2a touchpoint 4 is an upsell, not a §27.1-required notice**, and §23.2b treats a missing
    ask as the safe outcome. It is included anyway, because the code is about the CHANNEL rather than
    the message's commercial importance — the fact discovered is "this buyer can receive no email at
-   all", the same fact the close path discovers about the same buyer — and because it was the only
-   one of the five with no log line, so the condition was previously discovered and discarded in
-   total silence. **If Operations would rather the queue carried no lost upsells, this is the single
+   all", the same fact the close path discovers about the same buyer — and because it was one of
+   THREE of the five that carried no log line at all, with the dealer no-winner branch and the
+   selection reminder, so the condition was previously discovered and discarded in total silence.
+   *(An earlier revision of this paragraph called it "the only one of the five with no log line".
+   That was false, and the same commit contradicted it: the close-path comment calls the selection
+   reminder "the weakest of the three close-path sites — it did not even log." Corrected rather
+   than left standing; the recommendation above rests on the upsell-vs-§27.1 distinction, not on
+   logging, and is unaffected.)* **If Operations would rather the queue carried no lost upsells, this is the single
    site to drop; the other four stand without it.**
 2. **The dealer no-winner mail is the one close-path message still on the direct Resend rail**
    (REPORTED-NOT-BUILT item 3 below), so its outbox key is *synthesised* on the same shape rather
@@ -1467,6 +1472,34 @@ non-award notice on **both** channels with no log at all. The others are `offer.
 first-offer email, `select-offer/route.ts`, `offer/respond/route.ts`, the two dealer-offer routes and
 two in `dealer-invitation.service.ts`. Applying the helper to them is a follow-up batch: it widens
 this diff past the ruling and past this phase's capability map.
+
+#### The rulings' own review round — five findings, all of them mine (2026-09-14)
+
+The rulings diff went through the same treatment as the implementation: five lenses over it, each
+finding handed to an independent verifier prompted to REFUTE it. Twenty-six raised, **five survived**.
+Recorded because the sharpest one is a defect in the evidence rather than in the product, and that
+is the kind this process exists to catch.
+
+| # | Severity | Finding | Fix |
+| --- | --- | --- | --- |
+| V1 | **MAJOR** | **Ruling 4's fifth raise site never executed in its only test.** `premium-invitation.test.ts` mocks the dispatcher module with `enqueueTransactional` alone, so the route's new `raiseNoDeliverableChannel` import was `undefined`, the call threw a `TypeError`, and the caller's `.catch` absorbed it. The test's three assertions — 200, `recorded: true`, nothing enqueued — hold identically whether the raise runs or explodes, so the suite reported **9/9 green while the site did nothing at all**. Production was unaffected; the *evidence* for "five raise sites" was false for site 5 | The export is registered and the test now asserts `noChannel.length === 1` with the template key and the request-scoped outbox key — an assertion that cannot pass unless the site ran. Proven failing-first by removing the mock export again. A second test restores the coverage the old one claimed, on a path that really is a scheduling failure |
+| V2 | MINOR | **Ruling 5's BLOCKED marking reached one copy of three.** The R45 prose bullet is an EMBEDDED copy of `inventory.table.md`; the drift guard skips non-pipe lines, so editing only the document copy left the two diverged with `--check` green. Two further places still asserted the write-through as required work: §8.2's Phase 6 scope list and §8.4's legacy-path register | Source and embedded copy re-synced byte-for-byte; both other assertions now carry the block |
+| V3 | NIT→real | **Two more §10.x headings were stale** — §10.1 by four figures, §10.5 by two — on top of the §10.11 six corrected earlier in this phase | Corrected, **and guarded**: see below |
+| V4 | MINOR | **"the only one of the five with no log line" was false.** THREE of the five were silent. The same commit contradicted itself — the close-path comment calls the selection reminder "the weakest of the three close-path sites — it did not even log" | Corrected in both the document and the route comment. The recommendation it supported rests on the upsell-vs-§27.1 distinction, not on logging, and is unaffected |
+| V5 | NIT | The helper's wrap-placement rationale enumerated its call sites over-broadly: the S15 site is inside the sweep's per-auction catch, not the claimed block or a request path | Enumeration corrected to the actual five |
+
+**The §10.x headings now have a guard, because hand-counting has failed three times in one phase.**
+`checkSectionHeadings` parses the rows under each `### 10.x` heading and compares them to the count
+and tally the heading declares — self-contained, needing no area mapping, because a section's own
+rows are the authority for its own heading. It runs in `--check` and is asserted by the suite.
+
+**Its first version could not fail.** It compared a row's cell count against `COLUMNS` — the array
+of column NAMES rather than its length — so every row was rejected, every section fell through a
+silent zero-row branch, and `--check` reported "no drift" over thirteen sections it had never read.
+Caught by asking why a guard written to catch two known-stale headings reported none. The zero-row
+branch is now a loud failure, and a test inflates a heading by one row to prove the guard fails when
+it should. **A guard nobody has watched fail is a guard nobody has tested** — which is the same
+lesson as V1, one layer down.
 
 #### The hazard class behind four of the ten review defects
 
@@ -3236,7 +3269,8 @@ on a month counter.
   full lineage; non-selected candidates closed + non-award notices; Premium full-screen invitation shown
   once (touchpoint 3), 1-hour follow-up (touchpoint 4) only if declined/dismissed, second mention on the
   Best Price Report (touchpoint 2), impressions/dismissals/conversions recorded; `vehicle_offers` and
-  `dealer_offer_submissions` write a canonical `offers` row (staff intake only).
+  `dealer_offer_submissions` write a canonical `offers` row (staff intake only) — **NOT ACHIEVED;
+  BLOCKED, owner-accepted 2026-09-14. See §8.1f and §8.4.**
 - **Defects the offers verification surfaced (§10 *offers*), fixed at the cause here:** (1) junk-fee
   unit mismatch — `otd.ts:30-33` treats a fee `amount` as dollars (`× 100`) while
   `best-price.service.ts:64-65` sums the same field as cents; one integer-cents unit end-to-end with a
@@ -3450,7 +3484,7 @@ the register has at least one enqueue/raise site.
 | --- | --- | --- | --- |
 | Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, which it is not — §8.1e finding 17**) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
 | `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them. **OWNER RULING 2026-09-13: KEEP, and make the clock EVIDENCE-DRIVEN rather than calendar-driven.** Closing a capability in order to start a 30-day timer is the wrong trade; instead a write counter records when the path actually goes quiet, and the window starts from measured silence. **The §8.4 30-day zero-write window has NOT started.** *Write-site inventory corrected the same day — the list above names the admin ROUTES and is incomplete.* Measured: `app/api/admin/offers/route.ts:194,206` (update + create), `app/api/public/outside-dealer-offer/[token]/route.ts:90,116` (the outside dealer's OWN submission — the atomic `respondedAt` claim, then the offer write-back) and `lib/services/auction/outside-invite.service.ts:148` (the mint the admin routes call). Four writes across three files. The public token route is the half the earlier list missed, and it is the half with no rail equivalent — which is what makes KEEP the right call rather than a deferral. **THE RULING WAS MADE ON THE CORRECTED LIST, and that is load-bearing:** a list naming only the admin routes makes CLOSE look cheap, because every site on it has a rail equivalent. The outside dealer's own submission path does not, and it is the one the incomplete list omitted. Had the ruling been taken on the old list it would likely have gone the other way, and closed a capability no rail can yet replace |
-| `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI (writes canonical `offers`) | keep as intake; no drop |
+| `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI; the canonical-`offers` write-through is **BLOCKED (owner-accepted 2026-09-14)** — `Offer.auction_id` is required and these models carry no auction binding | keep as intake; no drop |
 | Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |
 | In-app credit application route/UI (`credit_applications`) | **0** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410 in the pre-schema security correction — §8.2 Phase 0, §8.2a), then **7** for the remaining read paths (buyer financing page, admin review queue, dormant services) | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
@@ -3511,7 +3545,7 @@ Each area below is the verified table produced from the area map (finder pass + 
 
 ### 10.1 Data model & schema (§4, §32, §28, §6.2, §12b–c, comms_outbox shape) — 186 rows
 
-Status counts: ALREADY CORRECT 53, PARTIAL 40, BROKEN 10, MISSING 69, DUPLICATED 12, UNVERIFIED 1 · Phase counts: P1 129, P2 17, P3 5, P4 5, P5 4, P6 8, P7 7, P8 5, P9 2, P10 3
+Status counts: ALREADY CORRECT 53, PARTIAL 40, BROKEN 11, MISSING 69, DUPLICATED 12, UNVERIFIED 1 · Phase counts: P1 128, P2 17, P3 5, P4 5, P5 4, P6 8, P7 7, P8 6, P9 3, P10 3
 
 # Parity table — AREA: schema (final)
 
@@ -4163,7 +4197,7 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 
 ### 10.5 Stage 5, §22, §22.1, §23: payment gate, money model, refunds, plans — 108 rows
 
-Status counts: ALREADY CORRECT 18, PARTIAL 35, BROKEN 16, MISSING 34, DUPLICATED 4, UNVERIFIED 1 · Phase counts: P1 7, P3 87, P4 1, P6 4, P7 2, P8 4, P9 1, P10 2
+Status counts: ALREADY CORRECT 18, PARTIAL 35, BROKEN 16, MISSING 34, DUPLICATED 4, UNVERIFIED 1 · Phase counts: P1 7, P3 86, P4 2, P6 4, P7 2, P8 4, P9 1, P10 2
 
 # Parity table — PAYMENT (Stage 5 · §22 · §22.1 · §23) — FINAL
 

@@ -118,5 +118,5 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 - Env-tier config (`INVENTORY_SWEEP_ZIP`, `INVENTORY_SWEEP_RADIUS_MILES`, `MARKETCHECK_MONTHLY_CALL_BUDGET`) and `inventory-sync-priority` unscheduled route until migrations apply (R24a, R30, R48).
 - `externalDealerName/Phone/City/State` LANE_2 name-match (`orchestrator.ts:92-105`) (R24b).
 - `coverage.service.ts:38` `RADIUS_TIERS` ending at 150 (R23b).
-- `vehicle_offers` / `dealer_offer_submissions` parallel offer models — keep as staff intake writing canonical `offers` (R45).
+- `vehicle_offers` / `dealer_offer_submissions` parallel offer models — keep as staff intake. The canonical-`offers` write-through is **BLOCKED, owner-accepted 2026-09-14**: `Offer.auction_id` is required and the legacy models carry no auction binding, so a write-through would have to invent one (R45, and see L1/R22/S25).
 - `withCronRun` alerting for DEFERRED runs (observability area) (R54).
