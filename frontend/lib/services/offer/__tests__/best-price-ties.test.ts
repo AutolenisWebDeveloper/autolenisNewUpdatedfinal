@@ -152,27 +152,66 @@ test("a dimension an offer does not have EXCLUDES it rather than ranking it wors
 
 // ── the overall score ───────────────────────────────────────────────────────────────────────────
 
+const W = { otd: 0.4, monthly: 0.25, fees: 0.2, junk: 0.15 };
+
 test("a cash offer is not penalised for having no monthly rank", () => {
   // The old formula divided the monthly term by max(financedCount, 1) and applied it to EVERY
   // offer, so a cash-only offer carried a term derived from a ranking it was not in. Renormalising
   // over the applicable dimensions scores it on what it has, on the same 0–1 scale.
-  const w = { otd: 0.4, monthly: 0.25, fees: 0.2, junk: 0.15 };
   const cash = overallScore([
-    { rank: 1, count: 4, weight: w.otd },
-    { rank: null, count: 0, weight: w.monthly },
-    { rank: 1, count: 4, weight: w.fees },
-    { rank: 1, count: 4, weight: w.junk },
+    { rank: 1, count: 4, weight: W.otd },
+    { rank: null, count: 0, weight: W.monthly },
+    { rank: 1, count: 4, weight: W.fees },
+    { rank: 1, count: 4, weight: W.junk },
   ]);
-  const financedSameRanks = overallScore([
-    { rank: 1, count: 4, weight: w.otd },
-    { rank: 1, count: 1, weight: w.monthly },
-    { rank: 1, count: 4, weight: w.fees },
-    { rank: 1, count: 4, weight: w.junk },
+  assert.equal(cash, 0, "a best-on-everything cash offer must reach the best score");
+});
+
+test("the same rank scores the same whatever the size of the field", () => {
+  // `rank / count` — the old formula — gave rank 1 of 2 a score of 0.5 and rank 1 of 10 a score of
+  // 0.1: the same achievement, scored five times apart, rewarding a dealership for the size of the
+  // field it happened to win rather than for anything about its offer. Since every auction has a
+  // different field size, it also made scores incomparable between auctions.
+  assert.equal(overallScore([{ rank: 1, count: 2, weight: 1 }]), 0);
+  assert.equal(overallScore([{ rank: 1, count: 10, weight: 1 }]), 0);
+  assert.equal(overallScore([{ rank: 2, count: 2, weight: 1 }]), 1);
+  assert.equal(overallScore([{ rank: 10, count: 10, weight: 1 }]), 1);
+});
+
+test("being the ONLY financed offer does not make a dealership lose", () => {
+  // THE DEFECT THIS REPLACED, with the measured numbers. `rank / count` maps rank 1 of 1 to 1.0 —
+  // the WORST value on the scale — so an offer ranked #1 on all four dimensions scored 0.4375
+  // while an offer ranked #1 on only three scored 0.2500. Being the one dealership willing to
+  // quote financing made it lose the Best Overall card.
+  //
+  // The first version of this test asserted `cash <= financed` and PASSED with the defect fully
+  // present, because that assertion cannot tell "the cash offer is not penalised" from "the
+  // financed offer is penalised instead". It now pins the equality, which only one of those two
+  // worlds satisfies.
+  const soleFinanced = overallScore([
+    { rank: 1, count: 4, weight: W.otd },
+    { rank: 1, count: 1, weight: W.monthly },
+    { rank: 1, count: 4, weight: W.fees },
+    { rank: 1, count: 4, weight: W.junk },
   ]);
-  assert.ok(cash < 1, "a best-on-everything cash offer scored worse than the scale allows");
-  assert.ok(
-    cash <= financedSameRanks + 1e-9,
-    "the cash offer was penalised on a dimension it does not have",
+  const cash = overallScore([
+    { rank: 1, count: 4, weight: W.otd },
+    { rank: null, count: 0, weight: W.monthly },
+    { rank: 1, count: 4, weight: W.fees },
+    { rank: 1, count: 4, weight: W.junk },
+  ]);
+  assert.equal(soleFinanced, cash, "the sole financed offer was scored on a comparison it won by default");
+  assert.equal(soleFinanced, 0);
+});
+
+test("a dimension with one entrant is EXCLUDED, not scored at any value", () => {
+  // Scoring it at all — best, worst or neutral — would make "was anyone else financing?" part of
+  // the comparison between two offers that are otherwise identical.
+  assert.equal(overallScore([{ rank: 1, count: 1, weight: 1 }]), 0.5, "nothing was ranked, so nothing is known");
+  assert.equal(
+    overallScore([{ rank: 1, count: 4, weight: 1 }, { rank: 1, count: 1, weight: 1 }]),
+    overallScore([{ rank: 1, count: 4, weight: 1 }]),
+    "a one-entrant dimension changed the score",
   );
 });
 
@@ -185,8 +224,13 @@ test("lower is better, and the best possible score is the best rank everywhere",
     { rank: 5, count: 5, weight: 0.4 },
     { rank: 5, count: 5, weight: 0.6 },
   ]);
-  assert.ok(best < worst);
+  assert.equal(best, 0);
   assert.equal(worst, 1);
+  assert.ok(best < worst);
+});
+
+test("the mid-field offer lands at the midpoint", () => {
+  assert.equal(overallScore([{ rank: 3, count: 5, weight: 1 }]), 0.5);
 });
 
 test("no applicable dimension scores the midpoint, not zero", () => {

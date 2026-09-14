@@ -169,6 +169,33 @@ export interface OverallTerm {
 }
 
 /**
+ * A rank's position on a 0–1 scale, where 0 is best. This is the arithmetic the weighted score is
+ * built on, and getting it wrong is not a rounding matter — it decides who the buyer is shown as
+ * the best overall value.
+ *
+ * `(rank - 1) / (count - 1)`, NOT `rank / count`, which was the old engine's formula and carries
+ * two distortions that survive into any weighting placed on top of it:
+ *
+ *   IT NEVER REACHES ZERO, so the best offer on a dimension always pays a residual penalty — and
+ *   the size of that penalty depends only on HOW MANY DEALERSHIPS BID. Rank 1 of 2 scored 0.5 and
+ *   rank 1 of 10 scored 0.1: the same achievement, scored five times apart, rewarding a dealership
+ *   for the size of the field it happened to win rather than for its offer.
+ *
+ *   IT MAXIMALLY PENALISES A SOLE PARTICIPANT. Rank 1 of 1 is 1.0 — the WORST value on the scale.
+ *   Measured: an offer ranked #1 on all four dimensions scored 0.4375 while an offer ranked #1 on
+ *   only three scored 0.2500, because the first was the only financed offer on the auction. Being
+ *   the one dealership willing to quote financing made it lose.
+ *
+ * A SOLE PARTICIPANT IS EXCLUDED, not scored. A dimension with one entrant distinguishes nobody,
+ * so it is dropped and the remaining weights renormalise — exactly what already happens for an
+ * offer the dimension does not apply to. Scoring it instead, at any value, would make "was anyone
+ * else financing?" part of the comparison between two offers that are otherwise identical.
+ */
+function normalizeRank(rank: number, count: number): number {
+  return (rank - 1) / (count - 1);
+}
+
+/**
  * The weighted overall score. LOWER IS BETTER, because the inputs are ranks.
  *
  * RENORMALISED OVER THE DIMENSIONS THAT APPLY, which is the fix for a real unfairness in the old
@@ -186,8 +213,9 @@ export function overallScore(terms: readonly OverallTerm[]): number {
   let weighted = 0;
   let applied = 0;
   for (const t of terms) {
-    if (t.rank === null || t.count <= 0 || t.weight <= 0) continue;
-    weighted += (t.rank / t.count) * t.weight;
+    // `count <= 1` is the exclusion described on `normalizeRank`: one entrant separates nobody.
+    if (t.rank === null || t.count <= 1 || t.weight <= 0) continue;
+    weighted += normalizeRank(t.rank, t.count) * t.weight;
     applied += t.weight;
   }
   // Every weight zero or every dimension inapplicable: no basis to separate this offer from any

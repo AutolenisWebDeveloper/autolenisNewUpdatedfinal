@@ -408,16 +408,21 @@ export async function getBestPriceReport(
     return { ranked: await rankOffers(auctionId, termMonths), source: "live" };
   }
 
+  // THE LOG IS THE AUTHORITY ON RANKS, NEVER ON WHETHER AN OFFER STILL STANDS.
+  //
+  // The ranking is committed at close and the buyer reads it over the following 72 hours, during
+  // which an offer can lapse (`expires_at`), be withdrawn, or be disqualified by a §13-D40
+  // re-evaluation. Rendering the log alone would keep showing it as qualified — and the select
+  // route would then refuse it with OFFER_EXPIRED or OFFER_DISQUALIFIED, which is the buyer
+  // discovering by rejection what the report should have stopped showing. The live re-read applies
+  // the same qualification predicate as the close and the selection gate.
   const offers = await prisma.offer.findMany({
-    where: { id: { in: persisted.ranked.map((r) => r.offerId) } },
+    where: { id: { in: persisted.ranked.map((r) => r.offerId) }, ...qualifiedOfferWhere() },
     include: { dealer: { select: { id: true, tier: true } } },
   });
   const byId = new Map(offers.map((o) => [o.id, o]));
 
   const ranked = persisted.ranked
-    // An offer deleted or withdrawn since the ranking was committed is dropped rather than
-    // rendered from the log alone: the log is the authority on RANKS, never on whether an offer
-    // still stands.
     .filter((r) => byId.has(r.offerId))
     .map((r) => {
       const o = byId.get(r.offerId)!;

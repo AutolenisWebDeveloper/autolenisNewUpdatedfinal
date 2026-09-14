@@ -58,7 +58,12 @@ mock.module("@/lib/prisma", {
       // HONOURS THE `where`. The defect under test includes an unfiltered query, so a fake that
       // returned every seeded row would make the qualification assertions pass for the wrong reason.
       offer: {
-        findMany: async ({ where }: { where: Rec }) => offers.filter((o) => matches(o, where)),
+        findMany: async ({ where }: { where: Rec }) => {
+          const ids = (where.id as Rec | undefined)?.in as string[] | undefined;
+          const rest = { ...where };
+          delete rest.id;
+          return offers.filter((o) => (!ids || ids.includes(o.id as string)) && matches(o, rest));
+        },
         update: (a: Rec) => { offerUpdates.push(a); return a; },
       },
       bestPriceWeightConfig: { findFirst: async () => weightConfig },
@@ -289,6 +294,36 @@ test("getPersistedRanking serves the committed ranking back", async () => {
 test("getPersistedRanking returns null when nothing was ever persisted", async () => {
   const { getPersistedRanking } = await import("../best-price.service");
   assert.equal(await getPersistedRanking("auc_1"), null);
+});
+
+test("the served report drops an offer that lapsed AFTER the ranking was committed", async () => {
+  // The ranking is committed at close and the buyer reads it over the next 72 hours. An offer can
+  // lapse, be withdrawn, or be disqualified in between. Rendering it from the log alone would keep
+  // showing it as qualified, and the select route would then refuse it — the buyer discovering by
+  // rejection what the report should have stopped showing.
+  offers = [offer({ id: "lives" }), offer({ id: "lapses", otdPriceCents: 2_900_000 })];
+  await rank(60, { persistLog: true });
+  assert.equal((logsCreated[0].result as Rec[]).length, 2, "both were ranked at close");
+
+  // ...time passes, and the second offer lapses.
+  offers[1].expiresAt = PAST;
+  const { getBestPriceReport } = await import("../best-price.service");
+  const report = await getBestPriceReport("auc_1", 60);
+  assert.equal(report.source, "persisted", "the committed ranking must still be the one served");
+  assert.deepEqual(report.ranked.map((r) => r.offerId), ["lives"]);
+});
+
+test("the served report keeps the RANKS the close committed, not a fresh ranking", async () => {
+  // Re-ranking on every page load would let the report change under a buyer who is reading it.
+  offers = [offer({ id: "a", otdPriceCents: 3_000_000 }), offer({ id: "b", otdPriceCents: 3_100_000 })];
+  await rank(60, { persistLog: true });
+  // A third offer arrives after the close (staff intake). It is NOT in the committed ranking and
+  // must not silently appear in, or reorder, the report the buyer was sent.
+  offers.push(offer({ id: "late", otdPriceCents: 2_500_000 }));
+  const { getBestPriceReport } = await import("../best-price.service");
+  const report = await getBestPriceReport("auc_1", 60);
+  assert.deepEqual(report.ranked.map((r) => r.offerId), ["a", "b"]);
+  assert.equal(report.ranked[0].rankCash, 1);
 });
 
 // ── the three cards ─────────────────────────────────────────────────────────────────────────────
