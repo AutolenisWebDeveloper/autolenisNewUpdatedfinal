@@ -1821,6 +1821,32 @@ removing.
 | `components/buyer/PremiumInvitation.tsx:186` | Links `/buyer/plan/premium`. **No such route exists** in `app/`. Pre-existing, outside this phase. (Phase 7's own use of the same dead prefix was fixed: `renderPremiumFollowUpFinal` now points at `/buyer/billing`) |
 | `financing-checkpoint.service.ts` | A failed `financing_audit_events` append is logged but raises no exception, because the catalogue has no code for a lost audit entry. Adding one is a registry change outside this phase's list |
 
+#### The owner-ordered re-audit, and what a third pass found
+
+The owner asked for the 24 findings to be re-checked with fresh eyes before applying the
+migrations, on the reasoning that **the pass most likely to mistake a narrowing for a fix is the one
+that found the defect**. It was the right instinct: the re-audit found four more, one of them a
+security defect introduced by this batch and missed by both earlier reviews.
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 1 | **Cross-tenant destructive action.** `POST /api/dealer/deals/[dealId]/hold` with `action: "RELEASE"` authenticated the caller and then called `releaseVehicleHold` with **no ownership check on any line of the path** — the service took `actorId` only. Any authenticated dealership could POST another dealership's deal id and destroy that deal: `CANCELLED`, firewall revoked, buyer emailed, and a dealer-fault SLA violation filed against the victim's rooftop. The EXTEND branch of the same route was guarded; the irreversible branch was not. | **FIXED.** `releaseVehicleHold` now requires `dealerId` and applies the same ownership test `extendVehicleHold` always had. Journey 13 proves it, and proves the legitimate release still works. |
+| 2 | **Page and route disagreed on ownership.** The dealer PAGE readers resolved it as `offer: { dealerId }`; every dealer ROUTE resolves it as `OR: [{ offer: { dealerId } }, { dealerId }]`. §13-D20 keeps `Offer.dealerId` on the placeholder and puts the claimed dealership on `Deal.dealerId`, so an outside winner was accepted by the API and 404'd by the page its own recap email linked to — making the Stage 11 surface unreachable for exactly the population §10b exists for. | **FIXED.** Both page readers are dual-keyed. Journey 14 asserts the deal is visible by either id. |
+| 3 | **`Deal.dealerId` has no writer at claim completion**, so `outsideWinnerGate` can never be satisfied and no outside winner can leave `DEALER_CONFIRMATION`. | **RULED, NOT BUILT** — §13-D58. The write belongs at the completion point of the dealer-recruitment claim sequence; building a second writer here would be the parallel-system rule broken. |
+| 4 | **Two more guards enforced at the wrong layer** — the same shape as the submission-time reconciliation this phase already got wrong once. `APPROVAL_NOT_CURRENT` refuses the dealership for a BUYER-side condition while the 24-hour clock runs on toward a dealer-fault timeout; and §10b's refusal did the same, so **every outside winner accrued a rooftop SLA violation for a sequence they were structurally unable to complete**. | **FIXED.** The approval refusal extends the confirmation window before throwing; and `returnToRemainingOffers` gates SLA and scorecard attribution on `dealershipWasBlocked`, raising an Operations row instead. The stand-down still happens and the buyer is still told — only the blame changes. |
+
+**The guard that does not become dead.** `dealershipWasBlocked` is not a workaround for §13-D58 and does
+not expire when that row is built: a dealership mid-claim, suspended, or with a lapsed agreement is
+blocked by the same gate for the same reason, and none of those is a missed deadline. It also fails
+TOWARD the dealership — if the gate cannot be evaluated, the stand-down proceeds unattributed,
+because recording a permanent mark against a real business on a guess is the worse of the two errors.
+
+**Correction to an earlier claim in this document's history.** The first STOP 2 report said all three
+build-failing guards "were proved to fail on a deliberately reintroduced defect before being kept."
+Only two were, at the time. All are now, and the firewall-surface guard has a stated limit: it
+catches a NEW ungated dealer file, but not the gate being neutered inside a file already on its
+allowlist.
+
 #### `pnpm test:visual` — why it exits 1 here, established rather than argued
 
 The marketing tier's pixel gate **fails in this container, on this branch and on the base commit
@@ -6371,11 +6397,11 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | Category | Decisions |
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
-| BLOCKING A NAMED LATER PHASE | **43** |
+| BLOCKING A NAMED LATER PHASE | **44** |
 | DEFAULT AND PROCEED UNLESS OVERRIDDEN | **8** |
-| **Total** | **57** |
+| **Total** | **58** |
 
-Decisions in the table: **57**. Categories sum to **57**. Unclassified: **0**.
+Decisions in the table: **58**. Categories sum to **58**. Unclassified: **0**.
 
 **BLOCKING PHASE 1 — these, and only these, must be answered before the Phase 1 wave is authored and deployed:**
 
@@ -6450,6 +6476,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D55 | Reaffirmation SLA threshold — N and window | DECISION | Phase 7 | **RULED 2026-09-14 — N = 2 within 90 days, REUSING `REPEAT_WINDOW_DAYS`.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/B20`'s "owner decision: N and window (policy value)".)* §Stage 10's "repeated failures trigger an SLA violation and review" needs a number. The window is §13-D42's existing `REPEAT_WINDOW_DAYS = 90` (`lib/services/trust/anti-circumvention.service.ts:43`) rather than a second constant — two windows that drift apart is a defect waiting. The SECOND failure raises the violation, so a dealership gets one recorded miss before review. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D56 | Recap dispute threshold — N before the freeze | DECISION | Phase 7 | **RULED 2026-09-14 — N = 2; the THIRD dispute freezes.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/C10`'s "owner decision: N (policy value)".)* §Stage 11: "Repeated failure escalates to Operations with the Deal frozen at recap." `FROZEN_PENDING_RELEASE` is deliberately NOT used — that status is Phase 10's coordinated unwind of an EXECUTED contract, and a deal stuck at recap has no contract. The freeze is the deal staying at `RECAP_PENDING` with a `RECAP_DISPUTED` queue row naming it. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D57 | `LEASE` → `FinancingPath` mapping | DECISION | Phase 7 | **RULED 2026-09-14 — FAIL CLOSED.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/D10`'s "owner decision: `LEASE` → `FinancingPath` mapping (UNVERIFIED #9)".)* `vehicle_request_financing.payment_method` is free text admitting `LEASE` (`schema.prisma:1421`); `FinancingPath` is `DEALER \| EXTERNAL \| CASH` and the document never contemplates leasing. The checkpoint therefore refuses to derive a path from `LEASE` and raises an Operations follow-up for a human to resolve, rather than silently mapping it to `DEALER` — which would invent business behaviour nobody agreed. | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D58 | `Deal.dealerId` has no writer at claim completion — §13-D20 depends on one | DECISION | **dealer-recruitment area** (the claim / verification / agreement sequence) | **RULED 2026-09-14 — NOT PHASE 7'S, AND NOT PHASE 8'S BY DEFAULT.** §13-D20 states that `Offer.dealerId` stays on the outside-dealer placeholder permanently and that `Deal.dealerId` is set to the claimed Dealer **when the claim, verification and agreement sequence completes**. That write does not exist. The only production writer of the field is `lib/services/deal/select-offer.service.ts:158`, which sets it to `offer.dealerId` at deal creation — the *shared system placeholder* for an outside winner, not null. **The exact write owed:** on completion of the claim sequence, set `deals.dealer_id` to the claimed, verified, agreement-signed `Dealer.id` for every Deal whose `offer.rooftop_id` matches the claimed rooftop and whose `offer.dealer.is_system_placeholder` is true. **Consequence while it is missing:** `outsideWinnerGate` (`lib/services/deal/dealer-reaffirmation.service.ts`) can never be satisfied, so `submitReaffirmation` refuses every outside winner and the deal cannot leave `DEALER_CONFIRMATION`. **Phase 7 must NOT build a second writer to compensate** — owner-ruled, parallel-system rule. What Phase 7 does instead is refuse to *penalise* the blocked dealership: `returnToRemainingOffers` gates the SLA and scorecard attribution on `dealershipWasBlocked` and opens an Operations row instead, so no outside winner accrues a rooftop SLA violation for a sequence it cannot complete. That guard is not a workaround and does not become dead when this row is built — a dealership mid-claim, suspended, or with a lapsed agreement is blocked by the same gate for the same reason. | BLOCKING A NAMED LATER PHASE (the dealer-recruitment claim sequence — §10b cannot complete end to end until it lands) |
 
 
 ## §14 Out-of-scope findings (reported, not implemented)

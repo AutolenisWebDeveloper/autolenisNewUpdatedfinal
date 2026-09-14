@@ -91,9 +91,20 @@ export interface DealerDealDetail {
  * Returns up to 50 of the dealer's deals (most recent first),
  * scoped via the accepted offer's dealerId.
  */
+/**
+ * OWNERSHIP IS EITHER ID, and these two readers used only one.
+ *
+ * §13-D20 keeps `Offer.dealerId` on the outside-dealer PLACEHOLDER permanently and puts the
+ * claimed dealership on `Deal.dealerId`. Every Phase 7 ROUTE resolves ownership as
+ * `OR: [{ offer: { dealerId } }, { dealerId }]` — `recap/route.ts:40`, `reaffirm/route.ts:65`,
+ * `extendVehicleHold`. These two PAGE readers resolved it as `offer: { dealerId }` alone, so for
+ * an outside winner the API accepted the dealership and the page 404'd — while the dealership's
+ * own "recap ready" email linked to that page. A surface that exists but cannot be reached by the
+ * population it was built for is not a surface.
+ */
 export async function getDealerDeals(dealerId: string): Promise<DealerDealSummary[]> {
   return prisma.deal.findMany({
-    where: { offer: { dealerId } },
+    where: { OR: [{ offer: { dealerId } }, { dealerId }] },
     select: {
       id: true,
       status: true,
@@ -110,7 +121,8 @@ export async function getDealerDeals(dealerId: string): Promise<DealerDealSummar
  */
 export async function getDealerDealById(dealId: string, dealerId: string): Promise<DealerDealDetail | null> {
   const deal = await prisma.deal.findFirst({
-    where: { id: dealId, offer: { dealerId } },
+    // Either id is ownership — see the note on `getDealerDeals`.
+    where: { id: dealId, OR: [{ offer: { dealerId } }, { dealerId }] },
     select: {
       id: true,
       status: true,

@@ -465,10 +465,32 @@ export async function submitReaffirmation(params: {
   // this refuses the submission and leaves the reaffirmation PENDING for Operations to resolve.
   // Nothing about the dealership's answer is lost — they resubmit once the approval is current.
   if (!approval.ok) {
+    // AND THE CLOCK STOPS WHILE THEY WAIT. Refusing the dealership for a BUYER-side condition
+    // while the 24-hour deadline keeps running is the same defect as refusing a legitimate price
+    // change at submission: the penalty lands on the party who cannot clear the condition. The
+    // sweep would time them out as DEALER_TIMED_OUT and file an SLA violation against their
+    // rooftop for a window the platform closed to them.
+    //
+    // `dueAt` is pushed a full fresh window from now, not merely nudged, because the buyer's
+    // approval has to be revalidated by Operations and that is not a minutes-long task. Recorded
+    // on the row rather than in a log so an operator reading the reaffirmation can see why its
+    // deadline moved.
+    await prisma.dealerReaffirmation
+      .updateMany({
+        where: { dealId: params.dealId, status: "PENDING" },
+        data: { dueAt: new Date(now.getTime() + REAFFIRMATION_WINDOW_HOURS * 3600_000), updatedAt: now },
+      })
+      .catch((err) => {
+        logger.error("reaffirmation: could not extend the window after an approval refusal", {
+          dealId: params.dealId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     throw new ReaffirmationError(
       "APPROVAL_NOT_CURRENT",
       "We cannot accept a confirmation on this deal right now — the buyer's approval needs to be " +
-        "revalidated before terms can be agreed. Our team has been alerted and will come back to you.",
+        "revalidated before terms can be agreed. Our team has been alerted and will come back to " +
+        "you, and your confirmation window has been extended so this does not count against you.",
     );
   }
   const ceilingCents = approval.approvedAmountCents;
@@ -1092,13 +1114,43 @@ export async function extendVehicleHold(params: {
   });
 }
 
-/** §10c — "A released hold returns the buyer to the remaining valid offers." */
+/**
+ * §10c — "A released hold returns the buyer to the remaining valid offers."
+ *
+ * OWNERSHIP IS CHECKED HERE, AND IT WAS NOT. This function took `actorId` and went straight to
+ * `returnToRemainingOffers`, with no ownership check on any line of the path — including the
+ * route, which authenticated the dealer and passed the `dealId` through unverified. Any
+ * authenticated dealership could therefore POST ANOTHER DEALERSHIP'S deal id and destroy that
+ * deal: CANCELLED, the identity firewall revoked, the buyer emailed "you have been returned to the
+ * remaining offers", and a dealer-fault SLA violation filed against the victim's rooftop.
+ *
+ * `extendVehicleHold` below has always carried this check. Release — the DESTRUCTIVE half of the
+ * same decision — did not, which is the wrong way round: the cheaper action was guarded and the
+ * irreversible one was open. Golden rule 3: server-side authorization always, and a route that
+ * merely authenticates has not authorized anything.
+ *
+ * `dealerId` is required rather than optional so a future caller cannot omit it and silently get
+ * the old behaviour back. There is exactly one caller today.
+ */
 export async function releaseVehicleHold(params: {
   dealId: string;
+  /** The authenticated dealership. Re-checked against the deal here, never trusted. */
+  dealerId: string;
   actorId: string;
   reason?: string;
   now?: Date;
 }): Promise<void> {
+  const owned = await prisma.deal.findUnique({
+    where: { id: params.dealId },
+    select: { dealerId: true, offer: { select: { dealerId: true } } },
+  });
+  if (!owned) throw new ReaffirmationError("NOT_FOUND", "Deal not found.");
+  // Either id is ownership — `Offer.dealerId` is the immutable attribution and `Deal.dealerId` is
+  // §13-D20's lineage field, set when an outside winner completes its claim. The same test
+  // `extendVehicleHold` uses, so the two halves of one decision cannot drift.
+  if (owned.dealerId !== params.dealerId && owned.offer?.dealerId !== params.dealerId) {
+    throw new ReaffirmationError("FORBIDDEN", "This deal belongs to another dealership.");
+  }
   await returnToRemainingOffers({
     dealId: params.dealId,
     reason: params.reason ?? "The dealership released its hold on the vehicle.",

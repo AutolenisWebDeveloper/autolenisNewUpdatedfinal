@@ -43,6 +43,7 @@ import {
   decideMaterialChange,
   expireOverdueReaffirmations,
   sweepExpiringHolds,
+  releaseVehicleHold,
 } from "@/lib/services/deal/dealer-reaffirmation.service";
 import { currentRecap, decideOptionalProduct, confirmRecap, disputeRecap } from "@/lib/services/deal/deal-recap.service";
 import { recordFinancingCheckpoint } from "@/lib/services/financing/financing-checkpoint.service";
@@ -52,6 +53,7 @@ import {
   secureHandoffPacket,
 } from "@/lib/services/deal/identity-firewall.service";
 import { PHASE_7_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
+import { getDealerDealById, getDealerDeals } from "@/lib/services/dealer/dealer-deals.service";
 
 const prisma = new PrismaClient();
 
@@ -915,4 +917,94 @@ test("journey 12 — the batched firewall reader agrees with the single predicat
   expect(foreign.get(a.dealId)).toEqual(await dealerIdentityVisible(a.dealId, losing));
   expect(foreign.get(a.dealId)!.visible).toBe(false);
   expect(foreign.get(a.dealId)!.reason).toBe("NO_DEAL");
+});
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Journeys 13–14 — the re-audit findings, against a real database
+//
+// Journey 13 is the one that matters most in this file: it is the only assertion here that a
+// dealership cannot reach into another dealership's deal. It failed before the fix.
+// ───────────────────────────────────────────────────────────────────────────────
+
+test("journey 13 — a dealership CANNOT release another dealership's hold", async () => {
+  needsInfra();
+  const f = await seedSelectedDeal();
+  await submitReaffirmation({ dealId: f.dealId, dealerId: f.dealerIds[0]!, submission: submission() });
+
+  const winner = f.dealerIds[0]!;
+  const intruder = f.dealerIds[1]!;
+  expect(intruder).not.toBe(winner);
+
+  // BEFORE THE FIX THIS SUCCEEDED. `releaseVehicleHold` took `actorId` only and went straight to
+  // `returnToRemainingOffers`: the intruder's id was recorded as the actor and the victim's deal
+  // was cancelled, its firewall revoked, its buyer emailed, and a dealer-fault SLA violation filed
+  // against the WINNER's rooftop.
+  await expect(
+    releaseVehicleHold({ dealId: f.dealId, dealerId: intruder, actorId: intruder, reason: "not mine to release" }),
+  ).rejects.toThrow(/belongs to another dealership/i);
+
+  // Nothing moved: the deal is live, the firewall is still lifted, no notice, no SLA row.
+  const after = await prisma.deal.findUnique({ where: { id: f.dealId } });
+  expect(after?.status).toBe(DealStatus.DEALER_CONFIRMATION);
+  expect((await dealerIdentityVisible(f.dealId, winner)).visible).toBe(true);
+  expect(
+    await prisma.commsOutbox.count({
+      where: { dealId: f.dealId, templateKey: PHASE_7_TEMPLATES.RETURNED_TO_OFFERS },
+    }),
+  ).toBe(0);
+  expect(await prisma.slaViolation.count({ where: { entityId: f.rooftopId, slaType: "REAFFIRMATION" } })).toBe(0);
+
+  // The OWNER can still release — the fix must not have closed the legitimate path.
+  await releaseVehicleHold({ dealId: f.dealId, dealerId: winner, actorId: winner, reason: "the vehicle sold this morning" });
+  const released = await prisma.deal.findUnique({ where: { id: f.dealId } });
+  expect(released?.status).toBe(DealStatus.CANCELLED);
+});
+
+test("journey 14 — an outside winner's own deal is visible to it, and its timeout is not its fault", async () => {
+  needsInfra();
+  const f = await seedSelectedDeal();
+
+  // Make the winning offer placeholder-owned, which is what an outside winner is: the offer keeps
+  // the shared system Dealer (§13-D20 never re-points it) and `Deal.dealerId` carries the claimed
+  // dealership — the field whose writer §13-D58 assigns to the dealer-recruitment area.
+  await prisma.dealer.update({
+    where: { id: f.dealerIds[0]! },
+    data: { isSystemPlaceholder: true },
+  });
+
+  // §13-D20's split: the page readers must find the deal by EITHER id. Before the fix they used
+  // `offer.dealerId` alone, so the dealership's own recap email linked it to a 404.
+  const claimed = f.dealerIds[1]!;
+  await prisma.deal.update({ where: { id: f.dealId }, data: { dealerId: claimed } });
+  expect(await getDealerDealById(f.dealId, claimed)).not.toBeNull();
+  expect((await getDealerDeals(claimed)).map((d) => d.id)).toContain(f.dealId);
+
+  // §10b blocks them (the claim sequence is incomplete — D58), so the window closes on a deal they
+  // could never have confirmed. The stand-down still happens; the BLAME does not.
+  const row = await prisma.dealerReaffirmation.findFirst({ where: { dealId: f.dealId } });
+  await prisma.dealerReaffirmation.update({
+    where: { id: row!.id },
+    data: { dueAt: new Date(Date.now() - 60_000) },
+  });
+  await expireOverdueReaffirmations(new Date());
+
+  const stoodDown = await prisma.deal.findUnique({ where: { id: f.dealId } });
+  expect(stoodDown?.status).toBe(DealStatus.CANCELLED);
+  // The buyer is still told — the stand-down is not suppressed, only the attribution is.
+  expect(
+    await prisma.commsOutbox.count({
+      where: { dealId: f.dealId, templateKey: PHASE_7_TEMPLATES.RETURNED_TO_OFFERS },
+    }),
+  ).toBeGreaterThan(0);
+  // No SLA mark on a dealership the platform blocked.
+  expect(await prisma.slaViolation.count({ where: { entityId: f.rooftopId, slaType: "REAFFIRMATION" } })).toBe(0);
+  // And Operations is told why it was not recorded.
+  const ops = await prisma.queueItem.findFirst({
+    where: { dealId: f.dealId, exceptionCode: "OUTSIDE_WINNER_FAILS_VERIFICATION" },
+  });
+  expect(ops).toBeTruthy();
+  // `raiseException`'s `detail` is folded into `required_action` by `buildRequiredAction`
+  // (queue-item.service.ts:189) — `queue_items` has no `detail` column. An earlier draft of this
+  // assertion read `ops!.detail`, got undefined, and failed: the test was wrong, not the code.
+  expect(ops!.requiredAction ?? "").toMatch(/was NOT at fault/i);
 });

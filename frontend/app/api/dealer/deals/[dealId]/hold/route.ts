@@ -50,7 +50,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       return successResponse({ dealId, action: "EXTEND", holdUntil: parsed.data.holdUntil });
     }
 
-    await releaseVehicleHold({ dealId, actorId: dealer.id, reason: parsed.data.reason });
+    await releaseVehicleHold({ dealId, dealerId: dealer.id, actorId: dealer.id, reason: parsed.data.reason });
     return successResponse({ dealId, action: "RELEASE" });
   } catch (err) {
     if (err instanceof ReaffirmationError) {

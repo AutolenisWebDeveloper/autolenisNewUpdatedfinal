@@ -83,6 +83,34 @@ const DEALER_FAULT: ReturnCause[] = [
   "OUTSIDE_WINNER_UNVERIFIED",
 ];
 
+/**
+ * Was the dealership prevented from confirming, rather than simply failing to?
+ *
+ * Returns the human-readable reason when it was, and null when the dealership genuinely had the
+ * ability to act. Only the §10b gate can block a confirmation in Phase 7, and it only applies to a
+ * placeholder-owned offer, so a registered dealership always answers null here and its attribution
+ * is unchanged.
+ */
+async function dealershipWasBlocked(dealId: string, isOutsideWinner: boolean): Promise<string | null> {
+  if (!isOutsideWinner) return null;
+  try {
+    // Imported lazily ONLY to avoid a cycle: `dealer-reaffirmation.service` imports this file.
+    // Verified: nothing else in that module graph imports back into this one at load time.
+    const { outsideWinnerGate } = await import("./dealer-reaffirmation.service");
+    const gate = await outsideWinnerGate(dealId);
+    return gate.satisfied ? null : gate.missing.join("; ");
+  } catch (err) {
+    // FAIL TOWARD THE DEALERSHIP. If the gate cannot be evaluated we do not know whether they were
+    // blocked, and recording a permanent mark against a real business on a guess is the worse of
+    // the two errors. The stand-down itself is unaffected.
+    logger.error("return-to-offers: could not evaluate whether the dealership was blocked", {
+      dealId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "the platform could not confirm whether this dealership was able to act";
+  }
+}
+
 export interface ReturnToOffersResult {
   returned: boolean;
   remainingOfferCount: number;
@@ -285,7 +313,47 @@ export async function returnToRemainingOffers(params: {
 
   let scorecardRecorded = false;
   let slaViolation = false;
-  if (DEALER_FAULT.includes(params.cause)) {
+  // A DEALERSHIP THAT COULD NOT ACT DID NOT FAIL TO ACT.
+  //
+  // `DEALER_FAULT` attributes the stand-down to the dealership and files an SLA violation against
+  // its rooftop. That is right when the dealership had the ability to confirm and did not. It is
+  // wrong — and it is a real, attributable mark on a real business — when the platform itself
+  // blocked them, and §10b does exactly that: `submitReaffirmation` refuses every outside
+  // winner whose claim sequence is incomplete, so the 24-hour sweep then times them out as
+  // `DEALER_TIMED_OUT` for a window they were never able to answer in.
+  //
+  // Today that is EVERY outside winner, because `Deal.dealerId` has no writer at claim completion
+  // (§13-D58 — owned by the dealer-recruitment area, ruled not to be compensated for here). But
+  // this guard is not a workaround for that gap and does not become dead when it closes: a
+  // dealership that is mid-claim, whose account is suspended, or whose agreement lapsed is blocked
+  // by the same gate for the same reason, and none of those is a missed deadline.
+  //
+  // The stand-down still happens and the buyer is still told. What changes is the attribution:
+  // Operations gets a row naming what blocked the dealership, instead of the dealership getting a
+  // failure it could not have avoided.
+  const blocked = await dealershipWasBlocked(params.dealId, deal.offer?.dealer?.isSystemPlaceholder === true);
+  if (blocked) {
+    logger.error("return-to-offers: stand-down NOT attributed to the dealership — they were blocked", {
+      dealId: params.dealId,
+      cause: params.cause,
+      blockedBy: blocked,
+    });
+    await raiseException({
+      code: "OUTSIDE_WINNER_FAILS_VERIFICATION",
+      dealId: params.dealId,
+      idempotencyKey: `BLOCKED_NOT_DEALER_FAULT:${params.dealId}`,
+      detail:
+        `This deal stood down as ${params.cause}, and the dealership was NOT at fault: they could ` +
+        `not confirm because ${blocked}. No SLA violation or scorecard entry has been recorded ` +
+        `against them. Resolve the blocking condition, or record the outcome against the platform.`,
+    }).catch((raiseErr) => {
+      logger.error("exception could not be raised", {
+        error: raiseErr instanceof Error ? raiseErr.message : String(raiseErr),
+      });
+    });
+  }
+
+  if (!blocked && DEALER_FAULT.includes(params.cause)) {
     const rooftopId = deal.rooftopId ?? deal.offer?.rooftopId ?? null;
     const realDealerId =
       deal.offer?.dealer?.isSystemPlaceholder === false ? deal.offer.dealerId : (deal.dealerId ?? null);
