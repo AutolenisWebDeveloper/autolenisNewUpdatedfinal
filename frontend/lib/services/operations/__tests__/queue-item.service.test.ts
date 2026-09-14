@@ -98,10 +98,10 @@ beforeEach(() => {
   state.createCalls = 0;
 });
 
-test("the catalogue covers §26's 48 rows plus the six the Markdown states elsewhere", async () => {
+test("the catalogue covers §26's 48 rows plus the seven the Markdown states elsewhere", async () => {
   const { EXCEPTION_CATALOGUE } = await cat();
-  assert.equal(EXCEPTION_CATALOGUE.length, 54);
-  // §26 proper: 48 rows. The six additions are each stated in the Markdown, just
+  assert.equal(EXCEPTION_CATALOGUE.length, 55);
+  // §26 proper: 48 rows. The seven additions are each stated in the Markdown, just
   // not as a §26 row:
   //   • COMMS_TERMINAL_FAILURE — §27, rendered in the HTML register (§2 diff D2)
   //   • LINEAGE_ORPHAN         — §3, the transaction spine
@@ -120,6 +120,13 @@ test("the catalogue covers §26's 48 rows plus the six the Markdown states elsew
   //     Operations → Alert". It is NOT ZERO_OFFERS_ALL_CANDIDATES: that row's required
   //     action ("relaunch once, or close it") is for an auction that has already closed,
   //     and this one fires while the field can still be widened. Added Phase 6 (K27-1325).
+  //   • COMMS_NO_DELIVERABLE_CHANNEL — §27/§27.1. The OTHER half of the comms rail's
+  //     failure surface, and not COMMS_TERMINAL_FAILURE: that code describes a message
+  //     that entered the rail and exhausted its retries, keys on `comms_outbox.id`, and
+  //     sends the operator to the outbox. A recipient with no address never produces a
+  //     row at all, so there is no id to key on and nothing at the outbox to find.
+  //     Added Phase 6 on the owner's 2026-09-14 ruling that a `logger.error` must not
+  //     stand in for an exception.
   const extraCodes = [
     "COMMS_TERMINAL_FAILURE",
     "LINEAGE_ORPHAN",
@@ -127,6 +134,7 @@ test("the catalogue covers §26's 48 rows plus the six the Markdown states elsew
     "THIN_DEALER_COVERAGE",
     "LAUNCH_READINESS_BLOCKED",
     "AUCTION_TRENDING_TO_ZERO_OFFERS",
+    "COMMS_NO_DELIVERABLE_CHANNEL",
   ];
   const extras = EXCEPTION_CATALOGUE.filter((d) => extraCodes.includes(d.code));
   assert.equal(extras.length, extraCodes.length, "each addition must be present exactly once");

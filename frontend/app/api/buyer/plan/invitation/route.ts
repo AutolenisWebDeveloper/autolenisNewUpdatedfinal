@@ -38,7 +38,10 @@ import {
   upgradeAskCounts,
 } from "@/lib/services/plan/upgrade-touchpoint.service";
 import { quotePremiumBalance } from "@/lib/services/plan/upgrade-window.service";
-import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
+import {
+  enqueueTransactional,
+  raiseNoDeliverableChannel,
+} from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_6_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { renderPremiumFollowUp } from "@/lib/services/comms/phase6-email-content";
 import { limitGeneral } from "@/lib/security/rate-limit";
@@ -166,7 +169,31 @@ async function scheduleFollowUp(buyerId: string, vehicleRequestId: string, dealI
     select: { firstName: true, user: { select: { email: true } } },
   });
   const email = contact?.user?.email;
-  if (!email) return;
+  if (!email) {
+    // THE ONE JUDGEMENT CALL in applying the 2026-09-14 ruling, made deliberately and flagged in
+    // the phase report rather than assumed.
+    //
+    // Against raising: touchpoint 4 is an UPSELL, not a §27.1-required notice about the buyer's
+    // transaction, and §23.2b treats a missing ask as the safe outcome. An Operations queue whose
+    // value depends on every row being actionable should not fill with lost upsells.
+    //
+    // For raising, which is what this does: the code is about the CHANNEL, not the message's
+    // commercial importance. The fact discovered here — this buyer can receive no email at all —
+    // is the same fact the close path discovers about the same buyer, and §23.2b's "safe outcome"
+    // governs whether to ASK, not whether to REPORT. This was also the only one of the five sites
+    // with no log line at all: the condition was discovered and discarded in total silence.
+    await raiseNoDeliverableChannel({
+      templateKey: PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP,
+      channel: "email",
+      // Request-scoped, matching the outbox key's own scoping below: §23.4 gives a second Vehicle
+      // Request its own fresh plan election.
+      outboxKey: `${PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP}:email:${vehicleRequestId}`,
+      recipientKind: "buyer",
+      recipientId: buyerId,
+      refs: { vehicleRequestId, dealId, buyerId },
+    });
+    return;
+  }
 
   const quote = await quotePremiumBalance(vehicleRequestId);
   const rendered = renderPremiumFollowUp({

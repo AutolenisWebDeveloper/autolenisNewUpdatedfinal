@@ -47,8 +47,12 @@ export async function GET(request: NextRequest) {
 
   // §9 / S15 — an auction whose offers ALL lapsed without a selection. Run immediately after the
   // sweep so the statuses it reads are the ones the sweep just wrote, rather than a tick behind.
-  // Idempotent: the exception dedupes on (code, refs) while its row is open and the notice dedupes
-  // on the auction-scoped outbox key, so running it every five minutes writes each at most once.
+  // Idempotent, and STRONGER than this comment used to claim. It said the exception "dedupes on
+  // (code, refs) while its row is open" — true of the derived key, and not enough: once Operations
+  // resolved the case, the next tick would open a new one under a `#2` suffix. Both §26 raises on
+  // this path now carry EXPLICIT once-ever keys (`BUYER_DOES_NOT_SELECT:<auctionId>` here, and
+  // `closeZeroOfferExceptionKey` in the close), so a resolved case stays resolved. The notice still
+  // dedupes on the auction-scoped outbox key. Running every five minutes writes each at most once.
   const unselected = await sweepUnselectedAuctions(now).catch((e) => {
     logger.error("[auction-close] unselected sweep failed:", e);
     return 0;

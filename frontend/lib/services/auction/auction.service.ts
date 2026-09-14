@@ -9,7 +9,10 @@ import { releaseAuctionLoad } from "@/lib/services/auction/dealer-invitation.ser
 import { rankOffers, getPersistedRanking } from "@/lib/services/offer/best-price.service";
 import { sendDealerAuctionClosedNoWinnerEmail } from "@/lib/services/email/resend.service";
 import { qualifiedOfferWhere, lapsedOfferWhere } from "@/lib/services/offer/offer-validity";
-import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
+import {
+  enqueueTransactional,
+  raiseNoDeliverableChannel,
+} from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_6_TEMPLATES, selectionReminderCancelKey } from "@/lib/services/comms/state-recheck-registry";
 import {
   renderOffersReady,
@@ -196,8 +199,11 @@ export function postCloseClaimWon(updatedCount: number): boolean {
  *
  * (e) THE ZERO-OFFER CASE HAD NO OWNER (§26, parity rows C14/E3c/G2). A buyer notification is not
  *     a case: nobody was assigned, no deadline ran, and §13-D39's one relaunch had nothing to hang
- *     off. It is raised through the `queue_items` writer, which dedupes on (code, refs) so the
- *     reconciler cannot open a second row.
+ *     off. It is raised through the `queue_items` writer under an explicit once-ever key
+ *     (`closeZeroOfferExceptionKey`) shared by both close-time codes, so neither the reconciler's
+ *     retry nor an Operations resolution can open a second row, and the two codes cannot both open
+ *     for one close. Dedup on (code, refs) — what this said before — is once-while-OPEN and
+ *     per-CODE, and neither property is what this branch needs.
  *
  * The in-app `Notification` rows stay alongside the dispatcher rows deliberately: the dispatcher's
  * `in_app` channel is read by no buyer surface in this repository, so dropping the `notifications`
@@ -354,11 +360,35 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
         .catch(() => []);
       const vehicleRef = `Auction ${auctionId.slice(0, 8)}`;
       for (const inv of invitedDealers) {
-        // An invitation to a non-registered rooftop carries no dealer and no mailbox (S7-18).
+        // TWO CONDITIONS, NOT ONE — they were collapsed under a single comment and are not the
+        // same thing.
+        //
+        // No dealer at all is a DESIGNED state of the outside-invite rail: an invitation to a
+        // non-registered rooftop carries neither dealer nor mailbox (S7-18). Raising on it would
+        // open a row for every outside rooftop on every zero-offer auction. Stays silent.
         const dealer = inv.dealer;
         if (!dealer) continue;
+        // A REGISTERED dealership with no address is the anomalous half: `dealers.user_id` is NOT
+        // NULL and `users.email` is NOT NULL, so this is an integrity violation, not a shape the
+        // rail expects. It is the half the ruling covers.
         const email = dealer.user?.email;
-        if (!email) continue;
+        if (!email) {
+          // The outbox key here is SYNTHESISED rather than copied: this notice does not ride the
+          // §27 dispatcher — it is the one close-path message still on the direct Resend rail, and
+          // that is recorded as REPORTED-NOT-BUILT item 3. The key is built on the same shape so
+          // the case reads consistently with its four siblings.
+          //
+          // No buyerId ref: §29/P3 keeps a dealer-facing Operations row free of the buyer.
+          await raiseNoDeliverableChannel({
+            templateKey: "dealer_auction_closed_no_winner",
+            channel: "email",
+            outboxKey: `dealer_auction_closed_no_winner:email:${auctionId}:${dealer.id}`,
+            recipientKind: "dealer",
+            recipientId: dealer.id,
+            refs: { auctionId, dealerId: dealer.id },
+          });
+          continue;
+        }
         await sendDealerAuctionClosedNoWinnerEmail({
           to: email,
           contactName: dealer.dealershipName,
@@ -481,7 +511,7 @@ async function countQualifiedOffers(auctionId: string, now: Date): Promise<numbe
  * failure the reconciler exists to retry.
  */
 async function enqueueCloseNotice(
-  auction: { buyerId: string; vehicleRequestId: string | null },
+  auction: { buyerId: string; vehicleRequestId: string | null; depositId: string | null },
   auctionId: string,
   qualifiedCount: number,
   now: Date,
@@ -490,16 +520,41 @@ async function enqueueCloseNotice(
     where: { id: auction.buyerId },
     select: { firstName: true, user: { select: { email: true } } },
   });
+  // Computed BEFORE the guard: the outbox key is template-scoped, and the case raised below keys on
+  // the dedup key this notice WOULD have carried — it names the message that does not exist.
+  const templateKey = qualifiedCount > 0 ? PHASE_6_TEMPLATES.OFFERS_READY : PHASE_6_TEMPLATES.AUCTION_ZERO_OFFERS;
+  const outboxKey = `${templateKey}:email:${auctionId}`;
+
   const email = buyer?.user?.email;
   if (!email) {
-    // Reported, not raised: §26 has no row for "buyer has no mailbox", and the buyer still has the
-    // in-app notification written above. Throwing would release the claim and retry forever
-    // against an address that is not going to appear.
-    logger.error(`[processAuctionClose] buyer ${auction.buyerId} has no email — close notice not enqueued`);
+    // OWNER RULING 2026-09-14. This was a `logger.error` and a silent return, under a comment
+    // claiming §26 had no row for it. There is one now, and the reason given for staying silent —
+    // that raising would retry forever — is answered by the helper, which swallows its own failure
+    // rather than by this branch staying quiet.
+    //
+    // THE `return` SURVIVES, and must. A throw here releases the post-close claim and is rethrown,
+    // and a missing mailbox does not appear on its own, so the cron would re-enter the close path
+    // every five minutes forever — never raising the zero-offer case (it sits after this call),
+    // never telling a single dealership there was no winner, leaving `postCloseProcessedAt` NULL
+    // so the S15 sweep can never see the auction either, and 500-ing the admin manual close. The
+    // buyer keeps the in-app notification written above; what changes is that the failure is now
+    // an owned case instead of a log line nobody reads.
+    await raiseNoDeliverableChannel({
+      templateKey,
+      channel: "email",
+      outboxKey,
+      recipientKind: "buyer",
+      recipientId: auction.buyerId,
+      refs: {
+        auctionId,
+        buyerId: auction.buyerId,
+        vehicleRequestId: auction.vehicleRequestId,
+        depositId: auction.depositId,
+      },
+    });
     return;
   }
 
-  const templateKey = qualifiedCount > 0 ? PHASE_6_TEMPLATES.OFFERS_READY : PHASE_6_TEMPLATES.AUCTION_ZERO_OFFERS;
   const rendered =
     qualifiedCount > 0
       ? renderOffersReady({
@@ -516,7 +571,7 @@ async function enqueueCloseNotice(
   // CHANNEL-QUALIFIED AND AUCTION-SCOPED. `comms_outbox.dedup_key` is globally unique, so the
   // derived default (`templateKey:recipientId`) would collide across a buyer's second auction and
   // silently drop the notice for it. Keyed on the auction, which is what the message is about.
-  const key = `${templateKey}:email:${auctionId}`;
+  const key = outboxKey;
   await enqueueTransactional({
     triggerEvent: "auction.closed",
     templateKey,
@@ -575,7 +630,21 @@ async function scheduleSelectionReminder(
     select: { firstName: true, user: { select: { email: true } } },
   });
   const email = buyer?.user?.email;
-  if (!email) return;
+  if (!email) {
+    // The weakest of the three close-path sites before the ruling — it did not even log. The two
+    // EARLIER returns above stay silent and should: neither is a missing channel. One is a
+    // pre-Phase-6 auction with no deadline to warn about, and the other is a reminder deliberately
+    // declined because the lead time has already passed.
+    await raiseNoDeliverableChannel({
+      templateKey: PHASE_6_TEMPLATES.SELECTION_REMINDER,
+      channel: "email",
+      outboxKey: `${PHASE_6_TEMPLATES.SELECTION_REMINDER}:email:${auctionId}`,
+      recipientKind: "buyer",
+      recipientId: auction.buyerId,
+      refs: { auctionId, buyerId: auction.buyerId, vehicleRequestId: auction.vehicleRequestId },
+    });
+    return;
+  }
 
   const rendered = renderSelectionReminder({
     firstName: buyer?.firstName ?? null,
@@ -702,7 +771,20 @@ async function enqueueExpiredNotice(
   });
   const email = buyer?.user?.email;
   if (!email) {
-    logger.error(`[sweepUnselectedAuctions] buyer ${auction.buyerId} has no email — expiry notice not enqueued`);
+    // THE STRONGEST OF THE THREE SITES, and the reason is not visible from this function.
+    // `sweepUnselectedAuctions` raises BUYER_DOES_NOT_SELECT *before* calling this, and that queue
+    // row is the sweep's terminal marker — the candidate query excludes any auction carrying it.
+    // So the auction stops being a candidate the moment the raise lands, and unlike the close path
+    // there is no retry at all: a skipped notice here is never revisited. `swept++` still runs
+    // afterwards, so the sweep's own return value reported a buyer as swept who heard nothing.
+    await raiseNoDeliverableChannel({
+      templateKey: PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED,
+      channel: "email",
+      outboxKey: `${PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED}:email:${auctionId}`,
+      recipientKind: "buyer",
+      recipientId: auction.buyerId,
+      refs: { auctionId, buyerId: auction.buyerId, vehicleRequestId: auction.vehicleRequestId },
+    });
     return;
   }
   const rendered = renderOffersExpiredUnselected({
@@ -740,7 +822,36 @@ async function enqueueExpiredNotice(
  * a coverage problem and the second is a budget conversation — and §26 gives them different
  * required results, so collapsing them onto one code would put the wrong instructions in front of
  * the operator. The distinction is observable: disqualification is recorded on the row (§13-D40).
+ *
+ * ONE ROW EITHER WAY. The two codes are alternatives, never both — this function raises exactly one
+ * per invocation — so they share a single once-ever key. Which of the two a given auction gets is
+ * decided by the FIRST processed close and never revised: `overBudget` is counted against
+ * SUBMITTED, unexpired rows, and every later pass sees a strictly more decayed set.
  */
+/**
+ * The once-ever key for the close-time "no qualified offer" case.
+ *
+ * ONE KEY FOR BOTH CODES, deliberately, and this is the half that is easy to get wrong. Keying per
+ * code would let ONE auction open BOTH cases: the `overBudget` count below requires
+ * `status: SUBMITTED` AND an unexpired `expires_at`, and `expireLapsedOffers` flips disqualified
+ * rows to EXPIRED like any other (`lapsedOfferWhere` does not exclude them, deliberately), so a
+ * later pass over the same auction sees `overBudget = 0` and raises the OTHER code under a second
+ * key. Two open rows for one close, carrying §26's two contradictory required actions — "relaunch
+ * once without a second $99, or close it" against a budget conversation — and resolving either
+ * leaves the other open.
+ *
+ * NOT the code as the prefix, for the same reason: a row whose `exception_code` is
+ * `ALL_OFFERS_EXCEED_BUDGET` must not carry a key that names `ZERO_OFFERS_ALL_CANDIDATES`. The key
+ * names the CONDITION — this auction closed with nothing qualified on it — not the description.
+ *
+ * Exported and built in one place for the reason `disputeExceptionKey` is
+ * (`lib/services/payment/fulfillment-hold.service.ts`): a key that drifts between the raiser and
+ * anything that later resolves or looks it up is a key that silently stops deduping.
+ */
+export function closeZeroOfferExceptionKey(auctionId: string): string {
+  return `AUCTION_CLOSE_ZERO_QUALIFIED:${auctionId}`;
+}
+
 async function raiseCloseException(
   auction: { buyerId: string; depositId: string | null; vehicleRequestId: string | null },
   auctionId: string,
@@ -756,6 +867,19 @@ async function raiseCloseException(
   });
   await raiseException({
     code: overBudget > 0 ? "ALL_OFFERS_EXCEED_BUDGET" : "ZERO_OFFERS_ALL_CANDIDATES",
+    // STRICT ONCE-EVER, same as the sweep. Without it `raiseException` derives
+    // `${code}:${refFingerprint}` and dedupes only while the row is OPEN: once Operations resolves
+    // the case, the next re-entry takes the `#2` suffix and opens a brand-new OPEN row, and after
+    // fifty of those `raiseException` THROWS on every pass — a throw that releases the close claim
+    // and leaves the cron re-entering and throwing forever, with the dealer no-winner emails below
+    // never sent. The derived key is also built from NULLABLE refs (`depositId` and
+    // `vehicleRequestId` are both `string | null` here), so a ref that is null on one pass and set
+    // on a later one changes the fingerprint and produces a second row for the same code.
+    //
+    // The condition is terminal by construction: a closed auction cannot acquire a qualified offer.
+    // The one permitted retry under §13-D39 is a NEW auction row, which carries its own key and its
+    // own case.
+    idempotencyKey: closeZeroOfferExceptionKey(auctionId),
     auctionId,
     buyerId: auction.buyerId,
     depositId: auction.depositId,

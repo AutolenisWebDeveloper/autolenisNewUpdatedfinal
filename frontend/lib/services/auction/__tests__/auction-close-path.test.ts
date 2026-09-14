@@ -36,6 +36,7 @@ let requestStatus: string;
 
 let notifications: Rec[];
 let enqueued: Rec[];
+let noChannel: Rec[];
 let raised: Rec[];
 let candidateUpdates: Rec[];
 let requestUpdates: Rec[];
@@ -164,6 +165,9 @@ mock.module("@/lib/services/email/resend.service", {
 });
 mock.module("@/lib/services/comms/transactional-dispatcher.service", {
   namedExports: {
+    // The §27 no-channel raise. Recorded rather than stubbed to a no-op, because two tests below
+    // assert that a buyer with no mailbox still produces an owned case.
+    raiseNoDeliverableChannel: async (input: Rec) => { noChannel.push(input); },
     enqueueTransactional: async (input: Rec) => {
       if (enqueueThrows) throw enqueueThrows;
       if (enqueueFilter) enqueueFilter(input);
@@ -199,6 +203,7 @@ beforeEach(() => {
   buyer = { firstName: "Ada", user: { email: "ada@test.local" } };
   notifications = [];
   enqueued = [];
+  noChannel = [];
   raised = [];
   candidateUpdates = [];
   requestUpdates = [];
@@ -229,6 +234,11 @@ test("a WITHDRAWN offer does not make a zero-offer auction look successful", asy
   assert.equal(res.offers, 0, "a withdrawn offer was counted as a live one");
   assert.equal(raised.length, 1, "the zero-offer case never opened");
   assert.equal(raised[0].code, "ZERO_OFFERS_ALL_CANDIDATES");
+  assert.equal(
+    raised[0].idempotencyKey,
+    "AUCTION_CLOSE_ZERO_QUALIFIED:auc_1",
+    "the close-time case is not once-ever — a resolved case reopens under a #2 suffix on the next retry",
+  );
 });
 
 test("a DISQUALIFIED offer is not a qualified offer (§8c)", async () => {
@@ -238,6 +248,40 @@ test("a DISQUALIFIED offer is not a qualified offer (§8c)", async () => {
   // ...and the case names the RIGHT condition: dealers competed, they were all over budget.
   assert.equal(raised[0].code, "ALL_OFFERS_EXCEED_BUDGET");
   assert.match(String(raised[0].detail), /disqualified against the buyer's approved amount/);
+  assert.equal(
+    raised[0].idempotencyKey,
+    "AUCTION_CLOSE_ZERO_QUALIFIED:auc_1",
+    "the over-budget branch must share the zero-offer branch's key — a per-code key lets one auction open BOTH cases",
+  );
+});
+
+test("both close-time codes share ONE once-ever key, so an auction cannot open two cases", async () => {
+  // The code is chosen by a TIME-DEPENDENT count: `overBudget` requires `status: SUBMITTED` and an
+  // unexpired `expires_at`, and `expireLapsedOffers` has already swept lapsed rows to EXPIRED —
+  // `lapsedOfferWhere` does not exclude disqualified offers, deliberately. So a retry that lands
+  // after the disqualified offers lapse sees `overBudget = 0` and raises the OTHER code. Under a
+  // per-code key that is two derived keys, two OPEN rows, and §26's two contradictory required
+  // actions in front of one operator for one close.
+  //
+  // Asserted as ONE LITERAL shared by both branches, so a later refactor to `${code}:${auctionId}`
+  // fails here rather than passing every other assertion in this file.
+  offers = [offer({ isDisqualified: true })];
+  await close();
+  assert.equal(raised[0].code, "ALL_OFFERS_EXCEED_BUDGET");
+  const overBudgetKey = raised[0].idempotencyKey;
+  // Pinned to the LITERAL as well as to each other. Comparing the two branches alone would pass
+  // vacuously if both were `undefined` — which is exactly the state this test exists to reject.
+  assert.equal(overBudgetKey, "AUCTION_CLOSE_ZERO_QUALIFIED:auc_1");
+
+  raised = [];
+  offers = [offer({ status: "WITHDRAWN" })];
+  await close();
+  assert.equal(raised[0].code, "ZERO_OFFERS_ALL_CANDIDATES");
+  assert.equal(
+    raised[0].idempotencyKey,
+    overBudgetKey,
+    "the two codes key differently — one auction can open both cases",
+  );
 });
 
 test("an EXPIRED offer is not a qualified offer, and is swept to EXPIRED", async () => {
@@ -414,15 +458,46 @@ test("a missing auction is a no-op, not a throw", async () => {
   assert.deepEqual(await close(), { offers: 0 });
 });
 
-test("a buyer with no mailbox does not stall the close forever", async () => {
+test("a buyer with no mailbox does not stall the close forever, and now opens a case", async () => {
   // Throwing here would release the claim and retry every tick against an address that is not
   // going to appear. The in-app notification is still written.
+  //
+  // OWNER RULING 2026-09-14 added the second half: the silent return became an owned Operations
+  // case. "A logger.error standing in for an exception is the defect class this program has spent
+  // five phases eliminating." Both halves are asserted together because they are in tension — the
+  // case must be raised WITHOUT the raise becoming a throw that stalls the close.
   offers = [offer()];
   buyer = { firstName: "Ada", user: null };
   const res = await close();
   assert.equal(res.offers, 1);
   assert.equal(enqueued.length, 0);
   assert.equal(notifications.length, 1);
+  // ONE CASE PER LOST MESSAGE, not one per unreachable buyer — and the success branch loses TWO:
+  // the offers-ready notice and the pre-expiry selection reminder scheduled right after it. They
+  // key differently on purpose. The operator's required action is "re-drive the notice once the
+  // address is fixed", and there are two notices to re-drive; collapsing them onto one row would
+  // fix the address and silently leave the reminder unsent.
+  assert.equal(noChannel.length, 2, "the buyer could not be reached and a message went unreported");
+  assert.deepEqual(
+    noChannel.map((n) => n.outboxKey).sort(),
+    ["offers_ready:email:auc_1", "selection_reminder:email:auc_1"],
+    "each case must key on the message that does not exist, so neither can open twice",
+  );
+  assert.ok(noChannel.every((n) => n.recipientKind === "buyer"));
+});
+
+test("the zero-offer branch names its own template when the buyer has no mailbox", async () => {
+  // The key is template-scoped, so the two branches must not collide: a buyer who cannot be
+  // reached about a zero-offer close and one who cannot be reached about a successful close are
+  // different messages and different cases.
+  offers = [];
+  buyer = { firstName: "Ada", user: null };
+  await close();
+  const keys = noChannel.map((n) => n.outboxKey);
+  assert.ok(
+    keys.includes("auction_zero_offers:email:auc_1"),
+    `the zero-offer branch keyed on the wrong template: ${JSON.stringify(keys)}`,
+  );
 });
 
 // ── the review findings, pinned ─────────────────────────────────────────────────────────────────

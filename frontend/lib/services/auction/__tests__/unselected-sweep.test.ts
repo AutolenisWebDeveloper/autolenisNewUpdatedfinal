@@ -23,6 +23,7 @@ let auctions: Rec[];
 let offersByAuction: Record<string, Rec[]>;
 let raised: Rec[];
 let enqueued: Rec[];
+let noChannel: Rec[];
 let buyer: Rec | null;
 let depositUpdates: Rec[];
 let auctionFindArgs: Rec[];
@@ -84,6 +85,7 @@ mock.module("@/lib/services/comms/transactional-dispatcher.service", {
   namedExports: {
     enqueueTransactional: async (input: Rec) => { enqueued.push(input); return { enqueued: true, id: "co", dedupKey: "" }; },
     cancelByKey: async () => ({ cancelled: 0 }),
+    raiseNoDeliverableChannel: async (input: Rec) => { noChannel.push(input); },
   },
 });
 mock.module("@/lib/services/auction/dealer-invitation.service", { namedExports: { releaseAuctionLoad: async () => {} } });
@@ -105,6 +107,7 @@ beforeEach(() => {
   offersByAuction = { auc_1: [] };
   raised = [];
   enqueued = [];
+  noChannel = [];
   buyer = { firstName: "Ada", user: { email: "ada@test.local" } };
   depositUpdates = [];
   auctionFindArgs = [];
@@ -194,13 +197,24 @@ test("one auction failing does not stop the sweep reaching the others", async ()
   assert.equal(enqueued.length, 1, "the failed auction must not be notified without its case");
 });
 
-test("a buyer with no mailbox still gets the case opened", async () => {
+test("a buyer with no mailbox still gets the case opened, AND the lost notice is reported", async () => {
   // The notice is how the buyer hears; the queue row is how anyone acts. Losing the first must not
   // cost the second.
+  //
+  // THIS IS THE SHARPEST OF THE FIVE NO-CHANNEL SITES, under the 2026-09-14 ruling. The sweep
+  // raises BUYER_DOES_NOT_SELECT BEFORE enqueueing the notice, and that row is its own terminal
+  // marker — the candidate query excludes any auction carrying it. So the auction stops being a
+  // candidate the instant the raise lands and, unlike the close path, is NEVER retried. Before the
+  // ruling the only trace that a buyer was never told their offers had expired was one log line,
+  // and `swept++` still counted them as swept.
   buyer = { firstName: "Ada", user: null };
   assert.equal(await sweep(), 1);
-  assert.equal(raised.length, 1);
+  assert.equal(raised.length, 1, "the S15 case must still open — that half was already right");
   assert.equal(enqueued.length, 0);
+  assert.equal(noChannel.length, 1, "the lost notice was discarded silently");
+  assert.equal(noChannel[0].templateKey, "offers_expired_unselected");
+  assert.equal(noChannel[0].outboxKey, "offers_expired_unselected:email:auc_1");
+  assert.equal(noChannel[0].recipientKind, "buyer");
 });
 
 // ── THE SWEEP MUST DRAIN, AND MUST NOT SWEEP AN AUCTION THAT NEVER HAD AN OFFER ────────────────

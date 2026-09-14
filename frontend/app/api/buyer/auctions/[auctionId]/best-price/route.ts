@@ -29,6 +29,18 @@ interface Props { params: Promise<{ auctionId: string }> }
  * §8a caps a financing term at 6–96 months, and `reviseOffer`/`submitOffer` validate the same
  * range. The report has to refuse anything else rather than clamp it silently: a buyer who asked
  * for 120 months and was shown 96 would be reading a payment they did not request.
+ *
+ * NO FIRST-PARTY CALLER SENDS THIS ANY MORE, and the parameter stays anyway. The buyer's Best
+ * Price Report used to carry a comparison-term control; the owner deleted it on 2026-09-14
+ * because a payment computed at a term no dealership quoted is a number nobody offered (§12 —
+ * AutoLenis does not underwrite). `months` never changed a byte of this response even then: every
+ * monthly figure is computed from the DEALERSHIP's own `term_months`, and `termMonths` reaches
+ * only `persistLog`, which the buyer path does not pass.
+ *
+ * Kept because this is a public, authenticated input that anyone can still send by hand, and a
+ * server-side guard on a reachable input outlives the client that used to populate it. Deleting it
+ * would also delete the regression tests that pin the NaN / divide-by-zero defect this validation
+ * was written for — losing the guard and the proof of the guard in one edit.
  */
 const MIN_TERM_MONTHS = 6;
 const MAX_TERM_MONTHS = 96;

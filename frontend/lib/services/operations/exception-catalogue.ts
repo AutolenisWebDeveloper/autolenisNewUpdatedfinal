@@ -21,7 +21,8 @@
 // one counted separately by `queue-item.service.test.ts`, which names them individually:
 // COMMS_TERMINAL_FAILURE (§27), LINEAGE_ORPHAN (§3), POSSIBLE_DUPLICATE_BUYER (§7.2), and the two
 // Phase 5 additions THIN_DEALER_COVERAGE and LAUNCH_READINESS_BLOCKED (Stage 6c / Stage 7), plus
-// AUCTION_TRENDING_TO_ZERO_OFFERS (§27.1, added Phase 6). The count lives in that test rather than
+// AUCTION_TRENDING_TO_ZERO_OFFERS and COMMS_NO_DELIVERABLE_CHANNEL (§27/§27.1, added Phase 6).
+// The count lives in that test rather than
 // in this comment — the previous figure here said 49 and had been wrong since Phase 5.
 //
 // `raisedByPhase` records which implementation phase wires the raise site. Phase 2
@@ -807,6 +808,47 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "§27 — the dispatcher",
     raisedByPhase: 2,
     specSection: "§27; §2 difference D2",
+  },
+  // §27's OTHER failure mode, and it is not the one above. COMMS_TERMINAL_FAILURE describes a
+  // message that entered the rail and exhausted its retries — it keys on `comms_outbox.id` and
+  // tells the operator to "investigate the undeliverable message". A recipient with no address
+  // never produces a row at all (`enqueueTransactional` refuses a channel without one before the
+  // insert), so there is no id to key on, no `last_error` to investigate, and no first attempt for
+  // "another way" to be another way THAN. An operator sent to the outbox would find nothing and
+  // conclude the alert was wrong.
+  //
+  // Split for the same reason this file already splits THIN_DEALER_COVERAGE from
+  // ZERO_DEALER_COVERAGE, AUCTION_TRENDING_TO_ZERO_OFFERS from ZERO_OFFERS_ALL_CANDIDATES, and
+  // POSSIBLE_DUPLICATE_BUYER out of LINEAGE_ORPHAN: same neighbourhood, different required action.
+  // Owner ruling 2026-09-14 — "a logger.error standing in for an exception is the defect class this
+  // program has spent five phases eliminating."
+  {
+    code: "COMMS_NO_DELIVERABLE_CHANNEL",
+    // The existing `COMMS_EXCEPTION` label, so no enum migration — and `queue_items.exception_code`
+    // is plain TEXT with no CHECK, so no migration at all.
+    type: "COMMS_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Required communication has no deliverable channel",
+    requiredResult:
+      "The §27.1 communication is delivered by another means and the recipient's contact record is corrected",
+    // NULL, and the null is the considered answer rather than the default. Three reasons, in order
+    // of weight: (1) this row exists BECAUSE the recipient cannot be reached, so a buyer-addressed
+    // sentence is one the system has just failed to deliver; (2) the in-app `Notification` already
+    // carries the buyer's honest account of the AUCTION's outcome, and that is the auction's status
+    // rather than this exception's — "we cannot email you" does not belong beside "your offers are
+    // ready"; (3) the same code is raised for a DEALERSHIP, which has no buyer half at all.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Reach the recipient another way and correct their contact record. There is no outbox row to " +
+      "retry — the message was never produced — so re-drive the notice once the address is fixed.",
+    // The same clock as COMMS_TERMINAL_FAILURE: a required transactional communication about a
+    // transaction the buyer has paid $99 for is not going to happen.
+    deadlineHours: 4,
+    // The rail, not a stage — this fires from Stage 8, Stage 9 and §23.2a alike, so any one stage
+    // would be wrong three times out of four.
+    returnPoint: "§27 — the required communication, once the recipient has a deliverable address",
+    raisedByPhase: 6,
+    specSection: "§27; §27.1",
   },
   // §3's orphan rule. The Markdown states it in §3 ("a payment, auction, offer,
   // deal, contract, or pickup that cannot resolve its parent is an orphan") rather
