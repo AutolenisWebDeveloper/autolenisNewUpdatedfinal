@@ -72,7 +72,12 @@ export default async function BuyerFinancingPage({
             and verify, and we never take an application or pull your credit.
           </p>
           <Link
-            href={`/buyer/deal/${deal.id}/financing`}
+            // `/buyer/deal/{id}/financing` DOES NOT EXIST — `app/buyer/deal/[dealId]/` holds only
+            // `complete`, `reaffirmation`, `recap` and `receipt`. Financing lives at the
+            // un-parameterised `/buyer/deal/financing`, which resolves the buyer's own deal.
+            // This is the same dead prefix already corrected in the email templates; the guard
+            // written for that only scanned `phase7-email-content.ts`, so it could not see a page.
+            href="/buyer/deal/financing"
             data-testid="financing-options-link"
             className="mt-4 inline-flex items-center justify-center rounded-lg bg-al-primary px-4 py-2 text-sm font-semibold text-white hover:bg-al-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
           >
