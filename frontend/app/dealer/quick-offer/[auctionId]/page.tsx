@@ -251,7 +251,9 @@ export default function QuickOfferPage() {
                 <label
                   key={v.id}
                   data-testid={`candidate-option-${v.id}`}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer text-sm ${
+                  // `min-h-[44px]`, matching the fee and submit controls on this page: a radio row
+                  // is a touch target, and 2.5 of vertical padding around 20px text lands at 40.
+                  className={`flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer text-sm ${
                     auctionVehicleId === v.id
                       ? "border-al-primary bg-slate-50"
                       : "border-slate-200 hover:bg-slate-50"

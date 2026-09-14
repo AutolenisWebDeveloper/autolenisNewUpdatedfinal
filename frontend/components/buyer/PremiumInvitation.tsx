@@ -27,7 +27,7 @@
 // the deposit already counts toward it, and makes declining a plain, equal choice rather than a
 // greyed-out afterthought.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -73,13 +73,64 @@ export default function PremiumInvitation({ dealId }: { dealId: string }) {
     }).catch(() => {});
   }, [dealId]);
 
-  // Escape closes it, which is the same decision as "Not now" — §23.2b treats a dismissal and a
-  // decline identically, so there is no quieter way out that avoids recording one.
+  // ── WHAT `aria-modal="true"` ACTUALLY PROMISES ────────────────────────────────────────────────
+  //
+  // The first version of this component declared `role="dialog" aria-modal="true"` and then did
+  // none of what that means: focus stayed on the page behind it, Tab walked straight out into the
+  // deal page a screen reader had been told was inert, and closing dropped focus on `<body>` —
+  // which strands a keyboard user with no position at all. The admin `SlideOver`
+  // (`components/admin/crm/ui/SlideOver.tsx`) documents this exact failure at length because it
+  // shipped with it once; the discipline is copied from there rather than re-derived.
+  //
+  //   on open   remember what had focus, move focus into the panel, lock the page behind it
+  //   while open  Tab and Shift+Tab cycle WITHIN the panel; Escape dismisses
+  //   on close  put focus back where it was
+  //
+  // Escape is a DISMISSAL, not a quieter exit. §23.2b treats a dismissal and a decline identically,
+  // so there is no way out of this dialog that avoids recording one — which is the honest design:
+  // the follow-up email exists precisely because the buyer said no.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+
+    const bodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusable = (): HTMLElement[] =>
+      Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((el) => el.offsetParent !== null);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { dismiss(); return; }
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) { e.preventDefault(); panelRef.current?.focus(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panelRef.current)) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault(); first.focus();
+      }
+    };
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const restore = returnFocusRef.current;
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = bodyOverflow;
+      // Unmount is a close: a keyboard user must land somewhere, and "nowhere" is the one answer
+      // that is never acceptable.
+      restore?.focus();
+    };
   }, [open, dismiss]);
 
   if (!open || !quote) return null;
@@ -87,12 +138,23 @@ export default function PremiumInvitation({ dealId }: { dealId: string }) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="premium-invitation-title"
-      data-testid="premium-invitation"
+      // The backdrop dismisses, matching every other dialog in this app. `onClick` on the overlay
+      // only — a click that started inside the panel and ended on the backdrop (a drag over text)
+      // must not close it, which is why the panel stops propagation rather than the overlay
+      // testing the target.
+      onClick={dismiss}
+      data-testid="premium-invitation-backdrop"
     >
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="premium-invitation-title"
+        data-testid="premium-invitation"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl focus:outline-none"
+      >
         <div className="mb-4 flex items-start justify-between gap-4">
           <h2 id="premium-invitation-title" className="text-lg font-bold text-slate-900">
             Your deal is locked in.
@@ -102,7 +164,9 @@ export default function PremiumInvitation({ dealId }: { dealId: string }) {
             onClick={dismiss}
             aria-label="Close"
             data-testid="premium-invitation-close"
-            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-al-primary"
+            // 44x44 minimum. An 18px icon in `p-1` is a 26px target — under the threshold on every
+            // touch device, and this is the control a buyer reaches for first.
+            className="-m-2 flex h-11 w-11 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-al-primary"
           >
             <X size={18} />
           </button>
