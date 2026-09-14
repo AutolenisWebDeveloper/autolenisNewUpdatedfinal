@@ -35,6 +35,7 @@ import { prisma } from "@/lib/prisma";
 import { DealStatus, Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { logger } from "@/lib/logger";
+import { recapTotals, type RecapProduct } from "./recap-totals";
 import { advanceDealStatus } from "./deal.service";
 import { enqueueOrRaise, cancelByKey } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_7_TEMPLATES, recapCancelKey } from "@/lib/services/comms/state-recheck-registry";
@@ -120,14 +121,45 @@ export interface RecapLine {
   amountCents: number;
 }
 
-/** §11a — separately named, separately priced, separately accepted or declined. */
-export interface OptionalProduct {
-  key: string;
-  label: string;
-  amountCents: number;
-  /** null means UNDECIDED. The buyer cannot confirm the recap while any remains null. */
-  accepted: boolean | null;
+/**
+ * §Stage 11 — THE DEAL STATES IN WHICH THE RECAP MAY STILL BE CHANGED.
+ *
+ * None of the three mutators had one. `disputeRecap` is the sharp case: it supersedes the live
+ * version AND nulls `recap_confirmed_by_buyer_at` / `recap_confirmed_by_dealer_at` on the Deal, so
+ * a dispute raised after both parties confirmed and the deal advanced erased the confirmation
+ * record of a stage the deal had already acted on — from a deal by then at FINANCING_PENDING, or
+ * with a contract out for signature. `confirmRecap` had the boundary only on its ADVANCE
+ * (`expectedFrom: RECAP_PENDING`), which left the confirmation timestamp itself writable
+ * afterwards, and `decideOptionalProduct` had none at all.
+ *
+ * ONE STATE, because the recap is built by the RECAP_PENDING arrival hook (`deal.service.ts:282`)
+ * and `confirmRecap` is what carries the deal out of it. READING stays open at every state —
+ * `currentRecap` is not gated, and a past recap is exactly what a buyer or an auditor needs to be
+ * able to look at.
+ */
+export const RECAP_MUTABLE_DEAL_STATUSES: readonly DealStatus[] = [DealStatus.RECAP_PENDING] as const;
+
+export function assertRecapMutable(status: DealStatus): void {
+  if (!RECAP_MUTABLE_DEAL_STATUSES.includes(status)) {
+    throw new RecapError(
+      "RECAP_STAGE_CLOSED",
+      `This deal is ${status} and has left the recap stage. The figures it agreed are part of the ` +
+        `record now; raise anything still wrong with our Operations team rather than through a ` +
+        `dispute, which would supersede a recap the deal has already acted on.`,
+    );
+  }
 }
+
+/**
+ * §11a — separately named, separately priced, separately accepted or declined.
+ *
+ * The shape is defined ONCE, in `recap-totals`, and aliased here under the name the routes and the
+ * E2E journeys already import. Two identical declarations of the money a buyer is answering for is
+ * how the screen's arithmetic and the row's arithmetic came to disagree in the first place.
+ *
+ * `accepted: null` means UNDECIDED. The buyer cannot confirm the recap while any remains null.
+ */
+export type OptionalProduct = RecapProduct;
 
 export interface RecapItemised {
   vehiclePriceCents: number;
@@ -289,11 +321,16 @@ export async function buildRecap(params: { dealId: string; now?: Date }): Promis
       : trade?.preliminaryAllowanceCents ?? null;
 
   const downPaymentCents = deal.downPaymentCents ?? 0;
-  const amountFinancedCents = amountFinanced({
-    otdCents,
+  // Version 1 is built with every product UNDECIDED, so none of them is in the principal yet.
+  // Same function the confirmation screen runs — see `agreedMoney`.
+  const agreed = agreedMoney({
+    itemisedOtdCents: otdCents,
+    products: optionalProducts,
     downPaymentCents,
     equityCents,
     financingPath: deal.financingPath,
+    aprRate: deal.offer.aprRate,
+    termMonths: deal.offer.termMonths,
   });
 
   const id = recapId(params.dealId, 1);
@@ -310,12 +347,8 @@ export async function buildRecap(params: { dealId: string; now?: Date }): Promis
         equityCents,
         downPaymentCents,
         financingPath: deal.financingPath,
-        amountFinancedCents,
-        estimatedPaymentCents: estimateMonthlyPaymentCents(
-          amountFinancedCents,
-          deal.offer!.aprRate,
-          deal.offer!.termMonths,
-        ),
+        amountFinancedCents: agreed.amountFinancedCents,
+        estimatedPaymentCents: agreed.estimatedPaymentCents,
         delivery: (deal.offer!.deliveryTerms
           ? { terms: deal.offer!.deliveryTerms }
           : Prisma.JsonNull) as Prisma.InputJsonValue,
@@ -427,6 +460,48 @@ export function estimateMonthlyPaymentCents(
   return Math.round((principalCents * monthlyRate * factor) / (factor - 1));
 }
 
+/**
+ * §11a — THE MONEY THE BUYER HAS ACTUALLY AGREED TO, and the one place it is derived.
+ *
+ * `itemisedOtdCents` is the figure the DEALERSHIP reaffirmed (`buildRecap` above takes it from
+ * `confirmedOtdCents`). It contains every optional product the dealership listed, and it is not
+ * rewritten by anything here: §10a compares it, the ceiling test reads it, and it is the evidence
+ * of what was quoted. What changes with the buyer's answers is what they OWE, which is derived.
+ *
+ * THE DEFECT THIS REPLACED. `decideOptionalProduct` flipped `accepted` on one JSON element and
+ * wrote nothing else, so `amount_financed_cents` and `estimated_payment_cents` — both computed at
+ * build time from the full figure — kept declined products in. The confirmation screen had already
+ * been corrected to carve them out, so the buyer read one number and agreed to a row holding
+ * another, and Stage 12 finances the row.
+ *
+ * Undecided products are outside the principal for the reason §11a exists: a product nobody has
+ * answered has not been agreed, and financing it is exactly "first appearing in the contract". The
+ * figure rises as the buyer accepts, which is what the screen's "still to decide" row warns them
+ * about — and it says the same thing because it calls the same `recapTotals`.
+ */
+export function agreedMoney(input: {
+  itemisedOtdCents: number;
+  products: RecapProduct[];
+  downPaymentCents: number;
+  equityCents: number | null;
+  financingPath: string | null;
+  aprRate: number | null;
+  termMonths: number | null;
+}): { agreedOtdCents: number; amountFinancedCents: number; estimatedPaymentCents: number | null } {
+  const agreedOtdCents = recapTotals(input.itemisedOtdCents, input.products).runningTotalCents;
+  const amountFinancedCents = amountFinanced({
+    otdCents: agreedOtdCents,
+    downPaymentCents: input.downPaymentCents,
+    equityCents: input.equityCents,
+    financingPath: input.financingPath,
+  });
+  return {
+    agreedOtdCents,
+    amountFinancedCents,
+    estimatedPaymentCents: estimateMonthlyPaymentCents(amountFinancedCents, input.aprRate, input.termMonths),
+  };
+}
+
 interface Item {
   label: string;
   amountCents: number;
@@ -493,9 +568,12 @@ export async function decideOptionalProduct(params: {
 }): Promise<RecapView> {
   const deal = await prisma.deal.findFirst({
     where: { id: params.dealId, buyerId: params.buyerId },
-    select: { id: true },
+    // The terms come from the OFFER: the recap row stores the principal and the payment, not the
+    // rate they were derived at, so a decision that moves the principal has to re-read them.
+    select: { id: true, status: true, offer: { select: { aprRate: true, termMonths: true } } },
   });
   if (!deal) throw new RecapError("NOT_FOUND", "Deal not found.");
+  assertRecapMutable(deal.status);
 
   const row = await prisma.dealRecap.findFirst({
     where: { dealId: params.dealId, supersededBy: null },
@@ -522,7 +600,13 @@ export async function decideOptionalProduct(params: {
   await runSerializable(async (tx) => {
     const current = await tx.dealRecap.findUnique({
       where: { id: row.id },
-      select: { optionalProducts: true },
+      select: {
+        optionalProducts: true,
+        itemized: true,
+        downPaymentCents: true,
+        equityCents: true,
+        financingPath: true,
+      },
     });
     const products = Array.isArray(current?.optionalProducts)
       ? (current!.optionalProducts as unknown as OptionalProduct[])
@@ -530,9 +614,39 @@ export async function decideOptionalProduct(params: {
     const idx = products.findIndex((p) => p.key === params.productKey);
     if (idx < 0) throw new RecapError("NO_PRODUCT", "That product is not on this recap.");
     products[idx] = { ...products[idx]!, accepted: params.accepted };
+
+    // THE DERIVED MONEY MOVES WITH THE ANSWER. Writing `accepted` alone left the principal and the
+    // quoted payment holding a product the buyer had just declined — see `agreedMoney`. Recomputed
+    // inside the SAME serializable transaction as the flag, so the two can never be observed apart.
+    //
+    // No itemisation means no reaffirmed total to carve from. The figures are then left exactly as
+    // they are rather than recomputed against a fabricated zero, which would report a $0 principal
+    // as though it had been derived.
+    const itemised = (current?.itemized as unknown as RecapItemised | null) ?? null;
+    const agreed =
+      typeof itemised?.otdCents === "number"
+        ? agreedMoney({
+            itemisedOtdCents: itemised.otdCents,
+            products,
+            downPaymentCents: current?.downPaymentCents ?? 0,
+            equityCents: current?.equityCents ?? null,
+            financingPath: current?.financingPath ?? null,
+            aprRate: deal.offer?.aprRate ?? null,
+            termMonths: deal.offer?.termMonths ?? null,
+          })
+        : null;
+
     await tx.dealRecap.update({
       where: { id: row.id },
-      data: { optionalProducts: products as unknown as Prisma.InputJsonValue },
+      data: {
+        optionalProducts: products as unknown as Prisma.InputJsonValue,
+        ...(agreed
+          ? {
+              amountFinancedCents: agreed.amountFinancedCents,
+              estimatedPaymentCents: agreed.estimatedPaymentCents,
+            }
+          : {}),
+      },
     });
   });
 
@@ -557,6 +671,15 @@ export async function confirmRecap(params: {
   now?: Date;
 }): Promise<{ confirmed: boolean; bothConfirmed: boolean; advanced: boolean }> {
   const now = params.now ?? new Date();
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: params.dealId },
+    select: { status: true },
+  });
+  if (!deal) throw new RecapError("NOT_FOUND", "Deal not found.");
+  // `expectedFrom: RECAP_PENDING` below gated the ADVANCE and not the confirmation write, so a
+  // confirmation timestamp could still be stamped on a deal that had left the stage.
+  assertRecapMutable(deal.status);
 
   const row = await prisma.dealRecap.findFirst({
     where: { dealId: params.dealId, supersededBy: null },
@@ -674,6 +797,15 @@ export async function disputeRecap(params: {
 }): Promise<{ version: number; frozen: boolean }> {
   const now = params.now ?? new Date();
   if (!params.reason.trim()) throw new RecapError("REASON_REQUIRED", "Say which figure is wrong.");
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: params.dealId },
+    select: { status: true },
+  });
+  if (!deal) throw new RecapError("NOT_FOUND", "Deal not found.");
+  // The sharpest of the three: this nulls both confirmation timestamps on the Deal. See
+  // `assertRecapMutable`.
+  assertRecapMutable(deal.status);
 
   const row = await prisma.dealRecap.findFirst({
     where: { dealId: params.dealId, supersededBy: null },

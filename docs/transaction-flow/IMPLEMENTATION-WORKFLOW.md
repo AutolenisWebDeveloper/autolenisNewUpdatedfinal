@@ -749,6 +749,45 @@ authorization/validation/atomicity/idempotency/audit/durable-comms/recovery per 
 adversarial review → fix in-scope findings → all gates → phase completion report → **STOP**).
 The §12 preflight is re-asserted at the start of every phase before any Playwright run.
 
+#### 8.0a STANDING MERGE RULE — confirm the head SHA at merge time, and wait for a review in flight
+
+**Owner ruling, 2026-09-14. A rule, not a lesson.** More than once in this programme a pull request
+has merged while work for it was still in flight, and each time that work became a second batch of
+known defects sitting in `main` with no scheduled owner.
+
+| Phase | Merge | What it out-ran |
+| --- | --- | --- |
+| 5 | PR #422, merged 2026-09-13 03:13:45 UTC | PR #424 — *"Six Phase 5 review fixes that missed the #422 merge by one minute"* — opened 03:30:36 UTC, seventeen minutes later (VERIFIED from the pull-request record; the owner recalls seven fixes, and #424's own title says six) |
+| 7 | PR #432, merged 2026-09-14 22:24:02 UTC | an automated review posted at **22:24:44 — forty seconds later** — carrying fourteen findings, two of them §25.1 privacy defects; and commit `a0b573ac`, pushed afterwards, which never reached `main` at all (`git merge-base --is-ancestor a0b573ac origin/main` → false) |
+
+The owner counts a third instance. It was not identified from the pull-request record in the
+session that wrote this section, and is recorded as the owner's rather than as evidence.
+
+**The rule, in two clauses.**
+
+1. **Confirm the head SHA at the moment of merging.** Not the SHA the evidence was gathered on, and
+   not the SHA the last CI run reported — the SHA the merge is about to take. Compare it against
+   the commit every gate in the completion report was actually run against. If they differ, the
+   report describes a different tree and the merge waits for a re-run. Afterwards,
+   `git merge-base --is-ancestor <sha> origin/main` is what proves a commit landed; a green pull
+   request page is not that proof, and in the Phase 7 case it was green while `a0b573ac` sat
+   outside `main`.
+2. **When a review is known to be in flight, wait for it.** "In flight" includes an automated
+   reviewer that has been requested and has not yet posted — not only a human who said they were
+   looking. A review out-run by the merge produces findings against code already in `main`, which
+   is the worst place to receive them: nothing is gated on them, and nobody owns the follow-up.
+
+**What a merge that beats a review costs, so the trade is explicit.** The findings do not go away;
+they move, and they get more expensive. On a branch a fix is one push, one CI run, and no exposure.
+After the merge the same fix needs the branch rebuilt from the new `main`, a second pull request, a
+second full matrix, and any commit that missed the merge carried forward by hand — a merged pull
+request is finished and must not be reused to carry it. It also costs the owner's sequencing: Phase
+8 could not open while the Phase 7 follow-up batch was outstanding.
+
+**Not a reason to hold a merge indefinitely.** A review nobody requested is not in flight, and a
+reviewer asked and silent past the window the owner set is a decision for the owner, not a standing
+block. This rule is about reviews already running.
+
 ### 8.1 Phase table
 
 | # | Phase | Markdown sections | HTML surfaces | §33 steps | Depends on |
@@ -1888,6 +1927,50 @@ job is the authority, and it does not run for this PR because none of its trigge
 | `external_pre_approval_documents` wiring (§13-D54) | **Phase 7 scope, deferred within it** — the checkpoint accepts `externalPreApprovalId` and attaches evidence to the Deal; migrating `documentUrl` into the documents table is a data move with no consumer yet |
 | An exception code for a lost `financing_audit_events` append | **Owner** — the §26 catalogue has no code for it, and adding one is a registry change outside §8.1 row 7. The failure is logged with the deal and the status; the chain entry is the §12c evidence, so the gap is worth closing |
 | `PREMIUM_FOLLOW_UP_FINAL`'s **enqueue** | **plan/upgrade area**, with the copy and suppression rule already deferred there. The renderer, the registry entry and the `alwaysSend` reason exist in this phase; nothing enqueues it, and that is the other area's trigger to own |
+
+#### 8.1g.1 The post-merge review round — fourteen findings, all against merged code (2026-09-14)
+
+PR #432 merged at **22:24:02 UTC**. An automated review posted at **22:24:44** — forty seconds
+later — with fourteen findings, and commit `a0b573ac` was pushed after that and never reached
+`main` (`git merge-base --is-ancestor a0b573ac origin/main` → false). §8.0a is the rule that came
+out of it.
+
+The branch was therefore rebuilt from `origin/main` (`6259eca`) keeping its name, per the
+merged-pull-request rule, `a0b573ac` was carried forward by cherry-pick, and the fourteen were
+re-verified one at a time against `main`'s own source before anything was changed.
+
+**ALL FOURTEEN VERIFIED — none dismissed.** Line numbers are `main` at `6259eca`. Two of the
+fourteen carry a qualification, recorded here because a finding accepted more precisely than it was
+written is worth more than one accepted whole.
+
+| # | `main` at `6259eca` | The defect | Disposition |
+| --- | --- | --- | --- |
+| 1 | `app/api/buyer/financing/route.ts:63` | the explicit-`dealId` branch scoped on `buyerId` alone, while the fallback beside it filtered `status` — a buyer could model a financing scenario against their own CANCELLED, REFUNDED or COMPLETED deal | FIXED — terminal states EXCLUDED rather than the branch narrowed to the fallback's two, which would have removed modelling at FEE_PENDING and CONTRACT_PENDING |
+| 2 | `dealer-reaffirmation.service.ts:1151` | `releaseVehicleHold` checked OWNERSHIP and not LIFECYCLE: the dealership that owned a deal at SIGNING_PENDING could still "release its hold" and take the deal down — CANCELLED, firewall revoked, buyer emailed, dealer-fault SLA filed | FIXED — `PRE_CONTRACT_HOLD_STATUSES` hoisted out of `sweepExpiringHolds`, where it was a local nothing else could reach, and applied to both |
+| 3 | `identity-firewall.service.ts:288` | the upsert's update branch wrote `revokedAt: null, revokedBy: null`, so every re-lift ERASED the record of an ended release — the loss §13-D38 chose option C over option B to avoid | FIXED — the update no longer touches the revocation; a re-lift ARCHIVES the ended release into the row's `description` (`TEXT NOT NULL`) under a compare-and-swap on the timestamp read, then clears the live pointer. Conditional, so an idempotent re-confirm appends nothing |
+| 4 | `identity-firewall.service.ts:449` | the trade packet — VIN, lienholder, verified payoff, photos — shipped ungated, while `shareConsentAt` was SELECTED at `:416` and never read. The co-buyer nine lines above WAS gated on its own | FIXED — gated identically. Not a capability removal: `trade-in.service.ts:261` refuses a submission without consent and `:292` stamps `shareConsentAt` on every one that persists |
+| 5 | `financing-checkpoint.service.ts:283` | the external pre-approval was attached on `{ id, dealId: null }` with the `updateMany` count discarded — naming another buyer's unattached approval attached their lender evidence to this deal, and naming a non-existent one still reported §12c evidence recorded | FIXED — scoped on `buyerId: deal.buyerId`, `OR: [{ dealId: null }, { dealId: <this deal> }]` so a re-record stays idempotent, and `count !== 1` refuses |
+| 6 | `deal-recap.service.ts:532` | `decideOptionalProduct` flipped `accepted` on a JSON element and wrote nothing else, so `amount_financed_cents` and `estimated_payment_cents` — computed at build time from an out-the-door figure containing every product — kept declined ones in. **The server twin of the UI defect `a0b573ac` had just fixed**: the buyer read one number and agreed to a row holding another | FIXED — `agreedMoney` derives both from the same `recapTotals` the confirmation screen renders, recomputed inside the same serializable transaction as the flag. `itemised.otdCents` is NOT rewritten: it is the figure the dealership reaffirmed, §10a compares it, and it is evidence |
+| 7 | `deal-recap.service.ts:682` | `disputeRecap` required no deal state, and it NULLS both confirmation timestamps on the Deal — so a late dispute erased the confirmation record of a stage the deal had already acted on. `confirmRecap` had the boundary only on its ADVANCE (`expectedFrom`), leaving the timestamp writable after | FIXED — `assertRecapMutable` on all three mutators. Reading stays open at every state; gating `currentRecap` would have removed a capability |
+| 8 | `return-to-offers.service.ts:215` | `actorRole: actorId === "system" ? "SYSTEM" : "DEALER"` — a BUYER rejecting a material change (`dealer-reaffirmation.service.ts:856` passes `params.buyerId`) was written into `deal_status_history` as the DEALERSHIP cancelling | FIXED — `standDownActorRole`, derived from the same `DEALER_FAULT` test so the two cannot disagree, with an explicit override for a caller that knows better |
+| 9 | `return-to-offers.service.ts:205` | the cancellation was an unconditional `update` from a status read before the transaction opened | FIXED — compare-and-swap on that status; a lost race abandons the transaction and returns. **QUALIFIED:** the finding's "duplicate side effects" is right for the history row and for `slaViolation.create` (an unconditional create — a second attributable mark on a real business, inflating the repeat-threshold count), and WRONG for two others: the §26 exception dedupes on `raiseException`'s derived `code:refFingerprint` key (`queue-item.service.ts:207`) and the buyer notice on its explicit `idempotencyKey`. Both were already safe |
+| 10 | `financing-checkpoint.service.ts:215` | `deal.status` was SELECTED and never consulted — a cancelled deal still accepted a recorded lender approval, a `financing_terms_locked_at` and an audit-chain entry | FIXED — `assertDealAcceptsFinancing`, a DENYLIST of the three terminal states rather than an allowlist pinned to FINANCING_PENDING, which would refuse Phase 8's second §12a checkpoint |
+| 11 | `financing-checkpoint.service.ts:261` | the §12b transition was validated against a read taken OUTSIDE the transaction and applied with a blind `upsert`: two admins recording different lender terms in the same second both passed, and the later silently replaced the other's APR, term and approved amount | FIXED — read, validate and write are one transaction; the update pins `status: existing.status` and a zero-row result raises `CONCURRENT_MODIFICATION` rather than retrying |
+| 12 | `financing-checkpoint.service.ts:325` | a failed §13-D19 chain append returned the same success to the caller as a successful one, with a log line the only trace — and §13-D19 makes the chain AUTHORITATIVE | FIXED, **but not by the remedy the finding implies.** The checkpoint is still not unwound: that is this file's own ruling and it holds — a committed financing decision must not be rolled back because its record failed. What changed is that it stops reading as success: the call returns `auditRecorded: false`, and a `FINANCING_AUDIT_APPEND_FAILED` row goes to `AdminAuditLog`, which this function already writes and an admin surface already reads. **No §26 code was invented** — the register has none for a broken audit chain and adding one is a registry change, already deferred to the owner in §8.1g's table |
+| 13 | `financing-checkpoint.service.ts:372` | `raiseException(...).catch(() => undefined)` on FAILED/EXPIRED — a buyer whose financing had just failed with no exception raised and nothing saying so | FIXED — the guarded-terminal pattern the rest of the programme uses: it still cannot throw, and it can no longer be silent |
+| 14 | `financing-checkpoint.service.ts:412` | `recordBuyerFinancingPath` selected `status` and ignored it, exactly as #10 did | FIXED. **QUALIFIED:** not independent of #10 — one missing guard observed at two call sites. The guard is applied at both, at this one so the buyer is told their deal has ended rather than told an election was recorded on it |
+
+**No migration. This batch is application-only** — every fix is a guard, a compare-and-swap, a
+scoping clause or a derivation, and `schema.prisma` is untouched. It does not interact with Phase
+8's destructive cutover.
+
+**Where the capability went.** Nothing removed. #4 and #7 are PROGRESSIVE (gated on a condition the
+buyer controls, with reads unaffected); #1, #2, #10, #14 are PROGRESSIVE on deal lifecycle; #3, #5,
+#6, #8, #9, #11, #12, #13 are KEPT with corrected behaviour. `recap-totals.ts` MOVED from
+`components/buyer/` to `lib/services/deal/` so the service and the screen share one implementation
+of the money — golden rule 2, and the reason #6 existed at all. `test:buyer-ui`, added by
+`a0b573ac` for a directory that is now empty, is REMOVED from `package.json`; the relocated tests
+are covered by the bare `test` script and `test:all` is back to main's 70 segments.
 
 ### 8.2 Phase scopes
 

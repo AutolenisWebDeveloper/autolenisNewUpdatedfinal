@@ -60,9 +60,23 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // THE EXPLICIT BRANCH WAS SCOPED BY BUYER ALONE while the fallback beside it filtered status, so
+  // a buyer passing the id of their own CANCELLED, REFUNDED or COMPLETED deal got a financing
+  // scenario modelled against it. A scenario is a calculator artefact, not a checkpoint — but it
+  // is stored, keyed to the deal, and read back on a surface that presents it as this deal's
+  // financing.
+  //
+  // The terminal states are EXCLUDED rather than the live ones enumerated: narrowing this branch
+  // to the fallback's two would remove the ability to model financing at FEE_PENDING or
+  // CONTRACT_PENDING, which it has today. The fallback keeps its own tighter filter because its
+  // job is to pick the ONE deal the buyer is working on, not to validate a named one.
   const deal = parsed.data.dealId
     ? await prisma.deal.findFirst({
-        where: { id: parsed.data.dealId, buyerId: buyer.id },
+        where: {
+          id: parsed.data.dealId,
+          buyerId: buyer.id,
+          status: { notIn: ["CANCELLED", "REFUNDED", "COMPLETED"] },
+        },
         select: { id: true },
       })
     : await prisma.deal.findFirst({

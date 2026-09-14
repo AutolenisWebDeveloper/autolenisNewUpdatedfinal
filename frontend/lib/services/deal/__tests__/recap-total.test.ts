@@ -1,6 +1,6 @@
 // §11a — the out-the-door total a buyer is shown must exclude the products they did not accept.
 //
-// Run with:  npx tsx --test components/buyer/__tests__/recap-total.test.ts
+// Run with:  npx tsx --test lib/services/deal/__tests__/recap-total.test.ts
 //
 // FOUND BY A REVIEW BOT AFTER TWO REVIEW PASSES MISSED IT. `RecapConfirmClient` rendered "Your
 // out-the-door total" as `money(baseOtdCents)` — the reaffirmed figure, which CONTAINS every
@@ -80,7 +80,11 @@ test("the component uses this arithmetic rather than its own", () => {
   // the two drift and the screen starts contradicting itself again.
   const { readFileSync } = require("node:fs") as typeof import("node:fs");
   const src = readFileSync(`${process.cwd()}/components/buyer/RecapConfirmClient.tsx`, "utf8");
-  assert.match(src, /from "\.\/recap-totals"/, "RecapConfirmClient must import recapTotals");
+  assert.match(
+    src,
+    /from "@\/lib\/services\/deal\/recap-totals"/,
+    "RecapConfirmClient must import recapTotals from the service layer — golden rule 2 puts the money there",
+  );
   assert.equal(
     /\{money\(baseOtdCents\)\}/.test(src),
     false,

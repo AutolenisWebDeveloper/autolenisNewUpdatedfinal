@@ -1,9 +1,15 @@
-// §Stage 11 / §11a — the arithmetic behind the recap's running total.
+// §Stage 11 / §11a — the arithmetic behind the recap's running total, and the ONE place it lives.
 //
 // Extracted from `RecapConfirmClient` so it can be tested without a browser. It was inline, and
 // inline is why the defect survived two review passes: the component rendered
 // `money(baseOtdCents)` for "Your out-the-door total" one row under "Declined (not in your
 // total)", and nothing could assert the contradiction.
+//
+// IT SITS UNDER `lib/services/deal` RATHER THAN BESIDE THE COMPONENT because the same carve-out
+// decides what the buyer is asked to agree to AND what `deal-recap.service` persists as the
+// amount financed. A copy on each side is how the screen and the stored principal come to
+// disagree — which is the second defect this file was moved to fix. It imports nothing (no
+// Prisma, no React), so both sides can use it.
 
 export interface RecapProduct {
   key: string;

@@ -20,7 +20,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, AlertCircle } from "lucide-react";
-import { recapTotals, type RecapProduct } from "./recap-totals";
+import { recapTotals, type RecapProduct } from "@/lib/services/deal/recap-totals";
 
 export type { RecapProduct };
 

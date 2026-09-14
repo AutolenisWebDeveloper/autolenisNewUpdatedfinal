@@ -1029,29 +1029,38 @@ export async function rejectReaffirmation(params: {
 }
 
 /**
- * §10c — "If the contract has not been requested before the hold expires, the dealership is asked
- * to extend or release."
+ * §10c — THE WINDOW IN WHICH THE VEHICLE HOLD MEANS ANYTHING.
  *
- * Note the predicate is the CONTRACT REQUEST, not the hold date alone: a deal already at
- * CONTRACT_PENDING or beyond has passed the point the hold exists to protect, so its expiry is
- * not an exception.
+ * The predicate is the CONTRACT REQUEST, not the hold date alone: a deal already at
+ * CONTRACT_PENDING or beyond has passed the point the hold exists to protect, so its expiry is not
+ * an exception — and, the correction this list was hoisted for, its RELEASE is not a stand-down.
+ *
+ * It lived inside `sweepExpiringHolds` as a local, where `releaseVehicleHold` could not reach it.
+ * That function checked ownership and stopped: the dealership that owned a deal at SIGNING_PENDING
+ * could still "release its hold" and take the whole deal down with it — CANCELLED, the firewall
+ * revoked, the buyer emailed, a dealer-fault SLA violation filed. One list, both halves of the
+ * decision, for the same reason the ownership check is shared: two copies drift.
+ */
+export const PRE_CONTRACT_HOLD_STATUSES: readonly DealStatus[] = [
+  DealStatus.DEALER_CONFIRMATION,
+  DealStatus.RECAP_PENDING,
+  DealStatus.FINANCING_PENDING,
+  DealStatus.FEE_PENDING,
+  DealStatus.FEE_PAID,
+  DealStatus.INSURANCE_PENDING,
+] as const;
+
+/**
+ * §10c — the sweep that asks the dealership to extend or release.
  */
 export async function sweepExpiringHolds(now: Date = new Date()): Promise<{
   expiring: number;
   expired: number;
 }> {
-  const PRE_CONTRACT: DealStatus[] = [
-    DealStatus.DEALER_CONFIRMATION,
-    DealStatus.RECAP_PENDING,
-    DealStatus.FINANCING_PENDING,
-    DealStatus.FEE_PENDING,
-    DealStatus.FEE_PAID,
-    DealStatus.INSURANCE_PENDING,
-  ];
   const deals = await prisma.deal.findMany({
     where: {
       vehicleHoldUntil: { not: null, lte: new Date(now.getTime() + 24 * 3600_000) },
-      status: { in: PRE_CONTRACT },
+      status: { in: [...PRE_CONTRACT_HOLD_STATUSES] },
     },
     select: { id: true, vehicleHoldUntil: true, buyerId: true, status: true },
     take: 200,
@@ -1142,7 +1151,7 @@ export async function releaseVehicleHold(params: {
 }): Promise<void> {
   const owned = await prisma.deal.findUnique({
     where: { id: params.dealId },
-    select: { dealerId: true, offer: { select: { dealerId: true } } },
+    select: { status: true, dealerId: true, offer: { select: { dealerId: true } } },
   });
   if (!owned) throw new ReaffirmationError("NOT_FOUND", "Deal not found.");
   // Either id is ownership — `Offer.dealerId` is the immutable attribution and `Deal.dealerId` is
@@ -1150,6 +1159,21 @@ export async function releaseVehicleHold(params: {
   // `extendVehicleHold` uses, so the two halves of one decision cannot drift.
   if (owned.dealerId !== params.dealerId && owned.offer?.dealerId !== params.dealerId) {
     throw new ReaffirmationError("FORBIDDEN", "This deal belongs to another dealership.");
+  }
+  // OWNERSHIP WAS CHECKED AND LIFECYCLE WAS NOT, which left the OWNER of a deal at SIGNING_PENDING
+  // able to cancel it through a control §10c scopes to the pre-contract window. Same list the
+  // sweep uses — see `PRE_CONTRACT_HOLD_STATUSES`.
+  //
+  // SECOND, NOT FIRST. This check names the deal's status in its message, and the route maps
+  // FORBIDDEN to 404 precisely so that "a dealership must not learn that a deal exists but is not
+  // theirs". Ordered the other way, a dealership POSTing another's deal id would be told that
+  // deal's stage instead of a 404 — a new disclosure introduced by the fix for a different one.
+  if (!PRE_CONTRACT_HOLD_STATUSES.includes(owned.status)) {
+    throw new ReaffirmationError(
+      "HOLD_NOT_RELEASABLE",
+      `This deal is ${owned.status}. §10c's hold covers the window before the contract is ` +
+        `requested; past it, releasing is not a stand-down and this deal is not yours to cancel.`,
+    );
   }
   await returnToRemainingOffers({
     dealId: params.dealId,
