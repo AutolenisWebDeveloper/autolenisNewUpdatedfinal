@@ -16,15 +16,146 @@ import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifica
 // here to keep offer.service's public surface unchanged for existing importers.
 import { assertOtdComponentsMatch } from "./otd";
 import { classifyFeeItems } from "./junk-fee.service";
-import { defaultOfferExpiry } from "./offer-validity";
+import { defaultOfferExpiry, qualifiedOfferWhere } from "./offer-validity";
 import { computeFeatureMatch } from "./feature-match";
 import { recheckApproval } from "@/lib/services/prequal/approval-recheck";
 export { assertOtdComponentsMatch };
+
+/**
+ * A refusal a DEALERSHIP is meant to read, as opposed to an internal failure.
+ *
+ * WHY A CLASS AND NOT A STRING MATCH. The routes mapped `err.message` onto safe copy with
+ * `msg.includes("already submitted")`, `"not active"`, `"not invited"`, `"expired"` — four English
+ * substrings. Every refusal this phase added ("your offer must name the one it answers", "not an
+ * active candidate", "you already have a live offer for this vehicle", the §8b cap, the OTD
+ * breakdown) matches none of them, so each collapsed to "Failed to submit offer. Please try
+ * again." — a dealer told nothing at all, and the previously-mapped duplicate-offer case silently
+ * regressed to the same opaque string.
+ *
+ * A string map cannot be kept correct: it fails OPEN into uselessness every time a refusal is
+ * added, and nothing fails when it does. Marking the refusal where it is raised is the only form
+ * that stays true — a new refusal is dealer-readable because its author said so, and an unmarked
+ * throw stays generic, which is the right default for an internal error whose text may carry an
+ * id or a buyer's figure. `evaluateBuyerBudget` is the reason that default matters: its verdict
+ * names the buyer's approved ceiling, and §13-D40 keeps it out of the throw path entirely.
+ */
+export class OfferRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OfferRefusedError";
+  }
+}
+
+/**
+ * `assertOtdComponentsMatch`, re-raised as a dealer-readable refusal.
+ *
+ * `otd.ts` is deliberately dependency-free — the concierge conversion path validates prices with
+ * the same assertion — so it cannot import `OfferRefusedError` without a cycle. Its message is
+ * arithmetic ("components sum to N cents but otdPriceCents is M") and names no buyer figure, so
+ * re-raising it as a refusal is safe and is what lets a dealership see WHICH number is wrong
+ * instead of "Failed to submit offer. Please try again."
+ */
+function assertOtdRefusable(input: Parameters<typeof assertOtdComponentsMatch>[0]) {
+  try {
+    assertOtdComponentsMatch(input);
+  } catch (err) {
+    throw new OfferRefusedError(err instanceof Error ? err.message : "OTD breakdown mismatch");
+  }
+}
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
 
 /** §8b: "capped at three offers per rooftop". */
 const MAX_LIVE_OFFERS_PER_ROOFTOP = 3;
+
+/**
+ * THE ONLY SHAPE OF AN `Offer` THAT MAY REACH A DEALERSHIP — §29 P3.
+ *
+ * WHY THIS EXISTS NOW AND NOT BEFORE. `/api/dealer/offers` returned the row unprojected
+ * (`findMany({ include: { auction: true } })`, and `successResponse({ offer })` straight from
+ * `submitOffer`). That was harmless while three column groups were always null in production, and
+ * this phase filled every one of them:
+ *
+ *   `rank_cash` / `rank_monthly` / `rank_balanced` / `best_price_score`
+ *        written onto the offer rows by `persistRanking` at close. A dealership that learns it
+ *        ranked #1 of seven learns something about the other six — the P3 leak the sibling detail
+ *        route was already projected against.
+ *
+ *   `disqualified_reason`
+ *        written by §13-D40's record-instead-of-throw. It carries the buyer's approved ceiling as
+ *        a formatted dollar figure, and `GET /api/dealer/auctions/[auctionId]` coarsens that exact
+ *        number into a RANGE precisely so a dealership cannot price to it. It also carries the
+ *        buyer's prequalification STATE ("Your approval has expired…"), which is credit
+ *        information about a third party. One over-budget probe would have returned it.
+ *
+ * `isDisqualified` IS returned. The dealership must be able to see that its offer will not be
+ * shown; what it may not see is the number or the reason. The boolean discloses nothing the
+ * dealership cannot already infer from its own price.
+ *
+ * ONE DEFINITION, used by every dealer-facing reader, because three hand-maintained projections
+ * would drift and the drift would be invisible. A column added to `Offer` from now on is absent
+ * from a dealer response until someone adds it here deliberately — which is the property being
+ * bought, and `app/api/dealer/__tests__/dealer-isolation-pins.test.ts` asserts it.
+ */
+export const DEALER_OFFER_SELECT = {
+  id: true,
+  auctionId: true,
+  auctionVehicleId: true,
+  dealerId: true,
+  rooftopId: true,
+  status: true,
+  otdPriceCents: true,
+  vehiclePriceCents: true,
+  taxCents: true,
+  feesCents: true,
+  junkFeeItems: true,
+  docFeeCents: true,
+  titleRegistrationCents: true,
+  deliveryFeeCents: true,
+  deliveryTerms: true,
+  addOnItems: true,
+  incentiveItems: true,
+  includesFinancing: true,
+  aprRate: true,
+  termMonths: true,
+  version: true,
+  originalOfferId: true,
+  isDisqualified: true,
+  expiresAt: true,
+  submittedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  notes: true,
+  vin: true,
+  stockNumber: true,
+  odometer: true,
+  exteriorColor: true,
+  interiorColor: true,
+  vehicleYear: true,
+  vehicleMake: true,
+  vehicleModel: true,
+  vehicleTrim: true,
+  vehicleCondition: true,
+  photoUrls: true,
+  conditionReportUrl: true,
+  vehicleHistoryReportUrl: true,
+  availabilityConfirmed: true,
+  availabilityConfirmedAt: true,
+  canCompleteSaleConfirmed: true,
+  outOfStateRegistrationSupported: true,
+  // The auction is projected for the same reason the offer is: an unprojected join hands the
+  // dealership `buyer_id`, `deposit_id`, `vehicle_request_id` and `sourcing_case_id` — internal
+  // keys the detail route strips deliberately so they cannot be correlated across endpoints.
+  auction: {
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      endsAt: true,
+      closedAt: true,
+    },
+  },
+} as const satisfies Prisma.OfferSelect;
 
 function assertFinancingConsistent(input: {
   includesFinancing?: boolean;
@@ -33,13 +164,13 @@ function assertFinancingConsistent(input: {
 }) {
   if (!input.includesFinancing) return;
   if (input.aprRate == null || input.termMonths == null) {
-    throw new Error("Financing offers require both aprRate and termMonths");
+    throw new OfferRefusedError("Financing offers require both aprRate and termMonths");
   }
   if (input.aprRate < 0 || input.aprRate > 50) {
-    throw new Error("APR must be between 0% and 50%");
+    throw new OfferRefusedError("APR must be between 0% and 50%");
   }
   if (input.termMonths < 6 || input.termMonths > 96) {
-    throw new Error("Term must be between 6 and 96 months");
+    throw new OfferRefusedError("Term must be between 6 and 96 months");
   }
 }
 
@@ -193,7 +324,7 @@ export async function submitOffer(input: OfferInput) {
   const now = new Date();
 
   // Server-side OTD arithmetic — components must sum to total OTD.
-  assertOtdComponentsMatch(input);
+  assertOtdRefusable(input);
   // Financing offer internal consistency.
   assertFinancingConsistent(input);
   // OTD must not exceed buyer's approved budget.
@@ -220,12 +351,12 @@ export async function submitOffer(input: OfferInput) {
       where: { auctionId: input.auctionId, dealerId: input.dealerId },
     });
     if (!invitation && !input.allowWithoutInvitation) {
-      throw new Error("Dealer not invited to this auction");
+      throw new OfferRefusedError("Dealer not invited to this auction");
     }
 
     const auction = await tx.auction.findUnique({ where: { id: input.auctionId } });
-    if (!auction || auction.status !== "ACTIVE") throw new Error("Auction is not active");
-    if (auction.endsAt && auction.endsAt < now) throw new Error("Auction has expired");
+    if (!auction || auction.status !== "ACTIVE") throw new OfferRefusedError("Auction is not active");
+    if (auction.endsAt && auction.endsAt < now) throw new OfferRefusedError("Auction has expired");
 
     // ── §8c CANDIDATE BINDING (defect 10) ────────────────────────────────────────────────────
     //
@@ -260,10 +391,10 @@ export async function submitOffer(input: OfferInput) {
     });
     if (candidates.length > 0) {
       if (!input.auctionVehicleId) {
-        throw new Error("This auction has specific vehicles — your offer must name the one it answers.");
+        throw new OfferRefusedError("This auction has specific vehicles — your offer must name the one it answers.");
       }
       if (!candidates.some((c) => c.id === input.auctionVehicleId)) {
-        throw new Error("That vehicle is not an active candidate on this auction.");
+        throw new OfferRefusedError("That vehicle is not an active candidate on this auction.");
       }
     }
     // No candidates: a CUSTOM REQUEST, where §8c binds the offer to the criteria set instead. The
@@ -316,7 +447,13 @@ export async function submitOffer(input: OfferInput) {
     // The rooftop is the invitation's, not the caller's: §7 issues one invitation per rooftop, so
     // that row is the authority on which rooftop this dealer is bidding for. Taking it from the
     // request body would let a dealer spend another rooftop's offer budget.
-    const rooftopId = input.rooftopId ?? invitation?.rooftopId ?? null;
+    //
+    // THE ORDER SAYS THAT, AND IT USED TO SAY THE OPPOSITE — `input.rooftopId ?? invitation…` let
+    // the caller win. Unreachable today (neither dealer route nor admin route accepts the field),
+    // but a precedence that contradicts the paragraph above it is a defect waiting for its first
+    // writer. `input.rooftopId` remains the STAFF-INTAKE fallback: an admin entering an offer for
+    // an outside dealership has no invitation row to take it from.
+    const rooftopId = invitation?.rooftopId ?? input.rooftopId ?? null;
 
     // ── §8b's TWO CAPS ───────────────────────────────────────────────────────────────────────
     //
@@ -357,12 +494,12 @@ export async function submitOffer(input: OfferInput) {
     });
 
     if (liveForScope.some((o) => o.auctionVehicleId === auctionVehicleId)) {
-      throw new Error(
+      throw new OfferRefusedError(
         "You already have a live offer for this vehicle on this auction. Use the revise endpoint to update it.",
       );
     }
     if (liveForScope.length >= MAX_LIVE_OFFERS_PER_ROOFTOP) {
-      throw new Error(
+      throw new OfferRefusedError(
         `A dealership may hold at most ${MAX_LIVE_OFFERS_PER_ROOFTOP} live offers on one auction (§8b).`,
       );
     }
@@ -435,8 +572,16 @@ export async function submitOffer(input: OfferInput) {
   const auction = await prisma.auction.findUnique({ where: { id: input.auctionId } });
   if (!auction) return offer;
 
-  // Notify buyer of new offer (count update only — no amount/identity)
-  const offerCount = await prisma.offer.count({ where: { auctionId: input.auctionId, status: "SUBMITTED" } });
+  // Notify buyer of new offer (count update only — no amount/identity).
+  //
+  // `qualifiedOfferWhere()`, not a bare `status: SUBMITTED`. §13-D40 made an over-budget offer a
+  // RECORD rather than a throw, so `SUBMITTED` now includes offers the buyer will never be shown
+  // and cannot select: the bell read "You now have 1 offer in your auction" for an offer $5,000
+  // over their approved ceiling, and the 0 → 1 email below fired for it. The offers page header
+  // and the close notice both count with this predicate; this was the one site left behind.
+  const offerCount = await prisma.offer.count({
+    where: { auctionId: input.auctionId, ...qualifiedOfferWhere() },
+  });
   await prisma.notification.create({
     data: {
       buyerId: auction.buyerId,
@@ -551,14 +696,14 @@ export async function submitOffer(input: OfferInput) {
 
 export async function reviseOffer(offerId: string, dealerId: string, input: Partial<OfferInput>) {
   const original = await prisma.offer.findFirst({ where: { id: offerId, dealerId, status: "SUBMITTED" } });
-  if (!original) throw new Error("Offer not found or not revisionable");
-  if (original.version >= MAX_OFFER_REVISIONS + 1) throw new Error("Max revisions reached");
+  if (!original) throw new OfferRefusedError("Offer not found or not revisionable");
+  if (original.version >= MAX_OFFER_REVISIONS + 1) throw new OfferRefusedError("Max revisions reached");
 
   // Validate auction still active and not past deadline.
   const auction = await prisma.auction.findUnique({ where: { id: original.auctionId } });
-  if (!auction || auction.status !== "ACTIVE") throw new Error("Auction closed");
+  if (!auction || auction.status !== "ACTIVE") throw new OfferRefusedError("Auction closed");
   if (auction.endsAt && auction.endsAt < new Date()) {
-    throw new Error("Auction has expired — revisions are no longer accepted");
+    throw new OfferRefusedError("Auction has expired — revisions are no longer accepted");
   }
 
   // Merge input over original for full validation.
@@ -572,7 +717,7 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
     aprRate: input.aprRate ?? original.aprRate ?? undefined,
     termMonths: input.termMonths ?? original.termMonths ?? undefined,
   };
-  assertOtdComponentsMatch(merged);
+  assertOtdRefusable(merged);
   assertFinancingConsistent(merged);
   const budget = await evaluateBuyerBudget(original.auctionId, merged.otdPriceCents, "offer_revision");
 

@@ -293,13 +293,14 @@ async function evaluate() {
   return evaluateReadiness("vr_1", CASE as never, db(), new Date("2026-09-11T00:00:00Z"));
 }
 
-async function launch(caseOverrides: Record<string, unknown> = {}) {
+async function launch(caseOverrides: Record<string, unknown> = {}, allowRelaunch = false) {
   const { launchFromCase } = await import("@/lib/services/sourcing/launch-readiness.service");
   return launchFromCase(
     "vr_1",
     { ...CASE, ...caseOverrides } as never,
     db(),
     new Date("2026-09-11T00:00:00Z"),
+    allowRelaunch,
   );
 }
 
@@ -685,7 +686,9 @@ test("§13-D39: a CLOSED original does not block the relaunch — the readiness 
     id: "auc_original", depositId: "dep_1", status: "CLOSED",
     originalAuctionId: null, relaunchCount: 0, createdAt: new Date(2026, 0, 1),
   }];
-  const res = await launch();
+  // `allowRelaunch: true` — spending §8c's one free retry is an explicit Operations act. The
+  // default refusal is pinned separately below.
+  const res = await launch({}, true);
   assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
   assert.equal(ctrl.auctionCreates.length, 1, "no relaunch auction was created");
   assert.equal(
@@ -721,11 +724,41 @@ test("§13-D39: §8c's ONE relaunch — a second is refused with the buyer's mon
     { id: "auc_retry", depositId: "dep_1", status: "CLOSED",
       originalAuctionId: "auc_original", relaunchCount: 0, createdAt: new Date(2026, 0, 2) },
   ];
-  const res = await launch();
+  const res = await launch({}, true);
   assert.equal(res.launched, false);
   assert.equal(ctrl.auctionCreates.length, 0, "a second relaunch was minted on one $99");
   assert.match(
     res.blockers.join(" | "), /one relaunch without a second \$99/,
     "the refusal did not name §8c's rule",
   );
+});
+
+test("§8c: a RECONCILER cannot spend the buyer's free relaunch — that is an Operations act", async () => {
+  // `deposit-activation.service.ts` states the rule: "a relaunch is an explicit Operations act
+  // under §8c, never something a reconciler infers." Before D39 this function refused on a CLOSED
+  // original, so the question could not arise; relaxing that refusal — correctly, since a terminal
+  // original is the PRECONDITION for a relaunch — also made it possible for `sweepSourcingCases`
+  // to create one by itself. A case left in READY_TO_LAUNCH whose auction was later cancelled is
+  // re-swept by `coverage-hold-reconcile`, and would have burned the retry with no operator
+  // decision and nothing to review.
+  ctrl.auctions = [{
+    id: "auc_original", depositId: "dep_1", status: "CANCELLED",
+    originalAuctionId: null, relaunchCount: 0, createdAt: new Date(2026, 0, 1),
+  }];
+  const res = await launch(); // the DEFAULT — what the sweep gets
+  assert.equal(res.launched, false);
+  assert.equal(ctrl.auctionCreates.length, 0, "a reconciler minted the §8c relaunch by itself");
+  assert.match(
+    res.blockers.join(" | "), /explicit Operations decision/,
+    "the case was dropped silently instead of being HELD with a reason an operator can act on",
+  );
+});
+
+test("the ORIGINAL launch is untouched — a deposit with no prior auction still launches", async () => {
+  // The gate must not turn the reconciler off. Only a RELAUNCH needs authorisation.
+  ctrl.auctions = [];
+  const res = await launch();
+  assert.equal(res.launched, true, `blocked on: ${res.blockers.join(" | ")}`);
+  assert.equal(ctrl.auctionCreates.length, 1);
+  assert.equal(ctrl.auctionCreates[0].originalAuctionId, undefined, "an original declared a parent");
 });

@@ -630,10 +630,30 @@ export async function sweepUnselectedAuctions(now: Date = new Date(), limit = 50
       postCloseProcessedAt: { not: null },
       // Nothing accepted...
       offers: { none: { status: OfferStatus.ACCEPTED } },
-      // ...and at least one offer that HAS lapsed, which is what makes this auction interesting.
-      AND: [{ offers: { some: { status: OfferStatus.EXPIRED } } }],
+      // ...and at least one QUALIFIED offer that HAS lapsed.
+      //
+      // `isDisqualified: false` is the whole difference between telling a buyer something true and
+      // telling them something they know to be false. An auction where every bid came in over the
+      // buyer's approved ceiling takes the ZERO-OFFER branch at close — `qualified.length === 0` —
+      // so the buyer has already been told no offers were received and `ALL_OFFERS_EXCEED_BUDGET`
+      // is already open. Seventy-two hours later `expireLapsedOffers` flips those same rows to
+      // EXPIRED (`lapsedOfferWhere` does not exclude disqualified offers, deliberately: a stale
+      // row should stop being live whatever its verdict), and without this clause the auction
+      // became a sweep candidate — a second case, and an email telling that buyer their offers had
+      // "reached their expiration without a selection".
+      AND: [{ offers: { some: { status: OfferStatus.EXPIRED, isDisqualified: false } } }],
+      // THE TERMINAL MARKER, without a column. The predicate above stays true forever for a
+      // finished auction, so every auction this sweep has already handled remained a candidate on
+      // every later tick — and with a bounded `take`, once fifty of them accumulated, the
+      // fifty-first buyer was never reached and nothing reported it. The case itself is the
+      // marker: an auction that carries `BUYER_DOES_NOT_SELECT` has been swept, whatever the
+      // case's status.
+      queueItems: { none: { exceptionCode: "BUYER_DOES_NOT_SELECT" } },
     },
     select: { id: true, buyerId: true, depositId: true, vehicleRequestId: true },
+    // Oldest first. An unordered `findMany` with a `take` returns an arbitrary page; the buyer who
+    // has been waiting longest should not be the one an arbitrary page leaves out.
+    orderBy: { closedAt: "asc" },
     take: limit,
   });
 
@@ -649,6 +669,12 @@ export async function sweepUnselectedAuctions(now: Date = new Date(), limit = 50
     try {
       await raiseException({
         code: "BUYER_DOES_NOT_SELECT",
+        // STRICT ONCE-EVER. Without an explicit key `raiseException` dedupes on (code, refs) only
+        // while the row is LIVE: the moment Operations resolved the case, the next tick took the
+        // `#2` suffix and opened a new OPEN row, and after fifty resolutions it threw on every
+        // tick forever. The condition is terminal by construction — a closed auction whose offers
+        // have all lapsed cannot become un-lapsed — which is exactly what the explicit key means.
+        idempotencyKey: `BUYER_DOES_NOT_SELECT:${auction.id}`,
         auctionId: auction.id,
         buyerId: auction.buyerId,
         depositId: auction.depositId,

@@ -4976,10 +4976,10 @@ Schema additions the §8.2 Phase 1 list does **not** enumerate and that this are
 | K27-1325 | MD §27.1 L1325 | Auction nearing zero offers → Ops alert | `checkSLAs` SYSTEM_ALERT without dedup `lib/services/monitoring/health.service.ts:509-524`; `vercel.json:116-117` | PARTIAL | none | `raiseException` idempotent per auction; no per-tick re-alert | 6 | unit | Health tests: same auction → one row | none | `SYSTEM_ALERT` | TO EXTEND |
 | K27-1326 | MD §27.1 L1326 | Offers ready → report + Premium second mention | OB `resend.service.ts:428-438`; no `premium` in template (`rg -i premium lib/services/email/templates`) | PARTIAL | Durable OB key `offers-ready-${auctionId}` | Add Premium copy (touchpoint 2) | 6 | unit, visual | Template test asserts Premium block; visual baseline | none | none | TO EXTEND |
 | K27-1327 | MD §27.1 L1327 | Zero offers → outcome + recovery path (buyer + Ops) | Dealer OB + buyer IA `auction.service.ts:161-192` | PARTIAL | atomic close claim | Buyer email via dispatcher + `raiseException` | 6 | unit | `auction-close.test.ts` | none | none | TO EXTEND |
-| K27-1328a | MD §27.1 L1328 | Buyer selects offer → confirmation to the buyer, award notice to the winning dealership | Buyer OB `select-offer/route.ts:114`; dealer OB via award drain `dealer-award.ts:272` | PARTIAL | `deal-selected-${dealId}` key; award marker | Dealer row becomes a dispatcher row keyed on the award marker | 6 | unit | Award dispatch test | none | R1/OB | **AS BUILT (Phase 6)** |
+| K27-1328a | MD §27.1 L1328 | Buyer selects offer → confirmation to the buyer, award notice to the winning dealership | Buyer OB `select-offer/route.ts:114`; dealer OB via award drain `dealer-award.ts:272` | PARTIAL | `deal-selected-${dealId}` key; award marker | Dealer row becomes a dispatcher row keyed on the award marker | 6 | unit | Award dispatch test | none | R1/OB | TO EXTEND — **AS BUILT (Phase 6)** |
 | K27-1328b | MD §27.1 L1328 | Buyer selects offer → REAFFIRMATION REQUEST to the winning dealership | none | MISSING | none | **SPLIT FROM K27-1328 BY OWNER RULING 2026-09-13 — FOLLOW N6.** Phase 6 sends the award notice and lands the reaffirmation-request enqueue as a NAMED NO-OP SEAM with its dedup key reserved; Phase 7 fills it. Splitting the row is what stops Phase 7 re-litigating whether the award notice was ever sent | 7 | unit | `reaffirmation.test.ts` asserts the seam's key is the one Phase 7 enqueues on | none | none | TO IMPLEMENT (Phase 7) |
-| K27-1328c | **NEW ROW — §27.1 carries none.** §9 L637 "Offers carry an expiration. Remind the buyer before offers expire" | Pre-expiry selection reminder → Buyer | QStash `offer-follow-up` sent "before it expires" copy against a column with NO WRITER (`offers.expires_at` shipped in the Phase 1 wave unwritten), so the deadline in that copy referred to nothing | MISSING | none | **ADDED BY OWNER RULING 2026-09-13** ("build the pre-expiry selection reminder, adding the §27.1 row since the reminder is being added anyway"). ONE dispatcher row per auction, scheduled at close for `SELECTION_REMINDER_LEAD_HOURS` (24) before the EARLIEST expiry across the qualified offers, `cancel_key` cancelled inside the selection transaction, send-time recheck refusing on an ACCEPTED offer or an empty qualified set. Skipped when the lead time has already passed | 6 | unit | `auction-close-path.test.ts` — earliest-expiry scheduling, the no-lead-time case, and that a failed enqueue does not release the close claim | none | `app/api/jobs/offer-follow-up/route.ts` (REPORTED superseded, left for in-flight schedules) | **AS BUILT (Phase 6)** |
-| K27-1328d | **NEW ROW — §27.1 carries none.** §9 L637 "non-selection → revalidation with dealerships or closure; buyer informed either way" | Every offer lapsed without a selection → Buyer + Operations | `BUYER_DOES_NOT_SELECT` sat in the §26 catalogue with `raisedByPhase: 6` and NO RAISE SITE; the auction simply sat there and the buyer heard nothing | MISSING | none | Added with the reminder above. `sweepUnselectedAuctions` runs in the close cron directly after the expiry sweep; raises the case and enqueues the notice; idempotent on both (the exception on (code, refs) while open, the notice on an auction-scoped key). S16 preserved — it moves no money | 6 | unit | `unselected-sweep.test.ts`, including the S16 no-refund assertion | none | none | **AS BUILT (Phase 6)** |
+| K27-1328c | **NEW ROW — §27.1 carries none.** §9 L637 "Offers carry an expiration. Remind the buyer before offers expire" | Pre-expiry selection reminder → Buyer | QStash `offer-follow-up` sent "before it expires" copy against a column with NO WRITER (`offers.expires_at` shipped in the Phase 1 wave unwritten), so the deadline in that copy referred to nothing | MISSING | none | **ADDED BY OWNER RULING 2026-09-13** ("build the pre-expiry selection reminder, adding the §27.1 row since the reminder is being added anyway"). ONE dispatcher row per auction, scheduled at close for `SELECTION_REMINDER_LEAD_HOURS` (24) before the EARLIEST expiry across the qualified offers, `cancel_key` cancelled inside the selection transaction, send-time recheck refusing on an ACCEPTED offer or an empty qualified set. Skipped when the lead time has already passed | 6 | unit | `auction-close-path.test.ts` — earliest-expiry scheduling, the no-lead-time case, and that a failed enqueue does not release the close claim | none | `app/api/jobs/offer-follow-up/route.ts` (REPORTED superseded, left for in-flight schedules) | TO IMPLEMENT — **AS BUILT (Phase 6)** |
+| K27-1328d | **NEW ROW — §27.1 carries none.** §9 L637 "non-selection → revalidation with dealerships or closure; buyer informed either way" | Every offer lapsed without a selection → Buyer + Operations | `BUYER_DOES_NOT_SELECT` sat in the §26 catalogue with `raisedByPhase: 6` and NO RAISE SITE; the auction simply sat there and the buyer heard nothing | MISSING | none | Added with the reminder above. `sweepUnselectedAuctions` runs in the close cron directly after the expiry sweep; raises the case and enqueues the notice; idempotent on both (the exception on (code, refs) while open, the notice on an auction-scoped key). S16 preserved — it moves no money | 6 | unit | `unselected-sweep.test.ts`, including the S16 no-refund assertion | none | none | TO IMPLEMENT — **AS BUILT (Phase 6)** |
 | K27-1329 | MD §27.1 L1329 | Premium invitation shown at acceptance | Bare POST `app/api/buyer/plan/upgrade/route.ts:21-89` | MISSING | none | Full-screen interstitial once + impression record (touchpoint 3) | 6 | unit, playwright, visual | Playwright: interstitial declinable, non-blocking | none | none | TO IMPLEMENT |
 | K27-1330 | MD §27.1 L1330 | Premium follow-up first (1h, only if declined) | None | MISSING | none | Dispatcher row `run_at=+1h`, recheck skips if upgraded | 6 | unit | Plan tests: declined → row; upgraded → skipped | none | none | TO IMPLEMENT |
 | K27-1331 | MD §27.1 L1331 | Premium follow-up final (reaffirmation/recap) | None | MISSING | none | Row at reaffirmation confirm; no further prompts | 7 | unit | Reaffirmation tests: one final row, no more | none | none | TO IMPLEMENT |
@@ -5503,17 +5503,17 @@ area maps, the critic rounds and the MarketCheck report contain no 13-column tab
 no rows. A line is a ledger row only when it starts with a pipe and parses to exactly
 13 cells (pipes escaped inside a cell do not split it). Excluded and counted separately:
 15 header rows, 15 separator rows and
-0 other pipe lines, out of 1599 pipe lines in total.
+0 other pipe lines, out of 1602 pipe lines in total.
 A requirement key is `area/Ref`, because bare refs are reused across areas
 (173 of them are).
 
 | Ledger fact | Value |
 | --- | --- |
 | Source files | 13 |
-| Source ledger rows | **1569** |
-| Embedded ledger rows (section 10) | **1569** |
+| Source ledger rows | **1572** |
+| Embedded ledger rows (section 10) | **1572** |
 | Embedded copy identical to source | yes |
-| Unique requirement keys (`area/Ref`) | 1569 |
+| Unique requirement keys (`area/Ref`) | 1572 |
 | Duplicate keys | 0 |
 | Rows with a missing key | 0 |
 | Bare refs reused across areas | 173 |
@@ -5523,13 +5523,13 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | ALREADY CORRECT | 215 |
 | PARTIAL | 510 |
 | BROKEN | 151 |
-| MISSING | 551 |
+| MISSING | 554 |
 | DUPLICATED | 105 |
 | UNVERIFIED | 37 |
 
 | Final disposition | Rows |
 | --- | --- |
-| TO IMPLEMENT | 657 |
+| TO IMPLEMENT | 660 |
 | TO EXTEND | 413 |
 | TO CONSOLIDATE | 205 |
 | ALREADY PRESENT | 102 |
@@ -5544,8 +5544,8 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | 3 | 172 |
 | 4 | 90 |
 | 5 | 117 |
-| 6 | 173 |
-| 7 | 129 |
+| 6 | 175 |
+| 7 | 130 |
 | 8 | 141 |
 | 9 | 149 |
 | 10 | 60 |
@@ -5554,7 +5554,7 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | Area | Rows | ALREADY CORRECT | PARTIAL | BROKEN | MISSING | DUPLICATED | UNVERIFIED |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | contract | 79 | 8 | 18 | 11 | 33 | 5 | 4 |
-| control | 266 | 22 | 114 | 27 | 70 | 25 | 8 |
+| control | 269 | 22 | 114 | 27 | 73 | 25 | 8 |
 | deal-early | 109 | 8 | 19 | 23 | 49 | 7 | 3 |
 | intake | 103 | 10 | 36 | 10 | 32 | 7 | 8 |
 | inventory | 79 | 12 | 31 | 7 | 26 | 3 | 0 |
@@ -5569,21 +5569,21 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 
 ```json parity-ledger
 {
-  "source_ledger_rows": 1569,
-  "embedded_ledger_rows": 1569,
-  "unique_requirement_keys": 1569,
+  "source_ledger_rows": 1572,
+  "embedded_ledger_rows": 1572,
+  "unique_requirement_keys": 1572,
   "duplicate_key_count": 0,
   "missing_key_count": 0,
   "by_status": {
     "ALREADY CORRECT": 215,
     "PARTIAL": 510,
     "BROKEN": 151,
-    "MISSING": 551,
+    "MISSING": 554,
     "DUPLICATED": 105,
     "UNVERIFIED": 37
   },
   "by_disposition": {
-    "TO IMPLEMENT": 657,
+    "TO IMPLEMENT": 660,
     "TO EXTEND": 413,
     "TO CONSOLIDATE": 205,
     "ALREADY PRESENT": 102,
@@ -5597,8 +5597,8 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
     "3": 172,
     "4": 90,
     "5": 117,
-    "6": 173,
-    "7": 129,
+    "6": 175,
+    "7": 130,
     "8": 141,
     "9": 149,
     "10": 60,

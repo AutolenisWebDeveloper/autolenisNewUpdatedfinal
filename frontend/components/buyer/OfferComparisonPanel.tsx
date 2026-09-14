@@ -53,7 +53,10 @@ const RANK_COLORS: Record<string, string> = {
 export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanelProps) {
   const router = useRouter();
   const [offers, setOffers] = useState<RankedOffer[]>([]);
-  const [termMonths, setTermMonths] = useState(60);
+  // `_setTermMonths` is unused while the control above is out of service, and is kept rather than
+  // collapsed to a constant so re-enabling the control is a one-line change once the owner answers
+  // the product question.
+  const [termMonths, _setTermMonths] = useState(60);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -144,23 +147,35 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
           {error}
         </div>
       )}
-      {/* LOAN TERM — REPORTED TO THE OWNER, NOT SILENTLY REMOVED.
-           This control no longer changes any payment on screen. §8c ranks the monthly payment a
-           DEALERSHIP quoted, at the APR and term they quoted, and Phase 6 makes the engine the one
-           source of that number — so a buyer-chosen term would be a hypothetical nobody offered.
-           The control is kept rather than deleted because removing a capability needs owner
-           sign-off, and the label now says what it does: it sets the comparison term used where a
-           term is not quoted. The product question — recompute at the buyer's term and label it an
-           estimate, or drop the control — is raised in the Phase 6 report. */}
-      <div className="flex flex-wrap items-center gap-2 mb-6" data-testid="term-toggle">
-        <span className="text-sm text-slate-500 mr-2 w-full sm:w-auto">Comparison term:</span>
-        {[36, 48, 60, 72].map(months => (
-          <button key={months} onClick={() => setTermMonths(months)}
-            data-testid={`term-${months}`}
-            className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-semibold transition-colors ${termMonths === months ? "bg-al-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-            {months}mo
-          </button>
-        ))}
+      {/* LOAN TERM — INERT, AND NOW VISIBLY SO. REPORTED TO THE OWNER, NOT SILENTLY REMOVED.
+           This control changes nothing on screen. §8c ranks the monthly payment a DEALERSHIP
+           quoted, at the APR and term they quoted, and Phase 6 made the engine the single source
+           of that number — `months` is validated by the route and then consumed by nothing, and
+           the persisted ranking path does not read a term at all. An earlier revision of this
+           comment claimed the control "sets the comparison term used where a term is not quoted";
+           review established that is not true either, so the claim is withdrawn rather than left
+           standing.
+           DISABLED, NOT DELETED. Four buttons that refetch identical data and repaint nothing are
+           a worse answer than none, but removing a control is a capability change that needs owner
+           sign-off, so it stays rendered, plainly out of service, with the fact it was hiding
+           stated beside it. The product question — recompute at a buyer-chosen term and label it
+           an estimate, or drop the control — is in the Phase 6 report. */}
+      <div className="mb-6" data-testid="term-toggle">
+        <div className="flex flex-wrap items-center gap-2 opacity-50">
+          <span className="text-sm text-slate-500 mr-2 w-full sm:w-auto">Comparison term:</span>
+          {[36, 48, 60, 72].map(months => (
+            <button key={months} type="button" disabled
+              aria-disabled="true"
+              data-testid={`term-${months}`}
+              className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-semibold cursor-not-allowed ${termMonths === months ? "bg-al-primary text-white" : "bg-slate-100 text-slate-600"}`}>
+              {months}mo
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500" data-testid="term-toggle-note">
+          Each monthly figure below is the payment that dealership quoted, at their own APR and
+          term. Choosing a different term here is not available yet.
+        </p>
       </div>
 
       {/* Offer cards — dealer identity NEVER revealed here */}

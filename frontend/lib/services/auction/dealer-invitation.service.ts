@@ -11,6 +11,7 @@ import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
 import { lookupCity, type LatLng } from "@/lib/utils/zip-coords";
 import { getPreferredMakes } from "@/lib/services/auction/auction-capacity.service";
 import { selectCoverageRadius } from "@/lib/services/auction/coverage.service";
+import { LIVE_AUCTION_STATUSES } from "@/lib/services/auction/deposit-auction";
 import { filterAuctionEligibleDealerIds } from "@/lib/services/dealer/dealer-auction-eligibility.service";
 
 const MAX_INVITATIONS_PER_AUCTION = 8;
@@ -467,24 +468,63 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
   return invitations.length;
 }
 
-// Decrement auction load when auction closes
+/**
+ * Return the `+1` each invitation on this auction took, now that the auction is no longer live.
+ *
+ * RECOMPUTED, NOT DECREMENTED — and that is a correctness requirement, not a style choice.
+ *
+ * This was `updateMany({ data: { currentAuctionLoad: { decrement: 1 } } })`: blind, unconditional,
+ * and therefore safe only if it ran exactly once per auction. It is the FIRST statement inside
+ * `processAuctionClose`'s claimed block, and Phase 6 turned that block's failure path from
+ * unreachable into routine — every notice and every exception raise now propagates by design, and
+ * the claim is released on the way out so the next tick retries. One comms-outbox outage lasting
+ * an hour therefore meant twelve re-entries, and every invited dealership was decremented twelve
+ * times. `current_auction_load` is a plain `Int` with no floor, and a dealership sitting at `-12`
+ * scores `+60` in `scoreDealerForAuction`, never trips `>= 5`, never trips `isDealerAtCapacity`
+ * and always passes `currentAuctionLoad: { lt: DEALER_MAX_AUCTION_LOAD }` — capacity fairness
+ * silently and permanently corrupted, with nothing to notice it.
+ *
+ * The column has an exact definition: the number of invitations this dealership holds on auctions
+ * that are still live. Every writer increments it once per invitation issued. Deriving it from
+ * that definition makes this function idempotent by construction — running it a hundred times is
+ * the same as running it once — and self-healing: a dealership already carrying drift is repaired
+ * the next time any of its auctions closes, which a floored decrement would only have hidden.
+ *
+ * A lease column would also have worked and was not chosen: it would need a migration, and it
+ * would still leave the existing drift in production untouched.
+ */
 export async function releaseAuctionLoad(auctionId: string): Promise<void> {
   const invitations = await prisma.auctionInvitation.findMany({
     where: { auctionId },
     select: { dealerId: true },
   });
 
-  // Only invitations that name a dealer ever incremented a dealer's load, so only those may
-  // decrement one. `dealer_id` is nullable from the Phase 1 wave on (S7-18), and passing a null
-  // into `id: { in: [...] }` would widen the update rather than narrow it.
-  const dealerIds = invitations
-    .map((i) => i.dealerId)
-    .filter((id): id is string => id !== null);
+  // Only invitations that name a dealer ever incremented a dealer's load. `dealer_id` is nullable
+  // from the Phase 1 wave on (S7-18), and a null in `id: { in: [...] }` would widen the update
+  // rather than narrow it.
+  const dealerIds = [
+    ...new Set(invitations.map((i) => i.dealerId).filter((id): id is string => id !== null)),
+  ];
+  if (dealerIds.length === 0) return;
 
-  if (dealerIds.length) {
-    await prisma.dealer.updateMany({
-      where: { id: { in: dealerIds } },
-      data: { currentAuctionLoad: { decrement: 1 } },
-    });
-  }
+  // The live set is the same one `deposit-auction.ts` uses, so "still running" means one thing
+  // across the codebase rather than one thing per reader.
+  const live = await prisma.auctionInvitation.groupBy({
+    by: ["dealerId"],
+    where: {
+      dealerId: { in: dealerIds },
+      auction: { status: { in: LIVE_AUCTION_STATUSES } },
+    },
+    _count: { _all: true },
+  });
+  const loadByDealer = new Map(live.map((r) => [r.dealerId, r._count._all]));
+
+  await prisma.$transaction(
+    dealerIds.map((id) =>
+      prisma.dealer.update({
+        where: { id },
+        data: { currentAuctionLoad: loadByDealer.get(id) ?? 0 },
+      }),
+    ),
+  );
 }

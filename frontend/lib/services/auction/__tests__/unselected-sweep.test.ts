@@ -170,8 +170,10 @@ test("only CLOSED, PROCESSED auctions with no ACCEPTED offer are even considered
   assert.equal(where.status, "CLOSED");
   assert.deepEqual(where.postCloseProcessedAt, { not: null }, "an unprocessed auction has not told the buyer anything yet");
   assert.deepEqual(where.offers, { none: { status: "ACCEPTED" } });
-  // ...and at least one offer that HAS lapsed, which is what makes the auction interesting at all.
-  assert.deepEqual(where.AND, [{ offers: { some: { status: "EXPIRED" } } }]);
+  // ...and at least one QUALIFIED offer that HAS lapsed, which is what makes the auction
+  // interesting at all. The `isDisqualified: false` half is asserted on its own below, with the
+  // double-notice it prevents written out.
+  assert.deepEqual(where.AND, [{ offers: { some: { status: "EXPIRED", isDisqualified: false } } }]);
 });
 
 test("the sweep is bounded per run", async () => {
@@ -199,4 +201,60 @@ test("a buyer with no mailbox still gets the case opened", async () => {
   assert.equal(await sweep(), 1);
   assert.equal(raised.length, 1);
   assert.equal(enqueued.length, 0);
+});
+
+// ── THE SWEEP MUST DRAIN, AND MUST NOT SWEEP AN AUCTION THAT NEVER HAD AN OFFER ────────────────
+//
+// Three defects found by review, all of them properties of the candidate QUERY rather than of the
+// per-auction work, which is why the tests above could not see them.
+
+test("the case is raised ONCE EVER, not once per Operations resolution", async () => {
+  // `raiseException` without an explicit key dedupes only while the row is LIVE: the moment
+  // Operations marks the case RESOLVED, the next five-minute tick takes the `#2` suffix and opens
+  // a brand-new OPEN row — and after fifty resolutions it throws on every tick forever. The
+  // condition here is terminal by construction (a closed auction whose offers have all lapsed
+  // cannot become un-lapsed), so it is exactly the "strict once-ever" case the explicit key is for.
+  await sweep();
+  assert.equal(raised.length, 1);
+  assert.equal(
+    raised[0].idempotencyKey,
+    "BUYER_DOES_NOT_SELECT:auc_1",
+    "the raise carries no explicit key — a resolved case reopens on the next tick",
+  );
+});
+
+test("an auction that already has the case is not a candidate — the set drains", async () => {
+  // Without this the predicate stays true forever for every auction it has already swept. With a
+  // `take` of 50 that is not merely wasteful: once 50 auctions sit in this state, the fifty-first
+  // buyer is never reached, and nothing anywhere reports it.
+  await sweep();
+  const where = auctionFindArgs[0].where as Rec;
+  const items = where.queueItems as Rec | undefined;
+  assert.ok(items, "the candidate query does not exclude auctions that already carry the case");
+  assert.deepEqual(items!.none, { exceptionCode: "BUYER_DOES_NOT_SELECT" });
+});
+
+test("the candidate set is ordered, so a bounded page is the OLDEST and not an arbitrary 50", async () => {
+  await sweep();
+  assert.deepEqual(auctionFindArgs[0].orderBy, { closedAt: "asc" });
+});
+
+test("an auction whose offers were ALL disqualified is never swept", async () => {
+  // The buyer was already told at close that no offers were received (`qualified.length === 0`
+  // takes the zero-offer branch) and `ALL_OFFERS_EXCEED_BUDGET` was raised. Seventy-two hours
+  // later `expireLapsedOffers` flips those same disqualified rows to EXPIRED — `lapsedOfferWhere`
+  // does not exclude them — and without this the sweep would then tell the same buyer that "the
+  // offers on your request have reached their expiration without a selection" and open a SECOND
+  // case. A buyer told there were no offers cannot be told their offers expired because they did
+  // not choose.
+  await sweep();
+  const where = auctionFindArgs[0].where as Rec;
+  const and = where.AND as Rec[];
+  const lapsed = and.find((c) => (c.offers as Rec | undefined)?.some) as Rec | undefined;
+  assert.ok(lapsed, "the candidate query no longer requires a lapsed offer");
+  assert.deepEqual(
+    (lapsed!.offers as Rec).some,
+    { status: "EXPIRED", isDisqualified: false },
+    "a disqualified lapsed offer still makes the auction a sweep candidate",
+  );
 });

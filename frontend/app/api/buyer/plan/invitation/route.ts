@@ -41,6 +41,7 @@ import { quotePremiumBalance } from "@/lib/services/plan/upgrade-window.service"
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_6_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { renderPremiumFollowUp } from "@/lib/services/comms/phase6-email-content";
+import { limitGeneral } from "@/lib/security/rate-limit";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com").replace(/\/+$/, "");
 /** §23.2a: "Email one hour after acceptance". */
@@ -126,6 +127,15 @@ export async function POST(request: NextRequest) {
     // press would count intentions as conversions.
     return errorResponse("VALIDATION_ERROR", 'action must be "dismiss"', 400);
   }
+
+  // Abuse guard on the write, the same shape `POST /api/buyer/plan/upgrade` uses and fails OPEN
+  // on a store outage for the same reason. `recordDismissal` appends a `buyer_activity_events` row
+  // unconditionally — `recordImpression` is idempotent per touchpoint, this is not — so an
+  // authenticated buyer looping this endpoint writes unbounded rows. The email is already safe
+  // (`enqueueTransactional` dedupes on the request-scoped key); what this bounds is storage and
+  // the cost of every later `eventsOfType` read.
+  const rl = await limitGeneral(`plan-invitation:${buyer.id}`, { tokens: 10, window: "10 m" });
+  if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
 
   const deal = await ownedDeal(body.dealId, buyer.id);
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);

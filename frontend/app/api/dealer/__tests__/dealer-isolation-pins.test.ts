@@ -175,3 +175,59 @@ test("the dealer sees only the LATEST of its own versions, not the whole chain",
   await get();
   assert.deepEqual((offerFindFirstArgs[0] as Rec).orderBy, { createdAt: "desc" });
 });
+
+// ── P3 — THE COLLECTION ROUTE, WHICH THE FIRST PASS OF THIS FILE MISSED ─────────────────────────
+//
+// The tests above pin `GET /api/dealer/auctions/[auctionId]` — the DETAIL route, which projects
+// explicitly and was already safe. `/api/dealer/offers` is the other dealer-facing offer surface
+// and it did neither: `findMany({ where: { dealerId }, include: { auction: true } })` and
+// `successResponse({ offer })` straight from `submitOffer`, both serialising the whole row.
+//
+// That was harmless until this phase. Phase 6 populated three column groups that had always been
+// null in production:
+//
+//   rank_cash / rank_monthly / rank_balanced / best_price_score  — written by `persistRanking`
+//   disqualified_reason                                          — written by §13-D40's
+//                                                                  record-instead-of-throw
+//
+// `disqualified_reason` is the sharper of the two. It carries the buyer's approved ceiling as a
+// formatted dollar figure ("Out-the-door exceeds the buyer's approved amount of $38,000."), and
+// the sibling route coarsens that exact number into a RANGE precisely because a dealership that
+// knows the ceiling can price to it. It also carries the buyer's prequalification STATE — "Your
+// approval has expired", "Complete your prequalification to continue" — which is credit
+// information about a third party.
+//
+// A single over-budget probe would have returned it. These tests are the pin.
+
+let listedOffers: Rec[];
+let offerFindManyArgs: Rec[];
+
+test("GET /api/dealer/offers projects explicitly — no ranking, no disqualification reason", async () => {
+  const mod = await import("@/lib/services/offer/offer.service");
+  const select = mod.DEALER_OFFER_SELECT as Rec;
+  for (const field of [
+    "bestPriceScore", "rankCash", "rankMonthly", "rankBalanced",
+    "disqualifiedReason", "aprFlag", "submittedByAdminId",
+  ]) {
+    assert.equal(select[field], undefined, `${field} is in the dealer-facing projection`);
+  }
+  // The dealership must still see everything it itself submitted, or the projection has taken a
+  // capability away rather than closed a leak.
+  for (const field of [
+    "id", "auctionId", "status", "otdPriceCents", "vehiclePriceCents", "taxCents", "feesCents",
+    "junkFeeItems", "includesFinancing", "aprRate", "termMonths", "version", "submittedAt",
+    "expiresAt", "isDisqualified",
+  ]) {
+    assert.equal(select[field], true, `${field} is missing from the dealer projection`);
+  }
+});
+
+test("the auction a dealer offer carries is projected too — no buyerId, no depositId", async () => {
+  const mod = await import("@/lib/services/offer/offer.service");
+  const select = mod.DEALER_OFFER_SELECT as Rec;
+  const auction = (select.auction as Rec | undefined)?.select as Rec | undefined;
+  assert.ok(auction, "the auction relation is returned unprojected");
+  for (const field of ["buyerId", "depositId", "vehicleRequestId", "sourcingCaseId"]) {
+    assert.equal(auction![field], undefined, `auction.${field} reached a dealer`);
+  }
+});

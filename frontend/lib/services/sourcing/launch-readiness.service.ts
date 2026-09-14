@@ -479,6 +479,25 @@ export async function launchFromCase(
   sourcingCase: SourcingCaseRecord,
   db: PrismaClient = defaultPrisma as PrismaClient,
   now: Date = new Date(),
+  /**
+   * §8c — MAY THIS CALL SPEND THE BUYER'S ONE FREE RELAUNCH?
+   *
+   * Default FALSE, and the default is the point. `deposit-activation.service.ts` states the rule
+   * this parameter enforces: "a relaunch is an explicit Operations act under §8c, never something
+   * a reconciler infers." Before D39 the question could not arise, because this function refused
+   * on a CLOSED original; relaxing that refusal (correctly — a terminal original is the
+   * PRECONDITION for a relaunch, not a reason to refuse) also made it possible for a sweep to
+   * create one by itself.
+   *
+   * The concrete path: a sourcing case left in READY_TO_LAUNCH whose auction was later cancelled
+   * is re-swept by `coverage-hold-reconcile` → `sweepSourcingCases`, and without this gate the
+   * sweep would parent a new auction to the terminal original and burn the buyer's single free
+   * retry with no operator decision and nothing to review.
+   *
+   * The ORIGINAL launch is unaffected: a deposit with no prior auction is not a relaunch, and the
+   * reconciler must still be able to launch it.
+   */
+  allowRelaunch = false,
 ): Promise<LaunchResult> {
   // A LAUNCH MAY RAISE. Unlike the admin surface, this path is the one §26's exception is for: an
   // approval that expired between payment and launch is a real blocker with a real owner.
@@ -558,6 +577,21 @@ export async function launchFromCase(
       deposit.id,
       { id: true, relaunchCount: true },
     );
+    if (priorOriginal && !allowRelaunch) {
+      // A prior original with nothing live on it means the only thing this call could create is a
+      // RELAUNCH, and this caller was not authorised to spend one. Reported as a blocker so the
+      // case is HELD and visible rather than silently launched or silently dropped.
+      logger.info(
+        `[readiness] deposit ${deposit.id} needs a §8c relaunch of auction ${priorOriginal.id} — not authorised on this path`,
+      );
+      return {
+        launched: false, auctionId: null, invitationsIssued: 0, noticesDispatched: 0,
+        blockers: [
+          "This request's auction has already run. Relaunching it spends the buyer's one free " +
+          "retry under §8c and is an explicit Operations decision, not an automatic one.",
+        ],
+      };
+    }
     if (priorOriginal && priorOriginal.relaunchCount >= RELAUNCH_LIMIT) {
       logger.info(
         `[readiness] deposit ${deposit.id} has already used its §8c relaunch of auction ${priorOriginal.id}`,

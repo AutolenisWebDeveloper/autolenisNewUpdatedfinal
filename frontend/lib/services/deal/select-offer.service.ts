@@ -92,14 +92,28 @@ export async function commitOfferSelection(
     if (raced) return null;
 
     // ── the lineage, read under the lock so it cannot drift from what is written ──
-    const auction = await tx.auction.findUnique({
-      where: { id: auctionId },
+    //
+    // BOUND, NOT MERELY FETCHED. Both reads used to be `findUnique` on the id alone: the auction
+    // was not tied to `buyerId` and the offer was not tied to `auctionId`. Neither current caller
+    // can exploit that — the HTTP route scopes `{ id: auctionId, buyerId }` and the AI action-intent
+    // path has its own ownership check — but this function is where the damage now lives, and it
+    // grew a great deal in this phase. A mis-bound call would, in ONE transaction, create a Deal
+    // owned by the caller carrying the victim's deposit and vehicle request, accept the victim's
+    // offer, DECLINE all their others, CLOSE their candidates, force the auction CLOSED with
+    // `postCloseProcessedAt` stamped — permanently suppressing the close reconciler — and cancel
+    // their selection reminder. An invariant that costs one `where` clause should be a property of
+    // the service, not of every caller that will ever exist.
+    const auction = await tx.auction.findFirst({
+      where: { id: auctionId, buyerId },
       select: { id: true, depositId: true, vehicleRequestId: true },
     });
     if (!auction) return null;
 
-    const offer = await tx.offer.findUnique({
-      where: { id: offerId },
+    const offer = await tx.offer.findFirst({
+      // `status: SUBMITTED` as well as the auction binding: an ACCEPTED offer is caught by the
+      // race check above, but a WITHDRAWN, DECLINED or EXPIRED one is not, and none of those is
+      // selectable. The caller validates this too; a second statement of it here costs nothing.
+      where: { id: offerId, auctionId, status: OfferStatus.SUBMITTED },
       select: {
         id: true,
         dealerId: true,

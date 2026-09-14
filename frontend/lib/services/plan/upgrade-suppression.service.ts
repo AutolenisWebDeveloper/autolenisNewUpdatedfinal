@@ -236,10 +236,19 @@ export async function isUpgradePromptSuppressed(
 
   // PAY-73 — AN OPEN §26 EXCEPTION. Owner-ruled into this phase.
   //
-  // Scoped to the request AND to the buyer, because §26 rows carry whichever reference the raise
-  // site had: a zero-offer case names the auction and the buyer, an approval expiry names the
-  // request. Either is the same transaction from the buyer's side, and a prompt during either is
-  // the ask arriving while somebody is still working out whether the deal can proceed at all.
+  // Scoped to THIS request, plus buyer-level cases that name no request at all.
+  //
+  // The second arm exists because §26 rows carry whichever reference the raise site had, and some
+  // raise sites have no request: a deposit dispute, an auction created by the deposit-activation
+  // reconciler (which leaves `vehicleRequestId` null). A case like that is not attributable to one
+  // transaction, so treating it as suppressing is the conservative reading.
+  //
+  // `vehicleRequestId: null` ON THAT ARM IS LOAD-BEARING. It used to be a bare `{ buyerId }`, which
+  // matched an open case on ANY of the buyer's transactions: a zero-offer case on their first
+  // request that Operations never resolved silenced the Premium ask on their second request, for
+  // which they had paid a second $99, permanently. `raiseCloseException` passes the auction's
+  // `vehicleRequestId`, so a close-time case on another request is now correctly out of scope, and
+  // `upgradeAskCounts` scopes to the request for the same reason.
   //
   // LIVE means OPEN, ASSIGNED or ESCALATED — a case somebody still owns. RESOLVED and CLOSED are
   // history and must not silence the ask forever, which is the failure mode of a bare
@@ -247,7 +256,10 @@ export async function isUpgradePromptSuppressed(
   const openException = await db.queueItem.findFirst({
     where: {
       status: { in: [QueueItemStatus.OPEN, QueueItemStatus.ASSIGNED, QueueItemStatus.ESCALATED] },
-      OR: [{ vehicleRequestId: input.vehicleRequestId }, { buyerId: input.buyerId }],
+      OR: [
+        { vehicleRequestId: input.vehicleRequestId },
+        { buyerId: input.buyerId, vehicleRequestId: null },
+      ],
     },
     select: { exceptionCode: true },
   });

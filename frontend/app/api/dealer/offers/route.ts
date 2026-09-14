@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
-import { submitOffer } from "@/lib/services/offer/offer.service";
+import { submitOffer, DEALER_OFFER_SELECT, OfferRefusedError } from "@/lib/services/offer/offer.service";
 import { z } from "zod";
 import { feeItemsSchema } from "@/lib/services/offer/junk-fee-items";
 import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
@@ -50,10 +50,14 @@ export async function GET(request: NextRequest) {
   if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
   const { prisma } = await import("@/lib/prisma");
 
-  // Auction offers (System A)
+  // Auction offers (System A).
+  //
+  // PROJECTED, NEVER `include`d — §29 P3. See `DEALER_OFFER_SELECT` for what this phase started
+  // writing onto these rows (ranking positions and a disqualification reason carrying the buyer's
+  // approved ceiling) and why an unprojected read now leaks it.
   const offers = await prisma.offer.findMany({
     where:   { dealerId: dealer.id },
-    include: { auction: true },
+    select:  DEALER_OFFER_SELECT,
     orderBy: { createdAt: "desc" },
   });
 
@@ -118,14 +122,27 @@ export async function POST(request: NextRequest) {
       }).catch(() => {});
     }
 
-    return successResponse({ offer }, 201);
+    // Re-read through the dealer projection rather than returning the service's row. `submitOffer`
+    // returns every column — including the ranking fields and the §13-D40 disqualification reason
+    // that carries the buyer's approved ceiling. One projection, used by every dealer-facing
+    // reader, is what stops the three routes drifting apart (§29 P3).
+    const offerForDealer = await prisma.offer.findUnique({
+      where: { id: offer.id },
+      select: DEALER_OFFER_SELECT,
+    });
+    return successResponse({ offer: offerForDealer }, 201);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to submit offer.";
-    const safeMsg = msg.includes("not invited") ? "You are not invited to this auction."
-      : msg.includes("already submitted") ? "You have already submitted an offer for this auction."
-      : msg.includes("not active") ? "This auction is no longer active."
-      : msg.includes("expired") ? "This auction has expired."
+    // A REFUSAL THE SERVICE MARKED AS DEALER-READABLE is passed through verbatim; anything else is
+    // an internal failure and stays generic. The four-substring map this replaces matched none of
+    // the refusals this phase added — candidate binding, the §8b caps, the OTD breakdown — so a
+    // dealer whose offer was refused for any of them was told only "please try again", with
+    // nothing to act on. See `OfferRefusedError`.
+    const safeMsg = err instanceof OfferRefusedError
+      ? err.message
       : "Failed to submit offer. Please try again.";
+    if (!(err instanceof OfferRefusedError)) {
+      logger.error("[dealer/offers] submission failed:", err);
+    }
     return errorResponse("OFFER_ERROR", safeMsg, 400);
   }
 }

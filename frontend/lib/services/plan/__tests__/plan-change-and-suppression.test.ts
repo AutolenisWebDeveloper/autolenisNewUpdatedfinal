@@ -296,9 +296,19 @@ test("the exception query looks for LIVE cases only, not resolved history", asyn
   assert.deepEqual([...where.status.in].sort(), ["ASSIGNED", "ESCALATED", "OPEN"]);
   assert.equal(where.status.in.includes("RESOLVED"), false, "a resolved case would silence the ask forever");
   assert.equal(where.status.in.includes("CLOSED"), false);
-  // Scoped to the request AND the buyer, because §26 rows carry whichever reference the raise site
-  // had — a zero-offer case names the auction and the buyer, an approval expiry names the request.
-  assert.deepEqual(where.OR, [{ vehicleRequestId: "vr_1" }, { buyerId: "b_1" }]);
+  // Scoped to THIS request, plus buyer-level cases that name NO request.
+  //
+  // The second arm used to be a bare `{ buyerId }`, and review showed what that cost: an open case
+  // on the buyer's FIRST transaction — a zero-offer case Operations never resolved — silenced the
+  // Premium ask on their second request, for which they had paid a second $99, permanently.
+  // `raiseCloseException` passes the auction's `vehicleRequestId`, so a close-time case on another
+  // request is correctly out of scope now; what remains in scope is a case with no request at all
+  // (a deposit dispute, an auction the deposit-activation reconciler created), which is not
+  // attributable to one transaction and is conservatively treated as suppressing.
+  assert.deepEqual(where.OR, [
+    { vehicleRequestId: "vr_1" },
+    { buyerId: "b_1", vehicleRequestId: null },
+  ]);
 });
 
 test("no open exception leaves an ordinary buyer askable", async () => {

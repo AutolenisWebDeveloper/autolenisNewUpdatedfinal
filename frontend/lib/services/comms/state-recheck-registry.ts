@@ -659,10 +659,11 @@ const skipIfUpgradeNoLongerAskable: StateRecheckFn = async (ctx) => {
   if (!vehicleRequestId || !ctx.recipientId) {
     return { proceed: false, reason: "premium follow-up with no request or buyer reference" };
   }
-  const [{ isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS }, { upgradeAskCounts }] = await Promise.all([
-    import("@/lib/services/plan/upgrade-suppression.service"),
-    import("@/lib/services/plan/upgrade-touchpoint.service"),
-  ]);
+  const [{ isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS }, { upgradeAskCounts, recordImpression }] =
+    await Promise.all([
+      import("@/lib/services/plan/upgrade-suppression.service"),
+      import("@/lib/services/plan/upgrade-touchpoint.service"),
+    ]);
 
   const counts = await upgradeAskCounts(ctx.recipientId, vehicleRequestId, ctx.db);
   if (counts.declines === 0) {
@@ -680,6 +681,24 @@ const skipIfUpgradeNoLongerAskable: StateRecheckFn = async (ctx) => {
     ctx.db,
   );
   if (decision.suppressed) return { proceed: false, reason: `${decision.reason}: ${decision.detail}` };
+
+  // RECORD THE EMAIL ASK, HERE AND NOWHERE ELSE. `upgradeAskCounts().emailsSent` derives from
+  // impressions on `EMAIL_TOUCHPOINTS`, and until now nothing ever recorded one — every writer used
+  // an in-app touchpoint — so the count was permanently 0 and §23.2b's "two emails, then silence"
+  // ceiling could never bind, however many emails went out.
+  //
+  // This is the correct moment and the enqueue was not: an outbox row that the recheck later
+  // suppresses is an ask that never happened, and counting it would silence a later, legitimate
+  // one. `proceed: true` is the decision to actually ask.
+  await recordImpression(
+    {
+      buyerId: ctx.recipientId,
+      vehicleRequestId,
+      touchpoint: UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE_EMAIL,
+      detail: { templateKey: PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP },
+    },
+    ctx.db,
+  );
   return { proceed: true };
 };
 
