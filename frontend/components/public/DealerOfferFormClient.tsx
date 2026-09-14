@@ -274,14 +274,32 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
       fd.append("data", JSON.stringify(payload));
       docFiles.forEach((file, i) => fd.append(`doc${i}`, file, file.name));
 
+      // ── AUTHORIZED SECURITY FIX (owner-approved sub-batch of Phase 6) ────────────────────
+      //
+      // THE DEALERSHIP'S OWN TOKEN, where it has one. `inviteToken` was passed into this form and
+      // never read: both the POST and the redirect used `offer.token` — the SHARED `VehicleOffer`
+      // token that every invited dealership on the same request receives.
+      //
+      // The consequence was on the confirmation page, which looked up that shared token and
+      // rendered `submissions[0]` ordered by `submitted_at desc` — the most recent submission by
+      // ANY dealership. So a dealership that submitted, then refreshed after a competitor
+      // submitted, was shown the competitor's name, their offer prices, their vehicle listings and
+      // their uploaded document names. §25.1 and dealer isolation forbid exactly that.
+      //
+      // Carrying the invite token makes the request self-identifying: the API already accepts
+      // either token, and the confirmation page can now scope to the one submission that belongs
+      // to this invite. Falls back to the shared token for the generic shareable link, which has
+      // no dealer identity — and the confirmation page shows no submission detail for it.
+      const submitToken = offer.inviteToken ?? offer.token;
+
       // Do NOT set Content-Type manually — the browser sets the multipart boundary.
-      const res = await fetch(`/api/public/dealer-offer/${offer.token}`, {
+      const res = await fetch(`/api/public/dealer-offer/${submitToken}`, {
         method: "POST",
         body: fd,
       });
       const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: string; message?: string } };
       if (res.ok && data.success) {
-        router.push(`/dealer-offer/${offer.token}/confirmed`);
+        router.push(`/dealer-offer/${submitToken}/confirmed`);
       } else {
         setError(data.error?.message ?? "Unable to submit your offer. Please try again.");
       }
