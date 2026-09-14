@@ -355,3 +355,62 @@ test("Best Monthly is the lowest monthly payment, and never a cash offer", async
   assert.equal(top.bestCash!.offerId, "cash");
   assert.equal(top.bestMonthly!.offerId, "fin_lo");
 });
+
+// ── Best Overall across candidates (review finding) ─────────────────────────────────────────────
+
+test("on a MULTI-candidate auction, Best Overall is the deepest discount, not the best within-group score", async () => {
+  // `overallScore` is a WITHIN-candidate normalised rank — a position among the offers on the same
+  // car. Comparing those across candidates compares positions in different races: a candidate
+  // answered by ONE dealership has no ranking to speak of, so its sole offer scored neutral while
+  // the winner of a two-offer race on another candidate scored best — and the card went to the
+  // second for having had a rival to beat, however much better the first deal was.
+  const carA = { id: "cand_1", distanceMiles: 10, listingSnapshot: { priceCents: 3_200_000 }, inventoryItem: null };
+  const carB = { id: "cand_2", distanceMiles: 10, listingSnapshot: { priceCents: 5_000_000 }, inventoryItem: null };
+  offers = [
+    // Two offers on car A. The better of them wins its race but concedes only 6% of the listing.
+    offer({ id: "a1", auctionVehicleId: "cand_1", auctionVehicle: carA, otdPriceCents: 3_000_000 }),
+    offer({ id: "a2", auctionVehicleId: "cand_1", auctionVehicle: carA, otdPriceCents: 3_150_000 }),
+    // The ONLY offer on car B, conceding 20%.
+    offer({ id: "b1", auctionVehicleId: "cand_2", auctionVehicle: carB, otdPriceCents: 4_000_000 }),
+  ];
+  const ranked = await rank();
+  const { selectTopOffers } = await import("../best-price.service");
+  const top = selectTopOffers(ranked);
+  assert.equal(top.bestOverall!.offerId, "b1", "the sole bidder could not win the card at any depth of discount");
+  assert.equal(top.bestCash!.offerId, "a1", "Best Cash is still simply the lowest out-the-door");
+});
+
+test("on a SINGLE-candidate auction the within-candidate score decides, under the PERSISTED weights", async () => {
+  // Every offer is in one race, so the weighted score is the right comparison — and it is the
+  // ADMINISTRATOR's weights that decide it, not a constant. Under the defaults (OTD 0.4, fees 0.2)
+  // the cheaper car wins despite carrying $890 more in fees...
+  const seed = () => [
+    offer({ id: "s1", otdPriceCents: 3_000_000, feesCents: 90_000 }),
+    offer({ id: "s2", otdPriceCents: 3_010_000, feesCents: 1_000 }),
+  ];
+  offers = seed();
+  const { selectTopOffers } = await import("../best-price.service");
+  assert.equal(selectTopOffers(await rank()).bestOverall!.offerId, "s1");
+
+  // ...and under a config that weights fees above price, the same two offers flip. If the weights
+  // were not being read, this assertion could not pass.
+  offers = seed();
+  weightConfig = { weightOtd: 0.1, weightMonthly: 0.1, weightFees: 0.7, weightJunkFees: 0.1 };
+  assert.equal(selectTopOffers(await rank()).bestOverall!.offerId, "s2");
+});
+
+test("the monthly payment carries the term it was computed at", async () => {
+  // The card used to label the payment with a term chosen in the UI while the number came from the
+  // dealership's own quote, so toggling to 36mo relabelled a 72-month payment.
+  offers = [offer({ id: "fin", includesFinancing: true, aprRate: 6.9, termMonths: 72 })];
+  const r = await rank();
+  assert.equal(r[0].monthlyTermMonths, 72);
+  assert.ok(r[0].monthlyPayment! > 0);
+});
+
+test("a cash offer carries NO term, because it has no payment", async () => {
+  offers = [offer({ id: "cash" })];
+  const r = await rank();
+  assert.equal(r[0].monthlyPayment, undefined);
+  assert.equal(r[0].monthlyTermMonths, null);
+});

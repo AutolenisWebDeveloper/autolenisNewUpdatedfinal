@@ -83,3 +83,28 @@ test("the required strings are echoed back as the buyer wrote them", () => {
   const r = computeFeatureMatch(["All-Wheel Drive"], ["Bluetooth"]);
   assert.deepEqual(r.mismatches, ["All-Wheel Drive"]);
 });
+
+// ── a feed string that NAMES a feature in order to deny it ──────────────────────────────────────
+
+test("a NEGATED feature does not satisfy the requirement it negates", () => {
+  // Found by review. A plain substring test counts "Sunroof Delete" as satisfying a requirement
+  // for "Sunroof" — and since this score is §8c's SECOND TIE-BREAK KEY, it hands a tie to the
+  // dealership whose car is missing the thing the buyer required.
+  for (const denial of ["Sunroof Delete", "No Sunroof", "Sunroof deleted", "without sunroof", "Sunroof - N/A"]) {
+    const r = computeFeatureMatch(["Sunroof"], [denial]);
+    assert.deepEqual(r.mismatches, ["Sunroof"], `"${denial}" was counted as having a sunroof`);
+    assert.equal(r.score, -1);
+  }
+});
+
+test("a genuine feature is still a match, and a negation elsewhere does not poison it", () => {
+  assert.equal(computeFeatureMatch(["Sunroof"], ["Panoramic Sunroof", "No Tow Package"]).score, 1);
+  assert.equal(computeFeatureMatch(["Tow Package"], ["Panoramic Sunroof", "No Tow Package"]).score, -1);
+});
+
+test("a feature whose own name contains a negation word is not mangled", () => {
+  // "Blind Spot Monitor" and "Night Vision" contain no negation token; the guard only fires on a
+  // token immediately adjacent to the matched requirement.
+  assert.equal(computeFeatureMatch(["Blind Spot Monitor"], ["Blind Spot Monitor"]).score, 1);
+  assert.equal(computeFeatureMatch(["Lane Departure"], ["Lane Departure Warning"]).score, 1);
+});

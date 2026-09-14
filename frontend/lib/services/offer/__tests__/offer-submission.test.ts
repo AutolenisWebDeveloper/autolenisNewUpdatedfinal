@@ -42,7 +42,12 @@ const tx = {
     update: async (a: Rec) => { invitationUpdates.push(a); return {}; },
   },
   auction: { findUnique: async () => auction },
-  vehicleRequest: { findUnique: async () => requestCriteria },
+  // HONOURS THE `where`. Answering regardless of id meant "the required-feature match is computed
+  // and persisted" could not detect the WRONG request being read — a buyer's required features
+  // matched against another buyer's offer. Found by review.
+  vehicleRequest: {
+    findUnique: async ({ where }: { where: Rec }) => (where.id === "vr_1" ? requestCriteria : null),
+  },
   auctionVehicle: { findMany: async () => candidates },
   offer: {
     // HONOURS THE `where`. A fake that returned every seeded row regardless of scope would have

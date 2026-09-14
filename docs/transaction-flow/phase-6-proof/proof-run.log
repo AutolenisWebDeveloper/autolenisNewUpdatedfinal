@@ -165,7 +165,9 @@ OK — no functional drift; structural drift at baseline.
    answered set is legitimately EMPTY on a zero-offer auction. SQL's own `x NOT IN ()` is a syntax
    error, so the client must rewrite it — and the rewrite could go either way.
 
-   Read from Prisma's query log against PostgreSQL 16.13:
+   Re-run 2026-09-14 from the same file as probe 1 (it was previously declared after `main()` had
+   already been invoked, so it had no caller and the citation was not reproducible from the
+   artifact it named — found by review). Read from Prisma's query log against PostgreSQL 16.13:
 
      notIn: []        SELECT ... WHERE ("candidate_status" = $1 AND 1=1)
      notIn: [a, b]    SELECT ... WHERE ("candidate_status" = $1 AND "id" NOT IN ($2,$3))

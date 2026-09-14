@@ -116,3 +116,37 @@ export function renderAuctionZeroOffers(input: {
   const cta = { label: "View your request", url: input.dashboardUrl };
   return { subject, html: layout(subject, lines.map(paragraph).join(""), cta), text: textFrom(subject, lines, cta) };
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Premium — §23.2a touchpoint 4
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * §27.1 "Premium follow-up first (1h, only if declined)" — K27-1330, §23.2a touchpoint 4.
+ *
+ * PAY-72 IS THE HARD CONSTRAINT ON THIS COPY: "never sold on fear". Nothing here may imply the
+ * deal goes worse on Standard, that Standard offers are weaker, or that any gate is slower —
+ * because none of that is true. Everything §23 guarantees a buyer is guaranteed on both plans, and
+ * this email is read by someone who has ALREADY SAID NO ONCE an hour ago. So it states what the
+ * upgrade adds, says the deposit already counts toward it, and says plainly that nothing is
+ * required — and it is the second of at most two emails, ever.
+ *
+ * It is deliberately short. A long second ask to someone who declined the first reads as pressure
+ * however carefully each sentence is worded.
+ */
+export function renderPremiumFollowUp(input: {
+  firstName?: string | null;
+  balanceDueUsd: string;
+  upgradeUrl: string;
+}): RenderedEmail {
+  const name = input.firstName?.trim() || "there";
+  const subject = "One option on your deal, if you want it";
+  const lines = [
+    `Hi ${name},`,
+    "You chose your deal earlier — congratulations. Everything from here runs exactly as it should on your current plan, and nothing below is needed for it.",
+    `If you'd like a concierge to handle the financing, paperwork and pickup coordination for you, Premium is available: your $99 deposit counts toward it, leaving ${input.balanceDueUsd}.`,
+    "If not, no action is needed and we won't ask again.",
+  ];
+  const cta = { label: "See what Premium includes", url: input.upgradeUrl };
+  return { subject, html: layout(subject, lines.map(paragraph).join(""), cta), text: textFrom(subject, lines, cta) };
+}

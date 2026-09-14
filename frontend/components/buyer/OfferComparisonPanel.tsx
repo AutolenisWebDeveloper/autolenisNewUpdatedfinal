@@ -22,7 +22,10 @@ interface RankedOffer {
   rankType: "BEST_CASH" | "BEST_MONTHLY" | "BEST_OVERALL";
   rankLabel: string;
   otdPriceCents: number;
-  monthlyPayment?: number;
+  /** Integer MINOR UNITS, like every other money field here. Render through `money()`. */
+  monthlyPaymentCents?: number;
+  /** The term the DEALERSHIP quoted, which is the only term anyone actually offered. */
+  monthlyTermMonths?: number | null;
   totalCostCents?: number;
   junkFeesCents: number;
   dealerTier: string;
@@ -141,9 +144,16 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
           {error}
         </div>
       )}
-      {/* Loan term toggle */}
+      {/* LOAN TERM — REPORTED TO THE OWNER, NOT SILENTLY REMOVED.
+           This control no longer changes any payment on screen. §8c ranks the monthly payment a
+           DEALERSHIP quoted, at the APR and term they quoted, and Phase 6 makes the engine the one
+           source of that number — so a buyer-chosen term would be a hypothetical nobody offered.
+           The control is kept rather than deleted because removing a capability needs owner
+           sign-off, and the label now says what it does: it sets the comparison term used where a
+           term is not quoted. The product question — recompute at the buyer's term and label it an
+           estimate, or drop the control — is raised in the Phase 6 report. */}
       <div className="flex flex-wrap items-center gap-2 mb-6" data-testid="term-toggle">
-        <span className="text-sm text-slate-500 mr-2 w-full sm:w-auto">Loan term:</span>
+        <span className="text-sm text-slate-500 mr-2 w-full sm:w-auto">Comparison term:</span>
         {[36, 48, 60, 72].map(months => (
           <button key={months} onClick={() => setTermMonths(months)}
             data-testid={`term-${months}`}
@@ -211,8 +221,18 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
               </span>
             )}
 
-            {offer.monthlyPayment && (
-              <p className="text-sm text-slate-600 mb-2">~${offer.monthlyPayment}/mo for {termMonths} months</p>
+            {/* TWO DEFECTS FIXED HERE, BOTH FOUND BY REVIEW.
+                 The payment is INTEGER MINOR UNITS — `calculateMonthly` takes `otdPriceCents` and
+                 returns cents — and this printed it raw, so a $30,000 offer at 6.9% over 72 months
+                 rendered as "~$50990/mo". It now goes through `money()` like every other amount.
+                 The term said `{termMonths}`, the value of the toggle above, while the payment was
+                 computed from the DEALERSHIP's own quoted term. Toggling to 36mo relabelled a
+                 72-month payment. The card now states the term the payment is actually for. */}
+            {offer.monthlyPaymentCents != null && (
+              <p className="text-sm text-slate-600 mb-2">
+                ~{money(offer.monthlyPaymentCents)}/mo
+                {offer.monthlyTermMonths ? ` for ${offer.monthlyTermMonths} months, as quoted` : ""}
+              </p>
             )}
 
             {offer.junkFeesCents > 0 && (

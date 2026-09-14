@@ -26,7 +26,16 @@ export interface RankedOffer {
   /** Non-junk fees. Separated from junk fees because §8c weights them separately. */
   feesCents: number;
   junkFeesCents: number;
+  /** INTEGER MINOR UNITS, like every other money field on this type. */
   monthlyPayment?: number;
+  /**
+   * The term the DEALERSHIP quoted, which is the term `monthlyPayment` was computed at.
+   *
+   * Carried because the report has to SAY it. The buyer-facing panel used to label the payment
+   * with a comparison term chosen in the UI while the number came from this one, so toggling to
+   * 36mo relabelled a 72-month payment.
+   */
+  monthlyTermMonths?: number | null;
   aprFlag?: string | null;
   aprRate?: number | null;
   distanceMiles: number | null;
@@ -255,6 +264,7 @@ export async function rankOffers(
       feesCents: m.offer.feesCents,
       junkFeesCents: m.junkFeesCents,
       monthlyPayment: m.monthly,
+      monthlyTermMonths: m.monthly != null ? m.offer.termMonths : null,
       aprFlag: m.offer.aprFlag,
       aprRate: m.offer.aprRate,
       distanceMiles: m.distanceMiles,
@@ -328,6 +338,10 @@ async function persistRanking(
           feesCents: r.feesCents,
           junkFeesCents: r.junkFeesCents,
           monthlyPayment: r.monthlyPayment ?? null,
+          // Persisted per offer, because the log's single `term_months` column records the term the
+          // ranking was REQUESTED at while each payment came from the dealership's own quoted
+          // term. Without this the row cannot be reproduced.
+          monthlyTermMonths: r.monthlyTermMonths ?? null,
           distanceMiles: r.distanceMiles,
           featureMatchScore: r.featureMatchScore,
           rankCash: r.rankCash,
@@ -472,9 +486,27 @@ export function selectTopOffers(ranked: RankedOffer[]): {
     ? financed.reduce((a, b) => (b.monthlyPayment! < a.monthlyPayment! ? b : a))
     : null;
 
-  // Lowest overall score wins; `ranked` order breaks the tie, so equal-scoring offers give the
-  // card to the one §8c's tie-break puts first rather than to the database's row order.
-  const bestOverall = ranked.reduce((a, b) => (b.overallScore < a.overallScore ? b : a));
+  // ── BEST OVERALL, AND WHY IT IS NOT SIMPLY THE LOWEST SCORE ────────────────────────────────
+  //
+  // `overallScore` is a WITHIN-CANDIDATE normalised rank: an offer's position among the other
+  // offers on the same car. Comparing those numbers across candidates is comparing positions in
+  // different races. Found by review, with the case that makes it plain: a candidate answered by
+  // ONE dealership has no ranking to speak of, so its sole offer scores neutral (0.5) while the
+  // winner of a two-offer race on another candidate scores 0.0 — and the card goes to the second
+  // one for having had a rival to beat, however much better the first deal was.
+  //
+  // So the question is answered with the measure that IS cross-candidate, and §8c already names
+  // it: "cross-candidate ranking on discount to listed market price". Across different cars, the
+  // best overall value is the deepest concession against what the vehicle is listed at.
+  //
+  // On a single-candidate auction (and on a custom request) every offer is in one race, the
+  // within-candidate score is exactly the right comparison, and it is used.
+  const groups = new Set(ranked.map((r) => r.auctionVehicleId ?? "__custom__"));
+  const crossCandidate = ranked.filter((r) => r.rankCrossCandidate != null);
+  const bestOverall =
+    groups.size > 1 && crossCandidate.length > 0
+      ? crossCandidate.reduce((a, b) => (b.rankCrossCandidate! < a.rankCrossCandidate! ? b : a))
+      : ranked.reduce((a, b) => (b.overallScore < a.overallScore ? b : a));
 
   return { bestCash, bestMonthly, bestOverall };
 }

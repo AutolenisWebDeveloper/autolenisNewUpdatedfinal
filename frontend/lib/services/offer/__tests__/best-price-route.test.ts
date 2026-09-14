@@ -27,7 +27,16 @@ let otdRows: Rec[];
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
-      auction: { findFirst: async () => auction },
+      // HONOURS THE `where`. A fake that answered regardless of scope made
+      // "another buyer's auction is not found" pass with `buyerId` deleted from the route's
+      // query — a green suite over a cross-buyer IDOR on a report containing someone else's
+      // offers. Found by review; the engine fake in the same commit already did this.
+      auction: {
+        findFirst: async ({ where }: { where: Rec }) =>
+          auction && (where.buyerId === undefined || where.buyerId === (auction as Rec).buyerId)
+            ? auction
+            : null,
+      },
       offer: { findMany: async () => otdRows },
     },
   },
@@ -80,7 +89,7 @@ function ranked(over: Rec = {}): Rec {
 }
 
 beforeEach(() => {
-  auction = { id: "auc_1", status: "CLOSED", startedAt: new Date("2026-09-01T00:00:00Z"), createdAt: new Date("2026-09-01T00:00:00Z") };
+  auction = { id: "auc_1", buyerId: "b1", status: "CLOSED", startedAt: new Date("2026-09-01T00:00:00Z"), createdAt: new Date("2026-09-01T00:00:00Z") };
   report = [ranked()];
   reportCalls = [];
   otdRows = [{ id: "off_1", vehiclePriceCents: 2_800_000, taxCents: 150_000, feesCents: 50_000 }];
@@ -209,7 +218,13 @@ test("a PENDING auction has nothing to rank", async () => {
   assert.equal((await get()).status, 400);
 });
 
-test("another buyer's auction is not found", async () => {
+test("another buyer's auction is not found — the query is SCOPED, not just filtered here", async () => {
+  // The fake honours `where.buyerId`, so this fails if the route ever stops scoping the lookup.
+  auction = { ...auction!, buyerId: "someone_else" };
+  assert.equal((await get()).status, 404);
+});
+
+test("a missing auction is a 404", async () => {
   auction = null;
   assert.equal((await get()).status, 404);
 });

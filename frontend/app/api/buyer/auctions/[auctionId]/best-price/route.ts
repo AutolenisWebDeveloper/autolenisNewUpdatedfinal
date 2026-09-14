@@ -102,7 +102,14 @@ export async function GET(request: NextRequest, { params }: Props) {
       rankType,
       rankLabel,
       otdPriceCents: o.otdPriceCents,
-      monthlyPayment: o.monthlyPayment,
+      // NAMED FOR ITS UNIT. The engine computes from `otdPriceCents` and returns minor units, and
+      // the field used to be called `monthlyPayment` — which the panel then printed raw as dollars,
+      // rendering a $30,000 offer at 6.9%/72mo as "~$50990/mo". The name now carries the unit, so
+      // the next reader cannot make the same mistake.
+      monthlyPaymentCents: o.monthlyPayment,
+      // The term the DEALERSHIP quoted. The card states this rather than the requested comparison
+      // term, because the payment was computed from it — see the panel.
+      monthlyTermMonths: o.monthlyTermMonths ?? null,
       junkFeesCents: o.junkFeesCents,
       dealerTier: o.dealerTier,
       rankingExplanation: explanation,

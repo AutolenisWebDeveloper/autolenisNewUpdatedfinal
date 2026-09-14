@@ -55,12 +55,37 @@ export function normalizeFeature(value: string): string {
  * buyer who required a "panoramic sunroof", and matching it would tell them they are getting
  * something they are not.
  */
+/**
+ * Feed strings that NAME a feature in order to say the vehicle does not have it. A substring test
+ * alone counts "Sunroof Delete" as satisfying a requirement for "Sunroof" — and since the feature
+ * match is §8c's second tie-break key, that hands a tie to the dealership whose car is missing the
+ * thing the buyer required. Found by review.
+ *
+ * Deliberately a short, literal list rather than language processing: these are the forms dealer
+ * feeds actually use, and a clever matcher here would start guessing at what a listing meant.
+ */
+const NEGATIONS = ["no", "not", "without", "delete", "deleted", "none", "removed", "n a", "not equipped", "not included"];
+
+/** Matched at a word boundary immediately before or after the requirement, never anywhere in the
+ *  string: "Blind Spot Monitor" and "Lane Departure Warning" must stay matches. */
+const NEGATED_BEFORE = new RegExp(`(?:^|\\s)(?:${NEGATIONS.join("|")})$`);
+const NEGATED_AFTER = new RegExp(`^(?:${NEGATIONS.join("|")})(?:\\s|$)`);
+
+function isNegated(offeredNormalized: string, requiredNormalized: string): boolean {
+  const idx = offeredNormalized.indexOf(requiredNormalized);
+  if (idx < 0) return false;
+  const before = offeredNormalized.slice(0, idx).trim();
+  const after = offeredNormalized.slice(idx + requiredNormalized.length).trim();
+  return NEGATED_BEFORE.test(before) || NEGATED_AFTER.test(after);
+}
+
 function satisfies(offered: readonly string[], required: string): boolean {
   const req = normalizeFeature(required);
   if (!req) return false;
   return offered.some((o) => {
     const off = normalizeFeature(o);
-    return off === req || off.includes(req);
+    if (off !== req && !off.includes(req)) return false;
+    return !isNegated(off, req);
   });
 }
 

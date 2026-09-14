@@ -7,12 +7,14 @@
 // unfiltered one and every defect this phase fixed in the counting would still be live, with a
 // green test suite on top of it (the unit fakes answer from memory).
 //
-// So it is proven against a real PostgreSQL rather than asserted. Run from `frontend/`, against a
-// THROWAWAY LOOPBACK database only — the run-proof.sh carve-out, never production:
+// So it is proven against a real PostgreSQL rather than asserted. Against a THROWAWAY LOOPBACK
+// database only — the run-proof.sh carve-out, never production. `@/…` and `@prisma/client` resolve
+// against `frontend/`, so copy it there to run it:
 //
+//   cd frontend && cp ../docs/transaction-flow/phase-6-proof/probe-qualified-count.ts scripts/probe-tmp.ts
 //   DATABASE_URL="postgresql://pgtest@127.0.0.1:55432/autolenis_chain" \
 //   DIRECT_URL="postgresql://pgtest@127.0.0.1:55432/autolenis_chain" \
-//     npx tsx ../docs/transaction-flow/phase-6-proof/probe-qualified-count.ts
+//     npx tsx scripts/probe-tmp.ts && rm scripts/probe-tmp.ts
 //
 // Recorded result (PostgreSQL 16.13, 2026-09-13) — see proof-run.log:
 //
@@ -83,6 +85,12 @@ async function main() {
   const ok = row.offers.length === 6 && row._count.offers === 2 && swept.count === 1 && after === 2;
   console.log(ok ? "PASS — the predicate is applied at the database" : "FAIL");
 
+  // PROBE 2, run from here rather than left as an exported function nobody calls. It was
+  // unreachable — declared after `main()` had already been invoked — while `proof-run.log` §12 and
+  // `auction.service.ts` cited it as the recorded run. Found by review: the claim was true and the
+  // citation was not reproducible from the artifact it named.
+  await probeEmptyNotIn(db);
+
   // Clean up: this is a throwaway loopback database, but leaving rows behind would poison the
   // next proof run's baseline.
   await db.offer.deleteMany({ where: { auctionId: auction.id } });
@@ -93,10 +101,6 @@ async function main() {
   await db.user.deleteMany({ where: { id: { in: [user.id, dealerUser.id] } } });
   if (!ok) process.exitCode = 1;
 }
-
-main()
-  .then(() => db.$disconnect())
-  .catch(async (e) => { console.error("FAILED:", e.message); await db.$disconnect(); process.exit(1); });
 
 // ── PROBE 2 — `id: { notIn: [] }` ───────────────────────────────────────────────────────────────
 //
@@ -115,6 +119,19 @@ main()
 // candidates; the success arm relies on the guard in `auction.service.ts`, because an empty
 // answered set there means the offers could not be attributed — not that nothing was answered.
 export async function probeEmptyNotIn(db: PrismaClient): Promise<void> {
-  await db.auctionVehicle.count({ where: { candidateStatus: "ACTIVE", id: { notIn: [] } } });
-  await db.auctionVehicle.count({ where: { candidateStatus: "ACTIVE", id: { notIn: ["a", "b"] } } });
+  // Run the client with `log: ["query"]` to SEE the generated SQL — the counts themselves prove
+  // nothing, the emitted predicate is the whole point. The recorded run above is that output.
+  const logged = new PrismaClient({ log: ["query"] });
+  try {
+    await logged.auctionVehicle.count({ where: { candidateStatus: "ACTIVE", id: { notIn: [] } } });
+    await logged.auctionVehicle.count({ where: { candidateStatus: "ACTIVE", id: { notIn: ["a", "b"] } } });
+  } finally {
+    await logged.$disconnect();
+  }
+  void db;
 }
+
+
+main()
+  .then(() => db.$disconnect())
+  .catch(async (e) => { console.error("FAILED:", e.message); await db.$disconnect(); process.exit(1); });

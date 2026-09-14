@@ -565,6 +565,8 @@ export const PHASE_6_TEMPLATES = {
   OFFERS_READY: "offers_ready",
   /** §27.1 "Zero offers" → Buyer, "Outcome and recovery path". */
   AUCTION_ZERO_OFFERS: "auction_zero_offers",
+  /** §27.1 K27-1330 / §23.2a touchpoint 4 — one hour after acceptance, only if declined. */
+  PREMIUM_FOLLOW_UP: "premium_follow_up",
 } as const;
 
 export type Phase6TemplateKey = (typeof PHASE_6_TEMPLATES)[keyof typeof PHASE_6_TEMPLATES];
@@ -634,3 +636,47 @@ const skipIfOffersArrived: StateRecheckFn = async (ctx) => {
 
 registerStateRecheck(PHASE_6_TEMPLATES.OFFERS_READY, skipIfOffersNoLongerReady);
 registerStateRecheck(PHASE_6_TEMPLATES.AUCTION_ZERO_OFFERS, skipIfOffersArrived);
+
+/**
+ * §23.2a touchpoint 4 — the one-hour follow-up, re-decided at send time.
+ *
+ * THE WHOLE SUPPRESSION SET IS RE-EVALUATED HERE, not merely re-read. The row is written at
+ * acceptance and drains an hour later, and that hour is exactly when the things §23.2b suppresses
+ * on tend to happen: the buyer upgrades from the interstitial's own link, a dispute lands on the
+ * $99, Operations opens an exception on the deal, the buyer starts cancelling. Enqueue-time
+ * suppression alone would send the ask into every one of those.
+ *
+ * It ALSO re-checks the precondition that is unique to this touchpoint: §23.2a sends it "only if
+ * the invitation was declined or dismissed". A buyer who simply has not opened the interstitial
+ * yet has not declined anything, and must not be emailed as though they had.
+ */
+const skipIfUpgradeNoLongerAskable: StateRecheckFn = async (ctx) => {
+  const vehicleRequestId = ctx.vehicleRequestId;
+  if (!vehicleRequestId || !ctx.recipientId) {
+    return { proceed: false, reason: "premium follow-up with no request or buyer reference" };
+  }
+  const [{ isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS }, { upgradeAskCounts }] = await Promise.all([
+    import("@/lib/services/plan/upgrade-suppression.service"),
+    import("@/lib/services/plan/upgrade-touchpoint.service"),
+  ]);
+
+  const counts = await upgradeAskCounts(ctx.recipientId, vehicleRequestId, ctx.db);
+  if (counts.declines === 0) {
+    return { proceed: false, reason: "the invitation was never declined or dismissed — §23.2a sends this only if it was" };
+  }
+
+  const decision = await isUpgradePromptSuppressed(
+    {
+      vehicleRequestId,
+      buyerId: ctx.recipientId,
+      touchpoint: UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE_EMAIL,
+      emailsSent: counts.emailsSent,
+      declines: counts.declines,
+    },
+    ctx.db,
+  );
+  if (decision.suppressed) return { proceed: false, reason: `${decision.reason}: ${decision.detail}` };
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP, skipIfUpgradeNoLongerAskable);

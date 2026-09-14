@@ -14,6 +14,35 @@ const schema = z.object({
   aprRate: z.number().optional(), termMonths: z.number().int().optional(),
   // One schema for all three accepted shapes — see lib/services/offer/junk-fee-items.ts.
   junkFeeItems: feeItemsSchema.optional(),
+
+  // ── §8c CANDIDATE BINDING — WITHOUT THIS FIELD THE DEALER PATH IS DEAD ────────────────────
+  //
+  // `submitOffer` refuses an offer that names no candidate whenever the auction HAS candidates
+  // ("This auction has specific vehicles — your offer must name the one it answers"), which is
+  // every sourced auction. This schema stripped the field, so the service threw on every such
+  // submission and a dealer could not bid at all. Found by review; the binding requirement landed
+  // one commit before this field did.
+  //
+  // Optional, because a CUSTOM REQUEST has no candidates and §8c binds those offers to the
+  // criteria set instead (parity row C3b). The service decides which case applies; the schema
+  // only has to stop discarding the answer.
+  auctionVehicleId: z.string().optional(),
+
+  // A2b — the vehicle snapshot. Every field optional and prefilled from the bound candidate's
+  // listing by the service; a dealership states one only where it differs from what AutoLenis
+  // already holds (a different trim, an odometer the feed has not caught up with, their own stock
+  // number). Accepting them is what makes "what the submitter states always wins" reachable from
+  // the dealer form rather than from staff intake alone.
+  vin: z.string().optional(),
+  stockNumber: z.string().optional(),
+  vehicleYear: z.number().int().optional(),
+  vehicleMake: z.string().optional(),
+  vehicleModel: z.string().optional(),
+  vehicleTrim: z.string().optional(),
+  odometer: z.number().int().min(0).optional(),
+  vehicleCondition: z.string().optional(),
+  exteriorColor: z.string().optional(),
+  interiorColor: z.string().optional(),
 });
 
 export async function GET(request: NextRequest) {

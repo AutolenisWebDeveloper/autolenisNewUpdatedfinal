@@ -25,12 +25,18 @@
 //           and therefore everything there is to count — belong to later phases. Stated
 //           rather than stubbed.
 //
-//   PAY-73  suppression while the transaction sits in an EXCEPTION state is NOT this
-//           phase: E26-45, T35 and the Phase 10 scope own it, and the unqualified
-//           phrase that stood in §8.2 implied otherwise (corrected 2026-09-09). It is
-//           deliberately absent from the reasons below rather than stubbed, because a
-//           predicate that always passes is worse than one that is not there — the next
-//           reader cannot tell which it is.
+//   PAY-73  suppression while the transaction sits in an EXCEPTION state. DEFERRED BY PHASE 3
+//           to E26-45/T35 and the Phase 10 scope, and RULED INTO PHASE 6 BY THE OWNER
+//           (2026-09-13): the interstitial ships with "the full suppression set including any
+//           open exception". Phase 3 could not build it honestly — `queue_items` had no writer
+//           it could rely on and a predicate that always passes is worse than one that is not
+//           there. Phase 6 raises four codes into that table, so the predicate now has
+//           something to read, and it is implemented below.
+//
+//           WHY IT MATTERS MOST HERE. Touchpoint 3 fires immediately after offer acceptance —
+//           the exact moment an approval-expired, over-budget or zero-offer case is most likely
+//           to be open. Asking a buyer for $400 while Operations is working out whether their
+//           transaction can proceed is the §23.2b failure that reads worst of all.
 //
 // PAY-72 IS NOT A PREDICATE. "Never sold on fear" is a property of the COPY — no message
 // may imply the deal goes worse on Standard, that Standard offers are weaker, or that
@@ -39,7 +45,7 @@
 // finds out where the fourth lives rather than concluding it was dropped.
 
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { QueueItemStatus, type Prisma } from "@prisma/client";
 import { depositNotOnHold } from "@/lib/payments/deposit-state";
 import { entitledPlanForRequest } from "@/lib/services/buyer/plan-snapshot.service";
 
@@ -78,6 +84,8 @@ export type SuppressionReason =
   | "already_premium"
   /** §23.2b — the two-email ceiling, or a buyer who declined twice. */
   | "asked_enough"
+  /** PAY-73 — an open §26 exception on this transaction. Added Phase 6, owner-ruled. */
+  | "exception_in_progress"
   /** The request is gone. */
   | "request_not_found";
 
@@ -234,6 +242,31 @@ export async function isUpgradePromptSuppressed(
       detail:
         "no settled, unrefunded, undisputed $99 stands behind this request — a prompt here would " +
         "be selling a credit that is under dispute",
+    };
+  }
+
+  // PAY-73 — AN OPEN §26 EXCEPTION. Owner-ruled into this phase.
+  //
+  // Scoped to the request AND to the buyer, because §26 rows carry whichever reference the raise
+  // site had: a zero-offer case names the auction and the buyer, an approval expiry names the
+  // request. Either is the same transaction from the buyer's side, and a prompt during either is
+  // the ask arriving while somebody is still working out whether the deal can proceed at all.
+  //
+  // LIVE means OPEN, ASSIGNED or ESCALATED — a case somebody still owns. RESOLVED and CLOSED are
+  // history and must not silence the ask forever, which is the failure mode of a bare
+  // `status: { not: "CLOSED" }`.
+  const openException = await db.queueItem.findFirst({
+    where: {
+      status: { in: [QueueItemStatus.OPEN, QueueItemStatus.ASSIGNED, QueueItemStatus.ESCALATED] },
+      OR: [{ vehicleRequestId: input.vehicleRequestId }, { buyerId: input.buyerId }],
+    },
+    select: { exceptionCode: true },
+  });
+  if (openException) {
+    return {
+      suppressed: true,
+      reason: "exception_in_progress",
+      detail: `an open exception (${openException.exceptionCode ?? "unspecified"}) is being worked on this transaction`,
     };
   }
 
