@@ -98,10 +98,10 @@ beforeEach(() => {
   state.createCalls = 0;
 });
 
-test("the catalogue covers §26's 48 rows plus the five the Markdown states elsewhere", async () => {
+test("the catalogue covers §26's 48 rows plus the six the Markdown states elsewhere", async () => {
   const { EXCEPTION_CATALOGUE } = await cat();
-  assert.equal(EXCEPTION_CATALOGUE.length, 53);
-  // §26 proper: 48 rows. The five additions are each stated in the Markdown, just
+  assert.equal(EXCEPTION_CATALOGUE.length, 54);
+  // §26 proper: 48 rows. The six additions are each stated in the Markdown, just
   // not as a §26 row:
   //   • COMMS_TERMINAL_FAILURE — §27, rendered in the HTML register (§2 diff D2)
   //   • LINEAGE_ORPHAN         — §3, the transaction spine
@@ -116,12 +116,17 @@ test("the catalogue covers §26's 48 rows plus the five the Markdown states else
   //   • LAUNCH_READINESS_BLOCKED — Stage 7's failure clause ("A launch that cannot
   //     reach readiness holds and surfaces the blocker with an owner"). Added Phase 5
   //     (S7-22).
+  //   • AUCTION_TRENDING_TO_ZERO_OFFERS — §27.1 "Auction nearing zero offers →
+  //     Operations → Alert". It is NOT ZERO_OFFERS_ALL_CANDIDATES: that row's required
+  //     action ("relaunch once, or close it") is for an auction that has already closed,
+  //     and this one fires while the field can still be widened. Added Phase 6 (K27-1325).
   const extraCodes = [
     "COMMS_TERMINAL_FAILURE",
     "LINEAGE_ORPHAN",
     "POSSIBLE_DUPLICATE_BUYER",
     "THIN_DEALER_COVERAGE",
     "LAUNCH_READINESS_BLOCKED",
+    "AUCTION_TRENDING_TO_ZERO_OFFERS",
   ];
   const extras = EXCEPTION_CATALOGUE.filter((d) => extraCodes.includes(d.code));
   assert.equal(extras.length, extraCodes.length, "each addition must be present exactly once");

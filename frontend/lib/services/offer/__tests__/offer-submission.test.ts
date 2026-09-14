@@ -20,6 +20,7 @@
 
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { OFFER_VALIDITY_HOURS } from "@/lib/constants";
 
 type Rec = Record<string, unknown>;
 
@@ -30,6 +31,9 @@ let liveOffers: Rec[];
 let approval: Rec;
 let created: Rec[];
 let invitationUpdates: Rec[];
+
+let originalOffer: Rec | null;
+let offerUpdates: Rec[];
 
 const tx = {
   auctionInvitation: {
@@ -55,6 +59,9 @@ const tx = {
       created.push(row);
       return row;
     },
+    // `reviseOffer` re-reads the original inside the transaction as its concurrency guard.
+    findFirst: async () => originalOffer,
+    update: async (a: Rec) => { offerUpdates.push(a); return {}; },
   },
   notification: { create: async () => ({}) },
 };
@@ -101,6 +108,8 @@ beforeEach(() => {
   approval = { ok: true, approvedAmountCents: 4_000_000, expiresAt: new Date() };
   created = [];
   invitationUpdates = [];
+  originalOffer = null;
+  offerUpdates = [];
 });
 
 function base(over: Rec = {}): Rec {
@@ -164,7 +173,13 @@ test("the candidate binding, the rooftop and the expiry are all written", async 
   await submit();
   assert.equal(created[0].auctionVehicleId, "cand_1", "§8c: every offer binds to the candidate it answers");
   assert.equal(created[0].rooftopId, "roof_1", "the rooftop comes from the INVITATION, not the request body");
-  assert.deepEqual(created[0].expiresAt, AUCTION_ENDS, "§8a's required expiration defaulted to the auction deadline");
+  // The expiry is a POLICY WINDOW opening at the CLOSE — never the close itself. See
+  // `offer-expiry.test.ts`, which owns that rule and the reason the obvious default breaks
+  // selection entirely.
+  assert.equal(
+    (created[0].expiresAt as Date).getTime(),
+    AUCTION_ENDS.getTime() + OFFER_VALIDITY_HOURS * 3_600_000,
+  );
 });
 
 test("a dealer cannot spend another rooftop's offer budget by naming one", async () => {
@@ -251,4 +266,76 @@ test("TWO OUTSIDE DEALERSHIPS can bid on one auction — the cap keys on their e
   }));
   assert.equal(created.length, 1, "the second outside dealership was refused as a duplicate of the first");
   assert.equal(created[0].externalDealerEmail, "second@dealership.test");
+});
+
+// ── THE REVISION PATH — every identifying column was dropped ────────────────────────────────────
+
+test("a revision carries the candidate, rooftop, outside identity and expiry forward", async () => {
+  // A revision is a NEW `offers` row that supersedes the original, and it wrote only the money.
+  // Four things broke at once on the surviving row:
+  //
+  //   auctionVehicleId  §8c's candidate binding — the dealer dropped out of the candidate they bid on
+  //   rooftopId         §8b's caps, and `offers_one_live_per_rooftop_candidate_key` went INERT again
+  //                     (both columns NULL, and PostgreSQL treats NULLs as distinct), so the rooftop
+  //                     could then submit a SECOND live offer for the same vehicle
+  //   external*         an OUTSIDE dealership's only identity — erased from the buyer's report
+  //   expiresAt         §8a's required field, dropped entirely
+  const EXPIRY = new Date(AUCTION_ENDS.getTime() + 72 * 3_600_000);
+  originalOffer = {
+    id: "off_orig",
+    auctionId: "auc_1",
+    dealerId: "d1",
+    version: 1,
+    otdPriceCents: 3_000_000,
+    vehiclePriceCents: 2_800_000,
+    taxCents: 150_000,
+    feesCents: 50_000,
+    junkFeeItems: [],
+    includesFinancing: false,
+    aprRate: null,
+    termMonths: null,
+    auctionVehicleId: "cand_1",
+    rooftopId: "roof_1",
+    submittedByAdminId: "adm_9",
+    externalDealerName: "Outside Motors",
+    externalDealerEmail: "sales@outside.test",
+    externalDealerPhone: "+15550100",
+    expiresAt: EXPIRY,
+  };
+
+  const { reviseOffer } = await import("../offer.service");
+  await reviseOffer("off_orig", "d1", { otdPriceCents: 2_900_000, vehiclePriceCents: 2_700_000 } as never);
+
+  assert.equal(created.length, 1);
+  const rev = created[0];
+  assert.equal(rev.auctionVehicleId, "cand_1", "the revision lost its candidate binding");
+  assert.equal(rev.rooftopId, "roof_1", "the revision lost its rooftop — the §8b cap stops binding");
+  assert.equal(rev.submittedByAdminId, "adm_9");
+  assert.equal(rev.externalDealerName, "Outside Motors");
+  assert.equal(rev.externalDealerEmail, "sales@outside.test", "an outside dealership lost its identity");
+  assert.equal(rev.externalDealerPhone, "+15550100");
+  assert.deepEqual(rev.expiresAt, EXPIRY, "the revision inherited no expiry at all");
+  assert.equal(rev.version, 2);
+  // ...and the original is still withdrawn, so the cap counts one live offer, not two.
+  assert.equal((offerUpdates[0].data as Rec).status, "WITHDRAWN");
+});
+
+test("a revision cannot extend its own validity past the window the auction gave", async () => {
+  // Re-derived from the auction rather than pushed forward on every revise: a dealer who revised
+  // three times would otherwise hold an offer alive long after its competitors lapsed.
+  originalOffer = {
+    id: "off_orig", auctionId: "auc_1", dealerId: "d1", version: 1,
+    otdPriceCents: 3_000_000, vehiclePriceCents: 2_800_000, taxCents: 150_000, feesCents: 50_000,
+    junkFeeItems: [], includesFinancing: false, aprRate: null, termMonths: null,
+    auctionVehicleId: "cand_1", rooftopId: "roof_1",
+    submittedByAdminId: null, externalDealerName: null, externalDealerEmail: null, externalDealerPhone: null,
+    expiresAt: null,
+  };
+  const { reviseOffer } = await import("../offer.service");
+  await reviseOffer("off_orig", "d1", { otdPriceCents: 2_900_000, vehiclePriceCents: 2_700_000 } as never);
+  assert.equal(
+    (created[0].expiresAt as Date).getTime(),
+    AUCTION_ENDS.getTime() + OFFER_VALIDITY_HOURS * 3_600_000,
+    "a legacy row with no expiry must get the same window every other offer on this auction has",
+  );
 });

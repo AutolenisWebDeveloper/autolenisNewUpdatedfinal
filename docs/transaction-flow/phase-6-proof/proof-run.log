@@ -140,3 +140,22 @@ OK — no functional drift; structural drift at baseline.
 == PHASE 6 MIGRATION PROOF: PASS on PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) ==
    preflight -> apply -> verify (physical + ledger) -> behaviour -> re-apply -> no-op -> verify
    -> rollback -> re-apply -> digest identical -> drift at baseline
+
+== 11. RUNTIME PROBE — the filtered relation count (probe-qualified-count.ts) ==
+   Prisma accepts `_count: { select: { offers: { where } } }` at the type level and executes it
+   without error whether or not the predicate reaches the database. `processAuctionClose` and
+   `checkSLAs` both branch on it, so it is proven rather than assumed.
+
+   Six offers seeded on one auction: SUBMITTED+future, SUBMITTED+NULL-expiry (a pre-Phase-6 row),
+   SUBMITTED+disqualified, SUBMITTED+lapsed, WITHDRAWN (a superseded revision), DRAFT.
+
+  unfiltered rows on the auction : 6
+  FILTERED relation count        : 2
+  lapsedOfferWhere swept          : 1
+  qualified after the sweep      : 2
+  PASS — the predicate is applied at the database
+
+   The sweep matched exactly the lapsed row and left the NULL-expiry row alone, which is the
+   boundary `offer-expiry.test.ts` pins in memory and this run confirms in PostgreSQL.
+
+== PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) — DEGRADED against production's 17.x, per §8 above ==

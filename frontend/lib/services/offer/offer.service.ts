@@ -16,6 +16,7 @@ import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifica
 // here to keep offer.service's public surface unchanged for existing importers.
 import { assertOtdComponentsMatch } from "./otd";
 import { classifyFeeItems } from "./junk-fee.service";
+import { defaultOfferExpiry } from "./offer-validity";
 import { recheckApproval } from "@/lib/services/prequal/approval-recheck";
 export { assertOtdComponentsMatch };
 
@@ -137,7 +138,10 @@ export interface OfferInput {
   auctionVehicleId?: string | null;
   /** §8a — the rooftop that made the offer. Phase 1 shipped the column; nothing wrote it. */
   rooftopId?: string | null;
-  /** §8a — "Offer expiration", a REQUIRED field. Defaults to the auction's own deadline. */
+  /**
+   * §8a — "Offer expiration", a REQUIRED field. Defaults to `OFFER_VALIDITY_HOURS` after the
+   * auction closes (`defaultOfferExpiry`), never to the close itself — see the write site.
+   */
   expiresAt?: Date | null;
 
   // ── STAFF INTAKE (§8.2 Phase 6 defect 2) ──────────────────────────────────────────────────
@@ -307,10 +311,21 @@ export async function submitOffer(input: OfferInput) {
         externalDealerName: input.externalDealerName ?? null,
         externalDealerEmail: input.externalDealerEmail ?? null,
         externalDealerPhone: input.externalDealerPhone ?? null,
-        // §8a makes the expiration a required field. Defaulting to the auction's own deadline is
-        // the honest floor: an offer cannot outlive the window it was made in, and a dealer who
-        // states a shorter one is taken at their word.
-        expiresAt: input.expiresAt ?? auction.endsAt ?? null,
+        // §8a makes the expiration a required field, and the default is a POLICY WINDOW that
+        // opens when the auction CLOSES (parity row A16b, "default policy window").
+        //
+        // THE OBVIOUS DEFAULT IS WRONG AND WOULD HAVE BROKEN SELECTION ENTIRELY. Defaulting to
+        // `auction.endsAt` reads as "an offer cannot outlive the window it was made in", but
+        // `processAuctionClose` runs when `endsAt <= now` — so every offer would be expired at
+        // the exact moment the buyer is first shown it, the ranked report would be empty and the
+        // `OFFER_EXPIRED` gate on the select route would refuse every selection. §9 says the
+        // opposite: "Offers carry an expiration. Remind the buyer BEFORE offers expire", which
+        // only means anything if the expiration is after the close.
+        //
+        // Measured from the close rather than from submission so every offer on one auction
+        // expires together — see OFFER_VALIDITY_HOURS. A dealer who states a shorter expiration
+        // is taken at their word.
+        expiresAt: input.expiresAt ?? defaultOfferExpiry(auction.endsAt, now),
       },
     });
 
@@ -513,6 +528,38 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
         // a stale verdict decide whether the buyer can pick this version.
         isDisqualified: budget.disqualified,
         disqualifiedReason: budget.disqualified ? budget.reason : null,
+
+        // ── CARRIED FORWARD, AND NONE OF IT WAS BEFORE ───────────────────────────────────────
+        //
+        // A revision is a NEW `offers` row that supersedes the original, and this block wrote
+        // only the money. Everything identifying WHOSE offer it is and WHAT it answers was left
+        // NULL on the surviving row, which broke four things at once:
+        //
+        //   auctionVehicleId    §8c's candidate binding, and with it per-candidate ranking. A
+        //                       dealer who revised dropped out of the candidate they bid on.
+        //   rooftopId           §8b's caps key on the rooftop, and
+        //                       `offers_one_live_per_rooftop_candidate_key` is a partial unique
+        //                       over exactly these two columns — so a revision made the live row
+        //                       INERT against the index again (NULLs are distinct), and the
+        //                       rooftop could then submit a second live offer for the same
+        //                       vehicle.
+        //   external*           An OUTSIDE dealership has no account; its identity lives in
+        //                       these columns. A revision erased the dealership's name and
+        //                       address from the offer the buyer is shown, and the per-email cap
+        //                       stopped seeing it.
+        //   expiresAt           §8a's required field, dropped on revision — the revised offer
+        //                       inherited no expiry at all.
+        //
+        // Re-derived rather than copied where the source is authoritative: the expiry comes from
+        // the auction's own deadline again, so a revision cannot extend its own validity past
+        // the window every other offer on the auction gets.
+        auctionVehicleId: original.auctionVehicleId,
+        rooftopId: original.rooftopId,
+        submittedByAdminId: original.submittedByAdminId,
+        externalDealerName: original.externalDealerName,
+        externalDealerEmail: original.externalDealerEmail,
+        externalDealerPhone: original.externalDealerPhone,
+        expiresAt: original.expiresAt ?? defaultOfferExpiry(auction.endsAt),
       },
     });
 

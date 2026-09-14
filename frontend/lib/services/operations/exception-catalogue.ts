@@ -16,11 +16,13 @@
 // express "this string belongs to this code", and a per-call-site literal would
 // drift the moment two sites raised the same code.
 //
-// COMPLETENESS. All 48 §26 rows are present, in document order, plus
-// COMMS_TERMINAL_FAILURE — which the Markdown carries in §27 ("terminal-failure
-// Operations alert") and the HTML renders in its exception register; §2 difference
-// D2 rules it a §27 requirement rendered in §26, so it is catalogued here and
-// counted separately. 49 entries.
+// COMPLETENESS. All 48 §26 rows are present, in document order, plus the entries the Markdown
+// states OUTSIDE §26 — each one catalogued here rather than given a second vocabulary, and each
+// one counted separately by `queue-item.service.test.ts`, which names them individually:
+// COMMS_TERMINAL_FAILURE (§27), LINEAGE_ORPHAN (§3), POSSIBLE_DUPLICATE_BUYER (§7.2), and the two
+// Phase 5 additions THIN_DEALER_COVERAGE and LAUNCH_READINESS_BLOCKED (Stage 6c / Stage 7), plus
+// AUCTION_TRENDING_TO_ZERO_OFFERS (§27.1, added Phase 6). The count lives in that test rather than
+// in this comment — the previous figure here said 49 and had been wrong since Phase 5.
 //
 // `raisedByPhase` records which implementation phase wires the raise site. Phase 2
 // raises the ten entries marked 2; the rest are catalogued now so that Phase 10's
@@ -312,6 +314,35 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Stage 8 — auction close",
     raisedByPhase: 6,
     specSection: "§26; Stage 8c",
+  },
+  {
+    /**
+     * NOT A §26 ROW — §27.1's "Auction nearing zero offers → Operations → Alert", catalogued here
+     * for the same reason COMMS_TERMINAL_FAILURE is: it is an owned Operations condition the
+     * Markdown states outside §26, and the alternative is a second vocabulary for exceptions that
+     * happen to be announced by §27.
+     *
+     * DISTINCT FROM `ZERO_OFFERS_ALL_CANDIDATES`, deliberately. That row's required action is
+     * "relaunch once without a second $99, or close it" — instructions for an auction that has
+     * already closed. This one fires while the auction is still LIVE and the useful action is the
+     * opposite: widen the field before the window ends. Collapsing them would put the wrong
+     * instruction in front of the operator at the only moment they could still act.
+     */
+    code: "AUCTION_TRENDING_TO_ZERO_OFFERS",
+    type: "AUCTION_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Auction nearing its close with zero offers",
+    requiredResult: "Operations alerted once, before the close, while the field can still be widened",
+    // No buyer-facing status: §Stage 7 keeps the auction sealed and a buyer told "nobody has bid"
+    // two hours before the close learns a competing dealer's position, which is the thing §13-D35
+    // exists to prevent.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Check invitation delivery and the size of the invited field, and widen or re-invite before the auction closes.",
+    deadlineHours: 2,
+    returnPoint: "Stage 8 — auction close",
+    raisedByPhase: 6,
+    specSection: "§27.1; Stage 8",
   },
   {
     code: "CANDIDATE_STALE_MID_AUCTION",

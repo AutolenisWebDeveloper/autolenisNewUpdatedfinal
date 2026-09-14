@@ -554,3 +554,76 @@ registerStateRecheck(
   ),
   "operations alert"
 );
+
+// ---------------------------------------------------------------------------
+// Phase 6 templates. §27.1 close rows.
+// ---------------------------------------------------------------------------
+
+/** Template keys Phase 6 enqueues. §27.1 rows K27-1326 and K27-1327. */
+export const PHASE_6_TEMPLATES = {
+  /** §27.1 "Offers ready" → Buyer, "Ranked report and selection instructions". */
+  OFFERS_READY: "offers_ready",
+  /** §27.1 "Zero offers" → Buyer, "Outcome and recovery path". */
+  AUCTION_ZERO_OFFERS: "auction_zero_offers",
+} as const;
+
+export type Phase6TemplateKey = (typeof PHASE_6_TEMPLATES)[keyof typeof PHASE_6_TEMPLATES];
+
+/**
+ * The qualified-offer predicate, re-read at send time.
+ *
+ * It is deliberately the SAME three conditions `qualifiedOfferWhere` applies at close — status
+ * SUBMITTED, not disqualified, not expired — expressed here against `ctx.db` rather than imported,
+ * because `lib/services/offer/offer-validity.ts` is compiled into the request/service tree and this
+ * registry is loaded by the outbox DRAIN. Importing it would pull the offer tree into the drain
+ * process for one `where` clause. The duplication is three lines and is pinned by a test that reads
+ * both and asserts they agree.
+ */
+async function countQualifiedOffers(ctx: StateRecheckContext, auctionId: string): Promise<number> {
+  return ctx.db.offer.count({
+    where: {
+      auctionId,
+      status: "SUBMITTED",
+      isDisqualified: false,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+  });
+}
+
+/**
+ * "Your offers are ready" must not arrive after the buyer has already chosen, and must not arrive
+ * at all if the offers it counts have gone.
+ *
+ * BOTH READS MATTER. A buyer who selected within the drain window (the outbox runs on its own
+ * cadence; an early accept selects inside the same minute the auction closes) would otherwise be
+ * invited to choose an offer they have already chosen. And an offer that lapsed or was withdrawn
+ * between the close and the drain would make the count in the subject line a lie — §8c's "never
+ * presented as qualified" applies to the notice as much as to the report.
+ */
+const skipIfOffersNoLongerReady: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "offers-ready notice with no auction reference" };
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "buyer already selected an offer" };
+  const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
+  if (qualified === 0) return { proceed: false, reason: "no qualified offer remains on this auction" };
+  return { proceed: true };
+};
+
+/**
+ * "No dealership submitted a qualified offer" is false the moment one has.
+ *
+ * That is not hypothetical: §8.2 defect 2 routes staff intake through `submitOffer`, so an offer
+ * that arrived by phone during the auction can be entered after the close, and §13-D39's relaunch
+ * is started by the same operator who would be reading this queue row. Sending the buyer a
+ * "nothing came in" notice after an offer has landed is the worst version of a stale message,
+ * because it also contradicts the in-app notice they can see.
+ */
+const skipIfOffersArrived: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "zero-offer notice with no auction reference" };
+  const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
+  if (qualified > 0) return { proceed: false, reason: `${qualified} qualified offer(s) arrived after the close` };
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_6_TEMPLATES.OFFERS_READY, skipIfOffersNoLongerReady);
+registerStateRecheck(PHASE_6_TEMPLATES.AUCTION_ZERO_OFFERS, skipIfOffersArrived);

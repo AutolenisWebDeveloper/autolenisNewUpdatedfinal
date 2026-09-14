@@ -4,7 +4,7 @@
 import { logger } from "@/lib/logger";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { closeExpiredAuctions, processAuctionClose } from "@/lib/services/auction/auction.service";
+import { closeExpiredAuctions, expireLapsedOffers, processAuctionClose } from "@/lib/services/auction/auction.service";
 import {
   sendDealerOfferRevisionClosingEmail,
 } from "@/lib/services/email/resend.service";
@@ -25,10 +25,21 @@ export async function GET(request: NextRequest) {
   // effects never completed (post_close_processed_at IS NULL), not just those
   // closed in a trailing 6-minute window. A missed or slow cron tick — or a
   // mid-run failure — therefore self-heals on the next pass instead of
-  // permanently dropping the buyer's win/no-offer notice and the zero-offer
-  // auto-refund. processAuctionClose claims each auction atomically and is
-  // idempotent, so reprocessing is safe. Bounded per run to respect the
-  // function timeout; any remainder is picked up next tick.
+  // permanently dropping the buyer's offers-ready or zero-offer notice.
+  // processAuctionClose claims each auction atomically and is idempotent, so
+  // reprocessing is safe. Bounded per run to respect the function timeout; any
+  // remainder is picked up next tick.
+  //
+  // THERE IS NO ZERO-OFFER AUTO-REFUND and there never was: §23.1 retains the $99 and makes a
+  // refund a reviewed request. This comment used to name one, which is the kind of stale line
+  // that later gets implemented.
+  // §8a / A16b — sweep lapsed offers BEFORE the close pass, unscoped. The default expiry window
+  // opens at the auction's close and runs 72 hours past it (`OFFER_VALIDITY_HOURS`), so the offers
+  // falling due on any given tick belong to auctions that closed days ago, not to the ones being
+  // processed below. Sweeping first also means `processAuctionClose`'s qualified count and the
+  // stored `OfferStatus` cannot disagree within the same run.
+  const expiredOffers = await expireLapsedOffers(null, now);
+
   const closedAuctions = await prisma.auction.findMany({
     where: { status: "CLOSED", postCloseProcessedAt: null },
     select: { id: true },
@@ -108,7 +119,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-    return { closed: count, processed: closedAuctions.length, timestamp: now.toISOString() };
+    return { closed: count, processed: closedAuctions.length, expiredOffers, timestamp: now.toISOString() };
   });
 
   if (!run.ok) {
