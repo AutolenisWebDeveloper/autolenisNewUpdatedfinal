@@ -726,3 +726,68 @@ export async function drainTransactionalOutbox(batchSize = 100): Promise<Transac
   }
   return summary;
 }
+
+/**
+ * §27 — enqueue a transactional message, and raise an EXCEPTION if the enqueue itself fails.
+ *
+ * WHY THIS EXISTS. `enqueueTransactional` throws on an unregistered template, an unrenderable
+ * payload, or a database failure. Call sites were writing `.catch(() => undefined)` after it,
+ * which turns all three into silence: the caller returns normally, the transaction the message
+ * was about is committed, and nobody is told. That is exactly how the `RETURNED_TO_OFFERS` notice
+ * §Stage 10 owes a buyer came to never send while every other assertion passed — the template had
+ * no registered recheck, `enqueueTransactional` threw, and the blind catch ate it.
+ *
+ * A message that cannot be enqueued is an Operations condition, not a debug line. This is the
+ * shape that site now uses, extracted so the next caller inherits it instead of re-deriving it:
+ * log with the refs, then open a `COMMS_TERMINAL_FAILURE` row naming what the recipient is
+ * missing. The raise is itself guarded — a failing queue writer must not mask the original
+ * failure — but it is never the only record, because the log line above it always runs.
+ *
+ * Returns `true` when the row was enqueued, `false` when it was not. Callers that have something
+ * to do differently (a status they should not advance) can branch on it; callers that only owed
+ * the message can ignore it and the exception row carries the follow-up.
+ */
+export async function enqueueOrRaise(
+  input: EnqueueTransactionalInput,
+  context: {
+    /** What a human reading the exception needs to know is missing, and for whom. */
+    detail: string;
+    /** Stable per subject, so a retried caller does not open a second row. */
+    idempotencyKey: string;
+    buyerId?: string | null;
+    dealerId?: string | null;
+    vehicleRequestId?: string | null;
+  },
+  db: Db = prisma,
+): Promise<boolean> {
+  try {
+    await enqueueTransactional(input, db);
+    return true;
+  } catch (err) {
+    logger.error(`[comms] ${input.templateKey}: enqueue failed`, {
+      templateKey: input.templateKey,
+      dealId: input.dealId ?? null,
+      recipientKind: input.recipientKind,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    const { raiseException } = await import("@/lib/services/operations/queue-item.service");
+    await raiseException({
+      code: "COMMS_TERMINAL_FAILURE",
+      dealId: input.dealId ?? null,
+      auctionId: input.auctionId ?? null,
+      vehicleRequestId: context.vehicleRequestId ?? input.vehicleRequestId ?? null,
+      buyerId: context.buyerId ?? null,
+      dealerId: context.dealerId ?? null,
+      idempotencyKey: context.idempotencyKey,
+      detail: context.detail,
+    }).catch((raiseErr) => {
+      // The queue writer is the thing that is failing. The log line above already ran, so this is
+      // not silence — but it is the last record, and it says so.
+      logger.error(`[comms] ${input.templateKey}: enqueue failed AND the exception could not be raised`, {
+        dealId: input.dealId ?? null,
+        error: raiseErr instanceof Error ? raiseErr.message : String(raiseErr),
+      });
+    });
+    return false;
+  }
+}

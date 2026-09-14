@@ -2491,7 +2491,11 @@ model Financing {
   aprRate              Float?                @map("apr_rate")
   termMonths           Int?                  @map("term_months")
   monthlyPaymentCents  Int?                  @map("monthly_payment_cents")
-  status               FinancingStatus       @default(PENDING)
+  // Phase 7 (20261116000000). The default moved off `PENDING`, a §13-D18 legacy value:
+  // a column default is not code, so an INSERT omitting `status` made "code refuses to
+  // write legacy values" untrue by construction. Every Phase 7 write names its status
+  // explicitly through `recordFinancingCheckpoint`, so nothing depends on this default.
+  status               FinancingStatus       @default(NOT_STARTED)
   // Phase 1 transaction spine (20261106000100).
   completedAt          DateTime?             @map("completed_at")
   downPaymentCents     Int?                  @map("down_payment_cents")
@@ -3266,6 +3270,13 @@ model IdentityFirewallEntry {
   state       String?
   liftedAt    DateTime?              @map("lifted_at")
   liftedBy    String?                @map("lifted_by")
+  // Phase 7 (20261116000100) — §13-D38 option C. The lift is APPEND-ONLY: a release that
+  // ends is revoked, never flipped back to WITHHELD, because "this rooftop was given the
+  // buyer's details at time T" is the §25.2 evidence this table exists to hold and a state
+  // flip would overwrite it. Revocation is a PORTAL-SURFACE control — it stops dealer
+  // surfaces rendering identity — and recalls nothing that was already sent at the handoff.
+  revokedAt   DateTime?              @map("revoked_at")
+  revokedBy   String?                @map("revoked_by")
 
   // One firewall entry per auction per rooftop. Plain composite unique, not a partial:
   // NULLs are distinct in PostgreSQL, so legacy alert rows (both columns NULL) stay

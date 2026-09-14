@@ -58,9 +58,14 @@ type Db = typeof prisma | Prisma.TransactionClient;
  * stale ceiling.
  *
  * Extending this union rather than repairing that function in place is the point: one predicate,
- * one §26 exception, one owner. `offer_confirmation` is Phase 7's (B13) and is deliberately NOT
- * added here — the reaffirmation flow it belongs to does not exist yet, and a gate with no caller
- * is indistinguishable from a gate that was forgotten.
+ * one §26 exception, one owner.
+ *
+ * `offer_confirmation` is Phase 7's (offers/B13), and it is added HERE, now, because the
+ * reaffirmation flow it belongs to exists as of this phase. It is the fourth of §8b's four
+ * rechecks — "on submit, on revision, on selection, and at dealer confirmation" — and it is what
+ * supplies the ceiling operand §10a refuses an above-ceiling proposal against. Reading the
+ * approval server-side at this gate is the whole reason a dealership cannot talk a buyer past
+ * their own approved amount: the operand never comes from the request.
  */
 export type ApprovalGate =
   | "payment"
@@ -68,6 +73,7 @@ export type ApprovalGate =
   | "offer_submit"
   | "offer_revision"
   | "offer_selection"
+  | "offer_confirmation"
   | "contract_request";
 
 export type ApprovalVerdict =
@@ -150,11 +156,16 @@ async function fail(
   //     approval is that buyer stuck behind a gate they cannot see. The raise does not spam —
   //     `raiseException` keys on `code:refFingerprint`, so every dealer bidding on the same
   //     auction converges on ONE live queue row rather than one per submission.
+  //     `offer_confirmation` (Phase 7, §Stage 10) joins them for the same reason and is the
+  //     sharpest case of all: the buyer has paid, chosen, and is waiting on a dealership that has
+  //     already been asked to confirm. A silent 409 there would strand a deal at
+  //     DEALER_CONFIRMATION with a 24-hour clock running and nothing on anyone's desk.
   const postPaymentGate =
     gate === "auction_launch" ||
     gate === "offer_submit" ||
     gate === "offer_revision" ||
     gate === "offer_selection" ||
+    gate === "offer_confirmation" ||
     gate === "contract_request";
   const raise = reason === "EXPIRED" || postPaymentGate;
   if (opts.raiseOnFailure && raise) {

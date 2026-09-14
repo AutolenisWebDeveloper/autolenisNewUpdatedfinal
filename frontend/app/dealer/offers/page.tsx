@@ -10,9 +10,14 @@ export const dynamic = "force-dynamic";
 
 export default async function DealerOffersPage() {
   const dealer = await requireDealer();
+  // PROJECTED, not `include`d — §29 P3 and the §13-D22 guard. The list renders four fields; an
+  // unprojected read also returns `disqualified_reason` (which embeds the buyer's approved amount
+  // as a dollar figure), the rank columns, and every auction column including `buyerId`. Nothing
+  // rendered them, which made this an over-read rather than a disclosure — and one edit away from
+  // being one.
   const offers = await prisma.offer.findMany({
     where: { dealerId: dealer.id },
-    include: { auction: true },
+    select: { id: true, status: true, otdPriceCents: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
 

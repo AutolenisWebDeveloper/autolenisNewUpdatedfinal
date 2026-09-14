@@ -468,6 +468,38 @@ export function applyTriageToDocument(docText, triage) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * §13.0a — REPORT (never fail) the bare `D<n>` refs that exist in BOTH namespaces.
+ *
+ * Added at the Phase 7 opening, after `deal-early/D9` and `§13-D9` were read as two conflicting
+ * decisions. They are two namespaces that both use `D`: this register's rows are decisions, a
+ * §10.x parity table's are requirement rows. §8.2's own citations are unambiguous (they carry the
+ * `§13-` prefix), so there is nothing here to FAIL a build over — and failing would make a
+ * pre-existing, harmless overlap block every future run.
+ *
+ * What it is for is the thing the collision hid: `deal-early/D9` carried an owner decision that
+ * had no §13 row at all, so §8.2 Phase 7's owner-gated list was incomplete by four. A printed
+ * overlap is a prompt to check that each side is registered where it belongs.
+ */
+function reportNamespaceOverlap(doc) {
+  // The §13 decision ids, read from the register's own rows.
+  const decisionIds = new Set([...doc.matchAll(/^\|\s*(D\d+)\s*\|/gm)].map((m) => m[1]));
+
+  // The parity row ids, read from the SOURCE tables rather than from the ledger payload — which
+  // publishes tallies, not rows. Deriving them here keeps this independent of that payload's shape.
+  const overlaps = [];
+  for (const file of sourceFiles()) {
+    const area = areaOf(file);
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const m = /^\|\s*(D\d+)\s*\|/.exec(line);
+      if (!m) continue;
+      if (!decisionIds.has(m[1])) continue;
+      overlaps.push(`${area}/${m[1]}`);
+    }
+  }
+  return [...new Set(overlaps)].sort();
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const ledger = calculateLedger();
@@ -519,6 +551,15 @@ function main() {
     if (problems.length) {
       process.stderr.write('parity ledger DRIFT:\n' + problems.map((p) => `  - ${p}`).join('\n') + '\n');
       process.exit(1);
+    }
+    const overlap = reportNamespaceOverlap(doc);
+    if (overlap.length) {
+      // REPORTED, NOT FAILED — see `reportNamespaceOverlap`.
+      process.stdout.write(
+        `parity ledger NOTE (§13.0a): ${overlap.length} parity row id(s) share a bare number with a ` +
+          `§13 decision. Cite decisions as \`§13-D<n>\` and parity rows as \`area/Ref\`: ` +
+          `${overlap.join(', ')}\n`,
+      );
     }
     process.stdout.write(`parity ledger OK: ${ledger.source_ledger_rows} rows, no drift\n`);
     return;

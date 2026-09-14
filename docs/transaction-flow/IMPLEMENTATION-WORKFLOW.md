@@ -759,7 +759,7 @@ The §12 preflight is re-asserted at the start of every phase before any Playwri
 | 4 | **Inventory, qualified results, shortlist candidates, co-buyer, trade packet** | Stage 4 (4a–4c), §22a (all), §6.1 inventory/detail/shortlist/find-one-like-this/trade surfaces, Appendix (re-verified), §26 inventory rows | S[3]; INV; QUAL; BUDGET; FINDINGS | 28, 30, 31, (18 co-buyer record) | 1 (2 for intake handler; 3 not required) |
 | 5 | **Dealer sourcing ladder, validation, invitations, launch readiness; identity firewall** (built here; the *lift* at reaffirmation is Phase 7 — §11.6) | Stage 6 (6a–6c), Stage 7, §25, §26 sourcing/invitation rows, §27.1 sourcing/auction rows | S[5..6]; MONEY_PANELS “Identity and circumvention” | 7, 8, 9, 29 | 3, 4 |
 | 6 | **Offers, validation, ranking, close, selection, Deal lineage, Premium invitation** — **AS BUILT 2026-09-14, §8.1f** | Stage 8 (8a–8c), Stage 9 (9a), §22a ranking rows, §23.2a touchpoints 2–4, §26 offer/selection rows, §27.1 offer/selection rows | S[7..8]; PLAN_SEQ rows 2–4 | 10, 12 (Deal creation half), 15 (touchpoints) | 5 |
-| 7 | **Dealer reaffirmation, vehicle hold, disclosure, material changes, outside-winner verification, deal recap, financing checkpoints, `credit_applications` freeze** | Stage 10 (10a–10c), Stage 11 (11a–11b), Stage 12 (12a–12d), §23.2a touchpoint 5, §26 rows, §27.1 rows | S[9..11]; FIN_CP; FIN_PANELS | 12, 13, 14, 27 (reaffirmation consequences) | 6 |
+| 7 | **Dealer reaffirmation, vehicle hold, disclosure, material changes, outside-winner verification, deal recap, financing checkpoints, `credit_applications` freeze** — **AS BUILT 2026-09-14, §8.1g** | Stage 10 (10a–10c), Stage 11 (11a–11b), Stage 12 (12a–12d), §23.2a touchpoint 5, §26 rows, §27.1 rows | S[9..11]; FIN_CP; FIN_PANELS | 12, 13, 14, 27 (reaffirmation consequences) | 6 |
 | 8 | **Contract request, Contract Shield, buyer + co-buyer signing, dealer execution, financing completion & funding clearance, insurance review** | Stage 13 (14a–14d), Stage 14, Stage 15, §26 rows, §27.1 rows | S[12..14] | 16, 17, 18, 19 (activation owner-gated), 20 | 7 |
 | 9 | **Pickup readiness, scheduling, release token, reminders, handover, possession, atomic completion, post-completion obligations** | Stage 16–21, §26 rows, §27.1 rows | S[15..20] | 21, 22, 26, 27 (no-show/overdue consequences) | 8 |
 | 10 | **Control-plane completion: cancellation orchestration, exception register, communications register, legacy neutralisation, cross-portal parity** | §24, §26 (all 48 rows wired), §27.1 (all 76 rows wired), §28.3, §29 (re-verified), §25.2 consequences | EXC; SAFE; TRANSITION; every portal status surface | 25, 27, 23/24 (completeness) | 9 |
@@ -1283,6 +1283,13 @@ never rejected at submit) and §13-D41 (new deals only, no backfill) are each re
 - **The 17.6 proof is DEGRADED, not approximated.** The migration proof ran on PostgreSQL 16.13,
   the only major available in the authoring session. CI's `migrations` job is the 17.x authority, as
   it was for migration 110, and it is green on every commit of this branch.
+- **CORRECTION, 2026-09-14 (Phase 7 opening).** The paragraph at the head of this section says
+  "**Nothing was applied to production and no migration was run**". That was true when it was
+  written and is no longer true of the outcome: the owner applied
+  `20261115000000_phase6_relaunch_partial_unique` to production on 2026-09-14 under the per-run
+  protocol — `applied_steps_count` 1, 339 ms, both halves verified — and the ledger reads **113
+  rows against 111 distinct migrations**. The sentence describes what the authoring session did,
+  which is still accurate; a later reader taking it as the state of production would be wrong.
 
 #### Where the plan was wrong, and what was built instead
 
@@ -1638,6 +1645,249 @@ CI is unaffected — `visual.yml` is a separate workflow with its own freshly-mi
 the baseline is data-dependent on that one component, and a future job that seeds before it renders
 would fail the guardrail for a reason that has nothing to do with design.
 
+
+### 8.1g Phase 7 — AS BUILT (2026-09-14)
+
+Implemented on `claude/txflow-07-reaffirmation` from base `2b0bcc06`. This section records how the
+phase was actually built where that differs from how it was planned, and carries the mandatory
+before → after capability map. **Nothing was applied to production and no migration was run** — the
+two migrations are authored and proved on a throwaway loopback database, and applying them is the
+owner's under the per-run protocol in CLAUDE.md.
+
+#### The owner's rulings, as built
+
+§13-D18, D19, D20, D21, D22, D25, D26 and D38 are each recorded on their own §13 row, D22 and D26
+and D38 ruled at STOP 1. §13-D9 was deliberately NOT ruled and is NOT in scope: the table and every
+row are untouched, the code references are gone, and the allowlist is zero. Five rulings changed
+the shape of the build:
+
+- **§13-D38 ruled OPTION C**, so the lift is append-only: `revoked_at`/`revoked_by` rather than a
+  flip back to `WITHHELD`, because "this rooftop was given the buyer's details at time T" is the
+  §25.2 evidence the table exists to hold. **Revocation recalls nothing** — the handoff already
+  sent the details, and §25.2 anti-circumvention is the control from that point. Stated here
+  because C is easy to mistake for a recall mechanism, and it is not one.
+- **§13-D20's RATIONALE was amended, not its ruling.** `Offer.dealerId` is not re-pointed. But the
+  ruling's stated reason — "scorecard credit preserved" — does not hold: the outside-dealer
+  placeholder is ONE SHARED system Dealer for every unregistered dealership, so a scorecard entry
+  keyed on it lands on a row shared by all of them and visible to none. The failure record keys on
+  the ROOFTOP instead (`SlaViolation{entityType:"ROOFTOP"}`, free TEXT, no migration) and mirrors
+  onto `dealer_scorecard_snapshots.reaffirmation_failure_count` only where a real, non-placeholder
+  Dealer owns the rooftop.
+- **§13-D22 covers surfaces 1–5; surface 6 is an owner-accepted disclosure.** The concierge rail's
+  `GET /api/dealer/offers` `conciergeSubmissions` returns `VehicleOffer` unprojected, carrying
+  buyer name, email, phone, budget and the trade packet. It is the legacy staff-intake rail, not
+  the auction spine, and it is outside §8.1 row 7 — excluded explicitly so a future reader sees a
+  decision rather than an oversight. See §8.4.
+- **The four unregistered decisions.** §8.2 Phase 7 listed nine owner-gated items; four more
+  carried an owner decision in their parity row and no §13 entry at all. Registered as §13-D54
+  (artefact store), D55 (SLA N and window), D56 (recap dispute N) and D57 (`LEASE`). §13.0a records
+  the namespace confusion that hid the first.
+- **§8.2's financing shorthand was short by three states.** It read
+  `NOT_STARTED → IN_PROGRESS → TERMS_LOCKED | NOT_REQUIRED_CASH`; §12b and HTML `FIN_PANELS` both
+  carry `→ COMPLETED | FAILED | EXPIRED | NOT_REQUIRED_CASH`. The fuller form is built, with
+  `COMPLETED` explicitly REFUSED by the Phase 7 writer as Phase 8's (`deal-early/D3`).
+
+#### Where the plan was wrong, and what was built instead
+
+- **The identity firewall was WRITE-ONLY, so Phase 7 had to build the reader as well as the lift.**
+  §11.6 says Phase 5 builds the firewall and Phase 7 performs the lift. Phase 5 does write
+  `identity_firewall_entries` (`auction-invitation.service.ts:466`, `state: "WITHHELD"`), but there
+  are **zero production readers** — no gate anywhere consults `state`, `lifted_at` or `lifted_by`.
+  Every withholding that actually held was STRUCTURAL: a Prisma `select` omitting the column, a
+  payload type with no field for it, `DEALER_OFFER_SELECT`, `bucketBudgetCents`. None keyed on
+  firewall state, so there was nothing for a "lift" to flip. `dealerIdentityVisible` is the missing
+  reader.
+- **The predicate keys on the REAFFIRMATION, with the ledger as qualifier — not the other way
+  round.** `writeWithheldFirewallEntry` is called only when `t.rooftopId` is truthy and the unique
+  is `(auction_id, rooftop_id)`, so a registered dealer invited WITHOUT a rooftop has no ledger row
+  at all. Reading the ledger as the primary source would make identity visible for exactly those
+  dealers by default: the ledger's absence is not consent.
+- **`DEALER_CONFIRMATION → FINANCING_PENDING` was NOT caller-less.** §8.1f records the edge as
+  deliberate and unreachable. It was reachable: `POST /api/admin/deals/[dealId]/action`
+  (`DEAL_STAGE_ADVANCED`) resolves the target at runtime and reaches `advanceDealStatus`
+  NON-FORCED, and two admin dropdowns offered `FINANCING_PENDING` as the next stage for a
+  `DEALER_CONFIRMATION` deal. An operations admin could move a deal past reaffirmation, the vehicle
+  hold and the condition disclosure with an ordinary, legal transition. The edge is replaced by
+  `DEALER_CONFIRMATION → RECAP_PENDING → FINANCING_PENDING`; `force: true` still overrides and
+  still audit-logs that it did.
+- **`financing.status` DEFAULT was `'PENDING'` — a legacy value written by the DATABASE.** §13-D18
+  says code refuses to write the four legacy values; a column default is not code, so an INSERT
+  omitting `status` made the refusal untrue by construction. Parity row `deal-early/D4a` specified
+  "default → `NOT_STARTED`" as Phase 1 work and the wave added the labels and the columns but not
+  the default. Migration 112 is that missed half.
+- **The 410 → redirect needed 303, not 307/308, and the difference is the whole point.** §8.2
+  Phase 7 says the Phase 0 handler "becomes a redirect". 307 and 308 PRESERVE the method and the
+  body, so a client still POSTing an SSN payload would have the browser RE-SEND it to the redirect
+  target — reopening the exposure Phase 0 closed, through the redirect. 303 See Other makes the
+  client re-issue as GET and drop the body. Both guards assert **303 exactly** — an intermediate
+  draft accepted `303 || 410`, which also passed if the route silently reverted, and a test that
+  permits the thing it was written to verify verifies nothing.
+- **A runtime dynamic import broke the 24-hour deadline, silently.** `dealer-reaffirmation.service`
+  reached `return-to-offers.service` through `await import(…)`. Playwright applies the `@/*` paths
+  at BUILD time, so a module reached only at run time never gets the transform and dies on its own
+  `@/lib/prisma` — the same class §8.1f records for the Phase 6 import cycle. Worse than a broken
+  test: `expireOverdueReaffirmations` catches per row and logs, so the throw became "0 windows
+  expired" — a deadline that had stopped closing, reported as success. There was no cycle to avoid;
+  the import is static, with the reason recorded at the import.
+- **A §27.1 notice shipped with no state recheck and a blind `.catch`.**
+  `enqueueTransactional` THROWS on an unregistered template. `RETURNED_TO_OFFERS` had none, and the
+  call site swallowed it — so the notice §Stage 10 owes a buyer ("returned to the remaining valid
+  offers WITH THE REASON STATED") silently never enqueued while every other assertion about the
+  stand-down passed. Found by a Playwright journey asserting the outbox ROW. Fixed at the class
+  level: `phase7-templates.test.ts` checks the registry against the template constant, so the next
+  one fails the build.
+- **The material-change comparison lowercased the dealership's own words.** The matching key is
+  normalised (`"Doc Fee"` and `"  doc   fee "` are one item) and the DISPLAY label was being
+  derived from it, so a buyer saw "reconditioning" where the dealership wrote "Reconditioning".
+  Small, and on the one screen where a fee that does not look like the fee on their paperwork is a
+  fee they have to think twice about. Found by the unit suite.
+
+#### Before → after capability map
+
+| Capability | Disposition |
+| --- | --- |
+| `DEALER_CONFIRMATION → FINANCING_PENDING` direct edge | **PROGRESSIVE** — the path to financing survives, now through `RECAP_PENDING` behind §Stage 10's four exit clauses. `force: true` still reaches it, audit-logged. `ACTIVE → FINANCING_PENDING` (pre-Phase-6 deals) is KEPT untouched |
+| Buyer records a financing path | **KEPT**, narrowed to what it is: it writes `path` + `IN_PROGRESS` (or `NOT_REQUIRED_CASH` for cash) and advances nothing |
+| Buyer self-advance `FINANCING_PENDING → FEE_PENDING` | **REMOVED** — §12c: the buyer can never be the verifier. Owner-approved in the Phase 7 brief ("Close both in package 8") |
+| Buyer writes `Financing.approvedAmountCents` from their own input | **REMOVED** — it is the LENDER's figure and a dealer surface renders it as "Approved". The what-if calculation is **MOVED** to `FinancingScenario`, which is the model for it |
+| `POST /api/buyer/financing/apply` 410 | **PROGRESSIVE** — 303 to the external-financing screen. Still bodyless in both directions, still imports nothing, still accepts no parameter |
+| Buyer financing page's `creditApplication` status display | **REMOVED** — the last read of a frozen model. The page is KEPT and routes to §12's three real paths |
+| `credit_applications` table and every row | **KEPT** — untouched, pending retention sign-off (§13-D9). Not this series' to delete |
+| Admin financing review queue | **MOVED** — same URL, same role gate, same envelope, now reading `queue_items`. The capability (see what needs a human, resolve it with a recorded note) is unchanged |
+| The resolve control's decision select (APPROVED/DECLINED/CONDITIONAL/WITHDRAWN) | **REMOVED** — §12 forbids AutoLenis making a credit decision, so an admin picking "APPROVED" was recording one it may not make |
+| `financing_review_tasks` table | **KEPT** — zero rows, shares §13-D9's retention sign-off |
+| In-house lender engine (orchestrator, lender service, adapters, credit-application service) | **REMOVED** — dormant, zero production callers, and §12 says AutoLenis never underwrites. The `no-inhouse-financing-on-auction-spine` guard is KEPT and still names every deleted symbol |
+| `holds` cron | **PROGRESSIVE** — same route, slot and wrapper; the no-op becomes §10c hold expiry and the §Stage 10 24-hour sweep. Still moves no money |
+| Dealer deal page buyer contact block | **PROGRESSIVE** — gated on the firewall instead of `status !== "PENDING"`, and it says WHY it is withheld rather than showing a gap |
+| Dealer Finance Manager page | **PROGRESSIVE** — buyer name and approved amount gated on the firewall; its status map made exhaustive over `FinancingStatus` (it previously mapped seven values that do not exist and left all seven checkpoint states grey) |
+| `GET /api/dealer/offers/[offerId]` | **PROGRESSIVE** — projected through `DEALER_OFFER_SELECT`; every field the dealer UI reads is preserved, the ceiling and `auction.buyerId` are not |
+| `GET /api/dealer/notifications` | **PROGRESSIVE** — projected to the seven fields a notification list renders; `metadata` dropped |
+| Concierge-rail buyer disclosure (`conciergeSubmissions`) | **REPORTED** — owner-accepted, out of §8.1 row 7, recorded in §8.4 with its file:line |
+| `app/dealer/opportunities` stated budget | **KEPT** — owner-ruled, with the reasoning recorded |
+| Dealer deal page — Stage 11 recap | **NEW, from the review.** §Stage 11 requires the dealership to confirm; the route existed with no surface behind it, so the stage had no exit. `DealerRecapPanel` renders the itemisation, the buyer's product decisions, confirm and dispute |
+| Dealer deal page — §Stage 10 secure handoff | **NEW, from the review.** The trade packet and co-buyer block the reaffirmation form already promised. Behind `secureHandoffPacket`, which returns null rather than a partial object while the firewall is closed |
+| Reaffirmation form — fee, add-on and incentive lines | **PROGRESSIVE.** The form submitted three empty arrays; it now pre-fills the offer's own lines and lets the dealership edit, add and remove them. §Stage 10 asks the dealership to confirm the line items, not only the total |
+| Admin stage dropdowns | **PROGRESSIVE** — `DEALER_CONFIRMATION` and `RECAP_PENDING` added to both, restoring the operator path Phase 7's transition change would otherwise have removed |
+| Everything else touched | **KEPT** |
+
+Counts reconcile — **20 rows: REMOVED 4, MOVED 1, PROGRESSIVE 7, KEPT 6, REPORTED 1, and one row
+(`Financing.approvedAmountCents`) carrying both REMOVED and MOVED for its two halves.** All four
+REMOVED are owner-approved: the two buyer self-advance paths and the decision select in the Phase 7
+brief, the lender engine by §13-D25 and §12's own prohibition.
+
+#### The independent review, and what it found
+
+The `autolenis-code-verification` loop's STEP 6 was run as a dispatched `adversarial-diff-reviewer`
+against a clean context, in parallel with a self-review of the same diff. **Twenty-four findings,
+three of them deal-stopping.** Every one was verified against the code before it was acted on, and
+every material one was fixed in this phase rather than deferred. They are recorded here because
+three of them describe defects that a reader of the first draft would otherwise assume were never
+there — and because two of them are the same defect class this programme has spent five phases
+removing.
+
+**The three that stopped the deal.**
+
+| # | What it was | What it cost |
+| --- | --- | --- |
+| 1 | **Stage 11 had no dealer surface.** `POST /api/dealer/deals/[dealId]/recap` existed; nothing rendered it. The dealership's own "recap ready" email linked to `/dealer/deals/{id}`, which had no recap block and no `RECAP_PENDING` case | §Stage 11's exit needs BOTH confirmations. The buyer confirmed, `dealerConfirmedAt` stayed null, and **every Phase 7 deal stopped at `RECAP_PENDING` permanently** — no cron or sweep looks at that state. Fixed: `components/dealer/DealerRecapPanel.tsx`, wired on the dealer deal page |
+| 2 | **The financing failure notice could never be delivered.** The FAILED/EXPIRED enqueue omitted `dealId`; `skipIfFinancingStatusChanged` opens with `if (!ctx.dealId) return { proceed: false }` | The row was SKIPPED at drain — not failed, not retried, never sent — for **every** failure and every expiry. §Stage 12's failure clause was unreachable, and nothing threw. Fixed, and a build-failing guard now asserts the shape of every Phase 7 enqueue |
+| 3 | **The recap dropped every fee, add-on and incentive.** The dealer form submitted three hard-coded empty arrays, and `??` does not fall back on `[]` | `optionalProducts` was empty, so §11a's "separately named, separately priced, separately accepted or declined" never happened and a dealer product could **first appear in the contract** — the one thing §11a forbids. `allProductsDecided` returned true vacuously. Fixed at both ends: the form collects and pre-fills the lines, and an empty list is read as "not confirmed" rather than "there are none" |
+
+**The rest, by what they broke.** All fixed in this phase unless the row says otherwise.
+
+| Area | Finding | Fix |
+| --- | --- | --- |
+| Money shown to a buyer | Negative equity was declared "rolled in" and then **excluded** from the amount financed (`Math.max(0, equity)` floors it at zero), while the recap page told the buyer in words that it was being added. A $5,000 shortfall understated the quoted monthly payment by roughly $99 | Subtract the signed value. `amountFinanced` is now a pure exported function with its own suite |
+| Money shown to a buyer | Nothing reconciled the itemisation with the total, so a table could list charges that did not sum to the figure beneath them | `reconcileLines` names the residual — "Other charges included in the total", or "Dealer contribution" where the dealership absorbs it. **An intermediate fix refused the dealership's submission instead, and that was the wrong layer: it blocked every legitimate price change.** Journeys 3, 4 and 5 caught it |
+| Deals that strand | `acknowledgeConditionDisclosure` had no state guard, so a buyer could acknowledge a disclosure **that did not exist** — and `submitReaffirmation` never re-checked the exit, so a dealership confirming LAST advanced nothing | The acknowledgement requires a CONFIRMED reaffirmation; all three actions that can complete §Stage 10's exit now ask whether it is met |
+| Deals that strand | A proposed material change had **no clock at all** — `holdUntil` went to the reaffirmation row only, and the expiry sweep filtered `status: "PENDING"` | The hold is written to the DEAL, `dueAt` is reset to a fresh 24-hour window (a dealership answering at hour 23 must not leave the buyer one hour), and the sweep covers both windows with **different causes** so a buyer's silence never counts against a rooftop's SLA |
+| Deals that strand | A stand-down is two steps that cannot be one transaction; if the second threw, the deal sat at `DEALER_CONFIRMATION` behind a REJECTED reaffirmation, showing the buyer "The dealership is confirming it can do this deal" | A repair pass in the sweep re-drives `returnToRemainingOffers` for any stranded row |
+| A promise the product did not keep | `secureHandoffPacket` had **zero production callers**, while the reaffirmation form told the dealership "their contact information **and the trade packet** are released to you the moment you do" | The trade packet and co-buyer block are rendered on the dealer deal page, behind the same single gate |
+| A control that did not control | §Stage 11's "Deal **frozen** at recap" was computed, written into the exception's text, and then ignored — `confirmRecap` had no freeze check | The freeze holds while the Operations row is open, and resolving that row is the decision that releases it. There is no separate unfreeze and nothing can unfreeze itself |
+| §27 | Five email CTAs pointed at routes that do not exist (`/buyer/deal/{id}`, `/buyer/deal/{id}/financing`) | Re-pointed, and a guard now resolves every CTA against `app/` so the next dead link fails the build |
+| §27 | Six enqueues ended `.catch(() => undefined)` — the exact class removed for `RETURNED_TO_OFFERS` one package earlier | `enqueueOrRaise` logs and opens a `COMMS_TERMINAL_FAILURE` row; a build-failing guard rejects the blind form |
+| §27 | §27.1's hold row is "Buyer **+ dealership** + Operations → extend or release". Only the buyer was told, and their copy said "our team has asked them to extend it" | The dealership half is sent, and the payload now carries `holdUntil` so the extended-after-queueing recheck can actually fire |
+| §27 | `OUTSIDE_DEALER_VERIFICATION` was registered and rendered and enqueued by nothing | Enqueued from the §10b gate, keyed on the outstanding set so a partially-claimed account is told what is still missing |
+| §10a | An EXPIRED or DECLINED approval set the ceiling to `null`, which `material-change.ts` documents as "no amount" — silently disabling the refusal | An invalid approval refuses the submission; §26's exception is already raised by `recheckApproval` |
+| Concurrency | `buildRecap` was a check-then-act with no unique on `(deal_id, version)`; `decideOptionalProduct` was a read-modify-write on a JSON column; `recordReaffirmationFailure` counted then inserted; `submitReaffirmation`'s commit raced the 24-hour cron | A deterministic primary key derived from `(deal, version)`; Serializable with one retry for the two read-modify-writes; compare-and-set on the reaffirmation and the deal |
+| Capability preservation | Both admin stage dropdowns still offered the edge Phase 7 made illegal and offered neither new stage — so an operator unwedging a stuck deal got a 409 | `DEALER_CONFIRMATION` and `RECAP_PENDING` added to both lists |
+| Usability with teeth | The reaffirmation form's VIN and odometer were never pre-filled, contradicting its own header. A retyped VIN with one wrong character trips §10a rule 1 — the buyer told "this is a different vehicle", the deal cancelled, an SLA failure filed against the rooftop. For a typo | The offer's own fields are projected and pre-filled |
+| Performance | The dealer Finance Manager resolved the firewall inside a loop — up to 150 serialised queries per render | `dealerIdentityVisibleMany`, the same predicate over the whole set, asserted against the single one deal by deal in journey 12 |
+
+**Reported, not fixed** — outside §8.1 row 7, per the owner's instruction to surface rather than build:
+
+| Where | What |
+| --- | --- |
+| `components/buyer/PremiumInvitation.tsx:186` | Links `/buyer/plan/premium`. **No such route exists** in `app/`. Pre-existing, outside this phase. (Phase 7's own use of the same dead prefix was fixed: `renderPremiumFollowUpFinal` now points at `/buyer/billing`) |
+| `financing-checkpoint.service.ts` | A failed `financing_audit_events` append is logged but raises no exception, because the catalogue has no code for a lost audit entry. Adding one is a registry change outside this phase's list |
+
+#### The owner-ordered re-audit, and what a third pass found
+
+The owner asked for the 24 findings to be re-checked with fresh eyes before applying the
+migrations, on the reasoning that **the pass most likely to mistake a narrowing for a fix is the one
+that found the defect**. It was the right instinct: the re-audit found four more, one of them a
+security defect introduced by this batch and missed by both earlier reviews.
+
+| # | Finding | Disposition |
+| --- | --- | --- |
+| 1 | **Cross-tenant destructive action.** `POST /api/dealer/deals/[dealId]/hold` with `action: "RELEASE"` authenticated the caller and then called `releaseVehicleHold` with **no ownership check on any line of the path** — the service took `actorId` only. Any authenticated dealership could POST another dealership's deal id and destroy that deal: `CANCELLED`, firewall revoked, buyer emailed, and a dealer-fault SLA violation filed against the victim's rooftop. The EXTEND branch of the same route was guarded; the irreversible branch was not. | **FIXED.** `releaseVehicleHold` now requires `dealerId` and applies the same ownership test `extendVehicleHold` always had. Journey 13 proves it, and proves the legitimate release still works. |
+| 2 | **Page and route disagreed on ownership.** The dealer PAGE readers resolved it as `offer: { dealerId }`; every dealer ROUTE resolves it as `OR: [{ offer: { dealerId } }, { dealerId }]`. §13-D20 keeps `Offer.dealerId` on the placeholder and puts the claimed dealership on `Deal.dealerId`, so an outside winner was accepted by the API and 404'd by the page its own recap email linked to — making the Stage 11 surface unreachable for exactly the population §10b exists for. | **FIXED.** Both page readers are dual-keyed. Journey 14 asserts the deal is visible by either id. |
+| 3 | **`Deal.dealerId` has no writer at claim completion**, so `outsideWinnerGate` can never be satisfied and no outside winner can leave `DEALER_CONFIRMATION`. | **RULED, NOT BUILT** — §13-D58. The write belongs at the completion point of the dealer-recruitment claim sequence; building a second writer here would be the parallel-system rule broken. |
+| 4 | **Two more guards enforced at the wrong layer** — the same shape as the submission-time reconciliation this phase already got wrong once. `APPROVAL_NOT_CURRENT` refuses the dealership for a BUYER-side condition while the 24-hour clock runs on toward a dealer-fault timeout; and §10b's refusal did the same, so **every outside winner accrued a rooftop SLA violation for a sequence they were structurally unable to complete**. | **FIXED.** The approval refusal extends the confirmation window before throwing; and `returnToRemainingOffers` gates SLA and scorecard attribution on `dealershipWasBlocked`, raising an Operations row instead. The stand-down still happens and the buyer is still told — only the blame changes. |
+
+**The guard that does not become dead.** `dealershipWasBlocked` is not a workaround for §13-D58 and does
+not expire when that row is built: a dealership mid-claim, suspended, or with a lapsed agreement is
+blocked by the same gate for the same reason, and none of those is a missed deadline. It also fails
+TOWARD the dealership — if the gate cannot be evaluated, the stand-down proceeds unattributed,
+because recording a permanent mark against a real business on a guess is the worse of the two errors.
+
+**Correction to an earlier claim in this document's history.** The first STOP 2 report said all three
+build-failing guards "were proved to fail on a deliberately reintroduced defect before being kept."
+Only two were, at the time. All are now, and the firewall-surface guard has a stated limit: it
+catches a NEW ungated dealer file, but not the gate being neutered inside a file already on its
+allowlist.
+
+#### `pnpm test:visual` — why it exits 1 here, established rather than argued
+
+The marketing tier's pixel gate **fails in this container, on this branch and on the base commit
+alike**, and the distinction matters: the first reading of that failure is "Phase 7 changed a
+marketing page", and it did not.
+
+`.github/workflows/visual.yml:5-9` states the constraint in the repository's own words: "The
+baseline MUST be rendered by this runner image, not an ad-hoc container: font/anti-aliasing
+rendering is environment-specific, so capture and comparison have to happen on the same image or
+the 0.1%-tolerance gate false-fails. The runner is therefore PINNED to ubuntu-24.04." The
+workflow's trigger paths — `frontend/tests/visual/**`, `playwright.visual.config.ts`,
+`frontend/components/ui/**`, `frontend/app/(public)/**` — exclude **every file this phase changed**;
+the only components it touches are under `components/{admin,buyer,dealer}/`, which no marketing
+page imports.
+
+That is the argument. This is the evidence, and it is stronger:
+
+> The base commit `2b0bcc06` was checked out into a second worktree, built with the same toolchain,
+> served on a second port, and put through the identical suite **in this container, in the same
+> hour**. It failed the **same ten screenshots**. All ten rendered PNGs are then **byte-identical**
+> (SHA-256, full file) to the ten this branch renders.
+
+So the branch changes no marketing pixel at all, and the committed baseline is simply not
+comparable against this image. Six of the ten also match the baseline's dimensions exactly and the
+four that differ differ in HEIGHT — font-metric reflow changing where text wraps, which is the
+signature of a different font stack rather than of different content.
+
+**The gate itself is NOT VERIFIED for this branch and cannot be**, because passing it requires the
+pinned runner. What IS verified is that this branch is not its cause. CI's own `Visual regression`
+job is the authority, and it does not run for this PR because none of its trigger paths changed.
+
+#### What is deferred, and which phase carries it
+
+| Deferred | Carried by |
+| --- | --- |
+| `financing.status = COMPLETED`, funding clearance, `deals.funding_cleared_at` | **Phase 8** — `deal-early/D2b`, `D3`. The Phase 7 writer refuses `COMPLETED` by name |
+| Physical deletion of `credit_applications` and `financing_review_tasks` | **Owner + retention/legal sign-off** (§13-D9, §13-D25). Outside this series |
+| Touchpoint-5 Premium copy and its suppression rule | **plan/upgrade area** — `deal-early/N3`, `offers/S10b`, `payment/PAY-69`. The template and its `alwaysSend` reason exist; the ask is the other area's |
+| `external_pre_approval_documents` wiring (§13-D54) | **Phase 7 scope, deferred within it** — the checkpoint accepts `externalPreApprovalId` and attaches evidence to the Deal; migrating `documentUrl` into the documents table is a data move with no consumer yet |
+| An exception code for a lost `financing_audit_events` append | **Owner** — the §26 catalogue has no code for it, and adding one is a registry change outside §8.1 row 7. The failure is logged with the deal and the status; the chain entry is the §12c evidence, so the gap is worth closing |
+| `PREMIUM_FOLLOW_UP_FINAL`'s **enqueue** | **plan/upgrade area**, with the copy and suppression rule already deferred there. The renderer, the registry entry and the `alwaysSend` reason exist in this phase; nothing enqueues it, and that is the other area's trigger to own |
 
 ### 8.2 Phase scopes
 
@@ -3306,7 +3556,7 @@ on a month counter.
   remaining offers + scorecard entry + SLA violation on repeat.
 - `deal_recaps` versions with both confirmations, itemised OTD, optional products individually accepted
   or declined, trade equity stated, dispute → new version, repeated failure → Ops exception (frozen at recap).
-- Financing checkpoint: `NOT_STARTED → IN_PROGRESS → TERMS_LOCKED | NOT_REQUIRED_CASH`, evidence via
+- Financing checkpoint: the FULL §12b machine — `NOT_STARTED → IN_PROGRESS → TERMS_LOCKED → COMPLETED | FAILED | EXPIRED | NOT_REQUIRED_CASH`. *(This bullet previously read `NOT_STARTED → IN_PROGRESS → TERMS_LOCKED | NOT_REQUIRED_CASH`, omitting `COMPLETED`, `FAILED` and `EXPIRED`. §12b and HTML `FIN_PANELS` both carry the full form and the Markdown governs; the shorthand is corrected here so a future reader does not meet the short version first. `COMPLETED` is checkpoint two and belongs to **Phase 8** — parity row `deal-early/D3` — and the Phase 7 writer refuses it explicitly.)* Evidence via
   `external_pre_approvals` (+`deal_id`), buyer can never set completion, Finance/Ops-only recording with
   the audit trail, failure/expiry → alternate external path without auto-cancel; touchpoint 5 email.
 - **Freeze re-verified, not newly established (§8.2a).** The model was recorded as frozen in Phase 1 and
@@ -3323,7 +3573,9 @@ on a month counter.
 - Gates: deal state-machine suites (new statuses), financing suites, Playwright: dealer reaffirms →
   buyer acknowledges → recap → terms locked (cash and external).
 
-- **Owner-gated:** **§13-D9** (physical removal of `credit_applications`, retention-gated), **§13-D18** (`FinancingStatus` migration semantics), **§13-D19** (audit trail for the new checkpoints), **§13-D20** (outside-winner lineage), **§13-D21** (permission tier for recording checkpoints), **§13-D22** (acknowledgement: the identity-firewall lift covers every dealer surface), **§13-D25** (retire `financing_review_tasks` with D9), **§13-D26** (`holds` cron repurposed) and **§13-D38** (`identity_firewall_entries` release semantics).
+- **Owner-gated — THIRTEEN, not nine.** The nine originally listed: **§13-D9** (physical removal of `credit_applications`, retention-gated — NOT ruled, NOT in scope), **§13-D18** (`FinancingStatus` migration semantics), **§13-D19** (audit trail for the new checkpoints), **§13-D20** (outside-winner lineage), **§13-D21** (permission tier for recording checkpoints), **§13-D22** (the identity-firewall lift covers every dealer surface), **§13-D25** (retire `financing_review_tasks` with D9), **§13-D26** (`holds` cron repurposed) and **§13-D38** (`identity_firewall_entries` release semantics).
+
+  **Four more were found at the Phase 7 opening carrying an owner decision in their parity row and no §13 entry at all**, and are now registered: **§13-D54** (the artefact store — `deal-early/D9` and `D-5`), **§13-D55** (reaffirmation SLA N and window — `deal-early/B20`), **§13-D56** (recap dispute N — `deal-early/C10`) and **§13-D57** (`LEASE` → `FinancingPath` — `deal-early/D10`). All four ruled 2026-09-14. This is what a hand-maintained owner-gated list costs; §13.0a records the namespace confusion that hid the first of them.
 - **Rollback:** Reaffirmation and recap are new records and new statuses; a revert stops creating them and the transition map still accepts the direct entry to `FINANCING_PENDING`, so in-flight deals are unaffected. The credit-application freeze completes here by deletion — reverting restores the routes, which is why the Phase 1 410 (not the deletion) is the control that must never be reverted.
 
 #### Phase 8 — Contract, Contract Shield, signatures, dealer execution, funding clearance, insurance review
@@ -3487,14 +3739,17 @@ the register has at least one enqueue/raise site.
 | `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI; the canonical-`offers` write-through is **BLOCKED (owner-accepted 2026-09-14)** — `Offer.auction_id` is required and these models carry no auction binding | keep as intake; no drop |
 | Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |
-| In-app credit application route/UI (`credit_applications`) | **0** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410 in the pre-schema security correction — §8.2 Phase 0, §8.2a), then **7** for the remaining read paths (buyer financing page, admin review queue, dormant services) | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
+| In-app credit application route/UI (`credit_applications`) | **0** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410 in the pre-schema security correction — §8.2 Phase 0, §8.2a), then **7** (corrected to **4** — §8.1a; the twelve-file figure was grep-derived and counted prose, and under the AST walk exactly four files held a real reference) for the remaining read paths (buyer financing page, the model's own service, the dormant orchestrator, the review queue). **AS BUILT (Phase 7): all four removed, allowlist at ZERO** | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
 | Non-crypto pickup QR nonce | 9 | none | removed in phase |
 | Admin inventory search tool's inline provider client | 4 | none | removed in phase |
 | QStash producers (`lib/qstash/*`, four live callers) and the 16 `app/api/jobs/*` consumers, `@upstash/qstash`, `QSTASH_*` env | 2 (workloads internal-by-default; touches via dispatcher) | none — vendor already dead | 10 (dependency, routes, env names deleted; §13-D23) |
 | `SYSTEM_ALERT` Notification as the exception store (every reconciler) | 2 (`raiseException` is the store) | `/admin/queues` and `/admin/operations` keep a read-only mirror | keep as mirror; no drop |
-| `holds` no-op cron | 7 (repurposed for §10c vehicle-hold expiry, §13-D26) | none | repurposed in phase |
+| `holds` no-op cron | 7 (repurposed for §10c vehicle-hold expiry, §13-D26) | none | **AS BUILT (Phase 7): REPURPOSED.** Same route, same `*/10 * * * *` slot, same `withCronRun("holds")` wrapper — it now expires the §Stage 10 24-hour windows and sweeps §10c hold expiry. Every reference was enumerated before repurposing and there were exactly three (the route, `vercel.json:44`, `cron-schedule.ts:52`); nothing read its return shape, and the dead-cron monitor watches it by NAME, so its heartbeat is intact. It still moves no money |
+| `app/dealer/opportunities/page.tsx` showing `vehicle_requests.max_budget_cents` | — | — | **RULED 2026-09-14 — LEAVE IT, and the reasoning is recorded so it reads as a decision.** §25.1 gives invited dealerships "complete vehicle criteria", and a buyer's own STATED budget is criteria: it is not `pre_qualifications.max_otd_amount_cents`, the prequal ceiling the platform coarsens into 5k bands, and a dealership needs some sense of range to bid at all. Surfaced at STOP 1 rather than decided unilaterally. Allowlisted with that reason in the §13-D22 guard |
 | Buyer self-advance of financing (`POST /api/buyer/financing`, `PATCH /api/buyer/deal/financing` → `FEE_PENDING`) | 7 (path/intent write only; advancement only through the checkpoint service) | none | removed in phase |
-| Identity-firewall lift at award (`dealer-award.ts`, `dealer-deals.service.ts`, dealer deal page) | 7 (lift moves to reaffirmation) | none | removed in phase |
+| Identity-firewall lift at award (`dealer-award.ts`, `dealer-deals.service.ts`, dealer deal page) | 7 (lift moves to reaffirmation) | none | **AS BUILT (Phase 7): NEUTRALISED, and the list was INCOMPLETE.** The Phase 7 enumeration found SIX dealer surfaces releasing buyer identity, the ceiling or the trade packet; this row named three. Also gated: `app/dealer/financing/page.tsx` (full name or email **and** `approvedAmountCents`, at any stage) and `GET /api/dealer/notifications` (unprojected `Notification` rows re-serving the award-time name on every poll, so neutralising the writer alone would have left every existing row serving it). All now behind `dealerIdentityVisible`, which fails closed |
+| **`GET /api/dealer/offers/[offerId]` returning the buyer's exact approved ceiling** | 7 | none | **AS BUILT (Phase 7): FIXED.** `include: { auction: true }` with no `select` serialised the whole Offer, and Phase 6 had started writing `offers.disqualified_reason` — whose text is literally *"Out-the-door exceeds the buyer's approved amount of $X."* (`offer.service.ts:235-242`), built from the prequal `maxOtdAmountCents`. `lib/utils/buyer-budget.ts:4` states the platform's own rule — "never expose maxOtdAmountCents to dealers directly" — which is why every other surface coarsens it into 5k bands. A live disclosure, reachable by any dealership on its own offer id. Now projected through `DEALER_OFFER_SELECT`; two dealer PAGES that over-read the same field without rendering it are projected too, and a build-failing guard covers the next one |
+| **Concierge-rail buyer disclosure via `GET /api/dealer/offers` `conciergeSubmissions`** | — | — | **OWNER-ACCEPTED DISCLOSURE, ruled 2026-09-14 — REPORTED, NOT BUILT.** `app/api/dealer/offers/route.ts:65-71` returns `include: { vehicleOffer: true }` unprojected, and `VehicleOffer` carries `buyer_name`, `buyer_email`, `buyer_phone`, `buyer_budget` and the full trade packet (`schema.prisma`, VehicleOffer). This is the legacy concierge STAFF-INTAKE rail, not the auction spine §25.1 governs, and it is outside §8.1 row 7. The owner excluded it explicitly at STOP 1 so that a future reader sees a decision rather than an oversight. It is not fixed, and it is not an oversight |
 
 Zero production traffic is verified only by the `LEGACY_PATH_WRITE` counter on production; preview
 traffic never counts.
@@ -6096,6 +6351,41 @@ Nothing below is executed or assumed. Each item names the action, why it is requ
 verify afterwards. Items marked **DECISION** need an answer before the named phase can start; items
 marked **ACTION** are owner-run production steps this session will not perform.
 
+### 13.0a Two namespaces, one letter — how to cite a `D` number
+
+**Recorded at the Phase 7 opening, after `D9` was read as two decisions in conflict.** It is not
+two decisions. It is two namespaces that both use `D`, and the fix is a citation convention rather
+than a renumbering.
+
+| Where | What a `D<n>` is | Example |
+| --- | --- | --- |
+| **This register (§13)** | An owner DECISION or ACTION. Cite it as **`§13-D9`** — the prefix names the register. | `§13-D9` = physical removal of `credit_applications`, retention-gated |
+| **A §10.x parity table** | A PARITY ROW id, scoped to its area. Cite it as **`area/Ref`**. | `deal-early/D9` = "`external_pre_approval_documents` holds the artefacts" (§12c) |
+
+The parity namespace is documented at the head of each area table — for `deal-early`: *"Rows: A–E =
+map sections (split a/b/c where parts land in different phases), D-n = map Duplicates, N =
+requirements added by the corrections pass, O = out-of-scope findings carried so nothing is
+dropped."* So `deal-early/D1…D17` are Stage-12 requirement rows and `deal-early/D-1…D-6` are the
+Duplicates rows; neither is a decision.
+
+**The collision is systemic, not unique to `D9`, and the number is measured rather than sampled.**
+`scripts/parity-ledger.mjs --check` now reports it: **54 parity row ids across eight areas share a
+bare number with a §13 decision** — `deal-early` 13, `schema` 8, `stages1-3` 8, `pickup` 7,
+`offers` 7, `intake` 6, `jobs` 5. It REPORTS and never fails: §8.2's citations all carry the
+`§13-` prefix, so the overlap is harmless where it is cited properly, and failing a build over a
+pre-existing, harmless overlap would block every future run for nothing. The ledger already keys
+requirements as `area/Ref` because bare refs repeat — it counts **173 bare refs reused across
+areas** — it simply never compared the two namespaces until now.
+
+**§8.2's citations were never ambiguous**: every one carries the `§13-` prefix and a parenthetical
+naming its subject. What the collision actually hid was different and worse — `deal-early/D9`
+carried an owner decision (the artefact store) that had **no §13 row at all**, so §8.2 Phase 7's
+owner-gated list of nine was incomplete. Three more were found the same way. All four are now
+registered as §13-D54 through §13-D57.
+
+**The convention, applied from here:** cite decisions as `§13-D<n>` and parity rows as `area/Ref`,
+never a bare `D<n>`.
+
 ### 13.0 Decision triage — what actually blocks Phase 1
 
 <!-- BEGIN GENERATED: decision-triage (scripts/parity-ledger.mjs) -->
@@ -6107,11 +6397,11 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | Category | Decisions |
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
-| BLOCKING A NAMED LATER PHASE | **39** |
+| BLOCKING A NAMED LATER PHASE | **44** |
 | DEFAULT AND PROCEED UNLESS OVERRIDDEN | **8** |
-| **Total** | **53** |
+| **Total** | **58** |
 
-Decisions in the table: **53**. Categories sum to **53**. Unclassified: **0**.
+Decisions in the table: **58**. Categories sum to **58**. Unclassified: **0**.
 
 **BLOCKING PHASE 1 — these, and only these, must be answered before the Phase 1 wave is authored and deployed:**
 
@@ -6148,7 +6438,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D17 | Existing tests that encode rules the spec replaces | ACKNOWLEDGEMENT | Phases 3–5 | `app/api/buyer/plan/__tests__/upgrade.test.ts` ("upgrade succeeds with NO charge"), `lib/services/shortlist/__tests__/shortlist-radius.test.ts` (100-mile ceiling), `lib/services/vehicle-request/__tests__/request-progression.test.ts` (sourcing side effects before payment), `lib/services/deal/__tests__/service-fee.test.ts` ($0 Standard fee) will be rewritten, not weakened, in the phase that changes the rule; each rewrite is called out in that phase's report. | BLOCKING A NAMED LATER PHASE (Phases 3–5) |
 | D18 | `FinancingStatus` migration semantics | DECISION | Phase 7 | Proposed: the four legacy values (`PENDING/SELECTED/APPROVED/DECLINED`) remain in the Postgres enum (values cannot be dropped without a type rebuild) with code refusing to write them; existing `Financing` rows are left untouched until an admin re-records evidence — no automatic backfill to `IN_PROGRESS`/`TERMS_LOCKED` (the count of affected production rows is taken at the Phase 7 preflight). | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D19 | Audit trail for `TERMS_LOCKED` / `COMPLETED` | DECISION | Phase 7 | Proposed: the existing tamper-evident `financing_audit_events` hash chain (DB triggers, migration `20261004000000`), with its event enum extended — not `AdminAuditLog`, which external approvals use today. Both are written; the chain is authoritative. | BLOCKING A NAMED LATER PHASE (Phase 7) |
-| D20 | Outside-winner lineage | DECISION | Phase 7 | Proposed: `Offer.dealerId` stays on the placeholder dealer record (immutable lineage, scorecard attribution preserved) and `Deal.dealerId` is set to the claimed `Dealer` when the claim/verification/agreement sequence completes; the placeholder is linked to the claimed dealer via the existing claim token. Alternative: re-point `Offer.dealerId` (changes historical attribution). | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D20 | Outside-winner lineage | DECISION | Phase 7 | **RULED 2026-09-14 — ADOPT, with the rationale AMENDED at STOP 1.** `Offer.dealerId` stays on the placeholder record (immutable lineage) and `Deal.dealerId` is set to the claimed `Dealer` when the claim/verification/agreement sequence completes, linked via the existing claim token. **`Offer.dealerId` is NOT re-pointed.** The original rationale also claimed "scorecard attribution preserved", and that half does not hold: `getOrCreateOutsideDealerId` (`lib/services/offer/outside-dealer.ts:24`) returns ONE SHARED system Dealer (`isSystemPlaceholder: true`, `status: TERMINATED`) for every unregistered dealership, so a scorecard entry keyed on `Offer.dealerId` would land on a single row shared by all of them and visible to none. **As built, the §Stage 10 failure record keys on the ROOFTOP** — `SlaViolation{entityType:"ROOFTOP", entityId: offers.rooftop_id}`, free TEXT so no migration — and mirrors onto `dealer_scorecard_snapshots.reaffirmation_failure_count` only where a real, non-placeholder Dealer owns the rooftop. Original proposal, superseded in its reasoning only: the placeholder is linked to the claimed dealer via the existing claim token. Alternative: re-point `Offer.dealerId` (changes historical attribution). | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D21 | Permission for recording financing checkpoints | DECISION | Phase 7 | Proposed: reuse `finance.preapproval.decide` (MONEY tier) for `TERMS_LOCKED`/`COMPLETED` recording, with the ≥10-char reason the external-approval route already requires. Alternative: a new `finance.financing.record` permission if Finance and Ops must be separated. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D22 | Identity-firewall lift scope | ACKNOWLEDGEMENT | Phase 7 | The lift moves from award dispatch to reaffirmation on **every** dealer surface, including the dealer Finance Manager page (`app/dealer/financing/page.tsx`), which today lists buyer name/email for dealer-path financings at any stage. Unless the owner objects, no dealer surface shows full PII before reaffirmation. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D23 | QStash decommission confirmation | DECISION | Phase 2 | Confirm the QStash token is revoked. If yes, every flag-OFF lifecycle workload and `affiliate-inactive` is silently dropped today; approve making all workloads internal-by-default (flag `null`) in Phase 2 ahead of the Phase 10 code deletion. If QStash is still live, Phase 2 still cuts the producers over (master §6: no vendor queue) and the deletion is unchanged. | BLOCKING A NAMED LATER PHASE (Phase 2) |
@@ -6166,7 +6456,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D35 | Sealed-auction semantics | DECISION | Phase 5 | §7 says the auction is sealed; the code offers dealers an anonymised competitiveness read (`app/api/dealer/auctions/[auctionId]/insights/route.ts`) and returns `offerCount` on the auction route. Proposed: keep sealed — no count, no position, no median before close; publish position insight only after close. Alternative: keep the anonymised median as a deliberate, documented exception. | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — KEEP SEALED.** `offerCount` is removed from the active dealer route (`app/api/dealer/auctions/[auctionId]/route.ts` returns `offerCount: null` while the auction is live and publishes it once CLOSED), the quick-offer page's unguarded median is deleted, and position is published only after close. `auction-insights-policy.ts` (`MIN_MEDIAN_SAMPLE = 4`, `mayPublishSegmentMedian`) is imported by BOTH the insights route and the insights page so the two cannot drift. Two defects fixed regardless of the ruling: the quick-offer page crashed on `_count` (now `offerCount: number \| null`, rendering "Sealed bidding"), and `AUCTION_EXTENDED` wrote no `AuctionExtensionLog` row — so an unaudited manual extension was indistinguishable from no extension when someone later asked why a deadline moved. **AS BUILT.** |
 | D36 | `MIN_COVERAGE_DEALERS` soft hold | DECISION | Phase 5 | `request-coverage-gate.service.ts` holds a request below a minimum dealer count while `coverage.service.ts` counts fail-open. Proposed: replace both with the §6c decision table (zero coverage → Ops exception + buyer notice; below threshold → audited limited auction). | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — ACCEPT.** The §6c table replaces `MIN_COVERAGE_DEALERS`: `coverageCount` on the case is the record, and the free-text coverage tag is retired. `decideOutcome` (`rooftop-sourcing.service.ts`) implements §6c exactly — 5–8 auto-launch, >8 rank and invite the best eight, 3–4 limited with audited approval, 1–2 expand/manual/close, 0 close after review — with EXPAND first (from §6a), so a thin field at 100 miles expands rather than going to Operations. `coverage.service.ts`'s fail-open on a coordless registered dealer is fixed to fail CLOSED when the buyer IS placeable; the buyer-unplaceable case is unchanged. The pre-payment gate is KEPT (fixed, not removed): §6c is the post-payment authority and the legacy gate remains the pre-payment protection — a literal reading of "replace both" would have removed a protection that fires before a deposit exists, which is a judgement call on the ruling's wording and is reported as such. **SUB-RULING, `operating_status` — PROPOSAL CONFIRMED 2026-09-11: a NEGATIVE filter only, recorded here as a deliberate, stated departure from §6b's literal "active operating status".** The column is nullable TEXT that nothing has ever written, so a predicate requiring `ACTIVE` would reject all 1,422 production rooftops and produce zero coverage for every buyer — fail-closed, in production. `operatingStatusVerdict` therefore treats only a recorded CLOSED/PERMANENTLY_CLOSED as disqualifying and UNKNOWN as admissible, and the column is now WRITTEN wherever it is learned, with `operating_status_checked_at`, so the filter strengthens as the data arrives. **AS BUILT.** |
 | D37 | Dealer portal access model | DECISION | Phase 5 | §7 requires one tokenised, expiring, auction-and-rooftop-bound invitation per rooftop. Registered dealers today use a session. Proposed: token binds the invitation and the session authorises the portal; a registered dealer following a token is bound to that rooftop's invitation. | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — ACCEPT: the token binds the invitation, the session authorises the portal. The token-alone surface is NOT built** (it is an authorization change and wants a security batch). `issueInvitations` mints one token per rooftop per auction via the existing `issueInvitationToken`, persists only `tokenHash`, and sets `expiresAt` to the auction's own `endsAt` so a link cannot outlive the auction it belongs to. `resolveInvitationByToken` compares only the hash, GRANTS nothing and WRITES nothing; `/dealer/invitation/[token]` records OPENED itself and hands an authorised dealer to `/dealer/quick-offer/[auctionId]`, which already owns submission. The session must MATCH the invitation (dealer id or rooftop id), not merely exist, or the token would be transferable between dealerships. **A CONSEQUENCE WORTH THE OWNER'S ATTENTION:** under this ruling an OUTSIDE rooftop with no registered dealer cannot submit an offer at all — it has no account to sign into. `/dealer/invitation/resume/[invitationId]` says so and offers the application path rather than redirecting to a sign-in form it cannot complete, but the practical effect is that the biddable field is the REGISTERED subset of the invited field. Reported, not worked around. **AS BUILT.** |
-| D38 | `identity_firewall_entries` | DECISION | Phase 7 | A table of that name exists (`IdentityFirewallEntry`) as an anti-circumvention flag store with zero code references, while HTML S[10] names it as the release ledger. Proposed: extend it with release semantics (deal_id, released_at, released_by, scope) rather than create a second table with the same name. | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D38 | `identity_firewall_entries` | DECISION | Phase 7 | **RULED 2026-09-14 — OPTION C: append-only, with `revoked_at`/`revoked_by`.** *(Evidence corrected at the Phase 7 opening: the row previously said the table has "zero code references (`schema.prisma:2755-2765`)". Both halves were stale — `2755-2765` is `admin_support_notes`, the model is at `3254-3275`, and Phase 5 landed a writer at `auction-invitation.service.ts:466` plus two-thirds of the proposal under different names: `auction_id`, `rooftop_id`, `state`, `lifted_at`, `lifted_by`, `@@unique([auctionId, rooftopId])`.)* So `deal_id` is NOT added — `deals.auction_id` and `deals.rooftop_id` make the entry fully derivable — and `scope` is not added, because §25.1 defines one release. What Phase 7 adds is revocation: a release that ends is revoked, never flipped back to `WITHHELD`, because "this rooftop was given the buyer's details at time T" is the §25.2 evidence the table exists to hold. **Revocation is a PORTAL-SURFACE control and recalls nothing** — the handoff already sent the details, and §25.2 anti-circumvention is the control from that point. Options A (permanent lift) and B (re-withhold) were rejected: A leaves a dealership seeing a dead buyer's details; B destroys the evidence. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D39 | Relaunch design | DECISION | Phase 6 | §8c allows one relaunch without a second $99. `Auction.depositId` is unique and `original_auction_id` has no writer. Proposed: a retry auction referencing the same deposit through `original_auction_id` with the unique constraint relaxed to a partial index; alternative: reopen the same auction row. | BLOCKING A NAMED LATER PHASE (Phase 6) **RULED 2026-09-13 — RETRY AUCTION.** A NEW `auctions` row parented by `original_auction_id`; the same deposit, so no second $99. The absolute unique on `auctions.deposit_id` is relaxed to TWO partial indexes — one original per deposit (`WHERE original_auction_id IS NULL`) and one retry per original (`WHERE original_auction_id IS NOT NULL`) — with `relaunched_at` and `relaunch_count` on the original. Do NOT reopen the same auction row: `auction_invitations_auction_rooftop_active_key` would force the first invitation to REPLACED and overwrite the record of what was invited when, which is the audit the relaunch exists to preserve. `OfferStatus.NOT_SELECTED` stays WITHHELD. **Core rule 11 applied: nine production sites relied on the absolute unique; six are caught by TypeScript and three were SILENT** — `launch-readiness`'s unordered `findFirst`, `admin/auctions`' missing per-deposit guard, and `deposit-activation`'s sweep predicate. Two were money-adjacent: `launch-auction` would have fabricated a second PAID $99 with no Stripe evidence. Guards ship WITH the migration, never ahead of it, and both carry a P2002 handler mapping the new index to a domain error rather than a 500. **AS BUILT (Phase 6).** |
 | D40 | Over-ceiling offers | DECISION | Phase 6 | Proposed: record the offer and mark `is_disqualified` with a reason (recoverable, visible to Ops) rather than rejecting at submit, so a dealer's mistake is recoverable and the §22a ceiling still binds selection. Pairs with §13-D16. | BLOCKING A NAMED LATER PHASE (Phase 6) **RULED 2026-09-13 — RECORD AND DISQUALIFY.** An over-ceiling offer is written with `is_disqualified` and a reason rather than rejected at submit: a dealer's arithmetic slip stays recoverable and visible to Operations. §22a's ceiling still binds — the offer is excluded from the ranked report AND refused at selection with the reason shown — so nothing is loosened by recording it. The same treatment covers an unusable APPROVAL, for a stronger reason: that is not the dealer's mistake at all. **AS BUILT (Phase 6).** |
 | D41 | `DEALER_CONFIRMATION` insertion and existing deals | DECISION | Phase 6/7 | Adding `DEALER_CONFIRMATION` before `FINANCING_PENDING` changes the entry state for new deals only; existing deals stay where they are and the transition map accepts both entries. Confirm no backfill is wanted. | BLOCKING A NAMED LATER PHASE (Phase 6) **RULED 2026-09-13 — NEW DEALS ONLY, NO BACKFILL.** `DealStatus.DEALER_CONFIRMATION` is the entry state for deals created from Phase 6 onward; existing deals are untouched and the transition map accepts both entries, so a revert leaves in-flight deals legal. `DEALER_CONFIRMATION → FINANCING_PENDING` is added to the map and is **deliberately unreachable from any Phase 6 code path** — Phase 7 wires the caller behind reaffirmation. Recorded here so nobody later reads an unused edge as an oversight. **AS BUILT (Phase 6).** |
@@ -6178,10 +6468,15 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D47 | PII already stored in `notifications.metadata` | ACTION (privacy) | Phase 2 | The public wizard spreads the whole form into `notifications.metadata`, so income, employer and credit-band answers sit in a notification row. Proposed: stop writing it in Phase 2, then an owner-run purge or redaction of the existing rows under the retention policy. Verify after: the metadata column holds no field outside an allowlist, and the purge query returns zero. | BLOCKING A NAMED LATER PHASE (Phase 2) |
 | D48 | Refund-policy copy shown to the buyer | DECISION (legal) | Phase 3 | §22.1 requires the buyer to see the refund rules before paying; the current deposit-confirmation email says the $99 "is credited toward your concierge fee when your deal closes", which contradicts both "Standard plan paid in full" and the $400-until-funding-clears rule. Proposed: legal-approved copy for the checkout disclosure and the receipt, written once and reused. Verify after: both surfaces render the approved text and a test pins it. | BLOCKING A NAMED LATER PHASE (Phase 3) |
 | D49 | Contract state representation | DECISION | **Phase 8** (re-triaged out of Phase 1, 2026-09-05) | **RULED 2026-09-05: DEFERRED out of Phase 1.** Nothing for D49 exists in either drafted Phase 1 directory (no `contract_scans`, `ContractScan` or `ContractVersionStatus` statement in the proof DDL), so it never blocked the wave. The proposal as worded is also **rejected on the merits**: `ContractVersionStatus` (`schema.prisma:1805-1811`) is a *document lifecycle* enum on `ContractVersion` — `UPLOADED/SCANNING/APPROVED/REJECTED/SUPERSEDED` — while the verdict lives on `ContractScan.status` (free `String`), and **no buyer surface reads `ContractVersion.status`**, so adding labels there cannot deliver "no free-text status reaches a buyer surface". The live value set is **five, not two**: `PASS`/`WARNING`/`FAIL` (`lib/constants.ts:71-77`, total over the score domain) plus `FLAGGED` and `REVISION_REQUESTED` written by the admin review route (`app/api/admin/contract-shield/[reviewId]/route.ts:158`, `:209`) — the original row omitted `FLAGGED`. **Direction for Phase 8:** split the axes — a closed `ContractScanStatus` on the verdict plus a separate typed review-disposition column — and ship it *with* replacement queue predicates, because the verdict string is currently the queue state machine (`lib/services/admin/admin-queue.service.ts:10`, `:58`, `:112`; `app/admin/contract-shield/page.tsx:88` exiting via `route.ts:96`). Removing those exits without a replacement is a REMOVED disposition needing explicit owner sign-off. **Reversal is cheap either way**, so deferral costs nothing: TEXT→enum precedent exists at `prisma/migrations/20260424030000_refinance_lead_referral_rebuild/migration.sql:60-70` using a total `CASE … ELSE` mapping that cannot abort. **Not deferred:** the buyer-facing defect. `app/buyer/contract-shield/page.tsx:45-47` and `app/buyer/contracts/page.tsx:46-49` fall through to red and render `Shield: REVISION_REQUESTED` verbatim to the buyer — a colour-map fix needing no schema change. | BLOCKING A NAMED LATER PHASE (Phase 8) |
-| D50 | Which surfaces the freeze test's repository-wide scan may exempt | DECISION | Phase 1 | The `credit_applications` guard scans `app/**`, `lib/**`, `components/**` and `scripts/**` with an explicit twelve-file allowlist (§8.2 Phase 1). Confirm no other surface needs an exemption, and that the allowlist shrinking to zero at Phase 7 is the intended end state. Verify after: the test fails when any allowlisted file stops referencing the model, and when a new reference appears anywhere else. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — the allowlist was enumerated from the tree (VERIFIED, twelve files); no surface is left to exempt |
+| D50 | Which surfaces the freeze test's repository-wide scan may exempt | DECISION | Phase 1 | **ANSWERED BY THE PHASE 7 BUILD: none, and the end state is zero.** The guard scans `app/**`, `lib/**`, `components/**` and `scripts/**`; its allowlist was **four** files, not the twelve §8.2 enumerates (that list is grep-derived and counts prose — §8.1a). Phase 7 removed all four and the allowlist is now EMPTY, asserted positively by `prisma/__tests__/credit-applications-frozen.test.ts` so a re-added entry requires deleting a test rather than passing unnoticed. An empty allowlist makes the guard strictly stronger: any AST-visible reference anywhere in those four trees now fails the build. Confirm no other surface needs an exemption, and that the allowlist shrinking to zero at Phase 7 is the intended end state. Verify after: the test fails when any allowlisted file stops referencing the model, and when a new reference appears anywhere else. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — the allowlist was enumerated from the tree (VERIFIED, twelve files); no surface is left to exempt |
 | D51 | CI `DATABASE_URL` secret — what it points at | ACTION (safety) | before the next CI run | **RESOLVED WITHOUT READING THE SECRET.** The original risk was real: `select-offer-concurrency.test.ts` sat inside `test:all`, which `ci.yml` runs with `secrets.DATABASE_URL \|\| <placeholder>` — so every CI run pointed a row-writing suite at an unidentified target. A stored GitHub secret's value cannot be read back, so "ask the owner to read it" was never an answer. Three changes remove the dependency on knowing it: (a) the destructive suite was taken **out of `test:all`** and now runs only in the `e2e` job against that job's own ephemeral service, `postgresql://autolenis_ci@localhost:5432/autolenis_e2e`, destroyed with the runner — `secrets.DATABASE_URL` is never passed to it; (b) `lib/testing/isolated-database.ts` **fails closed in CI** — a missing, unparseable or unapproved target fails the suite before a connection is opened, so "safe" and "never ran" are no longer indistinguishable; (c) `pnpm db:report-target` classifies the secret **in place** and prints only host, database name, project reference and a production/non-production verdict — never the user, the password or any part of a DSN. Two tests keep the arrangement from regressing: `test:all` must not contain `test:concurrency`, and exactly one workflow step may run it, with `CI: "true"`. The owner's answer is now informational rather than load-bearing. **ANSWERED FROM CI's OWN LOG, no secret revealed.** Run 33819305995 (`edd5782`), job "Typecheck, Lint, Tests & Build", step "Database target report": the step receives `DATABASE_URL: ${{ secrets.DATABASE_URL }}` and GitHub rendered it **empty**; `pnpm db:report-target` then printed `configured: no · host: (unresolvable) · database: (unresolvable) · project ref: (none) · classification: UNUSABLE · basis: no connection string is configured`. So **no usable `DATABASE_URL` secret is configured for this repository**, and every historical CI run of `test:all` used the literal placeholder rather than a real database. That is the sanitized answer the owner was owed, obtained without reading a stored value. It does not retire the controls: a secret added later would be classified the same way, the destructive suite still never receives it, and the guard still fails closed. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — now controlled: the guard fails closed in CI and the destructive suite runs only against the job's ephemeral autolenis_e2e service |
 | D52 | Flip `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` on in production | ACTION (production behaviour change) | **Phase 5 acceptance** — never Phase 3 | **Registered 2026-09-09.** Phase 3 builds the settlement side effect that opens the sourcing case, and neutralises the two auction-creation paths behind one monitored adapter: the webhook tail (`app/api/webhooks/stripe/route.ts`) and the deposit-activation reconciler's `create_auction`, `invite` and `close`-on-zero branches (`lib/services/auction/deposit-activation.service.ts`). The adapter **keeps creating and inviting by default** because Phase 3 removes the only path that currently invites dealers and the replacement does not exist until Phase 5; shipping it on would leave every paid buyer with an open sourcing case and no dealer ever invited (§8.2 Phase 3, sequencing guard). Until this row is actioned, Phase 3's new path runs **in preview only** and every production settlement writes a `LEGACY_PATH_WRITE` row — so §8.4's "30 days of zero writes" removal clock for that legacy path **starts at this flip, not at Phase 3 acceptance**. Prior to 2026-09-09 the flag was named exactly once in the whole plan, inside the Phase 3 bullet that creates it, and appeared in no §10 owner-gated cell, no §8.4 row, no phase gate and no §13 row — which is how Phase 5 could have shipped launch readiness without ever learning the flag exists. **Verify after.** (a) `SELECT count(*) FROM audit_logs WHERE action='LEGACY_PATH_WRITE' AND metadata->>'kind'='SETTLEMENT_AUCTION_LAUNCH' AND created_at > <flip time>` stays at 0; (b) each **non-concierge** settlement after the flip produces exactly one `sourcing_cases` row for its Vehicle Request and **no** `auctions` row keyed on that deposit until launch readiness passes — **amended 2026-09-11 on the owner's ruling, because the original wording was universal and is not.** A concierge conversion is a PRE-SOURCED transaction: the offer already exists, curated by staff, and the `VehicleRequest` is created at `OFFER_SENT`, so there is nothing to source and opening a case for it would be wrong. `convertConciergeOfferToClosedAuction` therefore does not call `applySettlementEffects`, opens no case, seeds no checkpoints and writes no `LEGACY_PATH_WRITE` row — before the flip or after it. The exclusion is a NAMED GUARD in code rather than an omission: `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` (`lib/services/concierge/concierge-conversion.service.ts`), asserted by `stripe-settlement-sourcing-case.test.ts` and `phase5-sourcing-journeys.spec.ts`, so routing the concierge branch through `applySettlementEffects` fails a test instead of silently changing what this flip means. (Routing it through `applySettlementEffects` was explicitly NOT authorised — that is Phase 3 surface work.) **A known risk on that path, reported and not worked around:** its `tx.vehicleRequest.create` runs inside the money transaction AFTER the deposit settles, and `vehicle_requests_one_open_per_buyer_key` is a partial unique index over ten open statuses including `OFFER_SENT` — so a buyer who already holds an open request takes a 23505 there, rolling back a settlement whose money has already moved. It has not fired in production (2 dealers, 7 closed auctions, no concierge conversion recorded) and fixing it is unauthorised Phase 3 surface work; **precondition (a) is clear** — the owner's pre-flip census of 2026-09-11 00:04 UTC read `pending_auctions 0`, `active_zero_invites 0`, `sourcing_cases 0`, `offers 0`, so nothing is in flight and no drain is needed, and the census is to be **re-run immediately before the flip** because the state can change; (c) Phase 5's invitation service has invited at least one dealer for each such case, which is the condition the flip exists to satisfy. Failing (c) is an unset-the-flag. | BLOCKING A NAMED LATER PHASE (Phase 5) |
 | D53 | Confirm `email_confirmed_at` is populated for the existing buyer population, or accept that §5a refuses them | ACTION (blocks payment for real buyers) | **Before Phase 3 merges** | **Registered 2026-09-10, from the Phase 3 adversarial review.** PAY-01 makes email verification one of §5a's seven conditions, and Phase 3 enforces it on the API path: `gatherAndCheckEligibility` reads `email_confirmed_at` from the Supabase session and `checkPaymentEligibility` returns `EMAIL_UNVERIFIED` when it is null (`frontend/lib/services/payment/deposit-eligibility.ts`). That is correct and it is also a NEW hard block on checkout for anyone whose column is null — and this session cannot read production to find out how many that is. A buyer created by admin invite, or claimed from a guest capture, may never have confirmed. This is the same shape as **§13-D10**'s NULL-location backfill and it has no equivalent row, which is why it is being added rather than assumed. **Verify before merge.** (a) `SELECT count(*) FROM auth.users WHERE email_confirmed_at IS NULL` over the buyer population; (b) if it is non-zero, decide between a confirmation campaign, a backfill for accounts already proven by another factor, or accepting that those buyers are refused until they confirm — the third is a legitimate answer and §5a's own reading, but it must be a decision rather than a discovery. The checkout now routes an `EMAIL_UNVERIFIED` buyer to their profile (`ELIGIBILITY_STEP` in `app/buyer/deposit/page.tsx`) instead of the dead end they met before, so the failure mode is recoverable either way. | BLOCKING A NAMED LATER PHASE (Phase 3) |
+| D54 | `external_pre_approval_documents` — the artefact store | DECISION | Phase 7 | **RULED 2026-09-14 — WIRE IT.** *(Registered at the Phase 7 opening. It existed only as parity rows `deal-early/D9` and `deal-early/D-5` and that section's local owner-gated list, so §8.2 Phase 7's list of nine did not name it — and its bare `D9` collided with **this register's** D9, `credit_applications` physical removal. Two namespaces, not two decisions; see §13.0a.)* Three stores hold one artefact today: `ExternalPreApproval.documentUrl`, `VehicleRequestFinancing.preApprovalLetterUrl`, and the unreferenced `ExternalPreApprovalDocument`. §12c names the documents table and the spec favours it: wire `ExternalPreApprovalDocument` (multi-document, `verifiedAt`), copy `documentUrl` forward, keep the private `prequal-letters` bucket and its signed URLs. | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D55 | Reaffirmation SLA threshold — N and window | DECISION | Phase 7 | **RULED 2026-09-14 — N = 2 within 90 days, REUSING `REPEAT_WINDOW_DAYS`.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/B20`'s "owner decision: N and window (policy value)".)* §Stage 10's "repeated failures trigger an SLA violation and review" needs a number. The window is §13-D42's existing `REPEAT_WINDOW_DAYS = 90` (`lib/services/trust/anti-circumvention.service.ts:43`) rather than a second constant — two windows that drift apart is a defect waiting. The SECOND failure raises the violation, so a dealership gets one recorded miss before review. | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D56 | Recap dispute threshold — N before the freeze | DECISION | Phase 7 | **RULED 2026-09-14 — N = 2; the THIRD dispute freezes.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/C10`'s "owner decision: N (policy value)".)* §Stage 11: "Repeated failure escalates to Operations with the Deal frozen at recap." `FROZEN_PENDING_RELEASE` is deliberately NOT used — that status is Phase 10's coordinated unwind of an EXECUTED contract, and a deal stuck at recap has no contract. The freeze is the deal staying at `RECAP_PENDING` with a `RECAP_DISPUTED` queue row naming it. | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D57 | `LEASE` → `FinancingPath` mapping | DECISION | Phase 7 | **RULED 2026-09-14 — FAIL CLOSED.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/D10`'s "owner decision: `LEASE` → `FinancingPath` mapping (UNVERIFIED #9)".)* `vehicle_request_financing.payment_method` is free text admitting `LEASE` (`schema.prisma:1421`); `FinancingPath` is `DEALER \| EXTERNAL \| CASH` and the document never contemplates leasing. The checkpoint therefore refuses to derive a path from `LEASE` and raises an Operations follow-up for a human to resolve, rather than silently mapping it to `DEALER` — which would invent business behaviour nobody agreed. | BLOCKING A NAMED LATER PHASE (Phase 7) |
+| D58 | `Deal.dealerId` has no writer at claim completion — §13-D20 depends on one | DECISION | **dealer-recruitment area** (the claim / verification / agreement sequence) | **RULED 2026-09-14 — NOT PHASE 7'S, AND NOT PHASE 8'S BY DEFAULT.** §13-D20 states that `Offer.dealerId` stays on the outside-dealer placeholder permanently and that `Deal.dealerId` is set to the claimed Dealer **when the claim, verification and agreement sequence completes**. That write does not exist. The only production writer of the field is `lib/services/deal/select-offer.service.ts:158`, which sets it to `offer.dealerId` at deal creation — the *shared system placeholder* for an outside winner, not null. **The exact write owed:** on completion of the claim sequence, set `deals.dealer_id` to the claimed, verified, agreement-signed `Dealer.id` for every Deal whose `offer.rooftop_id` matches the claimed rooftop and whose `offer.dealer.is_system_placeholder` is true. **Consequence while it is missing:** `outsideWinnerGate` (`lib/services/deal/dealer-reaffirmation.service.ts`) can never be satisfied, so `submitReaffirmation` refuses every outside winner and the deal cannot leave `DEALER_CONFIRMATION`. **Phase 7 must NOT build a second writer to compensate** — owner-ruled, parallel-system rule. What Phase 7 does instead is refuse to *penalise* the blocked dealership: `returnToRemainingOffers` gates the SLA and scorecard attribution on `dealershipWasBlocked` and opens an Operations row instead, so no outside winner accrues a rooftop SLA violation for a sequence it cannot complete. That guard is not a workaround and does not become dead when this row is built — a dealership mid-claim, suspended, or with a lapsed agreement is blocked by the same gate for the same reason. | BLOCKING A NAMED LATER PHASE (the dealer-recruitment claim sequence — §10b cannot complete end to end until it lands) |
 
 
 ## §14 Out-of-scope findings (reported, not implemented)

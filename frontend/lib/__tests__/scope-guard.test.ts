@@ -42,7 +42,7 @@ const APP_ROOT = process.cwd();
 const REPO_ROOT = resolve(APP_ROOT, "..");
 
 /** The phase this branch implements. */
-const CURRENT_PHASE = 4;
+const CURRENT_PHASE = 7;
 
 /** What each phase is allowed to ADD, beyond the baseline. §8.2 declares these. */
 const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string[]; libDirs: string[]; tables: string[] }> = {
@@ -103,6 +103,57 @@ const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string
     // key identically to an empty one, which means "Phase 4 declared nothing" and
     // "nobody wrote a Phase 4 entry" would be indistinguishable. They are not the same
     // claim, and this file is where the difference is recorded.
+    routeFamilies: [],
+    serviceDirs: [],
+    libDirs: [],
+    tables: [],
+  },
+  // PHASES 5, 6 AND 7 — DECLARED, NOT ABSENT, for the reason Phase 4's entry states.
+  //
+  // Until Phase 7 this constant read `CURRENT_PHASE = 4` with keys 2/3/4 only, so the
+  // loop in `allowed()` never reached Phases 5 and 6 at all. They passed the guard
+  // because every file they added landed in a directory that already existed — luck
+  // rather than compliance. A phase that HAD needed a new directory would have been
+  // caught only if someone remembered to raise the constant, which is exactly the
+  // failure mode a build-failing guard exists to remove.
+  5: {
+    // Sourcing ladder, dealer validation, invitations, launch readiness and the
+    // identity firewall all landed in `lib/services/auction`, `lib/services/sourcing`
+    // (declared by Phase 3) and `lib/services/dealer*` — all pre-existing.
+    routeFamilies: [],
+    serviceDirs: [],
+    libDirs: [],
+    tables: [],
+  },
+  6: {
+    // Offers, ranking, close, selection, Deal lineage and the Premium invitation
+    // landed in `lib/services/offer`, `lib/services/auction`, `lib/services/deal`,
+    // `lib/services/plan` and `lib/services/comms` — all pre-existing. Its migration
+    // (`20261115000000_phase6_relaunch_partial_unique`) adds indexes and columns, not
+    // a table.
+    routeFamilies: [],
+    serviceDirs: [],
+    libDirs: [],
+    tables: [],
+  },
+  7: {
+    // DELIBERATELY EMPTY, ALL FOUR KEYS — checked against the built tree, not assumed.
+    //
+    //   dealer-reaffirmation.service.ts, deal-recap.service.ts,
+    //   identity-firewall.service.ts, return-to-offers.service.ts    → lib/services/deal
+    //   financing-checkpoint.service.ts                              → lib/services/financing
+    //   phase7-email-content.ts                                      → lib/services/comms
+    //   POST /api/dealer/deals/[dealId]/reaffirm and the rest        → app/api/dealer,
+    //                                                                  app/api/buyer,
+    //                                                                  app/api/admin
+    //                                                                  (existing families)
+    //   the hold sweep                                               → app/api/cron/holds
+    //                                                                  (repurposed, §13-D26)
+    //
+    // `dealer_reaffirmations`, `deal_recaps` and `identity_firewall_entries` all exist
+    // in BASELINE_TABLES — the Phase 1 wave created the first two and Phase 5 extended
+    // the third, so none is this phase's to declare. Phase 7's two migrations change a
+    // column DEFAULT and add two nullable columns; neither adds a table.
     routeFamilies: [],
     serviceDirs: [],
     libDirs: [],

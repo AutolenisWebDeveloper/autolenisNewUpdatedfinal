@@ -50,6 +50,8 @@ const FIXED = {
   creditApplicationId: "app1",
   dealId: "deal1",
   buyerId: "b1",
+  // Phase 7 added `financingId` to the canonical form while the chain still held zero rows.
+  financingId: null,
   ruleId: "r1",
   createdAt: "2026-09-01T00:00:00.000Z",
 };
@@ -92,6 +94,7 @@ test("mirrors a non-PII breadcrumb into ComplianceEvent when the event concerns 
     buyerId: "b1",
     creditApplicationId: "app1",
     dealId: "deal1",
+    financingId: null,
     ruleId: "r1",
     payload: { ssn: "123-45-6789", income: 90000 }, // PII in the chain payload...
   });

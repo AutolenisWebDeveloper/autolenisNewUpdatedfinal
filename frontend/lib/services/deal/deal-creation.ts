@@ -96,4 +96,24 @@ export async function writeDealCreationRecord(
       data: { dealId: params.dealId },
     });
   }
+
+  // PHASE 7 — the Stage 10 window opens with the Deal, inside the same transaction.
+  //
+  // THIS IS THE SEAM PHASE 6 RESERVED (K27-1328b), filled rather than duplicated. §9a says the
+  // Premium invitation "never delays the reaffirmation request to the dealership" and HTML
+  // S[8].system[3] says the request goes "regardless of buyer engagement with the invitation".
+  // Arming it by the COMMIT that creates the Deal is what makes both literally true: there is no
+  // later call for a crashed request to lose, and no front-end flag that could gate it.
+  //
+  // It is HERE rather than in `commitOfferSelection` because this function is the one place BOTH
+  // creation paths pass through (`select-offer.service` and the vehicle-request offer respond
+  // route). A copy in each is how one of them stops opening the window.
+  //
+  // Only for deals that actually enter at DEALER_CONFIRMATION: an admin repair creating a deal
+  // further along has no 24-hour window to open, and opening one would start a clock on a stage
+  // the deal has already passed.
+  if (entryStatus === DealStatus.DEALER_CONFIRMATION) {
+    const { openReaffirmation } = await import("./dealer-reaffirmation.service");
+    await openReaffirmation(tx, { dealId: params.dealId, now: params.now });
+  }
 }
