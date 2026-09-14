@@ -143,12 +143,8 @@
       "mcp__Vercel__pause_project"
     ],
     "ask": [
-      "Bash(pnpm build:*)",
-      "Bash(pnpm run build:*)",
       "Bash(npm run build:*)",
       "Bash(yarn build:*)",
-      "Bash(pnpm lint:*)",
-      "Bash(pnpm run lint:*)",
       "Bash(npm run lint:*)",
       "Bash(yarn lint:*)",
       "Bash(vercel:*)",
@@ -174,7 +170,23 @@
       "Bash(pnpm exec prisma validate*)",
       "Bash(npx prisma generate*)",
       "Bash(pnpm db:report-target*)",
-      "Bash(node .claude/validate-skills.mjs*)"
+      "Bash(node .claude/validate-skills.mjs*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm run lint:*)",
+      "Bash(pnpm lint*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm run build:*)",
+      "Bash(pnpm exec tsc:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git fetch:*)",
+      "Bash(git branch:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)"
     ]
   }
 }
