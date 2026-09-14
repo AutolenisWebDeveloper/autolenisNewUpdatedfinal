@@ -1821,6 +1821,37 @@ removing.
 | `components/buyer/PremiumInvitation.tsx:186` | Links `/buyer/plan/premium`. **No such route exists** in `app/`. Pre-existing, outside this phase. (Phase 7's own use of the same dead prefix was fixed: `renderPremiumFollowUpFinal` now points at `/buyer/billing`) |
 | `financing-checkpoint.service.ts` | A failed `financing_audit_events` append is logged but raises no exception, because the catalogue has no code for a lost audit entry. Adding one is a registry change outside this phase's list |
 
+#### `pnpm test:visual` — why it exits 1 here, established rather than argued
+
+The marketing tier's pixel gate **fails in this container, on this branch and on the base commit
+alike**, and the distinction matters: the first reading of that failure is "Phase 7 changed a
+marketing page", and it did not.
+
+`.github/workflows/visual.yml:5-9` states the constraint in the repository's own words: "The
+baseline MUST be rendered by this runner image, not an ad-hoc container: font/anti-aliasing
+rendering is environment-specific, so capture and comparison have to happen on the same image or
+the 0.1%-tolerance gate false-fails. The runner is therefore PINNED to ubuntu-24.04." The
+workflow's trigger paths — `frontend/tests/visual/**`, `playwright.visual.config.ts`,
+`frontend/components/ui/**`, `frontend/app/(public)/**` — exclude **every file this phase changed**;
+the only components it touches are under `components/{admin,buyer,dealer}/`, which no marketing
+page imports.
+
+That is the argument. This is the evidence, and it is stronger:
+
+> The base commit `2b0bcc06` was checked out into a second worktree, built with the same toolchain,
+> served on a second port, and put through the identical suite **in this container, in the same
+> hour**. It failed the **same ten screenshots**. All ten rendered PNGs are then **byte-identical**
+> (SHA-256, full file) to the ten this branch renders.
+
+So the branch changes no marketing pixel at all, and the committed baseline is simply not
+comparable against this image. Six of the ten also match the baseline's dimensions exactly and the
+four that differ differ in HEIGHT — font-metric reflow changing where text wraps, which is the
+signature of a different font stack rather than of different content.
+
+**The gate itself is NOT VERIFIED for this branch and cannot be**, because passing it requires the
+pinned runner. What IS verified is that this branch is not its cause. CI's own `Visual regression`
+job is the authority, and it does not run for this PR because none of its trigger paths changed.
+
 #### What is deferred, and which phase carries it
 
 | Deferred | Carried by |
