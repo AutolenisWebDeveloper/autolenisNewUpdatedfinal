@@ -24,10 +24,10 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
-import {
-  EMAIL_TOUCHPOINTS,
-  type UpgradeTouchpoint,
-} from "./upgrade-suppression.service";
+// From the LEAF module, never from `upgrade-suppression.service` — that file is in an import
+// cycle with `plan-snapshot.service`, and joining it from here put the constants in their temporal
+// dead zone at run time while `tsc` stayed perfectly happy.
+import { EMAIL_TOUCHPOINTS, type UpgradeTouchpoint } from "./upgrade-touchpoints";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 

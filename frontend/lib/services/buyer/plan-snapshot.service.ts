@@ -32,7 +32,7 @@ import { prisma } from "@/lib/prisma";
 import {
   UPGRADE_TOUCHPOINTS,
   type UpgradeTouchpoint,
-} from "@/lib/services/plan/upgrade-suppression.service";
+} from "@/lib/services/plan/upgrade-touchpoints";
 import type { BuyerPlan, PlanSnapshot, Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 
