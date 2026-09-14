@@ -30,8 +30,43 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const auction = await prisma.auction.findFirst({ where: { id: auctionId, buyerId: buyer.id } });
   if (!auction) return errorResponse("NOT_FOUND", "Auction not found", 404);
+
+  // §8.2 Phase 6 defect (4). This route rejected ONLY `CANCELLED`, so a SUBMITTED offer on a
+  // `PENDING`, `EXPIRED` or `REOPENED` auction was selectable — a buyer could create a Deal on an
+  // auction that had never launched, or on one whose window had lapsed without close processing
+  // ever running. §9's entry is "offers ready", which is a CLOSED auction; the one sanctioned
+  // exception is the explicit, audited early accept on a still-live ACTIVE auction, handled below.
+  //
+  // Each refusal names its own state rather than sharing one message: "this auction has expired"
+  // and "this auction has not started" send a buyer to different places.
   if (auction.status === "CANCELLED") {
     return errorResponse("AUCTION_CANCELLED", "This auction has been cancelled.", 409);
+  }
+  if (auction.status === "PENDING") {
+    return errorResponse(
+      "AUCTION_NOT_STARTED",
+      "This auction has not started yet — no offers can be selected until dealers have been invited.",
+      409,
+    );
+  }
+  if (auction.status === "EXPIRED") {
+    return errorResponse(
+      "AUCTION_EXPIRED",
+      "This auction expired without closing. Operations will review it and contact you.",
+      409,
+    );
+  }
+  if (auction.status === "REOPENED") {
+    return errorResponse(
+      "AUCTION_REOPENED",
+      "This auction has been reopened and is not ready for selection.",
+      409,
+    );
+  }
+  if (auction.status !== "CLOSED" && auction.status !== "ACTIVE") {
+    // Defensive: a new AuctionStatus label must not become silently selectable. Every state is
+    // named above, so reaching here means the enum grew without this gate being revisited.
+    return errorResponse("AUCTION_NOT_SELECTABLE", "This auction is not ready for selection.", 409);
   }
 
   // F-007 — do not let a buyer silently end the 48h auction early. While the
@@ -70,6 +105,34 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
   if (!offer) return errorResponse("NOT_FOUND", "Offer not found", 404);
 
+  // §8.2 Phase 6 defect (4): "a valid unexpired offer". `offers.expires_at` shipped in the Phase 1
+  // wave and had no reader — §8a makes the expiration a REQUIRED field, and §9's failure path is
+  // built on it ("Offers carry an expiration. Remind the buyer before offers expire."). Selecting
+  // a lapsed offer commits a dealership to a price it withdrew.
+  if (offer.expiresAt && offer.expiresAt.getTime() <= Date.now()) {
+    return errorResponse(
+      "OFFER_EXPIRED",
+      "This offer has expired. Choose another, or ask us to revalidate it with the dealership.",
+      409,
+    );
+  }
+
+  // §13-D40, ruled: over-ceiling offers are RECORDED and disqualified rather than rejected at
+  // submit, so a dealer's arithmetic slip stays recoverable and visible to Operations — but §8c is
+  // unambiguous that they are "never presented as qualified", and §22a's ceiling "is enforced
+  // server-side at offer validation, AT SELECTION, and at contract request". Excluding a
+  // disqualified offer from the ranked report without also refusing it here would leave it
+  // selectable by anyone who kept the offer id.
+  if (offer.isDisqualified) {
+    return errorResponse(
+      "OFFER_DISQUALIFIED",
+      offer.disqualifiedReason
+        ? `This offer cannot be selected: ${offer.disqualifiedReason}`
+        : "This offer has been disqualified and cannot be selected.",
+      409,
+    );
+  }
+
   // STAGE 3 — APPROVAL RECHECK AT OFFER SELECTION.
   //
   // "Approval is rechecked — not merely at the payment gate, but at OFFER
@@ -99,6 +162,9 @@ export async function POST(request: NextRequest, { params }: Props) {
   let dealId: string;
   try {
     ({ dealId } = await commitOfferSelection({ buyerId: buyer.id, auctionId, offerId: offer.id }));
+    // The early-accept marker problem is now handled INSIDE the transaction: commitOfferSelection
+    // stamps `postCloseProcessedAt`, so the close reconciler can no longer claim this auction and
+    // tell a buyer who has just selected that their offers are ready.
   } catch (e) {
     if (e instanceof OfferSelectionRaceLostError) {
       return errorResponse("ALREADY_SELECTED", "You have already selected an offer for this auction.", 409);

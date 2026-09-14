@@ -5,6 +5,7 @@ import { INVENTORY_HEALTH_P1_THRESHOLD, PREQUAL_PROVIDER_FAILURE_EVENT } from "@
 import { getStripe } from "@/lib/stripe";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { qualifiedOfferWhere } from "@/lib/services/offer/offer-validity";
 import { logger } from "@/lib/logger";
 import {
   detectDeadCrons,
@@ -537,18 +538,52 @@ async function raiseEvidenceException(depositId: string, intentId: string, detai
 export async function checkSLAs(): Promise<SLAResult> {
   let breached = 0, warnings = 0;
 
-  // Auctions closing in < 2 hours with 0 offers
+  // ── §27.1 "Auction nearing zero offers → Operations" (§8.2 Phase 6 defect 6) ────────────────
+  //
+  // WHAT THIS REPLACED. A bare `Notification` of type SYSTEM_ALERT with NO dedup of any kind. This
+  // cron runs every 30 minutes (`vercel.json`) and the window is "closes within 2 hours", so a
+  // single quiet auction produced FOUR identical alerts — and the row it wrote carried no owner, no
+  // deadline, no return point and no reference to the auction, so an operator reading the admin
+  // console could not tell the four apart or act on any of them. `raiseException` fixes all of it:
+  // `queue_items` is the queue Operations actually works, the catalogue supplies §26's five facts,
+  // and the explicit idempotency key makes it once-ever per auction.
+  //
+  // THE KEY IS THE AUCTION, NOT THE TICK. A per-tick or per-day key would re-alert on the next
+  // pass, which is the defect. Once-ever is correct here because the condition cannot recur for the
+  // same auction: it closes within the window and `processAuctionClose` raises the close-time row.
+  //
+  // THE COUNT IS THE QUALIFIED COUNT. `_count.offers` counted DRAFT, WITHDRAWN and disqualified
+  // rows, so an auction whose only offer was a withdrawn revision looked healthy to the alert and
+  // then closed into the zero-offer branch with nobody warned — the exact case this exists for.
   const urgentAuctions = await prisma.auction.findMany({
     where: { status: "ACTIVE", endsAt: { lte: new Date(Date.now() + 2 * 3600000) } },
-    include: { _count: { select: { offers: true } } },
+    select: {
+      id: true,
+      buyerId: true,
+      depositId: true,
+      vehicleRequestId: true,
+      _count: { select: { offers: { where: qualifiedOfferWhere() } } },
+    },
   });
 
   for (const a of urgentAuctions) {
     if (a._count.offers === 0) {
       warnings++;
-      await prisma.notification.create({
-        data: { title: "SLA Warning: Auction closing with no offers", body: `Auction ${a.id.slice(-8)} closes in <2h with zero offers`, type: "SYSTEM_ALERT" },
-      }).catch(() => {});
+      try {
+        await raiseException({
+          code: "AUCTION_TRENDING_TO_ZERO_OFFERS",
+          auctionId: a.id,
+          buyerId: a.buyerId,
+          depositId: a.depositId,
+          vehicleRequestId: a.vehicleRequestId,
+          idempotencyKey: `AUCTION_TRENDING_TO_ZERO_OFFERS:${a.id}`,
+          detail: `closes within 2 hours with no qualified offer`,
+        });
+      } catch (e) {
+        // Best-effort, like every other alert in this cycle: a queue write that fails must not
+        // abort the SLA sweep and hide the checks that come after it.
+        logger.warn(`[health] trending-zero exception failed for auction ${a.id} (best-effort):`, e);
+      }
     }
   }
 

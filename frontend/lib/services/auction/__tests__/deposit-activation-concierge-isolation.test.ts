@@ -65,18 +65,22 @@ mock.module("@/lib/services/auction/auction.service", {
     createAuction: async () => {
       calls.createAuction += 1;
       if (db.deposit) {
-        db.deposit.auction = {
+        // §13-D39: `Deposit.auction` became `Deposit.auctions[]`. The reconciler selects the
+        // list newest-first and takes the head, so the fake must present a list — a fake still
+        // setting a singular object leaves the reconciler reading `undefined` and deciding there
+        // is no auction, which is how this suite failed when the relation changed.
+        db.deposit.auctions = [{
           id: "auc_new",
           status: "PENDING",
           createdAt: new Date(),
           _count: { invitations: 0, offers: 0 },
-        };
+        }];
       }
       return { id: "auc_new" };
     },
     launchAuction: async () => {
       calls.launchAuction += 1;
-      const a = db.deposit?.auction as Record<string, unknown> | null | undefined;
+      const a = (db.deposit?.auctions as Array<Record<string, unknown>> | undefined)?.[0];
       if (a) a.status = "ACTIVE";
       return {};
     },
@@ -108,7 +112,10 @@ function paidDepositNoAuction(stripePaymentIntentId: string | null) {
     status: "PAID",
     refundedAt: null,
     stripePaymentIntentId,
-    auction: null,
+    // §13-D39: `Deposit.auction` became `Deposit.auctions[]`. "No auction" is now an EMPTY LIST,
+    // not null — the reconciler reads `deposit.auctions[0] ?? null`, so a fixture left on `null`
+    // makes the property absent rather than empty and the distinction stops being expressed.
+    auctions: [] as Array<Record<string, unknown>>,
   };
 }
 
@@ -174,12 +181,12 @@ test("the track is only consulted when an auction would be created", async () =>
     status: "PAID",
     refundedAt: null,
     stripePaymentIntentId: "pi_live_1",
-    auction: {
+    auctions: [{
       id: "auc_1",
       status: "ACTIVE",
       createdAt: new Date(Date.now() - 10 * 60_000),
       _count: { invitations: 4, offers: 0 },
-    },
+    }],
   };
   const outcome = await reconcile();
   assert.equal(outcome, "ok");

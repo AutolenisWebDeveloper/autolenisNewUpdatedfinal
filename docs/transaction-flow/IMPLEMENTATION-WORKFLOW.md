@@ -758,7 +758,7 @@ The §12 preflight is re-asserted at the start of every phase before any Playwri
 | 3 | **Payment gate, money model, plans, settlement → sourcing case** | Stage 5 (5a–5d), §22, §22.1, §23 (all), Stage 6 entry, §26 payment/plan rows, §27.1 payment/plan rows | S[4]; MONEY/MONEY_PANELS; PLAN_* | 1 (deposit attach), 3, 4, 5, 6, 11, 15 | 2 |
 | 4 | **Inventory, qualified results, shortlist candidates, co-buyer, trade packet** | Stage 4 (4a–4c), §22a (all), §6.1 inventory/detail/shortlist/find-one-like-this/trade surfaces, Appendix (re-verified), §26 inventory rows | S[3]; INV; QUAL; BUDGET; FINDINGS | 28, 30, 31, (18 co-buyer record) | 1 (2 for intake handler; 3 not required) |
 | 5 | **Dealer sourcing ladder, validation, invitations, launch readiness; identity firewall** (built here; the *lift* at reaffirmation is Phase 7 — §11.6) | Stage 6 (6a–6c), Stage 7, §25, §26 sourcing/invitation rows, §27.1 sourcing/auction rows | S[5..6]; MONEY_PANELS “Identity and circumvention” | 7, 8, 9, 29 | 3, 4 |
-| 6 | **Offers, validation, ranking, close, selection, Deal lineage, Premium invitation** | Stage 8 (8a–8c), Stage 9 (9a), §22a ranking rows, §23.2a touchpoints 2–4, §26 offer/selection rows, §27.1 offer/selection rows | S[7..8]; PLAN_SEQ rows 2–4 | 10, 12 (Deal creation half), 15 (touchpoints) | 5 |
+| 6 | **Offers, validation, ranking, close, selection, Deal lineage, Premium invitation** — **AS BUILT 2026-09-14, §8.1f** | Stage 8 (8a–8c), Stage 9 (9a), §22a ranking rows, §23.2a touchpoints 2–4, §26 offer/selection rows, §27.1 offer/selection rows | S[7..8]; PLAN_SEQ rows 2–4 | 10, 12 (Deal creation half), 15 (touchpoints) | 5 |
 | 7 | **Dealer reaffirmation, vehicle hold, disclosure, material changes, outside-winner verification, deal recap, financing checkpoints, `credit_applications` freeze** | Stage 10 (10a–10c), Stage 11 (11a–11b), Stage 12 (12a–12d), §23.2a touchpoint 5, §26 rows, §27.1 rows | S[9..11]; FIN_CP; FIN_PANELS | 12, 13, 14, 27 (reaffirmation consequences) | 6 |
 | 8 | **Contract request, Contract Shield, buyer + co-buyer signing, dealer execution, financing completion & funding clearance, insurance review** | Stage 13 (14a–14d), Stage 14, Stage 15, §26 rows, §27.1 rows | S[12..14] | 16, 17, 18, 19 (activation owner-gated), 20 | 7 |
 | 9 | **Pickup readiness, scheduling, release token, reminders, handover, possession, atomic completion, post-completion obligations** | Stage 16–21, §26 rows, §27.1 rows | S[15..20] | 21, 22, 26, 27 (no-show/overdue consequences) | 8 |
@@ -1250,6 +1250,393 @@ is the corrected version, and the totals above were computed from the table rath
 - **No email was sent and no credit was spent**, and could not have been: the session carries no
   `RESEND_API_KEY`, `TWILIO_*`, `APOLLO_API_KEY`, `STRIPE_SECRET_KEY`, `DATABASE_URL` or
   `DIRECT_URL`. The preflight recorded all of them absent before any test ran.
+
+
+### 8.1f Phase 6 — AS BUILT (2026-09-14)
+
+Implemented on `claude/txflow-06-offers-w0qvu9` (PR #430). This section records how the phase was
+actually built where that differs from how it was planned, and carries the mandatory
+before → after capability map. **Nothing was applied to production and no migration was run** — the
+D39 migration is authored and proved on a throwaway loopback database, and applying it is the
+owner's under the per-run protocol in CLAUDE.md.
+
+#### The owner's rulings, as built
+
+§13-D39 (retry auction via `original_auction_id`, the absolute unique relaxed to two partial
+indexes, `relaunched_at`/`relaunch_count`), §13-D40 (over-ceiling offers recorded and disqualified,
+never rejected at submit) and §13-D41 (new deals only, no backfill) are each recorded on their own
+§13 row. Four further rulings changed the shape of the build:
+
+- **K27-1328 → follow N6.** Phase 6 sends the award notice and lands the reaffirmation-request
+  enqueue as a named no-op seam with its dedup key reserved; Phase 7 fills it. The row is split
+  a/b below.
+- **`DEALER_CONFIRMATION → FINANCING_PENDING`: ADD THE EDGE, ADD NO CALLER.** The transition is in
+  the map and is unreachable from any Phase 6 code path. **This is deliberate and is recorded here
+  so nobody later reads an unused edge as an oversight** — Phase 7 wires the caller behind
+  reaffirmation.
+- **PAY-73 ruled INTO this phase.** Phase 3 deferred exception-state upgrade suppression to Phase 10
+  and said so explicitly, because `queue_items` had no writer it could rely on and "a predicate that
+  always passes is worse than one that is not there". Phase 6 raises four codes into that table, so
+  the predicate now has something to read. It matters most at touchpoint 3, which fires immediately
+  after acceptance — the moment an approval-expired, over-budget or zero-offer case is most likely
+  open.
+- **The 17.6 proof is DEGRADED, not approximated.** The migration proof ran on PostgreSQL 16.13,
+  the only major available in the authoring session. CI's `migrations` job is the 17.x authority, as
+  it was for migration 110, and it is green on every commit of this branch.
+
+#### Where the plan was wrong, and what was built instead
+
+- **The offer expiry default.** The obvious default — `auction.endsAt` — breaks selection entirely.
+  `processAuctionClose` runs when `endsAt <= now`, so every offer would be expired at the exact
+  moment the buyer is first shown it: an empty ranked report, every selection refused with
+  `OFFER_EXPIRED`, and every auction falling into the zero-offer branch. §9 says the opposite
+  ("remind the buyer BEFORE offers expire"), which only means anything if the expiration is after
+  the close. Parity row A16b's "default policy window" is `OFFER_VALIDITY_HOURS = 72`, measured
+  from the CLOSE rather than from submission so every offer on one auction lapses together.
+- **`reviseOffer`'s statement order is load-bearing.** Carrying `rooftop_id` and
+  `auction_vehicle_id` forward — which §8b requires, or the cap stops binding — makes the revision's
+  INSERT collide with the still-`SUBMITTED` original on
+  `offers_one_live_per_rooftop_candidate_key`. The withdraw must come FIRST. It was invisible before
+  this phase only because both columns were NULL and PostgreSQL treats NULLs as distinct: the same
+  inertness that made the index meaningless. **No unit test can catch this** — the fakes implement
+  `offer.create` as `array.push`, and an array has no index — so it is proven against a real
+  database in `lib/services/offer/__tests__/destructive/offer-revision-index.test.ts`.
+- **The dealer route's zod schema stripped the candidate binding.** §8c's binding landed one commit
+  before the field was accepted, so `POST /api/dealer/offers` threw on every submission to a sourced
+  auction: the dealer path was dead on the mainline, and A2b/A17b were reachable only from the
+  admin and AI paths.
+- **`id: { notIn: [] }` compiles to `AND 1=1` in Prisma** — it matches EVERYTHING. The zero-offer
+  arm of the candidate sweep relies on that; the success arm needed a guard, because an empty
+  answered set there means the offers could not be ATTRIBUTED (a pre-Phase-6 row carries a NULL
+  binding), not that no candidate was answered. Verified by reading the generated SQL —
+  `probeEmptyNotIn`, recorded as §12 of `docs/transaction-flow/phase-6-proof/proof-run.log`.
+- **`rank / count` is the wrong normalisation.** It maps rank 1 of 1 to 1.0 — the WORST value — so
+  an offer ranked #1 on all four dimensions scored 0.4375 while one ranked #1 on only three scored
+  0.2500, because the first was the only financed offer. Being the one dealership willing to quote
+  financing made it lose. It also never reaches zero, and the residual penalty depends only on how
+  many dealerships bid: rank 1 of 2 scored 0.5 and rank 1 of 10 scored 0.1, the same achievement
+  five times apart. `(rank - 1) / (count - 1)`, with a one-entrant dimension excluded rather than
+  scored.
+- **Best Overall could not be a within-candidate score.** Those are positions in different races: a
+  candidate answered by one dealership has no ranking to speak of, so the card went to the winner of
+  a two-offer race on another candidate for having had a rival to beat. On a multi-candidate auction
+  it is decided by the cross-candidate discount, which is the measure §8c names for comparing
+  different cars.
+- **An import cycle made the §23.2a vocabulary unusable at run time.**
+  `upgrade-suppression.service` → `plan-snapshot.service` → back. Harmless until
+  `upgrade-touchpoint.service` entered the graph from a third point, at which point the constants
+  were in their temporal dead zone and every call failed with "Cannot access 'UPGRADE_TOUCHPOINTS'
+  before initialization" — a failure `tsc` cannot see. The vocabulary now lives in
+  `upgrade-touchpoints.ts`, a leaf module with no imports, which cannot participate in a cycle.
+- **L1 (legacy write-through) is REPORTED AS BLOCKED, not built.** `Offer.auction_id` is REQUIRED
+  and `VehicleOffer` carries no `auction_id`, no `vehicle_request_id` and no `buyer_id` — only
+  denormalised buyer strings and `referenceId`, a free-text `String?` an administrator types by hand
+  (its form placeholder is "REQ-001"). Writing a canonical `offers` row from a
+  `dealer_offer_submission` would mean inventing an auction binding or creating an auction from a
+  public dealer form: a schema and product decision, and the brief's own "never a parallel offer
+  model" cuts both ways.
+
+#### The authorized security sub-batch
+
+`/dealer-offer/[token]/confirmed` resolved the SHARED `VehicleOffer` token and rendered the most
+recent submission by ANY dealership, so a dealership that refreshed after a competitor submitted saw
+that competitor's NAME, OFFER PRICES, VEHICLE LISTING URLS and UPLOADED DOCUMENT NAMES. It was
+reachable by ordinary use: the form was handed a per-dealer `inviteToken` and never read it, so every
+dealership's redirect landed on the same URL. The form now carries its own token and the page scopes
+to the one submission that invite owns (`dealer_offer_submissions.invite_id` is `@unique`); the
+generic shareable link names no dealership at all. **This is the only authorization change in the
+phase.**
+
+#### Before → after capability map
+
+| Capability | Disposition |
+| --- | --- |
+| Auction close notices (buyer in-app + email) | **MOVED** — the email to the §27 dispatcher; the in-app `notifications` row KEPT, because the dispatcher's `in_app` channel is read by no buyer surface |
+| `sendOffersReadyEmail` (legacy sender) | **REPORTED** — content and parity key retained, no caller; documented in place, not deleted |
+| Dealer no-winner emails at zero-offer close | **KEPT** |
+| Atomic close claim + release-on-failure | **KEPT**, strengthened to a compare-and-swap |
+| No auto-refund at close or on decline (S16) | **KEPT**, and now pinned by a test |
+| `checkSLAs` SYSTEM_ALERT for a quiet auction | **MOVED** to `queue_items` via `raiseException`; surfaces in the admin Transaction Exceptions tab |
+| `POST /api/admin/deals` (admin selecting a winner) | **REMOVED** — §9 forbids it; owner-approved in the Phase 6 brief |
+| Buyer best-price route's own ranking | **REMOVED** — superseded by the engine output (C9); every response field the panel reads is preserved |
+| Loan-term toggle on the Best Price Report | **REMOVED** — owner-approved 2026-09-14. Relabelled, then disabled, then deleted: a payment computed at a term no dealership quoted is a number nobody offered, and §12 is explicit that AutoLenis does not underwrite. The sentence stating that each figure is the dealership's own quote at their own APR SURVIVES the deletion, moved above the cards |
+| Monthly figure with no recorded term | **PROGRESSIVE** — the card said "~$450/mo" and stopped. Reachable only on the persisted path, for ranking rows written before `monthlyTermMonths` existed; it now says "— term not recorded" rather than showing a payment whose term is silently absent |
+| QStash `offer-follow-up` rail | **REPORTED** as superseded by §9's selection reminder; left in place for in-flight schedules, no new callers |
+| Dealer offer confirmation page | **KEPT**, scoped per invite (security sub-batch) |
+| Everything else touched | **KEPT** |
+
+Counts reconcile — **13 rows: REMOVED 3, MOVED 2, REPORTED 2, PROGRESSIVE 1, KEPT 5.** All three
+REMOVED are owner-approved: two in the Phase 6 brief, the loan-term toggle in the 2026-09-14 STOP 2
+approval.
+
+*(The previous sentence here claimed three MOVED and three REPORTED against a table holding two of
+each, and had been wrong since the map was written. Found by the review round's completeness critic,
+which counted the rows rather than trusting the sentence — the same failure mode as the stale test
+counts in CLAUDE.md, and worth the same correction note.)*
+
+#### The owner's answers to the five open questions (STOP 2 approval, 2026-09-14)
+
+All five are ruled. The questions are kept above the answers so a later reader can see what was
+actually asked.
+
+| # | Question | Ruling | What it cost in code |
+| --- | --- | --- | --- |
+| 1 | Recompute at a buyer-chosen term, or drop the control? | **DELETE IT**, signing off the removal. "A monthly payment computed at a term no dealership quoted is a number nobody has offered, and §12 is explicit that AutoLenis does not underwrite. Show each dealer's own term beside their own monthly figure instead." | The control, its state, the `?months=` query string and the refetch-on-change are gone. The route's `months` parameter and its 6–96 validation **stay** — a server-side guard on a still-reachable public input outlives the client that populated it, and deleting it would delete the regression tests pinning the NaN / divide-by-zero defect it was written for. The owner's replacement was already built (`monthlyTermMonths`, rendered since the ranking slice); what it needed was the empty-suffix branch closed |
+| 2 | Explicit once-ever key on the close-time zero-offer exception? | **YES, same as the sweep** | `closeZeroOfferExceptionKey(auctionId)` → `AUCTION_CLOSE_ZERO_QUALIFIED:<auctionId>`. **ONE key for BOTH codes**, which is more than the question asked and is the half that mattered — see below |
+| 3 | Does a failed auction need a terminal request status? | **NO. §13-D39's relaunch owns it.** §26 already gives the two outcomes — one relaunch without a second $99, or closure — and `CLOSED_NO_MATCH` exists. "A third state would need its own exits and its own §27.1 rows." | **No code change.** Recorded here so the absent transition is not later read as an oversight: the zero-offer branch leaves the request in `ACTIVE_SOURCING` deliberately, and what moves it is the resolution of the Operations case the close opens |
+| 4 | Should a buyer with no mailbox be an Operations row? | **YES.** "A `logger.error` standing in for an exception is the defect class this program has spent five phases eliminating." | A new catalogue code and five raise sites — see below |
+| 5 | L1, the legacy write-through | **ACCEPT THE BLOCK.** Record as BLOCKED with the reasoning, "not as deferred" | Four parity rows (`offers/L1`, `schema/R22`, `schema/S25`, `inventory/R45`) and the §10.4 prose bullet now carry it. Leaving them asserting the write-through as required work would have left the ledger claiming as fact a thing the owner had just ruled blocked |
+
+#### Ruling 2, as built — one key for BOTH close-time codes
+
+The question asked for a once-ever key. Applying it exposed a second defect the question did not
+name: `raiseCloseException` picks between `ZERO_OFFERS_ALL_CANDIDATES` and
+`ALL_OFFERS_EXCEED_BUDGET` on a **time-dependent count** — `overBudget` requires `status: SUBMITTED`
+and an unexpired `expires_at`, and `expireLapsedOffers` flips disqualified rows to EXPIRED like any
+other. So a later pass over the same auction sees `overBudget = 0` and raises the OTHER code. Under
+a per-code key that is two keys, two open rows for one close, and §26's two contradictory required
+actions in front of one operator — with resolving either leaving the other open.
+
+The key therefore names the **condition**, not the description. A test asserts the same literal in
+both branches, so a future refactor to `${code}:${auctionId}` fails rather than passing quietly.
+
+**REPORTED, not folded in:** that same time-dependence means an auction whose dealers all bid over
+budget, but whose offers later lapsed, is filed as `ZERO_OFFERS_ALL_CANDIDATES` — "nobody bid" —
+when dealers did bid. Counting `isDisqualified: true` regardless of status and expiry would remove
+the time-dependence entirely and make the two codes mutually exclusive at every instant. That is a
+behaviour change beyond the ruling and is the owner's call, not this batch's.
+
+#### Ruling 4, as built — `COMMS_NO_DELIVERABLE_CHANNEL`, and why it is not `COMMS_TERMINAL_FAILURE`
+
+Reusing the existing code was the first thing checked, because golden rule 1 says extend rather
+than duplicate. It does not fit, and the reason is concrete rather than stylistic:
+`COMMS_TERMINAL_FAILURE` describes a message that entered the §27 rail and exhausted its retries. It
+keys on `comms_outbox.id`, its required action is "investigate the undeliverable message", and its
+return point is the dispatcher. A recipient with no address **never produces a row** —
+`enqueueTransactional` refuses a channel without one before the insert — so there is no id to key
+on, no `last_error` to investigate, and no first attempt for "another way" to be another way *than*.
+An operator sent to the outbox would find nothing and conclude the alert was wrong.
+
+That is the same split this catalogue has already made three times: `THIN_DEALER_COVERAGE` from
+`ZERO_DEALER_COVERAGE`, `AUCTION_TRENDING_TO_ZERO_OFFERS` from `ZERO_OFFERS_ALL_CANDIDATES`, and
+`POSSIBLE_DUPLICATE_BUYER` out of `LINEAGE_ORPHAN` — each time because the same neighbourhood
+carried a different required action. No migration: `COMMS_EXCEPTION` already exists as a
+`QueueItemType` and `queue_items.exception_code` is plain TEXT.
+
+**Five sites, not one.** The ruling named the close notice; applying it only there would have been
+the defect class it describes, one site over. Every branch in this phase that discovers a recipient
+has no channel now raises: the close notice, the pre-expiry selection reminder, the S15 expiry
+notice, the dealer no-winner mail (registered dealerships only), and §23.2a touchpoint 4.
+
+**One case per lost MESSAGE, not per unreachable buyer.** A successful close loses two — the
+offers-ready notice and the selection reminder — and each keys separately. The operator's required
+action is "re-drive the notice once the address is fixed", and there are two notices to re-drive;
+one row would fix the address and silently leave the reminder unsent.
+
+**The strongest of the five is the S15 expiry notice**, and not for a reason visible in that
+function: the sweep raises `BUYER_DOES_NOT_SELECT` *before* enqueueing, and that row is its own
+terminal marker, so the auction leaves the candidate set the instant the raise lands. Unlike the
+close path there is no retry at all — a notice skipped there was never revisited, while `swept++`
+still counted the buyer as swept.
+
+**The wrap lives in the helper, not at the call sites**, and that placement is load-bearing. A throw
+out of `enqueueCloseNotice` releases the post-close claim and is rethrown, and a missing mailbox is
+durable, so the cron would re-enter the close every five minutes forever: never raising the
+zero-offer case (it sits after the notice), never telling a dealership there was no winner, leaving
+`postCloseProcessedAt` NULL so the S15 sweep can never see the auction either, and 500-ing the admin
+manual close. One reportable defect would have become five. `raiseCloseException` is deliberately
+*not* wrapped — its failure is transient, so releasing the claim and retrying is right there.
+
+**Two things flagged rather than assumed:**
+
+1. **§23.2a touchpoint 4 is an upsell, not a §27.1-required notice**, and §23.2b treats a missing
+   ask as the safe outcome. It is included anyway, because the code is about the CHANNEL rather than
+   the message's commercial importance — the fact discovered is "this buyer can receive no email at
+   all", the same fact the close path discovers about the same buyer — and because it was one of
+   THREE of the five that carried no log line at all, with the dealer no-winner branch and the
+   selection reminder, so the condition was previously discovered and discarded in total silence.
+   *(An earlier revision of this paragraph called it "the only one of the five with no log line".
+   That was false, and the same commit contradicted it: the close-path comment calls the selection
+   reminder "the weakest of the three close-path sites — it did not even log." Corrected rather
+   than left standing; the recommendation above rests on the upsell-vs-§27.1 distinction, not on
+   logging, and is unaffected.)* **If Operations would rather the queue carried no lost upsells, this is the single
+   site to drop; the other four stand without it.**
+2. **The dealer no-winner mail is the one close-path message still on the direct Resend rail**
+   (REPORTED-NOT-BUILT item 3 below), so its outbox key is *synthesised* on the same shape rather
+   than copied from a dispatcher row. Named here so the two records do not contradict each other.
+
+**REPORTED, not changed — the same defect class outside this phase's code.** Eight further sites
+discard a recipient with no channel, all predating Phase 6 (blame: `581e171`, `42d5b28`, `f3dcdbb`).
+The sharpest is `lib/services/notifications/dealer-award.ts` — it drops the K27-1328a award /
+non-award notice on **both** channels with no log at all. The others are `offer.service.ts`'s
+first-offer email, `select-offer/route.ts`, `offer/respond/route.ts`, the two dealer-offer routes and
+two in `dealer-invitation.service.ts`. Applying the helper to them is a follow-up batch: it widens
+this diff past the ruling and past this phase's capability map.
+
+#### The rulings' own review round — five findings, all of them mine (2026-09-14)
+
+The rulings diff went through the same treatment as the implementation: five lenses over it, each
+finding handed to an independent verifier prompted to REFUTE it. Twenty-six raised, **five survived**.
+Recorded because the sharpest one is a defect in the evidence rather than in the product, and that
+is the kind this process exists to catch.
+
+| # | Severity | Finding | Fix |
+| --- | --- | --- | --- |
+| V1 | **MAJOR** | **Ruling 4's fifth raise site never executed in its only test.** `premium-invitation.test.ts` mocks the dispatcher module with `enqueueTransactional` alone, so the route's new `raiseNoDeliverableChannel` import was `undefined`, the call threw a `TypeError`, and the caller's `.catch` absorbed it. The test's three assertions — 200, `recorded: true`, nothing enqueued — hold identically whether the raise runs or explodes, so the suite reported **9/9 green while the site did nothing at all**. Production was unaffected; the *evidence* for "five raise sites" was false for site 5 | The export is registered and the test now asserts `noChannel.length === 1` with the template key and the request-scoped outbox key — an assertion that cannot pass unless the site ran. Proven failing-first by removing the mock export again. A second test restores the coverage the old one claimed, on a path that really is a scheduling failure |
+| V2 | MINOR | **Ruling 5's BLOCKED marking reached one copy of three.** The R45 prose bullet is an EMBEDDED copy of `inventory.table.md`; the drift guard skips non-pipe lines, so editing only the document copy left the two diverged with `--check` green. Two further places still asserted the write-through as required work: §8.2's Phase 6 scope list and §8.4's legacy-path register | Source and embedded copy re-synced byte-for-byte; both other assertions now carry the block |
+| V3 | NIT→real | **Two more §10.x headings were stale** — §10.1 by four figures, §10.5 by two — on top of the §10.11 six corrected earlier in this phase | Corrected, **and guarded**: see below |
+| V4 | MINOR | **"the only one of the five with no log line" was false.** THREE of the five were silent. The same commit contradicted itself — the close-path comment calls the selection reminder "the weakest of the three close-path sites — it did not even log" | Corrected in both the document and the route comment. The recommendation it supported rests on the upsell-vs-§27.1 distinction, not on logging, and is unaffected |
+| V5 | NIT | The helper's wrap-placement rationale enumerated its call sites over-broadly: the S15 site is inside the sweep's per-auction catch, not the claimed block or a request path | Enumeration corrected to the actual five |
+
+**The §10.x headings now have a guard, because hand-counting has failed three times in one phase.**
+`checkSectionHeadings` parses the rows under each `### 10.x` heading and compares them to the count
+and tally the heading declares — self-contained, needing no area mapping, because a section's own
+rows are the authority for its own heading. It runs in `--check` and is asserted by the suite.
+
+**Its first version could not fail.** It compared a row's cell count against `COLUMNS` — the array
+of column NAMES rather than its length — so every row was rejected, every section fell through a
+silent zero-row branch, and `--check` reported "no drift" over thirteen sections it had never read.
+Caught by asking why a guard written to catch two known-stale headings reported none. The zero-row
+branch is now a loud failure, and a test inflates a heading by one row to prove the guard fails when
+it should. **A guard nobody has watched fail is a guard nobody has tested** — which is the same
+lesson as V1, one layer down.
+
+#### The hazard class behind four of the ten review defects
+
+**Recorded as a class at the owner's instruction, alongside core rule 11.**
+
+> Core rule 11 (`autolenis-supabase-postgres`): *a constraint narrowing invalidates the code that
+> relied on it.* Its twin: **a column gaining its first writer invalidates the code that relied on
+> it being null.**
+
+Four of the review round's ten defects were exactly this. `rank_cash`, `rank_monthly`,
+`rank_balanced` and `best_price_score` had been on `offers` for months and were always NULL until
+`persistRanking` ran; `disqualified_reason` was always NULL until §13-D40 made an over-ceiling offer
+a record rather than a throw. An unprojected dealer route returned all five the day they started
+being written — leaking the buyer's approved ceiling to the dealership bidding against it, while the
+sibling route deliberately coarsened that same figure into a range.
+
+The two hazards are symmetric in every way that matters for finding them:
+
+| | Core rule 11 | Its twin |
+| --- | --- | --- |
+| The change | a constraint narrows | a column gains its first writer |
+| What breaks | readers that relied on the guarantee | readers that relied on the emptiness |
+| Who edited the broken code | nobody | nobody |
+| Compiler sees it | no | no |
+| Test sees it | only if a fixture models the cardinality | only if a fixture populates the column |
+| The check | list every reader of the constraint and re-derive each | list every reader of the column and re-derive each |
+
+The acceptance step is the same sentence with one word changed: **list the code that relied on this
+column being empty, and re-derive each.** A phase that writes a previously-unwritten column owes
+that list the way a phase that relaxes a unique index owes core rule 11's.
+
+#### What is NOT verified
+
+- **No surface was rendered in a browser.** Every Phase 6 surface is behind a buyer, dealer or admin
+  session, and this repository has no legitimate non-production authenticated environment.
+- **The outbox drain was never executed.** Every message this phase adds is proven only as far as
+  the enqueue and its registered send-time recheck.
+- **PostgreSQL 17.6** — the migration proof is DEGRADED (16.13). CI's `migrations` job is the
+  authority.
+- **No email was sent, no credit spent, and nothing was applied to production.**
+
+#### The review round — ten defects found AFTER the implementation was written (2026-09-14)
+
+The `autolenis-code-verification` loop's second and third passes. Two reviewers read the whole diff
+from a clean context — one adversarial on correctness, architecture and concurrency, one on
+security only. Between them: **1 blocker, 1 high-severity disclosure, 6 major, 5 minor, 2 nits.**
+Six were introduced by this phase. Every fix carries a regression test that was proven to fail
+against the code it replaces.
+
+Recorded here rather than in a commit message alone, because the pattern in them is the finding:
+**four of the ten are columns or rows this phase started WRITING for the first time, reaching a
+reader that had always seen null.** A projection that was safe for two years stopped being safe the
+day `persistRanking` ran.
+
+| # | Severity | Defect | Fix |
+| --- | --- | --- | --- |
+| R1 | HIGH | `/api/dealer/offers` returned the `Offer` row unprojected. `persistRanking` and §13-D40 filled `rank_cash`/`rank_monthly`/`rank_balanced`/`best_price_score` and `disqualified_reason` — the last carrying the buyer's approved ceiling as a dollar figure and their prequalification state. One over-budget probe returned both | `DEALER_OFFER_SELECT`: ONE projection for every dealer-facing reader. `isDisqualified` still returned; the number and the reason never |
+| R2 | BLOCKER | The dealer bid form sent no `auctionVehicleId`, and `submitOffer` now refuses an offer that names no candidate on an auction that has them — every sourced auction. The only dealer submit surface was dead, and the route's substring error map turned the refusal into "please try again" | Candidate selector on the quick-offer page (auto-selected at one candidate); `OfferRefusedError` marks a refusal dealer-readable at the point it is raised |
+| R3 | MAJOR | `releaseAuctionLoad` was a blind `decrement: 1` as the first statement of the claimed close block. Phase 6 made that block's failure path routine, so an hour-long outbox outage decremented every invited dealership twelve times. No floor: a dealership at `-12` scores `+60` and never trips capacity | Derived from the live invitation set — idempotent by construction, and it repairs drift that already exists |
+| R4 | MAJOR | `sweepUnselectedAuctions` raised `BUYER_DOES_NOT_SELECT` with no explicit key, so a RESOLVED case reopened on the next tick and threw after fifty; and its candidate set never drained, so past fifty auctions some buyers were never swept at all | `idempotencyKey: BUYER_DOES_NOT_SELECT:<auctionId>` (strict once-ever); the case itself is the terminal marker; `orderBy: { closedAt: "asc" }` |
+| R5 | MAJOR | An auction whose offers were ALL over budget was told "no offers received" at close, then — once `expireLapsedOffers` flipped the same rows to EXPIRED — "your offers expired without a selection", plus a second case | The sweep requires a lapsed offer that is `isDisqualified: false` |
+| R6 | MAJOR | §23.2a touchpoints 3 and 4 had NO CONSUMER. Nothing called `/api/buyer/plan/invitation`, so the invitation was never shown, no dismissal was recorded, and touchpoint 4 — which fires only on a dismissal — could never fire. Separately, no writer ever recorded an impression for an EMAIL touchpoint, so §23.2b's two-email ceiling could never bind | `PremiumInvitation` mounts on the deal page; the email ask is recorded in the send-time recheck, where `proceed: true` is the decision to actually ask |
+| R7 | MAJOR | The dealer form sent only the fees its own hard-coded heuristic flagged; everything else was folded into `feesCents`, so an administrator's `JunkFeePattern` could never match a fee the client missed. The in-code claim that "the server re-classifies" was true only of the subset already flagged | Every itemised fee is sent; `classifyFeeItems` is the only thing that decides `isJunk` |
+| R8 | MINOR | PAY-73 suppression matched any open case on the BUYER, so an unresolved case on one transaction silenced the Premium ask on every later one, permanently | Scoped to this request, plus buyer-level cases that name no request at all |
+| R9 | MINOR | `POST /api/admin/auctions` missed `REOPENED` on both guards and checked only the relaunch count — two live auctions on one $99, outside the partial unique | `resolveRelaunchEligibility`, as the sibling `launch-auction` route already did |
+| R10 | MINOR | `launchFromCase` would let `sweepSourcingCases` spend the buyer's one free §8c relaunch. `deposit-activation.service.ts` states the opposite rule explicitly | `allowRelaunch` defaults to false; the ORIGINAL launch is unaffected |
+
+Also fixed, below the table's threshold but in the same pass: a second submission through one invite
+link hit an unhandled `P2002` and a 500 (a regression from the authorized invite-token security fix
+— the invite's back-link now moves to the newest submission, as its own `submission_id` already
+did); the buyer's "N offers" bell and the first-offer email counted disqualified offers;
+`commitOfferSelection` bound neither auction to buyer nor offer to auction; `POST
+/api/buyer/plan/invitation` had no rate limit; `rooftopId` precedence contradicted its own comment;
+and the comparison-term control was four buttons that did nothing behind a comment claiming they
+did something.
+
+**One CI failure the gates caught that this session had not.** `test:parity-ledger` went red on the
+document close-out commit: the K27-1328 a/b/c/d split was written into §10 and never into
+`parity/control.table.md`, which is the source §10 is generated from, and three of the new rows
+carried `**AS BUILT (Phase 6)**` as their DISPOSITION — outside the seven-value vocabulary, so the
+tally stopped being a partition. Corrected at the source, regenerated, and the dispositions now
+read `TO EXTEND — **AS BUILT (Phase 6)**` / `TO IMPLEMENT — **AS BUILT (Phase 6)**`, which
+classify and stay honest. The cause was mine and is worth naming: **`pnpm test:all` was run before
+the last commit, not after it.**
+
+#### REPORTED, NOT BUILT — from the same review round
+
+Each is real, each is evidenced, and each is outside §8.1 row 6 or needs a decision that is not
+mine.
+
+**TWO ARE LIVE, NOT LATENT — flagged at the owner's instruction, 2026-09-14.** Items 1 and 6 below
+are not hypotheses about how the code could fail; they are conditions the current code reaches. Item
+1 strands a paid buyer's auction with nothing anywhere reporting it, and item 6 hands buyer budget
+and the full trade packet to an unauthenticated form backed by a world-readable document bucket.
+Both remain reported rather than built for reasons of scope, not of severity: item 1 needs a second
+column and therefore a second migration, and item 6 is a server-authorization change that CLAUDE.md
+reserves for a separately authorized security batch. **Neither is waiting on evidence.**
+
+1. **The post-close claim has no lease. — LIVE.** `postCloseProcessedAt` is stamped at claim time and the
+   auction is selected for reprocessing only while it is NULL. A function timeout between the claim
+   and the catch leaves the auction stamped with none of its side effects done, and the reconciler
+   excludes it forever: a buyer who paid $99 is never told their auction closed and nothing reports
+   it. The claim shape predates this phase; the work held under it is much larger now. The fix
+   needs a second column (`post_close_completed_at`) and therefore a second migration, which is why
+   it is reported rather than built.
+2. **`POST /api/buyer/requests/[requestId]/offer/respond`** checks "one Deal per request" with a
+   read outside its transaction and `Deal.vehicleRequestId` is not unique, so two concurrent
+   ACCEPTs on two `SENT` offers can both commit. The auction path serialises on `SELECT … FOR
+   UPDATE`; this path has no equivalent. Needs either a lock or a partial unique — a migration
+   again.
+3. **The dealer "no winner" mail** is the last notice on the close path still on the direct Resend
+   rail with a swallowed error, while every sibling moved to `enqueueTransactional`. It is
+   idempotency-keyed, so there is no double-send; what it lacks is a `template_key`, refs, and a
+   visible failure.
+4. **`GET /api/dealer/offers/competitiveness-check`** returns STRONG/MODERATE/WEAK to a bidding
+   dealer and is polled on every keystroke. That is a bucketed function of the competing offers on
+   a live auction. Unchanged by this phase, and it wants a ruling against §29 P3.
+5. **`GET /api/dealer/offers` returns `conciergeSubmissions` with `include: { vehicleOffer: true }`**,
+   and `VehicleOffer` carries the buyer's budget, monthly payment, down payment and city/state/zip.
+   Pre-existing, unchanged by this phase, and the same class as R1.
+6. **`app/(public)/dealer-offer/[token]/page.tsx` — LIVE.** It passes the buyer's exact budget,
+   monthly payment, down payment, city/state/zip and the full trade packet (including the trade VIN)
+   to an UNAUTHENTICATED dealer form, and the `dealer-offer-docs` bucket is created
+   `{ public: true }` with buyer documents in it. Paths are uuid-prefixed so they are not
+   enumerable, which bounds discovery — it does not bound disclosure to anyone holding a link. Both
+   halves pre-date this phase and neither is widened by it; the authorized security sub-batch in
+   this phase deliberately touched only the confirmation page's cross-dealer leak. This one needs
+   its own authorized batch, and it should get one.
+
+#### One observation about the visual baseline, not a defect
+
+`components/public/StatsStrip.tsx` renders only when the platform has activity, so the committed
+marketing baseline encodes an EMPTY database. Running the e2e suites against the same local
+Postgres seeded six buyers and the strip appeared, changing the homepage text by 100 characters.
+CI is unaffected — `visual.yml` is a separate workflow with its own freshly-migrated database — but
+the baseline is data-dependent on that one component, and a future job that seeds before it renders
+would fail the guardrail for a reason that has nothing to do with design.
 
 
 ### 8.2 Phase scopes
@@ -2162,6 +2549,26 @@ change during Phase 5, deliberately and only where the phase was authorised to c
 Its own hash is therefore new and is reported in the phase report and the pull request rather than
 pinned here.
 
+**Re-verified at the close of Phase 6 (2026-09-14).** `sha256sum` over both governing files at the
+Phase 6 close commit returns the same two values recorded in §1 — `a8f68aef…bf62` for the Markdown
+and `8c268f91…ff89` for the HTML — so neither specification moved while this phase was implemented,
+and every §-citation in the Phase 6 record refers to the text §1 verified. This document itself DID
+change during Phase 6, deliberately and only where the phase was authorised to correct it:
+
+- the new §8.1f Phase 6 — AS BUILT section, carrying the before → after capability map, the five
+  open questions and the NOT VERIFIED list;
+- **K27-1328 split into a and b** on the owner's 2026-09-13 ruling (follow N6): a is the award
+  notice, AS BUILT here; b is the reaffirmation request, Phase 7's, with the seam's dedup key
+  reserved. Splitting the row is what stops Phase 7 re-litigating whether the award notice was sent;
+- **two NEW §27.1 rows, K27-1328c and K27-1328d**, added on the same ruling ("build the pre-expiry
+  selection reminder, adding the §27.1 row since the reminder is being added anyway"). §27.1 carries
+  neither; both are stated in §9 L637 and had no communications row at all. The second exists
+  because §9's "buyer informed EITHER WAY" needs a row for the branch where nobody selects;
+- §13-D39, D40 and D41 recorded AS BUILT on their own rows.
+
+Its own hash is therefore new and is reported in the phase report and the pull request rather than
+pinned here.
+
 **Not applicable to this phase, stated rather than skipped.** Production migration: Phase 4 applies
 none and requires none to be applied. Its own merge, however, **is** gated on Phase 1's wave being
 applied and verified in both halves — see §8.1a.2 for why, and the phase report for which changes
@@ -2862,7 +3269,8 @@ on a month counter.
   full lineage; non-selected candidates closed + non-award notices; Premium full-screen invitation shown
   once (touchpoint 3), 1-hour follow-up (touchpoint 4) only if declined/dismissed, second mention on the
   Best Price Report (touchpoint 2), impressions/dismissals/conversions recorded; `vehicle_offers` and
-  `dealer_offer_submissions` write a canonical `offers` row (staff intake only).
+  `dealer_offer_submissions` write a canonical `offers` row (staff intake only) — **NOT ACHIEVED;
+  BLOCKED, owner-accepted 2026-09-14. See §8.1f and §8.4.**
 - **Defects the offers verification surfaced (§10 *offers*), fixed at the cause here:** (1) junk-fee
   unit mismatch — `otd.ts:30-33` treats a fee `amount` as dollars (`× 100`) while
   `best-price.service.ts:64-65` sums the same field as cents; one integer-cents unit end-to-end with a
@@ -3076,7 +3484,7 @@ the register has at least one enqueue/raise site.
 | --- | --- | --- | --- |
 | Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, which it is not — §8.1e finding 17**) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
 | `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them. **OWNER RULING 2026-09-13: KEEP, and make the clock EVIDENCE-DRIVEN rather than calendar-driven.** Closing a capability in order to start a 30-day timer is the wrong trade; instead a write counter records when the path actually goes quiet, and the window starts from measured silence. **The §8.4 30-day zero-write window has NOT started.** *Write-site inventory corrected the same day — the list above names the admin ROUTES and is incomplete.* Measured: `app/api/admin/offers/route.ts:194,206` (update + create), `app/api/public/outside-dealer-offer/[token]/route.ts:90,116` (the outside dealer's OWN submission — the atomic `respondedAt` claim, then the offer write-back) and `lib/services/auction/outside-invite.service.ts:148` (the mint the admin routes call). Four writes across three files. The public token route is the half the earlier list missed, and it is the half with no rail equivalent — which is what makes KEEP the right call rather than a deferral. **THE RULING WAS MADE ON THE CORRECTED LIST, and that is load-bearing:** a list naming only the admin routes makes CLOSE look cheap, because every site on it has a rail equivalent. The outside dealer's own submission path does not, and it is the one the incomplete list omitted. Had the ruling been taken on the old list it would likely have gone the other way, and closed a capability no rail can yet replace |
-| `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI (writes canonical `offers`) | keep as intake; no drop |
+| `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI; the canonical-`offers` write-through is **BLOCKED (owner-accepted 2026-09-14)** — `Offer.auction_id` is required and these models carry no auction binding | keep as intake; no drop |
 | Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |
 | In-app credit application route/UI (`credit_applications`) | **0** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410 in the pre-schema security correction — §8.2 Phase 0, §8.2a), then **7** for the remaining read paths (buyer financing page, admin review queue, dormant services) | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
@@ -3137,7 +3545,7 @@ Each area below is the verified table produced from the area map (finder pass + 
 
 ### 10.1 Data model & schema (§4, §32, §28, §6.2, §12b–c, comms_outbox shape) — 186 rows
 
-Status counts: ALREADY CORRECT 53, PARTIAL 40, BROKEN 10, MISSING 69, DUPLICATED 12, UNVERIFIED 1 · Phase counts: P1 129, P2 17, P3 5, P4 5, P5 4, P6 8, P7 7, P8 5, P9 2, P10 3
+Status counts: ALREADY CORRECT 53, PARTIAL 40, BROKEN 11, MISSING 69, DUPLICATED 12, UNVERIFIED 1 · Phase counts: P1 128, P2 17, P3 5, P4 5, P5 4, P6 8, P7 7, P8 6, P9 3, P10 3
 
 # Parity table — AREA: schema (final)
 
@@ -3170,7 +3578,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 | R19 | MD §4.3 L179; §32 L1502 | `offers` + `vin, stock_number, vehicle_year/make/model/trim, vehicle_condition, odometer, exterior_color, interior_color` | None on `offers`; vehicle detail on `VehicleOffer.vehicle*` (prisma/schema.prisma:3728-3788), `DealerOfferSubmission.vehicles` Json, `VehicleRequestOffer.vehicleInfo` Json (1155-1170), `AuctionVehicle` (500-516); no candidate binding | MISSING | none | Add columns + `auction_vehicle_id` FK (candidate binding, §22a) + `rooftop_id` | 1 | integration | migration job; column + FK assert | prod deploy of the Phase 1 wave (§13-D1) | none | TO IMPLEMENT |
 | R20 | MD §4.3 L179; §32 L1502 | `offers` + `availability_confirmed, doc_fee_cents, title_registration_cents, add_on_items, incentive_items, delivery_terms, delivery_fee_cents, out_of_state_registration_supported, expires_at` | `feesCents` lump + `junkFeeItems` only (prisma/schema.prisma:533-572); no per-fee columns, no expiry | MISSING | integer minor units for money | Add columns (Int cents / jsonb / Bool / timestamptz) + `can_complete_sale_confirmed` | 1 | integration | migration job; column assert | prod deploy of the Phase 1 wave (§13-D1) | none | TO IMPLEMENT |
 | R21 | MD §4.3 L179; §32 L1502 | `offers` + `required_feature_matches, required_feature_mismatches, condition_report_url, vehicle_history_report_url, photo_urls` | None | MISSING | none | Add jsonb / text / text[] columns | 1 | integration | migration job; column assert | prod deploy of the Phase 1 wave (§13-D1) | none | TO IMPLEMENT |
-| R22 | MD §4.3 L181; §32 L1520; HTML S[7] L582, S[8] L594 | `vehicle_offers` stays staff intake but writes a canonical `offers` row; criteria/trade read from VR | `VehicleOffer → DealerOfferSubmission → BuyerOfferReview` parallel model with no relation to `Offer` (prisma/schema.prisma:3728-3856); third surface `VehicleRequestOffer` + `Deal.vehicleRequestOfferId @unique` (1155-1170, 574-616); `OutsideAuctionInvite.offerId` written by routes app/api/public/outside-dealer-offer/[token]/route.ts:125,169 and app/api/admin/offers/route.ts:190-218 | BROKEN | `OutsideAuctionInvite.offerId @unique` links to a real `Offer` — pattern to copy | VehicleOffer/DealerOfferSubmission and VehicleRequestOffer write/point to `offers`; deprecate `Deal.vehicleRequestOfferId` for `Deal.offerId`; move route-level offer creation into offer service | 6 | integration, playwright | offer suite: staff intake creates `offers` row with lineage; Playwright selection → Deal.offerId set; DB assert no new VehicleRequestOffer-only deals | owner decision map Q2 (which surfaces retire) | vehicle-request-offer.service.ts; app/api/buyer/requests/[requestId]/offer/respond; app/buyer/deal/*, app/buyer/contracts/*, deal-document-link.service.ts | TO CONSOLIDATE |
+| R22 | MD §4.3 L181; §32 L1520; HTML S[7] L582, S[8] L594 | `vehicle_offers` stays staff intake but writes a canonical `offers` row; criteria/trade read from VR | `VehicleOffer → DealerOfferSubmission → BuyerOfferReview` parallel model with no relation to `Offer` (prisma/schema.prisma:3728-3856); third surface `VehicleRequestOffer` + `Deal.vehicleRequestOfferId @unique` (1155-1170, 574-616); `OutsideAuctionInvite.offerId` written by routes app/api/public/outside-dealer-offer/[token]/route.ts:125,169 and app/api/admin/offers/route.ts:190-218 | BROKEN | `OutsideAuctionInvite.offerId @unique` links to a real `Offer` — pattern to copy | VehicleOffer/DealerOfferSubmission and VehicleRequestOffer write/point to `offers`; deprecate `Deal.vehicleRequestOfferId` for `Deal.offerId`; move route-level offer creation into offer service **BLOCKED — OWNER-ACCEPTED 2026-09-14, not deferred.** `Offer.auction_id` is REQUIRED and `VehicleOffer` carries no `auction_id`, `vehicle_request_id` or `buyer_id` — only a free-text `referenceId`. A write-through would have to INVENT an auction binding, which is the parallel offer model §4.3 forbids. Unblocking it needs a schema decision (a nullable `offers.auction_id`, or a real binding on the legacy models), which is not this phase's and is not a migration this phase may author. | 6 | integration, playwright | offer suite: staff intake creates `offers` row with lineage; Playwright selection → Deal.offerId set; DB assert no new VehicleRequestOffer-only deals | owner decision map Q2 (which surfaces retire) | vehicle-request-offer.service.ts; app/api/buyer/requests/[requestId]/offer/respond; app/buyer/deal/*, app/buyer/contracts/*, deal-document-link.service.ts | TO CONSOLIDATE — **BLOCKED (owner-accepted 2026-09-14)** |
 | R23 | MD §4.4 L185; HTML S[6] L570 | Three invitation surfaces exist as described (registered/scored; outside/tokenized/embedded offer; dealer onboarding) | `AuctionInvitation` (prisma/schema.prisma:518-531, `@@unique(auctionId, dealerId)`); `OutsideAuctionInvite` (460-498, plaintext `token @unique`, `@@unique(auctionId, rooftopId)`); `DealerInvitation` (3651-3675, plaintext `token` + nullable `tokenHash`) | ALREADY CORRECT | `@@unique([auctionId, rooftopId])` TOCTOU backstop (460-498) | none; note DealerInvitation is not hash-only yet (later migration drops plaintext) | 1 | integration | column/unique assert; existing auction invitation tests | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
 | R24a | MD §4.4 L187; §32 L1503 | `auction_invitations` + `rooftop_id, dealership_name, contact_name, email, phone` (consolidated surface) | AI has none (prisma/schema.prisma:518-531); OAI has all, rooftop soft key by design (460-475) | MISSING | soft rooftop key: deleting a rooftop must not cascade into offer history (OAI comment L470-475) | Add columns; `dealer_id` nullable; partial unique `(auction_id, rooftop_id) WHERE rooftop_id IS NOT NULL`; add `candidate_ids[]`, `reminder_50/90_sent_at` | 1 | integration | migration job; column + partial-unique assert (second rooftop row rejected) | prod deploy of the Phase 1 wave (§13-D1) | none | TO IMPLEMENT |
 | R24b | MD §4.4 L187; §8.4 | Fold `outside_auction_invites` into `auction_invitations`; stop OAI writes | Writers: lib/services/auction/outside-invite.service.ts; app/(public)/dealer-offer-outside/[token]; app/api/public/outside-dealer-offer/[token]; app/api/admin/offers | PARTIAL | `(auction_id, rooftop_id)` uniqueness kept on the consolidated table | Invitation service issues AI rows for outside dealers; OAI writes stopped behind monitored adapter; public token route resolves both tables for the 2 historical rows | 5 | integration, playwright | auction suite: launch creates N AI rows, 0 OAI rows; `LEGACY_PATH_WRITE` counter; Playwright launch journey | legacy removal: `outside_auction_invites` drop after zero writes | outside-invite.service.ts; outside token routes; admin offers route | TO CONSOLIDATE |
@@ -3272,7 +3680,7 @@ Source map: `parity/schema.md` at HEAD 0cd399f, with its "Verification correctio
 | S22b | MD §32 L1517; Stage 4 | Up to five candidates per request with distance; offers bind to a candidate | Exactly one AuctionVehicle per auction from VR make/model/yearMin (lib/services/auction/dealer-invitation.service.ts:128-142); no offer binding | PARTIAL | none | Stage 4 candidate service writes ≤5 candidates with distance + revalidation; offers carry `auction_vehicle_id` (Phase 6) | 4 | unit, integration, concurrency | candidate suite: sixth candidate refused (DB trigger + service); revalidation drops stale; Playwright shortlist 5 → sixth refused | none | dealer-invitation.service.ts single-vehicle creation | TO EXTEND |
 | S23 | MD §32 L1518 | `shortlist_items` five-candidate cap and in-radius rule enforced at write time | `MAX_SHORTLIST_ITEMS=5` in service (lib/constants.ts:47; shortlist.service.ts:34-42); radius/freshness gate in route via `shortlistGate` (app/api/buyer/shortlist/route.ts:6,62); DB: unique pair only, no FK on `inventory_item_id` (prisma/schema.prisma:389-399); production 0 over cap (WORKFLOW §5.6) | PARTIAL | unique `(shortlist_id, inventory_item_id)` | Enforcement object 2 (I2): BEFORE INSERT trigger with parent `FOR UPDATE`; add FK `inventory_item_id → inventory_items`; in-radius stays in service (needs buyer geo) | 1 | integration, concurrency | `prisma/__tests__/shortlist-cap-trigger.test.ts`: sixth insert raises P0001; concurrent inserts → 5 | prod deploy of the Phase 1 wave (§13-D1) | none | TO EXTEND |
 | S24 | MD §32 L1519 | `inventory_items.last_seen_at` gates shortlist eligibility at 7 and 30 days | `lastSeenAt` (prisma/schema.prisma:991); 7-day STALE + 30-day `SHORTLIST_FRESHNESS_WINDOW_MS` → EXPIRED → REQUEST_SIMILAR (lib/services/shortlist/shortlist-radius.ts:28,31,108-118) | ALREADY CORRECT | freshness gate app-level | none in schema; Phase 4 keeps windows on qualified-results cards | 4 | unit | existing shortlist-radius tests assert 7/30-day boundaries | none | none | ALREADY PRESENT (VERIFY IN PHASE) |
-| S25 | MD §32 L1520 | `vehicle_offers` kept as staff intake; must write a canonical `offers` row (P1) | No relation to `Offer` (prisma/schema.prisma:3728-3788); production 6 / 2 rows (WORKFLOW §5.1) | BROKEN | none | Same as R22 | 6 | integration | see R22 | owner decision map Q2 | admin VehicleOffer intake | TO CONSOLIDATE |
+| S25 | MD §32 L1520 | `vehicle_offers` kept as staff intake; must write a canonical `offers` row (P1) | No relation to `Offer` (prisma/schema.prisma:3728-3788); production 6 / 2 rows (WORKFLOW §5.1) | BROKEN | none | Same as R22 **BLOCKED — OWNER-ACCEPTED 2026-09-14, not deferred.** `Offer.auction_id` is REQUIRED and `VehicleOffer` carries no `auction_id`, `vehicle_request_id` or `buyer_id` — only a free-text `referenceId`. A write-through would have to INVENT an auction binding, which is the parallel offer model §4.3 forbids. Unblocking it needs a schema decision (a nullable `offers.auction_id`, or a real binding on the legacy models), which is not this phase's and is not a migration this phase may author. | 6 | integration | see R22 | owner decision map Q2 | admin VehicleOffer intake | TO CONSOLIDATE — **BLOCKED (owner-accepted 2026-09-14)** |
 | S26 | MD §32 L1494-1520 | Spec row-count reconciliation: 25 §32 objects + 4 extra findings (VehicleRequestOffer third surface, `RefundReason` unused, `Deal.financingPath` duplicate, duplicate migration timestamp) | Covered by D1/N5, X2, D3, K2/D8 | DUPLICATED | none | Track the four extras in their owning rows; no separate change | 1 | n/a | parity map row count reconciled in Phase 1 opening | none | none | TO CONSOLIDATE |
 | S27 | Production read-only census (this branch); §5 | A disaster-recovery restore must yield a database the application can actually serve | **Production:** RLS ENABLED on **249/249** `public` tables but only **23** policies, on **23** distinct tables — so **226 tables are RLS-on with zero policies**. **Migration chain:** produces **0** policies and enables RLS on **0** tables (CI `migrations` job, empty → chain). Neither shape is serviceable: rebuilt from the chain, a restored database has RLS off and no policies; rebuilt to match production's RLS flags without its policies, every non-superuser path is denied by default | BROKEN | Production's `service_role` policies (23) and the server-side service-role client are what keep the app working today — do not remove either while closing this | **Out of scope here — record only.** Establish, per table, whether RLS-on-zero-policies is intentional (service-role-only, correct) or an unclosed gap; then make the intended state reproducible from the repository so a restore is serviceable. Requires an owner decision on the RLS model before any policy is authored | 9 | integration | A restore drill: rebuild from the chosen source, connect as `authenticated`/`anon`, and assert the buyer, dealer and admin read paths return rows rather than empty sets | owner decision on the RLS model (service-role-only vs per-role policies) | none | TO IMPLEMENT |
 | C1 | MD §27 L1290 | Outbox row carries trigger event | No column; implied by `payload.idempotencyKey/templateId` (lib/services/comms/comms-outbox.service.ts:32-46) | PARTIAL | none | Add `trigger_event`, `template_key`, `vehicle_request_id`, `deal_id`, `auction_id` columns | 1 | integration | migration job; column assert | prod deploy of the Phase 1 wave (§13-D1) | none | TO EXTEND |
@@ -3729,7 +4137,7 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 | R43a | MD §32 L1518 | Five-cap + in-radius enforced at write time (DB) | `shortlist_items` DDL: PK, unique(shortlist_id, inventory_item_id), FK shortlists only (init migration:174-182,759,867); no FK on `inventory_item_id` (`shortlist-availability.ts:5`); no trigger | PARTIAL | app cap counts AVAILABLE | Phase 1: `shortlist_items_enforce_cap()` BEFORE INSERT trigger (FOR UPDATE parent, P0001 at five); FK `inventory_item_id` (SET NULL vs RESTRICT decision); `distance_miles` column | 1 | integration, concurrency | DB-backed trigger test (CI migration job); shortlist cap concurrency test (Phase 4 gate) | production migration deploy; owner decision (FK on-delete) | none | TO IMPLEMENT |
 | R43b | MD §32 L1518 | Single gated shortlist writer/deleter | 3 writers: buyer `route.ts:99` (gated), admin `route.ts:89` (cap only), `shortlist.service.ts:41` `addToShortlist` (no callers); 3 deleters: `[itemId]/route.ts:13`, `route.ts:131`, `shortlist.service.ts:47`; two "has shortlist" definitions (`create-intent:76-78` rows vs `journey-status/route.ts:50` + `app/buyer/layout.tsx:215` `countAvailableItems`) | DUPLICATED | fail-closed gate | One service function wrapping `shortlistGate` used by buyer + admin routes; delete dead `addToShortlist`/`removeFromShortlist`/`getShortlistReadiness`; create-intent uses `countAvailableItems` | 4 | unit, integration | writer inventory test; extend `shortlist-radius-gate.test.ts` for admin path | none | `shortlist.service.ts` dead functions; create-intent row-count gate | TO CONSOLIDATE |
 | R44 | MD §32 L1519 | `inventory_items.last_seen_at` gates shortlist at 7/30 days (P1) | implemented in `shortlistGate`; undermined by 48h sweep (R27) | PARTIAL | never-seen = EXPIRED (`freshnessOf` `:151`) | Resolve with R27; use `provider_last_seen_at` (Phase 1 column) as the clock | 4 | unit | `shortlist-radius-gate.test.ts` freshness cases with aligned windows | owner decision (freshness clocks) | 48h `FRESHNESS_WINDOW_MS` | OWNER-GATED |
-| R45 | MD §32 L1520 | `VehicleRequestOffer` kept as staff intake, must write canonical `offers` row (P1) | `Offer` `:533-565` no link; `Deal.vehicleRequestOfferId` `:578` (not Offer); no `prisma.offer.create` in `lib/services/vehicle-request` (correction 6) — staff path lands on Deal directly | MISSING | none | `createAndSendOffer` writes canonical `Offer` in the same transaction (Phase 6 scope) | 6 | unit, integration | vehicle-request offer test asserts Offer row + lineage | none | `vehicle_offers`/`dealer_offer_submissions` parallel models (§8.4: keep as intake) | TO IMPLEMENT |
+| R45 | MD §32 L1520 | `VehicleRequestOffer` kept as staff intake, must write canonical `offers` row (P1) | `Offer` `:533-565` no link; `Deal.vehicleRequestOfferId` `:578` (not Offer); no `prisma.offer.create` in `lib/services/vehicle-request` (correction 6) — staff path lands on Deal directly | MISSING | none | `createAndSendOffer` writes canonical `Offer` in the same transaction (Phase 6 scope) **BLOCKED — OWNER-ACCEPTED 2026-09-14, not deferred.** `Offer.auction_id` is REQUIRED and `VehicleOffer` carries no `auction_id`, `vehicle_request_id` or `buyer_id` — only a free-text `referenceId`. A write-through would have to INVENT an auction binding, which is the parallel offer model §4.3 forbids. Unblocking it needs a schema decision (a nullable `offers.auction_id`, or a real binding on the legacy models), which is not this phase's and is not a migration this phase may author. | 6 | unit, integration | vehicle-request offer test asserts Offer row + lineage | none | `vehicle_offers`/`dealer_offer_submissions` parallel models (§8.4: keep as intake) | TO IMPLEMENT — **BLOCKED (owner-accepted 2026-09-14)** |
 | R46 | MD §33 step 28 L1556 | Radius-filter the shortlist action; specification path; ≤5 candidates on request | first two landed (ecb1ada: R5, R22 public); candidates on request PARTIAL (R39) | PARTIAL | server gate | Complete via R4b/R39/R42/R43 | 4 | unit, integration, playwright | Phase 4 Playwright: shortlist 5 → sixth refused → out-of-radius card offers request | none | none | TO EXTEND |
 | R47 | MD §33 step 29 L1557 | Sourcing resolves candidates against rooftop pool | depends on R24/R40 | MISSING | none | Phase 5 sourcing case | 5 | integration | as R40 | production migration 20261105 | none | TO IMPLEMENT |
 | R48 | MD §33 step 30 L1558; HTML FINDINGS[0-2] | Sweep targeted at served markets, sized as shop window, run rate matched | market from `inventory_sources` center_zip/radius/filter_* → env → NOT_CONFIGURED (`inventory-source-config.service.ts:148-238`; `adapter:160-174`); daily ≤10 calls (`vercel.json:96-97`); DFW repoint in 20261104 NOT APPLIED; single row `@@unique([type, name])` (`schema.prisma:2447`); markets admin route manages `MarketCoverage` only (`app/api/admin/inventory/markets/route.ts:11,21`, correction 20) | PARTIAL | no silent default ZIP; `is_active` kill switch (`:190-193`) | Apply migrations; multi-market: one MARKETCHECK source row per served market or a markets table (owner Q6); run-size anomaly → Ops exception | 4 | unit, integration | `marketcheck-market-config.test.ts` multi-market; `sync-yield.test.ts` anomaly → `raiseException` | production migration deploy (20261104/20261105); owner decision (multi-market model) | `INVENTORY_SWEEP_ZIP` env tier; `inventory-sync-priority` unscheduled route | TO EXTEND |
@@ -3784,12 +4192,12 @@ Source: `parity/inventory.md` at HEAD 0cd399f including its adversarial correcti
 - Env-tier config (`INVENTORY_SWEEP_ZIP`, `INVENTORY_SWEEP_RADIUS_MILES`, `MARKETCHECK_MONTHLY_CALL_BUDGET`) and `inventory-sync-priority` unscheduled route until migrations apply (R24a, R30, R48).
 - `externalDealerName/Phone/City/State` LANE_2 name-match (`orchestrator.ts:92-105`) (R24b).
 - `coverage.service.ts:38` `RADIUS_TIERS` ending at 150 (R23b).
-- `vehicle_offers` / `dealer_offer_submissions` parallel offer models — keep as staff intake writing canonical `offers` (R45).
+- `vehicle_offers` / `dealer_offer_submissions` parallel offer models — keep as staff intake. The canonical-`offers` write-through is **BLOCKED, owner-accepted 2026-09-14**: `Offer.auction_id` is required and the legacy models carry no auction binding, so a write-through would have to invent one (R45, and see L1/R22/S25).
 - `withCronRun` alerting for DEFERRED runs (observability area) (R54).
 
 ### 10.5 Stage 5, §22, §22.1, §23: payment gate, money model, refunds, plans — 108 rows
 
-Status counts: ALREADY CORRECT 18, PARTIAL 35, BROKEN 16, MISSING 34, DUPLICATED 4, UNVERIFIED 1 · Phase counts: P1 7, P3 87, P4 1, P6 4, P7 2, P8 4, P9 1, P10 2
+Status counts: ALREADY CORRECT 18, PARTIAL 35, BROKEN 16, MISSING 34, DUPLICATED 4, UNVERIFIED 1 · Phase counts: P1 7, P3 86, P4 2, P6 4, P7 2, P8 4, P9 1, P10 2
 
 # Parity table — PAYMENT (Stage 5 · §22 · §22.1 · §23) — FINAL
 
@@ -4166,7 +4574,7 @@ Schema note — the §8.2 Phase 1 wave already lists the `offers` expansion (`au
 | S14 | MD §9 L637; HTML S[8].fail | Offers carry an expiration; buyer reminded before they lapse | No `expiresAt`; QStash `offer-follow-up` sends "before it expires" copy with no real expiry `app/api/jobs/offer-follow-up/route.ts:36,55`; stop guard `lib/qstash/state.ts:95-104` | MISSING | none | Reminder rows in `comms_outbox` keyed off `offers.expires_at` (min across valid offers) with `cancel_key` on selection; retire the QStash copy | 6 | integration | Dispatcher test: reminder scheduled at `expiresAt − 24h`, cancelled on selection | none | `app/api/jobs/offer-follow-up/route.ts`; `lib/qstash/state.ts` | TO IMPLEMENT |
 | S15 | MD §9 L637; HTML S[8].fail | Non-selection → revalidation with dealerships or closure; buyer informed either way | Buyer decline closes auction, declines offers, notifies, records refund request `decline/route.ts:31-70`; no revalidation; no automatic closure after expiry | PARTIAL | Decline never auto-refunds | Expiry-driven job: all offers expired → queue item (Ops chooses revalidate via Phase 7 `return-to-offers`/relaunch or `CLOSE_NO_MATCH`) + buyer notice through dispatcher | 6 | integration, state-machine | Sweep test: all expired → queue item + outbox row; request status transition asserted | none | none | TO EXTEND |
 | S16 | MD §9 L637; HTML S[8].fail | Closed request with no selection does not auto-refund | `decline/route.ts:1-4,45-56`; admin refund gated `action/route.ts:158-176` | ALREADY CORRECT | Preserve | none | 6 | unit | Existing decline route test extended with "no refund call" assertion | refund/money-path activation unchanged | none | PRESERVED STRONGER SAFEGUARD |
-| L1 | Map "Legacy" (vehicle_offers); HTML S[7].tables | `VehicleOffer` (`vehicle_offers`) concierge request store | `prisma/schema.prisma:3728-3789`; writers `app/api/admin/vehicle-offers/route.ts` (create), `send-to-buyer/route.ts:130` (`sent_to_buyer`), `public/dealer-offer/[token]/route.ts:240-243` (`offers_in`); notification-metadata status store `app/api/admin/vehicle-requests/[id]/status/route.ts:36-54` | DUPLICATED | none | Keep as staff intake (§8.4: no drop); its status stores collapse onto `VehicleRequest.status`; intake writes canonical `offers` | 6 | integration | Intake test: admin concierge request → `VehicleRequest` + auction; `LEGACY_PATH_WRITE` counter on `requestStatus` writers | none | `app/api/admin/vehicle-offers/**`, `send-to-buyer/route.ts:130`, `admin/vehicle-requests/[id]/status/route.ts:36-54` | TO CONSOLIDATE |
+| L1 | Map "Legacy" (vehicle_offers); HTML S[7].tables | `VehicleOffer` (`vehicle_offers`) concierge request store | `prisma/schema.prisma:3728-3789`; writers `app/api/admin/vehicle-offers/route.ts` (create), `send-to-buyer/route.ts:130` (`sent_to_buyer`), `public/dealer-offer/[token]/route.ts:240-243` (`offers_in`); notification-metadata status store `app/api/admin/vehicle-requests/[id]/status/route.ts:36-54` | DUPLICATED | none | Keep as staff intake (§8.4: no drop); its status stores collapse onto `VehicleRequest.status`; intake writes canonical `offers` **BLOCKED — OWNER-ACCEPTED 2026-09-14, not deferred.** `Offer.auction_id` is REQUIRED and `VehicleOffer` carries no `auction_id`, `vehicle_request_id` or `buyer_id` — only a free-text `referenceId`. A write-through would have to INVENT an auction binding, which is the parallel offer model §4.3 forbids. Unblocking it needs a schema decision (a nullable `offers.auction_id`, or a real binding on the legacy models), which is not this phase's and is not a migration this phase may author. | 6 | integration | Intake test: admin concierge request → `VehicleRequest` + auction; `LEGACY_PATH_WRITE` counter on `requestStatus` writers | none | `app/api/admin/vehicle-offers/**`, `send-to-buyer/route.ts:130`, `admin/vehicle-requests/[id]/status/route.ts:36-54` | TO CONSOLIDATE — **BLOCKED (owner-accepted 2026-09-14)** |
 | L2 | Map "Legacy" (dealer_offer_submissions); HTML S[7].tables | `DealerOfferSubmission` (`dealer_offer_submissions`) parallel offer model | `prisma/schema.prisma:3816-3839`; writers `dealer-offer/[token]/route.ts:179-190`, `admin/vehicle-offers/[id]/submit-offer/route.ts:103-114`; `rejected` `reject-submission/route.ts:39`; soft `dealerId` link `dealer-offer/[token]/route.ts:218-230`; surfaces via `GET /api/dealer/offers:29-36`; no arithmetic/budget/junk validation | DUPLICATED | Legacy already captures VIN/stock/colors/condition/availability/carfax (source for §8a) | Public token route + admin manual entry write canonical `Offer` via `submitOffer` against a PENDING/concierge auction; table kept read-only for history | 6 | integration | Token-route test: submission creates `Offer` with §8a columns; no new `DealerOfferSubmission` row | none | `app/api/public/dealer-offer/[token]/route.ts`, `components/public/DealerOfferFormClient.tsx`, `admin/vehicle-offers/[id]/submit-offer/route.ts` | TO CONSOLIDATE |
 | L3 | Map "Legacy" (buyer_offer_reviews) | `BuyerOfferReview/Item` curated subset; canonical only after `concierge_deposit` webhook | `prisma/schema.prisma:3841-3870`; `send-to-buyer/route.ts:62`; Stripe webhook `app/api/webhooks/stripe/route.ts:345-420` → `convertConciergeOfferToClosedAuction` `concierge-conversion.service.ts:122-283` (`vehiclePriceCents = otd, tax=0, fees=0, junk=[]`, placeholder dealer) | DUPLICATED | Conversion runs `assertOtdComponentsMatch` `:228-234`; pre-stamps close marker `:196` | Review becomes a view over canonical offers; conversion carries §8a columns instead of zeroing components | 6 | integration | Conversion test asserts tax/fees/vin carried from submission | none | `BuyerOfferReviewClient.tsx`, `concierge-conversion.service.ts:246-268` | TO CONSOLIDATE |
 | L4a | Map "Legacy" (vehicle_request_offers); MD §9 L620, L622 | `VehicleRequestOffer` buyer-accept creates a Deal without lock/prequal/dealer | `prisma/schema.prisma:1155-1169`; `lib/services/vehicle-request/vehicle-request-offer.service.ts:5-21`; `app/api/buyer/requests/[requestId]/offer/respond/route.ts:57-89`; `dealer-award.ts:23-25` excludes it | DUPLICATED | none | Neutralise: accept path routes through `commitOfferSelection` (lock + recheck) or is disabled behind `LEGACY_PATH_WRITE` adapter | 6 | integration | Respond-route test: no direct `deal.create`; lock path exercised | none | `app/api/buyer/requests/[requestId]/offer/respond/route.ts` | TO CONSOLIDATE |
@@ -4691,9 +5099,9 @@ Schema note — the §8.2 Phase 1 wave lists `pickups.{readiness_confirmed_at,to
 - `lib/services/deal/deal-timeline.service.ts` + `DealTimeline` model — dead — R20.21, D7.
 - `lib/services/pickup/scheduling.service.ts` — buyer reschedule bypasses the proposal round (`:6-15`) — R17.14b, D8.
 
-### 10.11 Control planes: §24 cancellation, §26 exceptions, §27 communications, §28.3, §29 safeguards — 266 rows
+### 10.11 Control planes: §24 cancellation, §26 exceptions, §27 communications, §28.3, §29 safeguards — 269 rows
 
-Status counts: ALREADY CORRECT 22, PARTIAL 114, BROKEN 27, MISSING 70, DUPLICATED 25, UNVERIFIED 8 · Phase counts: P1 9, P2 46, P3 32, P4 7, P5 22, P6 33, P7 26, P8 38, P9 26, P10 27
+Status counts: ALREADY CORRECT 22, PARTIAL 114, BROKEN 27, MISSING 73, DUPLICATED 25, UNVERIFIED 8 · Phase counts: P1 7, P2 48, P3 32, P4 7, P5 22, P6 35, P7 27, P8 38, P9 26, P10 27
 
 # Control planes — FINAL parity table (§24 cancellation · §26 exception register · §27 communications · §28.3 transition controls · §29 safeguards)
 
@@ -4815,7 +5223,10 @@ Schema additions the §8.2 Phase 1 list does **not** enumerate and that this are
 | K27-1325 | MD §27.1 L1325 | Auction nearing zero offers → Ops alert | `checkSLAs` SYSTEM_ALERT without dedup `lib/services/monitoring/health.service.ts:509-524`; `vercel.json:116-117` | PARTIAL | none | `raiseException` idempotent per auction; no per-tick re-alert | 6 | unit | Health tests: same auction → one row | none | `SYSTEM_ALERT` | TO EXTEND |
 | K27-1326 | MD §27.1 L1326 | Offers ready → report + Premium second mention | OB `resend.service.ts:428-438`; no `premium` in template (`rg -i premium lib/services/email/templates`) | PARTIAL | Durable OB key `offers-ready-${auctionId}` | Add Premium copy (touchpoint 2) | 6 | unit, visual | Template test asserts Premium block; visual baseline | none | none | TO EXTEND |
 | K27-1327 | MD §27.1 L1327 | Zero offers → outcome + recovery path (buyer + Ops) | Dealer OB + buyer IA `auction.service.ts:161-192` | PARTIAL | atomic close claim | Buyer email via dispatcher + `raiseException` | 6 | unit | `auction-close.test.ts` | none | none | TO EXTEND |
-| K27-1328 | MD §27.1 L1328 | Buyer selects offer → confirmation + reaffirmation request | Buyer OB `select-offer/route.ts:114`; dealer OB via award drain `dealer-award.ts:272` | PARTIAL | `deal-selected-${dealId}` key; award marker | Dealer row becomes reaffirmation request with 24h deadline | 6 | unit | Selection tests: dealer row template `reaffirmation_request` | none | none | TO EXTEND |
+| K27-1328a | MD §27.1 L1328 | Buyer selects offer → confirmation to the buyer, award notice to the winning dealership | Buyer OB `select-offer/route.ts:114`; dealer OB via award drain `dealer-award.ts:272` | PARTIAL | `deal-selected-${dealId}` key; award marker | Dealer row becomes a dispatcher row keyed on the award marker | 6 | unit | Award dispatch test | none | R1/OB | TO EXTEND — **AS BUILT (Phase 6)** |
+| K27-1328b | MD §27.1 L1328 | Buyer selects offer → REAFFIRMATION REQUEST to the winning dealership | none | MISSING | none | **SPLIT FROM K27-1328 BY OWNER RULING 2026-09-13 — FOLLOW N6.** Phase 6 sends the award notice and lands the reaffirmation-request enqueue as a NAMED NO-OP SEAM with its dedup key reserved; Phase 7 fills it. Splitting the row is what stops Phase 7 re-litigating whether the award notice was ever sent | 7 | unit | `reaffirmation.test.ts` asserts the seam's key is the one Phase 7 enqueues on | none | none | TO IMPLEMENT (Phase 7) |
+| K27-1328c | **NEW ROW — §27.1 carries none.** §9 L637 "Offers carry an expiration. Remind the buyer before offers expire" | Pre-expiry selection reminder → Buyer | QStash `offer-follow-up` sent "before it expires" copy against a column with NO WRITER (`offers.expires_at` shipped in the Phase 1 wave unwritten), so the deadline in that copy referred to nothing | MISSING | none | **ADDED BY OWNER RULING 2026-09-13** ("build the pre-expiry selection reminder, adding the §27.1 row since the reminder is being added anyway"). ONE dispatcher row per auction, scheduled at close for `SELECTION_REMINDER_LEAD_HOURS` (24) before the EARLIEST expiry across the qualified offers, `cancel_key` cancelled inside the selection transaction, send-time recheck refusing on an ACCEPTED offer or an empty qualified set. Skipped when the lead time has already passed | 6 | unit | `auction-close-path.test.ts` — earliest-expiry scheduling, the no-lead-time case, and that a failed enqueue does not release the close claim | none | `app/api/jobs/offer-follow-up/route.ts` (REPORTED superseded, left for in-flight schedules) | TO IMPLEMENT — **AS BUILT (Phase 6)** |
+| K27-1328d | **NEW ROW — §27.1 carries none.** §9 L637 "non-selection → revalidation with dealerships or closure; buyer informed either way" | Every offer lapsed without a selection → Buyer + Operations | `BUYER_DOES_NOT_SELECT` sat in the §26 catalogue with `raisedByPhase: 6` and NO RAISE SITE; the auction simply sat there and the buyer heard nothing | MISSING | none | Added with the reminder above. `sweepUnselectedAuctions` runs in the close cron directly after the expiry sweep; raises the case and enqueues the notice; idempotent on both (the exception on (code, refs) while open, the notice on an auction-scoped key). S16 preserved — it moves no money | 6 | unit | `unselected-sweep.test.ts`, including the S16 no-refund assertion | none | none | TO IMPLEMENT — **AS BUILT (Phase 6)** |
 | K27-1329 | MD §27.1 L1329 | Premium invitation shown at acceptance | Bare POST `app/api/buyer/plan/upgrade/route.ts:21-89` | MISSING | none | Full-screen interstitial once + impression record (touchpoint 3) | 6 | unit, playwright, visual | Playwright: interstitial declinable, non-blocking | none | none | TO IMPLEMENT |
 | K27-1330 | MD §27.1 L1330 | Premium follow-up first (1h, only if declined) | None | MISSING | none | Dispatcher row `run_at=+1h`, recheck skips if upgraded | 6 | unit | Plan tests: declined → row; upgraded → skipped | none | none | TO IMPLEMENT |
 | K27-1331 | MD §27.1 L1331 | Premium follow-up final (reaffirmation/recap) | None | MISSING | none | Row at reaffirmation confirm; no further prompts | 7 | unit | Reaffirmation tests: one final row, no more | none | none | TO IMPLEMENT |
@@ -5339,17 +5750,17 @@ area maps, the critic rounds and the MarketCheck report contain no 13-column tab
 no rows. A line is a ledger row only when it starts with a pipe and parses to exactly
 13 cells (pipes escaped inside a cell do not split it). Excluded and counted separately:
 15 header rows, 15 separator rows and
-0 other pipe lines, out of 1599 pipe lines in total.
+0 other pipe lines, out of 1602 pipe lines in total.
 A requirement key is `area/Ref`, because bare refs are reused across areas
 (173 of them are).
 
 | Ledger fact | Value |
 | --- | --- |
 | Source files | 13 |
-| Source ledger rows | **1569** |
-| Embedded ledger rows (section 10) | **1569** |
+| Source ledger rows | **1572** |
+| Embedded ledger rows (section 10) | **1572** |
 | Embedded copy identical to source | yes |
-| Unique requirement keys (`area/Ref`) | 1569 |
+| Unique requirement keys (`area/Ref`) | 1572 |
 | Duplicate keys | 0 |
 | Rows with a missing key | 0 |
 | Bare refs reused across areas | 173 |
@@ -5359,13 +5770,13 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | ALREADY CORRECT | 215 |
 | PARTIAL | 510 |
 | BROKEN | 151 |
-| MISSING | 551 |
+| MISSING | 554 |
 | DUPLICATED | 105 |
 | UNVERIFIED | 37 |
 
 | Final disposition | Rows |
 | --- | --- |
-| TO IMPLEMENT | 657 |
+| TO IMPLEMENT | 660 |
 | TO EXTEND | 413 |
 | TO CONSOLIDATE | 205 |
 | ALREADY PRESENT | 102 |
@@ -5380,8 +5791,8 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | 3 | 172 |
 | 4 | 90 |
 | 5 | 117 |
-| 6 | 173 |
-| 7 | 129 |
+| 6 | 175 |
+| 7 | 130 |
 | 8 | 141 |
 | 9 | 149 |
 | 10 | 60 |
@@ -5390,7 +5801,7 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 | Area | Rows | ALREADY CORRECT | PARTIAL | BROKEN | MISSING | DUPLICATED | UNVERIFIED |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | contract | 79 | 8 | 18 | 11 | 33 | 5 | 4 |
-| control | 266 | 22 | 114 | 27 | 70 | 25 | 8 |
+| control | 269 | 22 | 114 | 27 | 73 | 25 | 8 |
 | deal-early | 109 | 8 | 19 | 23 | 49 | 7 | 3 |
 | intake | 103 | 10 | 36 | 10 | 32 | 7 | 8 |
 | inventory | 79 | 12 | 31 | 7 | 26 | 3 | 0 |
@@ -5405,21 +5816,21 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
 
 ```json parity-ledger
 {
-  "source_ledger_rows": 1569,
-  "embedded_ledger_rows": 1569,
-  "unique_requirement_keys": 1569,
+  "source_ledger_rows": 1572,
+  "embedded_ledger_rows": 1572,
+  "unique_requirement_keys": 1572,
   "duplicate_key_count": 0,
   "missing_key_count": 0,
   "by_status": {
     "ALREADY CORRECT": 215,
     "PARTIAL": 510,
     "BROKEN": 151,
-    "MISSING": 551,
+    "MISSING": 554,
     "DUPLICATED": 105,
     "UNVERIFIED": 37
   },
   "by_disposition": {
-    "TO IMPLEMENT": 657,
+    "TO IMPLEMENT": 660,
     "TO EXTEND": 413,
     "TO CONSOLIDATE": 205,
     "ALREADY PRESENT": 102,
@@ -5433,8 +5844,8 @@ A requirement key is `area/Ref`, because bare refs are reused across areas
     "3": 172,
     "4": 90,
     "5": 117,
-    "6": 173,
-    "7": 129,
+    "6": 175,
+    "7": 130,
     "8": 141,
     "9": 149,
     "10": 60,
@@ -5756,9 +6167,9 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D36 | `MIN_COVERAGE_DEALERS` soft hold | DECISION | Phase 5 | `request-coverage-gate.service.ts` holds a request below a minimum dealer count while `coverage.service.ts` counts fail-open. Proposed: replace both with the §6c decision table (zero coverage → Ops exception + buyer notice; below threshold → audited limited auction). | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — ACCEPT.** The §6c table replaces `MIN_COVERAGE_DEALERS`: `coverageCount` on the case is the record, and the free-text coverage tag is retired. `decideOutcome` (`rooftop-sourcing.service.ts`) implements §6c exactly — 5–8 auto-launch, >8 rank and invite the best eight, 3–4 limited with audited approval, 1–2 expand/manual/close, 0 close after review — with EXPAND first (from §6a), so a thin field at 100 miles expands rather than going to Operations. `coverage.service.ts`'s fail-open on a coordless registered dealer is fixed to fail CLOSED when the buyer IS placeable; the buyer-unplaceable case is unchanged. The pre-payment gate is KEPT (fixed, not removed): §6c is the post-payment authority and the legacy gate remains the pre-payment protection — a literal reading of "replace both" would have removed a protection that fires before a deposit exists, which is a judgement call on the ruling's wording and is reported as such. **SUB-RULING, `operating_status` — PROPOSAL CONFIRMED 2026-09-11: a NEGATIVE filter only, recorded here as a deliberate, stated departure from §6b's literal "active operating status".** The column is nullable TEXT that nothing has ever written, so a predicate requiring `ACTIVE` would reject all 1,422 production rooftops and produce zero coverage for every buyer — fail-closed, in production. `operatingStatusVerdict` therefore treats only a recorded CLOSED/PERMANENTLY_CLOSED as disqualifying and UNKNOWN as admissible, and the column is now WRITTEN wherever it is learned, with `operating_status_checked_at`, so the filter strengthens as the data arrives. **AS BUILT.** |
 | D37 | Dealer portal access model | DECISION | Phase 5 | §7 requires one tokenised, expiring, auction-and-rooftop-bound invitation per rooftop. Registered dealers today use a session. Proposed: token binds the invitation and the session authorises the portal; a registered dealer following a token is bound to that rooftop's invitation. | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — ACCEPT: the token binds the invitation, the session authorises the portal. The token-alone surface is NOT built** (it is an authorization change and wants a security batch). `issueInvitations` mints one token per rooftop per auction via the existing `issueInvitationToken`, persists only `tokenHash`, and sets `expiresAt` to the auction's own `endsAt` so a link cannot outlive the auction it belongs to. `resolveInvitationByToken` compares only the hash, GRANTS nothing and WRITES nothing; `/dealer/invitation/[token]` records OPENED itself and hands an authorised dealer to `/dealer/quick-offer/[auctionId]`, which already owns submission. The session must MATCH the invitation (dealer id or rooftop id), not merely exist, or the token would be transferable between dealerships. **A CONSEQUENCE WORTH THE OWNER'S ATTENTION:** under this ruling an OUTSIDE rooftop with no registered dealer cannot submit an offer at all — it has no account to sign into. `/dealer/invitation/resume/[invitationId]` says so and offers the application path rather than redirecting to a sign-in form it cannot complete, but the practical effect is that the biddable field is the REGISTERED subset of the invited field. Reported, not worked around. **AS BUILT.** |
 | D38 | `identity_firewall_entries` | DECISION | Phase 7 | A table of that name exists (`IdentityFirewallEntry`) as an anti-circumvention flag store with zero code references, while HTML S[10] names it as the release ledger. Proposed: extend it with release semantics (deal_id, released_at, released_by, scope) rather than create a second table with the same name. | BLOCKING A NAMED LATER PHASE (Phase 7) |
-| D39 | Relaunch design | DECISION | Phase 6 | §8c allows one relaunch without a second $99. `Auction.depositId` is unique and `original_auction_id` has no writer. Proposed: a retry auction referencing the same deposit through `original_auction_id` with the unique constraint relaxed to a partial index; alternative: reopen the same auction row. | BLOCKING A NAMED LATER PHASE (Phase 6) |
-| D40 | Over-ceiling offers | DECISION | Phase 6 | Proposed: record the offer and mark `is_disqualified` with a reason (recoverable, visible to Ops) rather than rejecting at submit, so a dealer's mistake is recoverable and the §22a ceiling still binds selection. Pairs with §13-D16. | BLOCKING A NAMED LATER PHASE (Phase 6) |
-| D41 | `DEALER_CONFIRMATION` insertion and existing deals | DECISION | Phase 6/7 | Adding `DEALER_CONFIRMATION` before `FINANCING_PENDING` changes the entry state for new deals only; existing deals stay where they are and the transition map accepts both entries. Confirm no backfill is wanted. | BLOCKING A NAMED LATER PHASE (Phase 6) |
+| D39 | Relaunch design | DECISION | Phase 6 | §8c allows one relaunch without a second $99. `Auction.depositId` is unique and `original_auction_id` has no writer. Proposed: a retry auction referencing the same deposit through `original_auction_id` with the unique constraint relaxed to a partial index; alternative: reopen the same auction row. | BLOCKING A NAMED LATER PHASE (Phase 6) **RULED 2026-09-13 — RETRY AUCTION.** A NEW `auctions` row parented by `original_auction_id`; the same deposit, so no second $99. The absolute unique on `auctions.deposit_id` is relaxed to TWO partial indexes — one original per deposit (`WHERE original_auction_id IS NULL`) and one retry per original (`WHERE original_auction_id IS NOT NULL`) — with `relaunched_at` and `relaunch_count` on the original. Do NOT reopen the same auction row: `auction_invitations_auction_rooftop_active_key` would force the first invitation to REPLACED and overwrite the record of what was invited when, which is the audit the relaunch exists to preserve. `OfferStatus.NOT_SELECTED` stays WITHHELD. **Core rule 11 applied: nine production sites relied on the absolute unique; six are caught by TypeScript and three were SILENT** — `launch-readiness`'s unordered `findFirst`, `admin/auctions`' missing per-deposit guard, and `deposit-activation`'s sweep predicate. Two were money-adjacent: `launch-auction` would have fabricated a second PAID $99 with no Stripe evidence. Guards ship WITH the migration, never ahead of it, and both carry a P2002 handler mapping the new index to a domain error rather than a 500. **AS BUILT (Phase 6).** |
+| D40 | Over-ceiling offers | DECISION | Phase 6 | Proposed: record the offer and mark `is_disqualified` with a reason (recoverable, visible to Ops) rather than rejecting at submit, so a dealer's mistake is recoverable and the §22a ceiling still binds selection. Pairs with §13-D16. | BLOCKING A NAMED LATER PHASE (Phase 6) **RULED 2026-09-13 — RECORD AND DISQUALIFY.** An over-ceiling offer is written with `is_disqualified` and a reason rather than rejected at submit: a dealer's arithmetic slip stays recoverable and visible to Operations. §22a's ceiling still binds — the offer is excluded from the ranked report AND refused at selection with the reason shown — so nothing is loosened by recording it. The same treatment covers an unusable APPROVAL, for a stronger reason: that is not the dealer's mistake at all. **AS BUILT (Phase 6).** |
+| D41 | `DEALER_CONFIRMATION` insertion and existing deals | DECISION | Phase 6/7 | Adding `DEALER_CONFIRMATION` before `FINANCING_PENDING` changes the entry state for new deals only; existing deals stay where they are and the transition map accepts both entries. Confirm no backfill is wanted. | BLOCKING A NAMED LATER PHASE (Phase 6) **RULED 2026-09-13 — NEW DEALS ONLY, NO BACKFILL.** `DealStatus.DEALER_CONFIRMATION` is the entry state for deals created from Phase 6 onward; existing deals are untouched and the transition map accepts both entries, so a revert leaves in-flight deals legal. `DEALER_CONFIRMATION → FINANCING_PENDING` is added to the map and is **deliberately unreachable from any Phase 6 code path** — Phase 7 wires the caller behind reaffirmation. Recorded here so nobody later reads an unused edge as an oversight. **AS BUILT (Phase 6).** |
 | D42 | Dealer termination criteria | DECISION | Phase 5 | §25.2 requires consequences for repeat circumvention. Proposed: first attempt warns and records; a second within 90 days suspends invitations pending review; termination is always a human decision. | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — ACCEPT, 90-day window.** `REPEAT_WINDOW_DAYS = 90` in `anti-circumvention.service.ts`. `circumvention_attempts` gains `initiator_role`, recorded on EVERY attempt (defect 7: §25.2 scanning was buyer-only and unattributable, so a dealer-initiated attempt was either missed or recorded against the buyer), plus `after_paid_auction` resolved at detection — nullable, NOT defaulted false, because NULL means "not determined" and false would assert a fact. Consequences apply to DEALER-initiated attempts only. **Phase 5 records and warns; Phase 10 enforces** — but the READ exists from the start: §6b treats a dealer whose `status` is not `ACTIVE` as not invitation-ready (`DEALER_SUSPENDED`), so Phase 10's suspension write bites immediately instead of needing a reader built for it. `resolveCircumventionAttempt` restores FLAGGED → ACTIVE on dismissal only when no other detection stands. **AS BUILT.** |
 | D43 | RLS coverage for the invitation and messaging tables | DECISION | Phase 1 | No migration enables RLS on `auction_invitations`, `outside_auction_invites`, `messages`, `circumvention_attempts`, `identity_firewall_entries` (production probe: the core Prisma tables are reached only through the service role). Proposed: enable RLS with zero policies (deny-all except service role) on the new tables this wave creates, and leave existing tables unchanged in this phase. Adding a policy OPENS access, so none is added. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — §5.4 evidence: the app connects as table owner, so a policy would OPEN access; new tables ship RLS-on/zero-policies matching every existing transaction table |
 | D44 | Untargeted dealer broadcast | DECISION | Phase 5 | `notifyActiveDealersOfOpportunity` emails the first 20 ACTIVE dealers with no radius and no invitation, from the public request route. Proposed: retire it — §7 invitations are the only dealer fan-out. | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — RETIRE OUTRIGHT.** `notifyActiveDealersOfOpportunity` is a stub returning `{ notified: 0, gated: false, retired: true }`; its three tests are rewritten to pin the retirement, and they assert not merely that nothing was sent but that NO DEALER POOL IS ASSEMBLED — a retirement that still queried twenty dealers would be one edit away from sending again. The QStash dealer-SMS rail is retired with it. **AS BUILT.** |

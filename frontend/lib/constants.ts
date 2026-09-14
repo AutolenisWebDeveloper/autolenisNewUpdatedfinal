@@ -48,6 +48,32 @@ export const MAX_SHORTLIST_ITEMS = 5;
 export const MAX_DEALER_INVITATIONS = 8;
 export const AUCTION_EXTENSION_HOURS = 24;
 
+/**
+ * §8a / §9 — how long a submitted offer stays selectable after the auction closes.
+ *
+ * MEASURED FROM THE AUCTION'S CLOSE, NOT FROM SUBMISSION, and that is the whole design. §9's
+ * Best Price Report compares offers side by side and §8c requires equal results to be presented
+ * honestly as equal; offers that lapsed at staggered times would drop out of the report one by
+ * one while the buyer was reading it, so the dealership that bid first would lose its place for
+ * having answered promptly. One window, opening when the sealed auction opens, is also the window
+ * the buyer is actually given — which is why `BUYER_DOES_NOT_SELECT` carries the same 72 hours and
+ * why the offers-ready notice can state it without qualification.
+ *
+ * A dealer who states a SHORTER expiration is taken at their word: this is the default, not a
+ * floor.
+ */
+export const OFFER_VALIDITY_HOURS = 72;
+
+/**
+ * §9 — how far AHEAD of the expiry the buyer is reminded to choose.
+ *
+ * "Offers carry an expiration. Remind the buyer before offers expire." A reminder that lands as the
+ * offers lapse is a notification of a loss, not a reminder; a day is enough to act on and short
+ * enough that the offers are still the thing the buyer is thinking about. It has to be strictly
+ * less than `OFFER_VALIDITY_HOURS`, or the reminder would be due before the window opens.
+ */
+export const SELECTION_REMINDER_LEAD_HOURS = 24;
+
 // ─── Commission Rates (3-level ONLY — D2) ─────────────────────────────────────
 // L4 and L5 do not exist. Commission walk depth: maximum 3 levels.
 // Rate is persisted on each Commission row at creation time, so changes here

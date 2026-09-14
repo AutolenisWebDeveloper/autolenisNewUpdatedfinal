@@ -29,12 +29,31 @@
 
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import {
+  UPGRADE_TOUCHPOINTS,
+  type UpgradeTouchpoint,
+} from "@/lib/services/plan/upgrade-touchpoints";
 import type { BuyerPlan, PlanSnapshot, Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
-/** Where the election happened. Free text, but stable per surface. */
+/**
+ * Where the election happened. Free text, but stable per surface.
+ *
+ * PHASE 6 UNIFICATION. Two vocabularies existed and did not overlap at a single value: this union
+ * (seven surface names) and `UPGRADE_TOUCHPOINTS` (§23.2a's five, the set PAY-77 measures
+ * against). A conversion from the Best Price Report or the post-acceptance interstitial therefore
+ * could not be stamped onto the snapshot at all — `tsc` rejected it — so touchpoints 2-4 were
+ * unmeasurable by construction. `UpgradeTouchpoint` is now part of this union.
+ *
+ * THE ONE INCONSISTENCY THAT SURVIVES, deliberately. Touchpoint 1 is suppression-checked as
+ * `UPGRADE_TOUCHPOINTS.RECEIPT` ("receipt") but stamps `"settlement"` on the snapshot
+ * (`settlement-effects.service.ts:181-195`). `plan_snapshots` carries a BEFORE UPDATE append-only
+ * trigger, so shipped rows cannot be relabelled — and production holds zero of them, so there is
+ * nothing to relabel in fact. Rather than rename a shipped label, `TOUCHPOINT_ALIASES` below
+ * records the equivalence so a per-touchpoint conversion query counts them as one.
+ */
 export type PlanTouchpoint =
   | "signup"
   | "buyer_dashboard_upgrade"
@@ -44,7 +63,28 @@ export type PlanTouchpoint =
   /** Phase 3 — the $99 settling. §23.2a touchpoint 1, the receipt line. */
   | "settlement"
   /** Phase 3 — §23.3, a downgrade back to Standard. */
-  | "downgrade";
+  | "downgrade"
+  /** Phase 6 — the Deal-level snapshot written at creation (§11.6 ruling 8, §9a "Recorded"). */
+  | "deal_created"
+  /** Phase 6 — §23.2a's own five, so a conversion can be stamped where it happened. */
+  | UpgradeTouchpoint;
+
+/**
+ * Labels that name the SAME §23.2a touchpoint. Read by any per-touchpoint conversion query, so
+ * touchpoint 1 is not counted twice or missed because two surfaces spelled it differently.
+ */
+export const TOUCHPOINT_ALIASES: Readonly<Record<string, UpgradeTouchpoint>> = {
+  settlement: UPGRADE_TOUCHPOINTS.RECEIPT,
+  checkout: UPGRADE_TOUCHPOINTS.RECEIPT,
+};
+
+/** The §23.2a touchpoint a stored label belongs to, or null if it is not an upgrade touchpoint. */
+export function upgradeTouchpointOf(label: string | null | undefined): UpgradeTouchpoint | null {
+  if (!label) return null;
+  if (TOUCHPOINT_ALIASES[label]) return TOUCHPOINT_ALIASES[label];
+  const values = Object.values(UPGRADE_TOUCHPOINTS) as string[];
+  return values.includes(label) ? (label as UpgradeTouchpoint) : null;
+}
 
 export interface RecordPlanElectionInput {
   buyerId: string;
@@ -419,4 +459,64 @@ export async function settledDepositCentsForRequest(
     );
   }
   return deposits.reduce((sum, d) => sum + d.amountCents, 0);
+}
+
+// ── The DEAL-level snapshot (Phase 6) ───────────────────────────────────────────────────────────
+
+export interface RecordDealPlanSnapshotInput {
+  dealId: string;
+  buyerId: string;
+  plan: BuyerPlan;
+  vehicleRequestId?: string | null;
+  actor: string;
+  touchpoint: PlanTouchpoint;
+  reason?: string | null;
+  settledDepositCents?: number | null;
+  settledPremiumCents?: number | null;
+  effectiveAt?: Date;
+}
+
+/**
+ * Write the plan snapshot that a Deal carries at creation (§9a "Recorded", §11.6 ruling 8).
+ *
+ * WHY THIS IS NOT `recordPlanElection`. That function dedupes on the plan VALUE and returns null
+ * when the buyer's plan has not changed — correct for a buyer-level election, and exactly wrong
+ * here. §9a requires the Deal to carry its own snapshot of the plan in force at the moment it was
+ * created, and a Standard buyer who never changed plan is the COMMON case. Deduping would leave
+ * the majority of Deals with `current_plan_snapshot_id` NULL and the lineage incomplete.
+ *
+ * THE WRITE ORDER IS FORCED BY THE SCHEMA, not chosen. `deals.(id, current_plan_snapshot_id)` is a
+ * composite FK onto `plan_snapshots.(deal_id, id)`, so the snapshot must name its Deal before the
+ * Deal can point at it. Hence: Deal first, snapshot second, Deal updated third — all inside the
+ * caller's transaction, so a Deal never commits without its snapshot.
+ *
+ * `plan_snapshots` carries a BEFORE UPDATE append-only trigger, so later changes APPEND a new row
+ * and re-point the Deal; nothing is ever mutated in place.
+ */
+export async function recordDealPlanSnapshot(
+  input: RecordDealPlanSnapshotInput,
+  db: Db = prisma,
+): Promise<PlanSnapshot> {
+  const snapshot = await db.planSnapshot.create({
+    data: {
+      id: randomUUID(),
+      dealId: input.dealId,
+      buyerId: input.buyerId,
+      vehicleRequestId: input.vehicleRequestId ?? null,
+      plan: input.plan,
+      effectiveAt: input.effectiveAt ?? new Date(),
+      actor: input.actor,
+      touchpoint: input.touchpoint,
+      reason: input.reason ?? null,
+      settledDepositCents: input.settledDepositCents ?? null,
+      settledPremiumCents: input.settledPremiumCents ?? null,
+    },
+  });
+
+  await db.deal.update({
+    where: { id: input.dealId },
+    data: { currentPlanSnapshotId: snapshot.id },
+  });
+
+  return snapshot;
 }

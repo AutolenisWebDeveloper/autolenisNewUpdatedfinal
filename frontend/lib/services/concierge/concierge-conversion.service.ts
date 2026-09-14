@@ -32,6 +32,7 @@
 import { Prisma, OfferStatus, VehicleRequestStatus } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { assertOtdComponentsMatch } from "@/lib/services/offer/otd";
+import { findOriginalAuctionForDeposit } from "@/lib/services/auction/deposit-auction";
 
 export class ConciergeConversionError extends Error {
   constructor(message: string) {
@@ -184,13 +185,18 @@ export async function convertConciergeOfferToClosedAuction(
   const { buyerId, depositId, reviewToken, outsideDealerId } = params;
   const now = new Date();
 
-  // Idempotency anchor: Auction.depositId is unique. If a prior (partial or
-  // complete) run already created the auction for this deposit, reuse it and do
-  // NOT re-convert — the offers are already there.
-  const existingAuction = await tx.auction.findUnique({
-    where: { depositId },
-    select: { id: true, vehicleRequestId: true, offers: { select: { id: true } } },
-  });
+  // Idempotency anchor: the ORIGINAL auction for this deposit. If a prior (partial or complete)
+  // run already created it, reuse it and do NOT re-convert — the offers are already there.
+  //
+  // §13-D39 relaxed `auctions.deposit_id` to a partial unique, so this is no longer "the" auction
+  // in general. It is still exactly right HERE, and for a reason specific to this track rather
+  // than a coincidence: a concierge auction is born CLOSED and the admin action route refuses to
+  // reopen one into a competitive auction, so a concierge deposit never carries a relaunch.
+  const existingAuction = await findOriginalAuctionForDeposit<{
+    id: string;
+    vehicleRequestId: string | null;
+    offers: { id: string }[];
+  }>(tx, depositId, { id: true, vehicleRequestId: true, offers: { select: { id: true } } });
   if (existingAuction) {
     return {
       auctionId: existingAuction.id,

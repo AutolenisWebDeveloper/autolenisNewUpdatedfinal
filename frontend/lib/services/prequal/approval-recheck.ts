@@ -48,7 +48,27 @@ type Db = typeof prisma | Prisma.TransactionClient;
  * gate sits AFTER payment like the two below it: the buyer has paid, so arriving with no
  * usable approval is a stuck buyer rather than an unfinished one, and it raises.
  */
-export type ApprovalGate = "payment" | "auction_launch" | "offer_selection" | "contract_request";
+/**
+ * Phase 6 adds the two OFFER gates. §8b: "Offer submission rechecks that the buyer's approval is
+ * current, unexpired, and sufficient — on submit, on revision, on selection, and at dealer
+ * confirmation." Only selection existed; submit and revise went through
+ * `offer.service.ts`'s own `assertWithinBuyerBudget`, which FAILED OPEN in two places (no auction
+ * row, and no prequal row both returned silently) and selected `decision` and `expiresAt` without
+ * ever reading them — so a DECLINED or long-expired approval still authorised any price under a
+ * stale ceiling.
+ *
+ * Extending this union rather than repairing that function in place is the point: one predicate,
+ * one §26 exception, one owner. `offer_confirmation` is Phase 7's (B13) and is deliberately NOT
+ * added here — the reaffirmation flow it belongs to does not exist yet, and a gate with no caller
+ * is indistinguishable from a gate that was forgotten.
+ */
+export type ApprovalGate =
+  | "payment"
+  | "auction_launch"
+  | "offer_submit"
+  | "offer_revision"
+  | "offer_selection"
+  | "contract_request";
 
 export type ApprovalVerdict =
   | { ok: true; approvedAmountCents: number | null; expiresAt: Date }
@@ -125,8 +145,17 @@ async function fail(
   //     it is the one where raising matters most: the auction has not launched yet,
   //     so the buyer's $99 is sitting against a request that cannot proceed and
   //     nothing downstream has happened to reveal it.
+  //     The two OFFER gates (Phase 6) are post-payment for the same reason: an auction only
+  //     exists once the $99 has settled, so a dealer submitting against a buyer with no usable
+  //     approval is that buyer stuck behind a gate they cannot see. The raise does not spam —
+  //     `raiseException` keys on `code:refFingerprint`, so every dealer bidding on the same
+  //     auction converges on ONE live queue row rather than one per submission.
   const postPaymentGate =
-    gate === "auction_launch" || gate === "offer_selection" || gate === "contract_request";
+    gate === "auction_launch" ||
+    gate === "offer_submit" ||
+    gate === "offer_revision" ||
+    gate === "offer_selection" ||
+    gate === "contract_request";
   const raise = reason === "EXPIRED" || postPaymentGate;
   if (opts.raiseOnFailure && raise) {
     try {

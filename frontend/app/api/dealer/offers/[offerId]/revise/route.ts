@@ -1,10 +1,11 @@
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
-import { reviseOffer } from "@/lib/services/offer/offer.service";
+import { reviseOffer, DEALER_OFFER_SELECT, OfferRefusedError } from "@/lib/services/offer/offer.service";
 import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { feeItemsSchema } from "@/lib/services/offer/junk-fee-items";
 
 interface Props { params: Promise<{ offerId: string }> }
 
@@ -19,9 +20,8 @@ const schema = z.object({
   includesFinancing: z.boolean().optional(),
   aprRate: z.number().optional(),
   termMonths: z.number().int().optional(),
-  junkFeeItems: z
-    .array(z.object({ name: z.string(), amount: z.number() }))
-    .optional(),
+  // One schema for all three accepted shapes — see lib/services/offer/junk-fee-items.ts.
+  junkFeeItems: feeItemsSchema.optional(),
 });
 
 export async function PATCH(request: NextRequest, { params }: Props) {
@@ -39,14 +39,16 @@ export async function PATCH(request: NextRequest, { params }: Props) {
   try {
     revised = await reviseOffer(offerId, dealer.id, parsed.data);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Failed to revise offer.";
-    const safeMsg =
-      msg.includes("Max revisions") ? "You've reached the maximum number of revisions for this offer."
-      : msg.includes("expired") ? "Auction has expired — revisions are no longer accepted."
-      : msg.includes("closed") ? "This auction is no longer active."
-      : msg.includes("budget") ? msg
-      : msg.includes("breakdown") ? msg
+    // Same rule as the submit route: the service marks what a dealership may read. The
+    // `msg.includes("budget")` arm this replaces was already unreachable — §13-D40 made the budget
+    // verdict a RECORD rather than a throw — and `includes("expired")` also matched
+    // "Offer was modified concurrently"'s neighbours by accident.
+    const safeMsg = err instanceof OfferRefusedError
+      ? err.message
       : "Failed to revise offer. Please try again.";
+    if (!(err instanceof OfferRefusedError)) {
+      logger.error("[dealer/offers/revise] revision failed:", err);
+    }
     return errorResponse("REVISION_ERROR", safeMsg, 400);
   }
 
@@ -72,5 +74,12 @@ export async function PATCH(request: NextRequest, { params }: Props) {
     }).catch((err) => logger.error("[dealer/offers/revise] email failed:", err));
   }
 
-  return successResponse({ offer: revised });
+  // Projected, for the reason `DEALER_OFFER_SELECT` records: `reviseOffer` returns the whole row,
+  // and this phase started writing ranking positions and a §13-D40 disqualification reason onto it
+  // — the latter carrying the buyer's approved ceiling as a dollar figure (§29 P3).
+  const offerForDealer = await prisma.offer.findUnique({
+    where: { id: revised.id },
+    select: DEALER_OFFER_SELECT,
+  });
+  return successResponse({ offer: offerForDealer });
 }

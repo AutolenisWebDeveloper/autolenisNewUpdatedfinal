@@ -16,11 +16,14 @@
 // express "this string belongs to this code", and a per-call-site literal would
 // drift the moment two sites raised the same code.
 //
-// COMPLETENESS. All 48 §26 rows are present, in document order, plus
-// COMMS_TERMINAL_FAILURE — which the Markdown carries in §27 ("terminal-failure
-// Operations alert") and the HTML renders in its exception register; §2 difference
-// D2 rules it a §27 requirement rendered in §26, so it is catalogued here and
-// counted separately. 49 entries.
+// COMPLETENESS. All 48 §26 rows are present, in document order, plus the entries the Markdown
+// states OUTSIDE §26 — each one catalogued here rather than given a second vocabulary, and each
+// one counted separately by `queue-item.service.test.ts`, which names them individually:
+// COMMS_TERMINAL_FAILURE (§27), LINEAGE_ORPHAN (§3), POSSIBLE_DUPLICATE_BUYER (§7.2), and the two
+// Phase 5 additions THIN_DEALER_COVERAGE and LAUNCH_READINESS_BLOCKED (Stage 6c / Stage 7), plus
+// AUCTION_TRENDING_TO_ZERO_OFFERS and COMMS_NO_DELIVERABLE_CHANNEL (§27/§27.1, added Phase 6).
+// The count lives in that test rather than
+// in this comment — the previous figure here said 49 and had been wrong since Phase 5.
 //
 // `raisedByPhase` records which implementation phase wires the raise site. Phase 2
 // raises the ten entries marked 2; the rest are catalogued now so that Phase 10's
@@ -312,6 +315,35 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Stage 8 — auction close",
     raisedByPhase: 6,
     specSection: "§26; Stage 8c",
+  },
+  {
+    /**
+     * NOT A §26 ROW — §27.1's "Auction nearing zero offers → Operations → Alert", catalogued here
+     * for the same reason COMMS_TERMINAL_FAILURE is: it is an owned Operations condition the
+     * Markdown states outside §26, and the alternative is a second vocabulary for exceptions that
+     * happen to be announced by §27.
+     *
+     * DISTINCT FROM `ZERO_OFFERS_ALL_CANDIDATES`, deliberately. That row's required action is
+     * "relaunch once without a second $99, or close it" — instructions for an auction that has
+     * already closed. This one fires while the auction is still LIVE and the useful action is the
+     * opposite: widen the field before the window ends. Collapsing them would put the wrong
+     * instruction in front of the operator at the only moment they could still act.
+     */
+    code: "AUCTION_TRENDING_TO_ZERO_OFFERS",
+    type: "AUCTION_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Auction nearing its close with zero offers",
+    requiredResult: "Operations alerted once, before the close, while the field can still be widened",
+    // No buyer-facing status: §Stage 7 keeps the auction sealed and a buyer told "nobody has bid"
+    // two hours before the close learns a competing dealer's position, which is the thing §13-D35
+    // exists to prevent.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Check invitation delivery and the size of the invited field, and widen or re-invite before the auction closes.",
+    deadlineHours: 2,
+    returnPoint: "Stage 8 — auction close",
+    raisedByPhase: 6,
+    specSection: "§27.1; Stage 8",
   },
   {
     code: "CANDIDATE_STALE_MID_AUCTION",
@@ -776,6 +808,47 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "§27 — the dispatcher",
     raisedByPhase: 2,
     specSection: "§27; §2 difference D2",
+  },
+  // §27's OTHER failure mode, and it is not the one above. COMMS_TERMINAL_FAILURE describes a
+  // message that entered the rail and exhausted its retries — it keys on `comms_outbox.id` and
+  // tells the operator to "investigate the undeliverable message". A recipient with no address
+  // never produces a row at all (`enqueueTransactional` refuses a channel without one before the
+  // insert), so there is no id to key on, no `last_error` to investigate, and no first attempt for
+  // "another way" to be another way THAN. An operator sent to the outbox would find nothing and
+  // conclude the alert was wrong.
+  //
+  // Split for the same reason this file already splits THIN_DEALER_COVERAGE from
+  // ZERO_DEALER_COVERAGE, AUCTION_TRENDING_TO_ZERO_OFFERS from ZERO_OFFERS_ALL_CANDIDATES, and
+  // POSSIBLE_DUPLICATE_BUYER out of LINEAGE_ORPHAN: same neighbourhood, different required action.
+  // Owner ruling 2026-09-14 — "a logger.error standing in for an exception is the defect class this
+  // program has spent five phases eliminating."
+  {
+    code: "COMMS_NO_DELIVERABLE_CHANNEL",
+    // The existing `COMMS_EXCEPTION` label, so no enum migration — and `queue_items.exception_code`
+    // is plain TEXT with no CHECK, so no migration at all.
+    type: "COMMS_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Required communication has no deliverable channel",
+    requiredResult:
+      "The §27.1 communication is delivered by another means and the recipient's contact record is corrected",
+    // NULL, and the null is the considered answer rather than the default. Three reasons, in order
+    // of weight: (1) this row exists BECAUSE the recipient cannot be reached, so a buyer-addressed
+    // sentence is one the system has just failed to deliver; (2) the in-app `Notification` already
+    // carries the buyer's honest account of the AUCTION's outcome, and that is the auction's status
+    // rather than this exception's — "we cannot email you" does not belong beside "your offers are
+    // ready"; (3) the same code is raised for a DEALERSHIP, which has no buyer half at all.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Reach the recipient another way and correct their contact record. There is no outbox row to " +
+      "retry — the message was never produced — so re-drive the notice once the address is fixed.",
+    // The same clock as COMMS_TERMINAL_FAILURE: a required transactional communication about a
+    // transaction the buyer has paid $99 for is not going to happen.
+    deadlineHours: 4,
+    // The rail, not a stage — this fires from Stage 8, Stage 9 and §23.2a alike, so any one stage
+    // would be wrong three times out of four.
+    returnPoint: "§27 — the required communication, once the recipient has a deliverable address",
+    raisedByPhase: 6,
+    specSection: "§27; §27.1",
   },
   // §3's orphan rule. The Markdown states it in §3 ("a payment, auction, offer,
   // deal, contract, or pickup that cannot resolve its parent is an orphan") rather

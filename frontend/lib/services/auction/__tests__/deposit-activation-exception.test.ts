@@ -59,12 +59,15 @@ function strandedDeposit() {
     status: "PAID",
     refundedAt: null,
     // ACTIVE auction, zero invitations/offers, aged past the 120m no-dealer grace.
-    auction: {
+    // §13-D39: `Deposit.auction` became `Deposit.auctions[]` — the reconciler selects the list
+    // newest-first and takes the head, because a relaunched deposit carries a dead original as
+    // well as the live retry and closing the wrong one would strand a live auction.
+    auctions: [{
       id: "auc_1",
       status: "ACTIVE",
       createdAt: new Date(Date.now() - 200 * 60_000),
       _count: { invitations: 0, offers: 0 },
-    },
+    }],
   };
 }
 

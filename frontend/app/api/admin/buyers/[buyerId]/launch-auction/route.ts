@@ -6,7 +6,11 @@ import { z } from "zod";
 import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { issueInvitations } from "@/lib/services/auction/auction-invitation.service";
 import { MAX_INVITATION_FIELD } from "@/lib/services/sourcing/rooftop-sourcing.service";
-import { createAuction, launchAuction, resolveOwnedVehicleRequestId } from "@/lib/services/auction/auction.service";
+import { createAuction, createRelaunchAuction, launchAuction, resolveOwnedVehicleRequestId } from "@/lib/services/auction/auction.service";
+import {
+  resolveRelaunchEligibility,
+  isDepositAuctionUniqueViolation,
+} from "@/lib/services/auction/deposit-auction";
 import {
   sendDealerAuctionInvitationEmail,
   sendAuctionActivatedEmail,
@@ -146,11 +150,41 @@ export async function POST(request: NextRequest, { params }: Props) {
     );
   }
 
-  // Find existing PAID deposit not linked to an auction, or create an admin-override one
+  // DEPOSIT SELECTION — and the second-$99 hazard §13-D39 turned from latent into reachable.
+  //
+  // Pre-D39 this read `auction: null` on a to-one relation. `auctions: { none: {} }` is its exact
+  // translation, but translating it and stopping would have been the defect: a relaunch-eligible
+  // deposit (original CLOSED) no longer matches, so the fallback below would FABRICATE a second
+  // PAID $99 deposit with no Stripe evidence — precisely the second charge §8c's one-free-relaunch
+  // rule exists to prevent, landing in the ledger as an admin-origin PAID row.
+  //
+  // Order is therefore: (1) an unconsumed deposit, exactly as before; (2) otherwise a
+  // relaunch-eligible one, reused under §8c at no further cost to the buyer; (3) only then the
+  // admin-override deposit, which is a real capability and is kept — it now fires only when the
+  // buyer genuinely has no reusable deposit, instead of silently whenever the first query misses.
+  let relaunchOfAuctionId: string | null = null;
   let deposit = await prisma.deposit.findFirst({
-    where: { buyerId, status: "PAID", auction: null },
+    where: { buyerId, status: "PAID", auctions: { none: {} } },
     select: { id: true },
   });
+  if (!deposit) {
+    const settled = await prisma.deposit.findMany({
+      where: { buyerId, status: "PAID", refundedAt: null },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+    });
+    for (const candidate of settled) {
+      const eligibility = await resolveRelaunchEligibility(prisma, candidate.id);
+      if (eligibility.eligible) {
+        deposit = { id: candidate.id };
+        relaunchOfAuctionId = eligibility.originalAuctionId;
+        logger.info(
+          `[launch-auction] reusing deposit ${candidate.id} as the §8c relaunch of auction ${eligibility.originalAuctionId} — no second $99`,
+        );
+        break;
+      }
+    }
+  }
   if (!deposit) {
     deposit = await prisma.deposit.create({
       data: { buyerId, amountCents: DEPOSIT_AMOUNT_CENTS, status: "PAID" },
@@ -162,7 +196,25 @@ export async function POST(request: NextRequest, { params }: Props) {
   // originating VehicleRequest onto the auction, but only after confirming it
   // belongs to this buyer (never store a cross-buyer request id).
   const ownedVehicleRequestId = await resolveOwnedVehicleRequestId(buyerId, vehicleRequestId);
-  const created = await createAuction(buyerId, deposit.id, ownedVehicleRequestId);
+  let created;
+  try {
+    created = relaunchOfAuctionId
+      ? await createRelaunchAuction(buyerId, deposit.id, relaunchOfAuctionId, ownedVehicleRequestId)
+      : await createAuction(buyerId, deposit.id, ownedVehicleRequestId);
+  } catch (err) {
+    // §13-D39: before the partial index, a duplicate here raised an unhandled P2002 and surfaced
+    // as a 500 — ugly, but a refusal. The preconditions above are the real guard; this maps the
+    // residual race (two admins relaunching the same deposit at once) onto a named domain error
+    // rather than letting the loser see an unexplained 500.
+    if (isDepositAuctionUniqueViolation(err)) {
+      return adminError(
+        "AUCTION_ALREADY_EXISTS",
+        "An auction already exists for this deposit, or it has already been relaunched once.",
+        409,
+      );
+    }
+    throw err;
+  }
   const launched = await launchAuction(created.id);
 
   // Optional custom duration override

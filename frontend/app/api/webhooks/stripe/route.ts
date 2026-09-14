@@ -4,6 +4,7 @@ import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 import { applyFulfillmentHold, releaseFulfillmentHold, recordDisputeLost } from "@/lib/services/payment/fulfillment-hold.service";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { findOriginalAuctionForDeposit } from "@/lib/services/auction/deposit-auction";
 import Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
@@ -299,11 +300,15 @@ export async function POST(request: NextRequest) {
               return { deposit, createdAuction: null, isNewAuction: false, effects, notSettleable: false };
             }
 
-            // Auction.depositId is unique — re-use if a prior partial run created it.
-            const existingAuction = await tx.auction.findUnique({
-              where: { depositId: deposit.id },
-              select: { id: true },
-            });
+            // The ORIGINAL auction is the idempotency anchor — re-use if a prior partial run
+            // created it. §13-D39 relaxed `auctions.deposit_id` to a partial unique
+            // (`WHERE original_auction_id IS NULL`), so this must NOT match a relaunch: if it did,
+            // a redelivered settlement would see the retry, skip creation, and the original would
+            // never exist. The partial index still refuses a second original for this deposit.
+            const existingAuction = await findOriginalAuctionForDeposit<{ id: string }>(
+              tx,
+              deposit.id,
+            );
             const createdAuction = existingAuction
               ? existingAuction
               : await tx.auction.create({

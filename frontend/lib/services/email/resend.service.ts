@@ -472,6 +472,21 @@ export async function sendAuctionActivatedEmail(to: string, buyerName: string, a
   });
 }
 
+/**
+ * SUPERSEDED IN PHASE 6 — REPORTED, NOT DELETED.
+ *
+ * `processAuctionClose` was its only caller and now enqueues K27-1326 through the §27 dispatcher
+ * (`enqueueTransactional`, template key `offers_ready`), which the legacy rail below cannot
+ * provide: no `template_key`, no refs, and above all no SEND-TIME STATE RECHECK — so this version
+ * would still tell a buyer their offers are ready after they had already selected one, or after the
+ * last qualified offer lapsed.
+ *
+ * Kept because removing it is a capability decision, not a refactor: its content and its
+ * `offers-ready-${auctionId}` key are still pinned by `sender-migration.test.ts`, and the two rails
+ * write the same `comms_outbox` table under DIFFERENT dedup keys — so a caller re-added here would
+ * double-send rather than dedupe. That is the reason it is documented rather than quietly left
+ * looking available.
+ */
 export async function sendOffersReadyEmail(to: string, buyerName: string, auctionId: string, offerCount: number) {
   void offerCount; // offer count not shown in email (buyers view in app)
   const offersUrl = `${APP_URL}/buyer/auctions/${auctionId}/offers`;

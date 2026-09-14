@@ -98,6 +98,12 @@ export declare function readDisplayedLedger(docText: string): {
 };
 export declare function readDisplayedTablePairs(docText: string): Array<[string, number]>;
 
+/**
+ * Every §10.x heading whose declared row count or status/phase tally disagrees with the rows under
+ * it, as human-readable problem strings. Empty array means no drift.
+ */
+export declare function checkSectionHeadings(docText: string): string[];
+
 export declare const TRIAGE_CATEGORIES: readonly string[];
 export declare const TRIAGE_BEGIN: string;
 export declare const TRIAGE_END: string;

@@ -30,6 +30,26 @@ interface AuctionContext {
    * of the same ruling — a live offer count is competitive information in a sealed auction.
    */
   offerCount: number | null;
+  /**
+   * §8c CANDIDATE BINDING. `GET /api/dealer/auctions/[auctionId]` has always returned these and
+   * this page has always ignored them — which stopped mattering the moment `submitOffer` began
+   * REFUSING an offer that names no candidate on an auction that has them ("This auction has
+   * specific vehicles — your offer must name the one it answers"). Every sourced auction has at
+   * least one: `ensureAuctionVehicleFromRequest` creates one for any request with a make
+   * preference, and shortlist promotion creates more. Without the selector below, this — the only
+   * dealer-facing bid surface — could not submit a single offer on a sourced auction.
+   *
+   * An auction with NO candidates is a custom request: §8c binds those offers to the criteria set
+   * instead, the service does not ask for a candidate, and nothing renders here.
+   */
+  vehicles?: Array<{
+    id: string;
+    year: number | null;
+    make: string | null;
+    model: string | null;
+    trim: string | null;
+    mileage: number | null;
+  }>;
 }
 
 export default function QuickOfferPage() {
@@ -50,9 +70,12 @@ export default function QuickOfferPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [competitive, setCompetitive] = useState<"STRONG" | "MODERATE" | "WEAK" | null>(null);
   const [auctionCtx, setAuctionCtx] = useState<AuctionContext | null>(null);
+  const [auctionVehicleId, setAuctionVehicleId] = useState<string | null>(null);
   const [auctionError, setAuctionError] = useState<string | null>(null);
   const [checkingCompetitiveness, setCheckingCompetitiveness] = useState(false);
 
+  const candidates = auctionCtx?.vehicles ?? [];
+  const needsCandidate = candidates.length > 0;
   const junkFees = fees.filter(f => f.isJunk);
   const totalFeesCents = fees.reduce((sum, f) => sum + f.amountCents, 0);
   const junkFeesCents = junkFees.reduce((sum, f) => sum + f.amountCents, 0);
@@ -65,8 +88,13 @@ export default function QuickOfferPage() {
     if (!auctionId) return;
     api.get<{ auction: AuctionContext }>(`/api/dealer/auctions/${auctionId}`)
       .then(({ auction }) => {
-        if (auction) setAuctionCtx(auction);
-        else setAuctionError("Auction not found or you are not invited.");
+        if (auction) {
+          setAuctionCtx(auction);
+          // One candidate needs no decision — asking a dealer to pick from a list of one is a
+          // click that can only be answered one way. Two or more is a real choice and the
+          // selector below makes it.
+          if (auction.vehicles?.length === 1) setAuctionVehicleId(auction.vehicles[0].id);
+        } else setAuctionError("Auction not found or you are not invited.");
       })
       .catch((err) => setAuctionError(apiErrorMessage(err, "Unable to load auction details.")));
   }, [auctionId]);
@@ -117,11 +145,34 @@ export default function QuickOfferPage() {
         // otherwise fall back to the OTD total (fees and tax are tracked separately via feesCents/taxCents).
         vehiclePriceCents: vehiclePriceCents > 0 ? vehiclePriceCents : otdCents - taxCents - totalFeesCents > 0 ? otdCents - taxCents - totalFeesCents : otdCents,
         taxCents,
-        feesCents: totalFeesCents,
+        // §8.2 defect 1, the half that BLOCKED EVERY FEE-BEARING BID. This sent `totalFeesCents`
+        // here AND the whole `fees` list as `junkFeeItems` below, and `otd.ts` adds the two —
+        // so `expected` exceeded `otdPriceCents` by the entire fee total and
+        // `assertOtdComponentsMatch` threw for any non-zero fee. The dealer saw only "Failed to
+        // submit offer. Please try again.", so a dealer could bid only with zero fees.
+        //
+        // `feesCents` is now the UN-ITEMISED remainder and `junkFeeItems` carries the itemised
+        // fees, which is what §8a asks for ("itemized add-ons, each separately named and priced")
+        // and what makes the two sum to the total exactly once.
+        // ZERO, because every fee entered here is itemised below. §8.2 defect 1's other half:
+        // this used to send `totalFeesCents - junkFeesCents`, keeping any fee the CLIENT
+        // heuristic did not flag out of `junkFeeItems` entirely. The server re-classifies with
+        // the admin's `JunkFeePattern` rows — but it can only classify what it receives, so a
+        // pattern an administrator added ("reconditioning") could never match a fee the
+        // hard-coded list below missed. Sending every itemised fee is what makes the server the
+        // only thing that decides `isJunk`. The arithmetic is unchanged:
+        // vehiclePrice + tax + feesCents + Σ(items) still equals otdPriceCents.
+        feesCents: 0,
         includesFinancing,
         aprRate: includesFinancing && aprRate ? parseFloat(aprRate) : undefined,
         termMonths: includesFinancing && termMonths ? parseInt(termMonths) : undefined,
-        junkFeeItems: fees.map(f => ({ name: f.name, amount: f.amountCents / 100 })),
+        // EVERY itemised fee, in cents. `isJunk` is not sent: it is a UX hint computed from a
+        // hard-coded list in this file and it never reaches the database — `classifyFeeItems`
+        // decides, against the admin's patterns.
+        junkFeeItems: fees.map(f => ({ name: f.name, amountCents: f.amountCents })),
+        // §8c — the candidate this offer answers. `undefined` on a custom request, which has no
+        // candidates and binds to the criteria set instead.
+        auctionVehicleId: auctionVehicleId ?? undefined,
       };
       await api.post("/api/dealer/offers", body);
       setSubmitted(true);
@@ -186,6 +237,45 @@ export default function QuickOfferPage() {
               sealed. The deadline below is what a bidder legitimately needs. */}
           <div className="text-xs text-slate-400 shrink-0">Sealed bidding</div>
         </div>
+      )}
+
+      {/* §8c — which vehicle this offer answers. Rendered only when the auction HAS candidates;
+          a custom request has none and binds to the criteria set instead. */}
+      {needsCandidate && (
+        <fieldset className="bg-white border border-slate-200 rounded-xl p-5 mb-5" data-testid="candidate-selector">
+          <legend className="text-sm font-medium text-slate-700 px-1">Which vehicle is this offer for?</legend>
+          <div className="space-y-2 mt-2">
+            {candidates.map((v) => {
+              const label = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || "Vehicle";
+              return (
+                <label
+                  key={v.id}
+                  data-testid={`candidate-option-${v.id}`}
+                  // `min-h-[44px]`, matching the fee and submit controls on this page: a radio row
+                  // is a touch target, and 2.5 of vertical padding around 20px text lands at 40.
+                  className={`flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer text-sm ${
+                    auctionVehicleId === v.id
+                      ? "border-al-primary bg-slate-50"
+                      : "border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="auction-vehicle"
+                    value={v.id}
+                    checked={auctionVehicleId === v.id}
+                    onChange={() => setAuctionVehicleId(v.id)}
+                    className="border-slate-300"
+                  />
+                  <span className="text-slate-700">{label}</span>
+                  {v.mileage != null && (
+                    <span className="text-xs text-slate-400 ml-auto">{v.mileage.toLocaleString()} mi</span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
       )}
 
       {/* Vehicle price */}
@@ -283,10 +373,18 @@ export default function QuickOfferPage() {
       )}
 
       <Button className="w-full" size="lg" onClick={handleSubmit}
-        disabled={otdCents === 0 || loading || !auctionId || auctionCtx?.status !== "ACTIVE"}
+        disabled={
+          otdCents === 0 || loading || !auctionId || auctionCtx?.status !== "ACTIVE" ||
+          (needsCandidate && !auctionVehicleId)
+        }
         data-testid="submit-offer-btn">
         {loading ? "Submitting…" : "Submit Offer"}
       </Button>
+      {needsCandidate && !auctionVehicleId && (
+        <p className="text-xs text-slate-400 text-center mt-2" data-testid="candidate-required-notice">
+          Choose the vehicle this offer is for.
+        </p>
+      )}
       {auctionCtx && auctionCtx.status !== "ACTIVE" && (
         <p className="text-xs text-slate-400 text-center mt-2" data-testid="auction-closed-notice">This auction is no longer accepting offers.</p>
       )}

@@ -22,7 +22,10 @@ interface RankedOffer {
   rankType: "BEST_CASH" | "BEST_MONTHLY" | "BEST_OVERALL";
   rankLabel: string;
   otdPriceCents: number;
-  monthlyPayment?: number;
+  /** Integer MINOR UNITS, like every other money field here. Render through `money()`. */
+  monthlyPaymentCents?: number;
+  /** The term the DEALERSHIP quoted, which is the only term anyone actually offered. */
+  monthlyTermMonths?: number | null;
   totalCostCents?: number;
   junkFeesCents: number;
   dealerTier: string;
@@ -50,7 +53,6 @@ const RANK_COLORS: Record<string, string> = {
 export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanelProps) {
   const router = useRouter();
   const [offers, setOffers] = useState<RankedOffer[]>([]);
-  const [termMonths, setTermMonths] = useState(60);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +61,7 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.get<{ offers?: RankedOffer[] }>(`/api/buyer/auctions/${auctionId}/best-price?months=${termMonths}`)
+    api.get<{ offers?: RankedOffer[] }>(`/api/buyer/auctions/${auctionId}/best-price`)
       .then(data => {
         if (cancelled) return;
         setOffers(data?.offers ?? []);
@@ -71,7 +73,7 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [auctionId, termMonths]);
+  }, [auctionId]);
 
   async function selectOffer(offerId: string) {
     setError(null);
@@ -141,17 +143,25 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
           {error}
         </div>
       )}
-      {/* Loan term toggle */}
-      <div className="flex flex-wrap items-center gap-2 mb-6" data-testid="term-toggle">
-        <span className="text-sm text-slate-500 mr-2 w-full sm:w-auto">Loan term:</span>
-        {[36, 48, 60, 72].map(months => (
-          <button key={months} onClick={() => setTermMonths(months)}
-            data-testid={`term-${months}`}
-            className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-semibold transition-colors ${termMonths === months ? "bg-al-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-            {months}mo
-          </button>
-        ))}
-      </div>
+      {/* LOAN TERM — THE CONTROL IS GONE. Owner ruling, 2026-09-14, signing off the removal:
+           "A monthly payment computed at a term no dealership quoted is a number nobody has
+           offered, and §12 is explicit that AutoLenis does not underwrite."
+
+           It had been relabelled, then disabled, and neither was honest enough: four buttons that
+           refetched identical data and repainted nothing. `months` was validated by the route and
+           consumed by nothing — the engine computes each payment from the DEALERSHIP's own
+           `term_months` — so no buyer ever saw it change a figure.
+
+           The sentence below is what survives the deletion, and it survives deliberately: it was
+           the only statement on this screen that each monthly figure is the dealership's own quote
+           at their own APR, which is exactly what §12 requires the buyer to be able to see. The
+           route's `months` parameter and its 6–96 validation stay where they are — the guard on a
+           public input outlives the control that used to supply it, and the persisted
+           `best_price_calculation_logs.term_months` audit of how each report was computed is
+           untouched. */}
+      <p className="mb-4 text-xs text-slate-500" data-testid="monthly-quote-note">
+        Each monthly figure is the payment that dealership quoted, at their own APR and term.
+      </p>
 
       {/* Offer cards — dealer identity NEVER revealed here */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -211,8 +221,29 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
               </span>
             )}
 
-            {offer.monthlyPayment && (
-              <p className="text-sm text-slate-600 mb-2">~${offer.monthlyPayment}/mo for {termMonths} months</p>
+            {/* TWO DEFECTS FIXED HERE, BOTH FOUND BY REVIEW, AND THE HISTORY IS KEPT ON PURPOSE.
+                 The payment is INTEGER MINOR UNITS — `calculateMonthly` takes `otdPriceCents` and
+                 returns cents — and this printed it raw, so a $30,000 offer at 6.9% over 72 months
+                 rendered as "~$50990/mo". It now goes through `money()` like every other amount.
+                 The term used to say `{termMonths}`, the value of a toggle, while the payment was
+                 computed from the DEALERSHIP's own quoted term — toggling to 36mo relabelled a
+                 72-month payment. The card states the term the payment is actually for, and under
+                 the 2026-09-14 owner ruling the toggle that made the two disagree is gone.
+
+                 "term not recorded" IS REACHABLE, so it is stated rather than left blank. On the
+                 live ranking path the engine only computes a payment when the dealership quoted a
+                 term, and then always carries it — but `getBestPriceReport` spreads a PERSISTED log
+                 row straight through, and rows written before the `monthlyTermMonths` field existed
+                 carry a payment with no term. An empty suffix would print a bare "~$450/mo": a
+                 monthly figure whose term is silently absent, which is the one thing the ruling
+                 forbids. */}
+            {offer.monthlyPaymentCents != null && (
+              <p className="text-sm text-slate-600 mb-2">
+                ~{money(offer.monthlyPaymentCents)}/mo
+                {offer.monthlyTermMonths
+                  ? ` for ${offer.monthlyTermMonths} months, as quoted`
+                  : " — term not recorded"}
+              </p>
             )}
 
             {offer.junkFeesCents > 0 && (
@@ -253,7 +284,13 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
                 <HelpCircle size={12} /> Why this rank?
               </button>
               <span className="absolute left-0 top-full mt-1 w-56 bg-slate-800 text-white text-xs leading-snug rounded-lg px-3 py-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg">
-                Offers are ranked by total out-the-door price first, then by dealer tier and reliability. The lowest all-in price you&apos;ll pay earns the #1 spot.
+                {/* §8c parity row C9: the old copy named "dealer tier and reliability" as a
+                    tie-break. The engine has never read either — the real order is out-the-door,
+                    then required-feature match, then distance, then who submitted first, and
+                    equal offers share a rank rather than being separated by an invented rule. */}
+                Offers are ranked by total out-the-door price first. Ties go to the closer match on
+                your required features, then the shorter distance, then whoever submitted first —
+                and offers that are genuinely equal share the same rank.
               </span>
             </div>
 

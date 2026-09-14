@@ -451,7 +451,10 @@ model Deposit {
   refundedAt            DateTime?       @map("refunded_at")
   createdAt             DateTime        @default(now()) @map("created_at")
   updatedAt             DateTime        @updatedAt @map("updated_at")
-  auction               Auction?
+  // Phase 6 (20261115000000) — §13-D39 relaxed `auctions.deposit_id` to a PARTIAL unique
+  // (one ORIGINAL auction per deposit), so this can no longer be a one-to-one. A deposit
+  // carries its original auction and, at most, one relaunch.
+  auctions              Auction[]
   buyer                 Buyer           @relation(fields: [buyerId], references: [id])
   queueItems            QueueItem[]
   // Phase 1 transaction spine (20261106000100).
@@ -476,7 +479,7 @@ model Auction {
   id                   String                 @id @default(uuid())
   sourcingCaseId       String?                @map("sourcing_case_id")
   buyerId              String                 @map("buyer_id")
-  depositId            String                 @unique @map("deposit_id")
+  depositId            String                 @map("deposit_id")
   status               AuctionStatus          @default(PENDING)
   startedAt            DateTime?              @map("started_at")
   endsAt               DateTime?              @map("ends_at")
@@ -494,6 +497,12 @@ model Auction {
   // manual admin extensions; drives the MAX_AUTO_EXTENSIONS cap atomically.
   autoExtensionCount   Int                    @default(0) @map("auto_extension_count")
   originalAuctionId    String?                @map("original_auction_id")
+  // Phase 6 (20261115000000) — §13-D39. `relaunchedAt` is stamped on the ORIGINAL when its
+  // one permitted retry is created; `relaunchCount` is the readable form of the same fact.
+  // "One relaunch" is enforced declaratively by the partial unique on `original_auction_id`,
+  // not by this counter alone.
+  relaunchedAt         DateTime?              @map("relaunched_at")
+  relaunchCount        Int                    @default(0) @map("relaunch_count")
   // C1 — originating VehicleRequest (nullable). The admin launch path sets it
   // (buyer-ownership validated); the deposit-activation reconciler leaves it null.
   // No unique constraint: a retry auction legitimately shares its request.

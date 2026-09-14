@@ -34,7 +34,12 @@ function makeTx(state: MockState) {
   let offerSeq = 0;
   return {
     auction: {
-      findUnique: async (_args: AnyRec) => state.existingAuction,
+      // §13-D39: the conversion's idempotency anchor moved from `findUnique({ depositId })` to
+      // `findOriginalAuctionForDeposit`, because `auctions.deposit_id` is now unique only among
+      // rows with a NULL parent. The fake follows the production query rather than the old one —
+      // a fake left on `findUnique` would have thrown here, which is the honest failure, but one
+      // left answering by depositId alone would have passed while asking the wrong question.
+      findFirst: async (_args: AnyRec) => state.existingAuction,
       create: async ({ data, select }: { data: AnyRec; select?: AnyRec }) => {
         state.auctionCreates.push(data);
         void select;

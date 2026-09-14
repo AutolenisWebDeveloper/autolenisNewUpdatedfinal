@@ -25,12 +25,18 @@
 //           and therefore everything there is to count — belong to later phases. Stated
 //           rather than stubbed.
 //
-//   PAY-73  suppression while the transaction sits in an EXCEPTION state is NOT this
-//           phase: E26-45, T35 and the Phase 10 scope own it, and the unqualified
-//           phrase that stood in §8.2 implied otherwise (corrected 2026-09-09). It is
-//           deliberately absent from the reasons below rather than stubbed, because a
-//           predicate that always passes is worse than one that is not there — the next
-//           reader cannot tell which it is.
+//   PAY-73  suppression while the transaction sits in an EXCEPTION state. DEFERRED BY PHASE 3
+//           to E26-45/T35 and the Phase 10 scope, and RULED INTO PHASE 6 BY THE OWNER
+//           (2026-09-13): the interstitial ships with "the full suppression set including any
+//           open exception". Phase 3 could not build it honestly — `queue_items` had no writer
+//           it could rely on and a predicate that always passes is worse than one that is not
+//           there. Phase 6 raises four codes into that table, so the predicate now has
+//           something to read, and it is implemented below.
+//
+//           WHY IT MATTERS MOST HERE. Touchpoint 3 fires immediately after offer acceptance —
+//           the exact moment an approval-expired, over-budget or zero-offer case is most likely
+//           to be open. Asking a buyer for $400 while Operations is working out whether their
+//           transaction can proceed is the §23.2b failure that reads worst of all.
 //
 // PAY-72 IS NOT A PREDICATE. "Never sold on fear" is a property of the COPY — no message
 // may imply the deal goes worse on Standard, that Standard offers are weaker, or that
@@ -39,33 +45,22 @@
 // finds out where the fourth lives rather than concluding it was dropped.
 
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { QueueItemStatus, type Prisma } from "@prisma/client";
 import { depositNotOnHold } from "@/lib/payments/deposit-state";
 import { entitledPlanForRequest } from "@/lib/services/buyer/plan-snapshot.service";
+import { EMAIL_TOUCHPOINTS, type UpgradeTouchpoint } from "./upgrade-touchpoints";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
-/** §23.2a's five touchpoints. The vocabulary PAY-77 measures against. */
-export const UPGRADE_TOUCHPOINTS = {
-  /** Payment confirmation — a single line on the receipt and the sourcing-started screen. */
-  RECEIPT: "receipt",
-  /** Alongside the Best Price Report. */
-  BEST_PRICE_REPORT: "best_price_report",
-  /** The full-screen invitation, once, immediately after offer acceptance. */
-  POST_ACCEPTANCE: "post_acceptance",
-  /** Email one hour after acceptance, only if the invitation was declined or dismissed. */
-  POST_ACCEPTANCE_EMAIL: "post_acceptance_email",
-  /** Email at dealer reaffirmation or recap. The second and final ask. */
-  REAFFIRMATION_EMAIL: "reaffirmation_email",
-} as const;
-
-export type UpgradeTouchpoint = (typeof UPGRADE_TOUCHPOINTS)[keyof typeof UPGRADE_TOUCHPOINTS];
-
-/** The two touchpoints that are EMAILS. §23.2b: two emails, then silence. */
-export const EMAIL_TOUCHPOINTS: readonly UpgradeTouchpoint[] = [
-  UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE_EMAIL,
-  UPGRADE_TOUCHPOINTS.REAFFIRMATION_EMAIL,
-];
+// The vocabulary moved to a LEAF module (`upgrade-touchpoints.ts`) and is re-exported here so no
+// importer changes. It had to move: this file imports `plan-snapshot.service`, which imports the
+// vocabulary back, and that cycle became a run-time TDZ failure the moment a third module joined
+// the graph. A file with no imports cannot participate in a cycle.
+export {
+  UPGRADE_TOUCHPOINTS,
+  EMAIL_TOUCHPOINTS,
+  type UpgradeTouchpoint,
+} from "./upgrade-touchpoints";
 
 export type SuppressionReason =
   /** §23.2b — a do-not-contact flag. */
@@ -78,6 +73,8 @@ export type SuppressionReason =
   | "already_premium"
   /** §23.2b — the two-email ceiling, or a buyer who declined twice. */
   | "asked_enough"
+  /** PAY-73 — an open §26 exception on this transaction. Added Phase 6, owner-ruled. */
+  | "exception_in_progress"
   /** The request is gone. */
   | "request_not_found";
 
@@ -234,6 +231,43 @@ export async function isUpgradePromptSuppressed(
       detail:
         "no settled, unrefunded, undisputed $99 stands behind this request — a prompt here would " +
         "be selling a credit that is under dispute",
+    };
+  }
+
+  // PAY-73 — AN OPEN §26 EXCEPTION. Owner-ruled into this phase.
+  //
+  // Scoped to THIS request, plus buyer-level cases that name no request at all.
+  //
+  // The second arm exists because §26 rows carry whichever reference the raise site had, and some
+  // raise sites have no request: a deposit dispute, an auction created by the deposit-activation
+  // reconciler (which leaves `vehicleRequestId` null). A case like that is not attributable to one
+  // transaction, so treating it as suppressing is the conservative reading.
+  //
+  // `vehicleRequestId: null` ON THAT ARM IS LOAD-BEARING. It used to be a bare `{ buyerId }`, which
+  // matched an open case on ANY of the buyer's transactions: a zero-offer case on their first
+  // request that Operations never resolved silenced the Premium ask on their second request, for
+  // which they had paid a second $99, permanently. `raiseCloseException` passes the auction's
+  // `vehicleRequestId`, so a close-time case on another request is now correctly out of scope, and
+  // `upgradeAskCounts` scopes to the request for the same reason.
+  //
+  // LIVE means OPEN, ASSIGNED or ESCALATED — a case somebody still owns. RESOLVED and CLOSED are
+  // history and must not silence the ask forever, which is the failure mode of a bare
+  // `status: { not: "CLOSED" }`.
+  const openException = await db.queueItem.findFirst({
+    where: {
+      status: { in: [QueueItemStatus.OPEN, QueueItemStatus.ASSIGNED, QueueItemStatus.ESCALATED] },
+      OR: [
+        { vehicleRequestId: input.vehicleRequestId },
+        { buyerId: input.buyerId, vehicleRequestId: null },
+      ],
+    },
+    select: { exceptionCode: true },
+  });
+  if (openException) {
+    return {
+      suppressed: true,
+      reason: "exception_in_progress",
+      detail: `an open exception (${openException.exceptionCode ?? "unspecified"}) is being worked on this transaction`,
     };
   }
 

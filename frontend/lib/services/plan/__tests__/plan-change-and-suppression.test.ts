@@ -26,6 +26,7 @@ interface Ctrl {
   requestUpdates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   requestUpdateCount: number;
   exceptions: Array<Record<string, unknown>>;
+  openException: Record<string, unknown> | null;
 }
 let ctrl: Ctrl;
 
@@ -41,6 +42,9 @@ mock.module("@/lib/prisma", {
       },
       buyer: { findUnique: async () => ctrl.buyer },
       deposit: { findFirst: async () => ctrl.settledDeposit },
+      // PAY-73, added Phase 6: an open §26 exception suppresses the ask. Defaults to none, so
+      // every existing case below still exercises the reason it was written for.
+      queueItem: { findFirst: async () => ctrl.openException },
     },
   },
 });
@@ -97,6 +101,7 @@ beforeEach(() => {
     requestUpdates: [],
     requestUpdateCount: 1,
     exceptions: [],
+    openException: null,
   };
 });
 
@@ -255,3 +260,62 @@ test("assigning a concierge moves ownership, and re-assigning the same one is a 
   assert.equal(again.changed, false);
 });
 
+
+// ── PAY-73 — an open §26 exception suppresses the ask (added Phase 6, owner-ruled) ────────────
+
+test("an open exception on the transaction suppresses every touchpoint", async () => {
+  // Phase 3 deferred this to Phase 10 and said so explicitly, because `queue_items` had no writer
+  // it could rely on and a predicate that always passes is worse than one that is not there.
+  // Phase 6 raises four codes into that table, so it now has something to read — and touchpoint 3
+  // fires immediately after acceptance, the exact moment an approval-expired, over-budget or
+  // zero-offer case is most likely to be open. Asking for $400 while Operations is working out
+  // whether the transaction can proceed is the §23.2b failure that reads worst of all.
+  const { isUpgradePromptSuppressed } = await import("@/lib/services/plan/upgrade-suppression.service");
+  ctrl.openException = { exceptionCode: "ALL_OFFERS_EXCEED_BUDGET" };
+  const d = await isUpgradePromptSuppressed({ vehicleRequestId: "vr_1", buyerId: "b_1", touchpoint: "post_acceptance" });
+  assert.equal(d.suppressed, true);
+  assert.equal((d as { reason: string }).reason, "exception_in_progress");
+  assert.match((d as { detail: string }).detail, /ALL_OFFERS_EXCEED_BUDGET/);
+});
+
+test("the exception query looks for LIVE cases only, not resolved history", async () => {
+  // `status: { not: "CLOSED" }` would silence the ask forever after any case was worked, which is
+  // the failure mode this avoids: a resolved exception is history.
+  const calls: Array<Record<string, unknown>> = [];
+  const { prisma } = await import("@/lib/prisma");
+  const original = (prisma as unknown as { queueItem: { findFirst: unknown } }).queueItem.findFirst;
+  (prisma as unknown as { queueItem: { findFirst: unknown } }).queueItem.findFirst = async (a: Record<string, unknown>) => {
+    calls.push(a);
+    return null;
+  };
+  const { isUpgradePromptSuppressed } = await import("@/lib/services/plan/upgrade-suppression.service");
+  await isUpgradePromptSuppressed({ vehicleRequestId: "vr_1", buyerId: "b_1", touchpoint: "post_acceptance" });
+  (prisma as unknown as { queueItem: { findFirst: unknown } }).queueItem.findFirst = original;
+
+  const where = calls[0].where as { status: { in: string[] }; OR: Array<Record<string, unknown>> };
+  assert.deepEqual([...where.status.in].sort(), ["ASSIGNED", "ESCALATED", "OPEN"]);
+  assert.equal(where.status.in.includes("RESOLVED"), false, "a resolved case would silence the ask forever");
+  assert.equal(where.status.in.includes("CLOSED"), false);
+  // Scoped to THIS request, plus buyer-level cases that name NO request.
+  //
+  // The second arm used to be a bare `{ buyerId }`, and review showed what that cost: an open case
+  // on the buyer's FIRST transaction — a zero-offer case Operations never resolved — silenced the
+  // Premium ask on their second request, for which they had paid a second $99, permanently.
+  // `raiseCloseException` passes the auction's `vehicleRequestId`, so a close-time case on another
+  // request is correctly out of scope now; what remains in scope is a case with no request at all
+  // (a deposit dispute, an auction the deposit-activation reconciler created), which is not
+  // attributable to one transaction and is conservatively treated as suppressing.
+  assert.deepEqual(where.OR, [
+    { vehicleRequestId: "vr_1" },
+    { buyerId: "b_1", vehicleRequestId: null },
+  ]);
+});
+
+test("no open exception leaves an ordinary buyer askable", async () => {
+  const { isUpgradePromptSuppressed } = await import("@/lib/services/plan/upgrade-suppression.service");
+  ctrl.openException = null;
+  assert.deepEqual(
+    await isUpgradePromptSuppressed({ vehicleRequestId: "vr_1", buyerId: "b_1", touchpoint: "post_acceptance" }),
+    { suppressed: false },
+  );
+});

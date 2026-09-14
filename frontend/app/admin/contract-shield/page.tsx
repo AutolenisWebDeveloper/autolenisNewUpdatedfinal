@@ -4,6 +4,7 @@
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { normalizeJunkFeeItems } from "@/lib/services/offer/junk-fee-items";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Shield, AlertTriangle, Info } from "lucide-react";
@@ -35,8 +36,11 @@ function deriveRiskSeverity(scan: {
   if (scan.score < 40) signals.push(`Low scan score (${scan.score})`);
 
   // Signal 4: fee anomalies — junk fees present
-  const rawJunkFees = scan.deal.offer?.junkFeeItems;
-  const junkFeeCount = Array.isArray(rawJunkFees) ? rawJunkFees.length : 0;
+  // Counts the items the server CLASSIFIED as junk, not every itemised fee. Before Phase 6 wired
+  // `classifyFeeItems` into submission nothing was classified, so this counted the whole list and
+  // a documentation fee raised the same signal as a nitrogen fill.
+  const junkFeeCount = normalizeJunkFeeItems(scan.deal.offer?.junkFeeItems)
+    .filter((f) => f.isJunk !== false).length;
   if (junkFeeCount > 0) signals.push(`${junkFeeCount} junk fee item(s) on offer`);
 
   // Signal 5: existing risk score on deal

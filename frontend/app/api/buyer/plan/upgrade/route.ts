@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { NotificationType, NotificationChannel } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { limitGeneral } from "@/lib/security/rate-limit";
-import { recordPlanElection, recordRequestPlanElection } from "@/lib/services/buyer/plan-snapshot.service";
+import { recordPlanElection, recordRequestPlanElection, upgradeTouchpointOf } from "@/lib/services/buyer/plan-snapshot.service";
+import type { UpgradeTouchpoint } from "@/lib/services/plan/upgrade-suppression.service";
+import { recordConversion } from "@/lib/services/plan/upgrade-touchpoint.service";
 import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
 import { isUpgradeWindowOpen, quotePremiumBalance } from "@/lib/services/plan/upgrade-window.service";
 
@@ -20,6 +22,23 @@ import { isUpgradeWindowOpen, quotePremiumBalance } from "@/lib/services/plan/up
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
+
+  // WHICH TOUCHPOINT CONVERTED — PAY-77, and the numerator of the whole §23.2a measurement.
+  //
+  // The label is VALIDATED against §23.2a's five rather than stored as given: `touchpoint` reaches
+  // `plan_snapshots`, which carries an append-only trigger, so a client-supplied string would be
+  // permanently unfixable — and a per-touchpoint conversion query would silently miss it. An
+  // unrecognised or absent value falls back to the surface this route has always been, which is
+  // the honest answer for a buyer who navigated here themselves.
+  let convertedFrom: UpgradeTouchpoint | null = null;
+  try {
+    const body = (await request.clone().json()) as { touchpoint?: unknown };
+    if (typeof body?.touchpoint === "string") {
+      convertedFrom = upgradeTouchpointOf(body.touchpoint);
+    }
+  } catch {
+    // No body, or not JSON. The self-service case; nothing to attribute.
+  }
 
   if (buyer.plan === "PREMIUM") {
     return successResponse({ plan: "PREMIUM", alreadyUpgraded: true });
@@ -56,7 +75,7 @@ export async function POST(request: NextRequest) {
   await recordPlanElection({
     buyerId: buyer.id,
     plan: "PREMIUM",
-    touchpoint: "buyer_dashboard_upgrade",
+    touchpoint: convertedFrom ?? "buyer_dashboard_upgrade",
     actor: buyer.id,
     reason: "Self-service upgrade STANDARD → PREMIUM (no charge at this stage; fee collected at deal payment).",
   });
@@ -88,10 +107,22 @@ export async function POST(request: NextRequest) {
       buyerId: buyer.id,
       vehicleRequestId: openRequest.id,
       plan: "PREMIUM",
-      touchpoint: "buyer_dashboard_upgrade",
+      touchpoint: convertedFrom ?? "buyer_dashboard_upgrade",
       actor: buyer.id,
       reason: "Self-service election STANDARD → PREMIUM for this request. The $400 balance is unpaid.",
     });
+
+    // §23.2a's conversion counter, alongside the snapshot stamp. Two records of one fact, and
+    // deliberately: the snapshot answers "what plan, elected when, from where" for the
+    // transaction, and the activity event is the funnel's own series, queryable per touchpoint
+    // without reading the append-only plan ledger.
+    if (convertedFrom) {
+      await recordConversion({
+        buyerId: buyer.id,
+        vehicleRequestId: openRequest.id,
+        touchpoint: convertedFrom,
+      });
+    }
     windowState = await isUpgradeWindowOpen(openRequest.id);
     quote = await quotePremiumBalance(openRequest.id);
   }

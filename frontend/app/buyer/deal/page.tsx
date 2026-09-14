@@ -8,6 +8,7 @@ import { buyerFacingDealerName } from "@/lib/services/offer/dealer-display";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import PremiumInvitation from "@/components/buyer/PremiumInvitation";
 import Link from "next/link";
 import { ArrowRight, Car } from "lucide-react";
 
@@ -52,6 +53,11 @@ export default async function DealPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deal-page">
+      {/* §23.2a touchpoint 3. Mounted AFTER the deal exists and rendered from its own request, so
+          nothing about it can delay or fail the Deal the buyer has already made. Whether it shows
+          at all is the server's decision — the full suppression set, the once-ever impression and
+          the do-not-contact read all live behind `/api/buyer/plan/invitation`. */}
+      <PremiumInvitation dealId={deal.id} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-900">My Deal</h1>

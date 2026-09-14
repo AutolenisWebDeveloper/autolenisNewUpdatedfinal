@@ -30,6 +30,7 @@ import {
   parseDecisions,
   applyTriageToDocument,
   TRIAGE_CATEGORIES,
+  checkSectionHeadings,
 } from "../parity-ledger.mjs";
 
 const doc = () => readFileSync(DOC_PATH, "utf8");
@@ -99,6 +100,31 @@ describe("parity ledger — the two copies of the rows cannot diverge", () => {
     assert.equal(c.missing_key_count, 0, `rows with no ref: ${c.missing_keys.join(", ")}`);
     assert.equal(c.unique_requirement_keys, c.source_ledger_rows);
     assert.ok(c.bare_refs_reused_across_areas > 0, "bare refs are reused across areas — keys must stay qualified");
+  });
+
+  test("every §10.x heading agrees with the rows under it", () => {
+    // THE THIRD DRIFT SURFACE, and the one nothing watched. §10 holds thirteen hand-written
+    // headings, each declaring a row count and a status/phase tally beside the rows it describes.
+    // `embedded_matches_source` compares ROWS between the two copies and never reads a heading, so
+    // the headings drifted three times in one phase — §10.11 by six figures, §10.1 by four, §10.5
+    // by two — each found by a human counting, which is the labour this file exists to abolish.
+    assert.deepEqual(checkSectionHeadings(doc()), []);
+  });
+
+  test("the heading guard can actually fail", () => {
+    // Written because the first version of that guard COULD NOT. It compared a row's cell count
+    // against `COLUMNS` — the array of column NAMES, not its length — so every row was rejected,
+    // every section took the zero-row path, and `--check` reported "no drift" over thirteen
+    // sections it had never examined. A guard nobody has watched fail is a guard nobody has tested.
+    const broken = doc().replace(
+      /^(### 10\.1 .*?) — (\d+) rows$/m,
+      (_m, head, n) => `${head} — ${Number(n) + 1} rows`,
+    );
+    const problems = checkSectionHeadings(broken);
+    assert.ok(
+      problems.some((p: string) => /§10\.1 heading/.test(p)),
+      `an inflated row count went unnoticed: ${JSON.stringify(problems)}`,
+    );
   });
 
   test("regenerating from a clean state reproduces the committed document exactly", () => {

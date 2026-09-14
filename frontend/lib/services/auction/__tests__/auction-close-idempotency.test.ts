@@ -5,7 +5,13 @@
 // NULL → now() via an atomic updateMany, then only proceeds if exactly one row
 // was claimed. These tests lock that guard so a concurrent or repeated
 // invocation (overlapping cron ticks, admin manual close racing the cron) can
-// never double-notify the buyer or double-issue the zero-offer refund.
+// never double-notify the buyer.
+//
+// CORRECTED IN PHASE 6 (parity rows S6 / T19): this header used to say the guard also prevented
+// "double-issuing the zero-offer refund". THERE IS NO ZERO-OFFER REFUND. §23.1 retains the $99 at
+// close and makes every refund a reviewed request; `processAuctionClose` has never moved money and
+// must not. The line mattered because it described an automatic reversal as an existing behaviour
+// the guard protects, which is how a future change comes to add one.
 
 import test from "node:test";
 import assert from "node:assert/strict";

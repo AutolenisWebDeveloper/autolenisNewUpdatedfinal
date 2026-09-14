@@ -176,17 +176,41 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
   const data = parsed.data;
 
-  const submission = await prisma.dealerOfferSubmission.create({
-    data: {
-      vehicleOfferId: offer.id,
-      dealershipName: data.dealershipName,
-      contactName:    data.contactName,
-      contactEmail:   data.contactEmail.toLowerCase(),
-      contactPhone:   data.contactPhone,
-      vehicles:       data.vehicles as unknown as Parameters<typeof prisma.dealerOfferSubmission.create>[0]["data"]["vehicles"],
-      notes:          data.notes ?? null,
-      inviteId:       invite?.id ?? null,
-    },
+  // ── "SUBMIT ANOTHER OFFER", WHICH THE INVITE-TOKEN FIX BROKE ───────────────────────────────
+  //
+  // `dealer_offer_submissions.invite_id` is `@unique`. Before the authorized security fix the form
+  // POSTed the SHARED `VehicleOffer` token, so `invite` was always null here and the column was
+  // never written — a second submission was simply a second row. Carrying the per-dealer invite
+  // token (which is what stopped the confirmation page showing a competitor's bid) means the first
+  // submission now claims that column, and the confirmation page's own "Submit Another Offer" link
+  // — an invite-token URL — walked straight into a unique violation: an unhandled P2002, a 500,
+  // and a dealership that lost the work it had just typed with no way to succeed.
+  //
+  // The invite's OWN `submission_id` is re-pointed to the newest submission a few statements below
+  // and has always been re-pointable. Moving `invite_id` in the same transaction makes the two
+  // columns name the SAME row instead of leaving one stranded on the first submission. No
+  // submission is deleted or overwritten: an earlier one keeps its vehicles, documents, dealership
+  // name and contact details, and its `vehicle_offer_id` — it is simply no longer THE submission
+  // this invite resolves to, which is exactly what `submission_id` already said.
+  const submission = await prisma.$transaction(async (tx) => {
+    if (invite) {
+      await tx.dealerOfferSubmission.updateMany({
+        where: { inviteId: invite.id },
+        data:  { inviteId: null },
+      });
+    }
+    return tx.dealerOfferSubmission.create({
+      data: {
+        vehicleOfferId: offer.id,
+        dealershipName: data.dealershipName,
+        contactName:    data.contactName,
+        contactEmail:   data.contactEmail.toLowerCase(),
+        contactPhone:   data.contactPhone,
+        vehicles:       data.vehicles as unknown as Parameters<typeof prisma.dealerOfferSubmission.create>[0]["data"]["vehicles"],
+        notes:          data.notes ?? null,
+        inviteId:       invite?.id ?? null,
+      },
+    });
   });
 
   // ── Upload documents now that submission.id is available ────────────────

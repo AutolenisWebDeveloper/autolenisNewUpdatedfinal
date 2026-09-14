@@ -581,6 +581,86 @@ async function terminalFail(
   );
 }
 
+/**
+ * §27 — A REQUIRED COMMUNICATION HAS NOWHERE TO GO.
+ *
+ * Owner ruling 2026-09-14: "a `logger.error` standing in for an exception is the defect class this
+ * program has spent five phases eliminating." Five sites across this phase discovered that a
+ * recipient had no address and returned silently; this is the one place that turns that discovery
+ * into an owned case.
+ *
+ * NOT `COMMS_TERMINAL_FAILURE`. That code is for a message that entered the rail and exhausted its
+ * retries: it keys on `comms_outbox.id` and sends the operator to the outbox. Here there is no row
+ * — `enqueueTransactional` refuses a channel with no address before the insert — so the operator
+ * would arrive to find nothing. See the catalogue entry for the full argument.
+ *
+ * THE TRY/CATCH IS IN HERE, NOT AT THE CALL SITES, and that placement is the point.
+ * `queue-item.service.ts` states the contract: "a caller on a request hot path that must not fail
+ * because of the queue wraps this call itself — the writer does not silently drop an exception on
+ * the caller's behalf." No caller of this helper can afford a throw: three sit inside
+ * `processAuctionClose`'s claimed block, one is on a buyer request path, and the fifth is inside
+ * `sweepUnselectedAuctions`'s per-auction best-effort catch, where a throw would skip `swept++` and
+ * report a buyer as swept whose terminal `BUYER_DOES_NOT_SELECT` marker has already landed — so the
+ * auction never becomes a candidate again. Putting the wrap in one place is what stops the sixth
+ * call site forgetting it.
+ *
+ * That matters more than it looks. A throw out of `enqueueCloseNotice` releases the post-close
+ * claim and is rethrown, and the condition is DURABLE — a missing mailbox does not appear on its
+ * own — so the five-minute cron would re-enter the whole close path forever: the zero-offer case
+ * would never be raised (it sits after the notice), no dealership would ever be told there was no
+ * winner, `postCloseProcessedAt` would stay NULL and permanently exclude the auction from the S15
+ * sweep, and the admin manual close would 500 on a close that actually happened. One reportable
+ * defect would become five.
+ *
+ * The deliberate asymmetry: `raiseCloseException` is correctly NOT wrapped. Its failure is
+ * transient, so releasing the claim and retrying is the right answer there. This one's is not.
+ */
+export async function raiseNoDeliverableChannel(
+  input: {
+    templateKey: string;
+    channel: "email" | "sms";
+    /** The dedup key the notice WOULD have carried. The key names the message that does not exist. */
+    outboxKey: string;
+    recipientKind: "buyer" | "dealer";
+    recipientId: string | null;
+    refs: {
+      vehicleRequestId?: string | null;
+      dealId?: string | null;
+      auctionId?: string | null;
+      depositId?: string | null;
+      buyerId?: string | null;
+      dealerId?: string | null;
+    };
+  },
+  db: Db = prisma,
+): Promise<void> {
+  try {
+    await raiseException(
+      {
+        code: "COMMS_NO_DELIVERABLE_CHANNEL",
+        ...input.refs,
+        // Once-ever on the message that was never produced. The condition is durable, so a
+        // recurrence suffix would open a new row on every pass for as long as the address is
+        // missing.
+        idempotencyKey: `COMMS_NO_DELIVERABLE_CHANNEL:${input.outboxKey}`,
+        // Mirrors `terminalFail`'s detail shape, including its "(unidentified)" convention — a
+        // recipient rendered as an empty string reads as a bug in the alert rather than a missing
+        // field on the row.
+        detail:
+          `template ${input.templateKey} to ${input.recipientKind} ` +
+          `${input.recipientId ?? "(unidentified)"}: no ${input.channel} address on record — ` +
+          `no outbox row was produced`,
+      },
+      db,
+    );
+  } catch (err) {
+    logger.error(
+      `[comms-dispatcher] could not raise COMMS_NO_DELIVERABLE_CHANNEL for ${input.outboxKey}:`,
+      err,
+    );
+  }
+}
+
 export interface TransactionalDrainSummary {
   status: "OK" | "NO_PENDING";
   claimed: number;

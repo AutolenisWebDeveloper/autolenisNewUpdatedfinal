@@ -554,3 +554,197 @@ registerStateRecheck(
   ),
   "operations alert"
 );
+
+// ---------------------------------------------------------------------------
+// Phase 6 templates. §27.1 close rows.
+// ---------------------------------------------------------------------------
+
+/** Template keys Phase 6 enqueues. §27.1 rows K27-1326 and K27-1327. */
+export const PHASE_6_TEMPLATES = {
+  /** §27.1 "Offers ready" → Buyer, "Ranked report and selection instructions". */
+  OFFERS_READY: "offers_ready",
+  /** §27.1 "Zero offers" → Buyer, "Outcome and recovery path". */
+  AUCTION_ZERO_OFFERS: "auction_zero_offers",
+  /** §27.1 K27-1330 / §23.2a touchpoint 4 — one hour after acceptance, only if declined. */
+  PREMIUM_FOLLOW_UP: "premium_follow_up",
+  /** §9 / parity row S14 — "remind the buyer before offers expire". NEW §27.1 row, Phase 6. */
+  SELECTION_REMINDER: "selection_reminder",
+  /** §9 / parity row S15 — every offer lapsed without a selection. Buyer told either way. */
+  OFFERS_EXPIRED_UNSELECTED: "offers_expired_unselected",
+} as const;
+
+export type Phase6TemplateKey = (typeof PHASE_6_TEMPLATES)[keyof typeof PHASE_6_TEMPLATES];
+
+/**
+ * The qualified-offer predicate, re-read at send time.
+ *
+ * It is deliberately the SAME three conditions `qualifiedOfferWhere` applies at close — status
+ * SUBMITTED, not disqualified, not expired — expressed here against `ctx.db` rather than imported,
+ * because `lib/services/offer/offer-validity.ts` is compiled into the request/service tree and this
+ * registry is loaded by the outbox DRAIN. Importing it would pull the offer tree into the drain
+ * process for one `where` clause. The duplication is three lines and is pinned by a test that reads
+ * both and asserts they agree.
+ */
+async function countQualifiedOffers(ctx: StateRecheckContext, auctionId: string): Promise<number> {
+  return ctx.db.offer.count({
+    where: {
+      auctionId,
+      status: "SUBMITTED",
+      isDisqualified: false,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+  });
+}
+
+/**
+ * "Your offers are ready" must not arrive after the buyer has already chosen, and must not arrive
+ * at all if the offers it counts have gone.
+ *
+ * BOTH READS MATTER. A buyer who selected within the drain window (the outbox runs on its own
+ * cadence; an early accept selects inside the same minute the auction closes) would otherwise be
+ * invited to choose an offer they have already chosen. And an offer that lapsed or was withdrawn
+ * between the close and the drain would make the count in the subject line a lie — §8c's "never
+ * presented as qualified" applies to the notice as much as to the report.
+ */
+const skipIfOffersNoLongerReady: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "offers-ready notice with no auction reference" };
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "buyer already selected an offer" };
+  const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
+  if (qualified === 0) return { proceed: false, reason: "no qualified offer remains on this auction" };
+  return { proceed: true };
+};
+
+/**
+ * "No dealership submitted a qualified offer" is false the moment one has.
+ *
+ * That is not hypothetical: §8.2 defect 2 routes staff intake through `submitOffer`, so an offer
+ * that arrived by phone during the auction can be entered after the close, and §13-D39's relaunch
+ * is started by the same operator who would be reading this queue row. Sending the buyer a
+ * "nothing came in" notice after an offer has landed is the worst version of a stale message,
+ * because it also contradicts the in-app notice they can see.
+ */
+const skipIfOffersArrived: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "zero-offer notice with no auction reference" };
+  // AN ACCEPTED OFFER IS THE STRONGEST POSSIBLE REFUTATION and it does not count as qualified —
+  // selection moves the winner to ACCEPTED and the rest to DECLINED, so an auction the buyer has
+  // just bought on has a qualified count of ZERO. Without this the recheck would happily deliver
+  // "no dealership submitted a qualified offer" to a buyer holding a Deal. Checked first, and
+  // deliberately mirroring `skipIfOffersNoLongerReady`.
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "an offer on this auction was already selected" };
+  const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
+  if (qualified > 0) return { proceed: false, reason: `${qualified} qualified offer(s) arrived after the close` };
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_6_TEMPLATES.OFFERS_READY, skipIfOffersNoLongerReady);
+registerStateRecheck(PHASE_6_TEMPLATES.AUCTION_ZERO_OFFERS, skipIfOffersArrived);
+
+/**
+ * §23.2a touchpoint 4 — the one-hour follow-up, re-decided at send time.
+ *
+ * THE WHOLE SUPPRESSION SET IS RE-EVALUATED HERE, not merely re-read. The row is written at
+ * acceptance and drains an hour later, and that hour is exactly when the things §23.2b suppresses
+ * on tend to happen: the buyer upgrades from the interstitial's own link, a dispute lands on the
+ * $99, Operations opens an exception on the deal, the buyer starts cancelling. Enqueue-time
+ * suppression alone would send the ask into every one of those.
+ *
+ * It ALSO re-checks the precondition that is unique to this touchpoint: §23.2a sends it "only if
+ * the invitation was declined or dismissed". A buyer who simply has not opened the interstitial
+ * yet has not declined anything, and must not be emailed as though they had.
+ */
+const skipIfUpgradeNoLongerAskable: StateRecheckFn = async (ctx) => {
+  const vehicleRequestId = ctx.vehicleRequestId;
+  if (!vehicleRequestId || !ctx.recipientId) {
+    return { proceed: false, reason: "premium follow-up with no request or buyer reference" };
+  }
+  const [{ isUpgradePromptSuppressed, UPGRADE_TOUCHPOINTS }, { upgradeAskCounts, recordImpression }] =
+    await Promise.all([
+      import("@/lib/services/plan/upgrade-suppression.service"),
+      import("@/lib/services/plan/upgrade-touchpoint.service"),
+    ]);
+
+  const counts = await upgradeAskCounts(ctx.recipientId, vehicleRequestId, ctx.db);
+  if (counts.declines === 0) {
+    return { proceed: false, reason: "the invitation was never declined or dismissed — §23.2a sends this only if it was" };
+  }
+
+  const decision = await isUpgradePromptSuppressed(
+    {
+      vehicleRequestId,
+      buyerId: ctx.recipientId,
+      touchpoint: UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE_EMAIL,
+      emailsSent: counts.emailsSent,
+      declines: counts.declines,
+    },
+    ctx.db,
+  );
+  if (decision.suppressed) return { proceed: false, reason: `${decision.reason}: ${decision.detail}` };
+
+  // RECORD THE EMAIL ASK, HERE AND NOWHERE ELSE. `upgradeAskCounts().emailsSent` derives from
+  // impressions on `EMAIL_TOUCHPOINTS`, and until now nothing ever recorded one — every writer used
+  // an in-app touchpoint — so the count was permanently 0 and §23.2b's "two emails, then silence"
+  // ceiling could never bind, however many emails went out.
+  //
+  // This is the correct moment and the enqueue was not: an outbox row that the recheck later
+  // suppresses is an ask that never happened, and counting it would silence a later, legitimate
+  // one. `proceed: true` is the decision to actually ask.
+  await recordImpression(
+    {
+      buyerId: ctx.recipientId,
+      vehicleRequestId,
+      touchpoint: UPGRADE_TOUCHPOINTS.POST_ACCEPTANCE_EMAIL,
+      detail: { templateKey: PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP },
+    },
+    ctx.db,
+  );
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP, skipIfUpgradeNoLongerAskable);
+
+/**
+ * §9 / S14 — the pre-expiry selection reminder, re-decided at send time.
+ *
+ * Scheduled at close for 24 hours before the earliest expiry, which means it sits in the outbox
+ * for two days — the longest gap between enqueue and drain anywhere in this phase, and therefore
+ * the one most likely to have become false. THREE things can make it false, and the cancel key
+ * only covers the first:
+ *
+ *   the buyer selected          `cancelByKey` fires on selection, but a cancel that failed (or a
+ *                               selection through a path that forgot it) must not produce "your
+ *                               offers expire soon — choose one" for a buyer holding a Deal.
+ *   the offers went            withdrawn, disqualified on re-evaluation, or already lapsed.
+ *                               Reminding someone to choose from nothing is worse than silence.
+ *   nothing is left to choose   the same read, stated as the qualified count.
+ */
+const skipIfSelectionNoLongerNeeded: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "selection reminder with no auction reference" };
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "the buyer has already selected" };
+  const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
+  if (qualified === 0) return { proceed: false, reason: "no qualified offer remains to choose from" };
+  return { proceed: true };
+};
+
+/**
+ * §9 / S15 — "non-selection → revalidation with dealerships or closure; buyer informed EITHER WAY".
+ *
+ * The one thing that makes this false is a selection that landed between the sweep and the drain.
+ * A lapsed offer does NOT make it false — the message is about the lapse.
+ */
+const skipIfSelectedAfterExpiry: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "expiry notice with no auction reference" };
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "the buyer selected before the offers lapsed" };
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_6_TEMPLATES.SELECTION_REMINDER, skipIfSelectionNoLongerNeeded);
+registerStateRecheck(PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED, skipIfSelectedAfterExpiry);
+
+/** §27's cancellation rule. One key for the reminder, cancelled the moment the buyer chooses. */
+export function selectionReminderCancelKey(auctionId: string): string {
+  return `selection-reminder:${auctionId}`;
+}
