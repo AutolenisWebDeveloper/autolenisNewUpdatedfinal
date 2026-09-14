@@ -159,3 +159,18 @@ OK — no functional drift; structural drift at baseline.
    boundary `offer-expiry.test.ts` pins in memory and this run confirms in PostgreSQL.
 
 == PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) — DEGRADED against production's 17.x, per §8 above ==
+
+== 12. RUNTIME PROBE — `id: { notIn: [] }` (probe-qualified-count.ts, probeEmptyNotIn) ==
+   The candidate-closing sweep in `processAuctionClose` uses `id: { notIn: [...answered] }`, and the
+   answered set is legitimately EMPTY on a zero-offer auction. SQL's own `x NOT IN ()` is a syntax
+   error, so the client must rewrite it — and the rewrite could go either way.
+
+   Read from Prisma's query log against PostgreSQL 16.13:
+
+     notIn: []        SELECT ... WHERE ("candidate_status" = $1 AND 1=1)
+     notIn: [a, b]    SELECT ... WHERE ("candidate_status" = $1 AND "id" NOT IN ($2,$3))
+
+   EMPTY MATCHES EVERYTHING. Both directions are load-bearing: the zero-offer arm needs it to
+   close every candidate, and the success arm needs the attributability guard in the service,
+   because an empty answered set there means the qualified offers could not be attributed to a
+   candidate — not that no candidate was answered.

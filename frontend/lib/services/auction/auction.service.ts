@@ -3,10 +3,10 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { AuctionStatus, OfferStatus, Prisma, VehicleRequestStatus } from "@prisma/client";
+import { AuctionStatus, NotificationType, OfferStatus, Prisma, VehicleRequestStatus } from "@prisma/client";
 import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { releaseAuctionLoad } from "@/lib/services/auction/dealer-invitation.service";
-import { rankOffers } from "@/lib/services/offer/best-price.service";
+import { rankOffers, getPersistedRanking } from "@/lib/services/offer/best-price.service";
 import { sendDealerAuctionClosedNoWinnerEmail } from "@/lib/services/email/resend.service";
 import { qualifiedOfferWhere, lapsedOfferWhere } from "@/lib/services/offer/offer-validity";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
@@ -239,7 +239,8 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
 
     // UNATTRIBUTABLE IS NOT UNANSWERED, and the guard is load-bearing because of how Prisma
     // compiles the query: `id: { notIn: [] }` becomes `AND 1=1` — it matches EVERYTHING (verified
-    // against PostgreSQL 16.13 by reading the generated SQL; see phase-6-proof). So an empty
+    // against PostgreSQL 16.13 by reading the generated SQL — `probeEmptyNotIn` in
+    // docs/transaction-flow/phase-6-proof/, recorded as §12 of proof-run.log). So an empty
     // `answered` set on a SUCCESSFUL auction would close every candidate and stamp each with "no
     // qualified offer", which is simply false.
     //
@@ -249,7 +250,14 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
     //
     // Zero qualified offers is the opposite case and must still close them all — nothing was
     // answered, and N1 says so. Hence the two-armed condition rather than a bare `size > 0`.
-    if (qualified.length === 0 || answered.size > 0) {
+    // The residual case the guard alone does not cover: SOME offers bound and some not. A
+    // pre-Phase-6 row carries a NULL binding (the column had no writer until this phase), so on an
+    // auction that spans the deploy the legacy offer's candidate cannot be identified — and
+    // closing it with "No qualified offer at auction close" would be false about a candidate that
+    // may well have been answered. Unattributable offers therefore suspend the sweep entirely
+    // rather than letting the attributable ones close everything else.
+    const anyUnattributable = qualified.some((o) => !o.auctionVehicleId);
+    if (qualified.length === 0 || (answered.size > 0 && !anyUnattributable)) {
       await prisma.auctionVehicle.updateMany({
         where: { auctionId, candidateStatus: "ACTIVE", id: { notIn: [...answered] } },
         data: { candidateStatus: "CLOSED", droppedReason: "No qualified offer at auction close (§22a)." },
@@ -257,7 +265,14 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
     }
 
     if (qualified.length > 0) {
-      await rankOffers(auctionId, 60, { persistLog: true }).catch((err) =>
+      // PERSIST THE RANKING ONCE PER AUCTION, not once per reconciler pass. The release-on-failure
+      // branch below makes re-entry a normal outcome, and `bestPriceCalculationLog` has no dedup
+      // key, so an unguarded `persistLog` would append a near-identical audit row every five
+      // minutes for as long as a downstream write kept failing. An existing ranking is what the
+      // buyer report serves (parity row C9), so re-ranking would also silently change the report
+      // under a buyer who is reading it.
+      const alreadyRanked = await getPersistedRanking(auctionId).catch(() => null);
+      await rankOffers(auctionId, 60, { persistLog: !alreadyRanked }).catch((err) =>
         logger.error(`[processAuctionClose] rankOffers failed for ${auctionId}:`, err),
       );
 
@@ -266,23 +281,38 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       // has already happened (an early accept closes the auction and creates the Deal first), and
       // so a re-run is a no-op.
       if (auction.vehicleRequestId) {
-        await prisma.vehicleRequest.updateMany({
+        const advanced = await prisma.vehicleRequest.updateMany({
           where: {
             id: auction.vehicleRequestId,
             status: { in: PRE_OFFER_REQUEST_STATUSES },
           },
           data: { status: "OFFER_READY" },
         });
+        // Parity row C12 requires the EVENT as well as the status. The conditional update is the
+        // compare-and-swap, so `count` is the honest answer to "did this run advance it?" — and
+        // writing the event unconditionally would give a reprocessed auction a second event for a
+        // transition that did not happen this time. Non-blocking: the request has already
+        // advanced, and losing the timeline row must not release the close claim and redo the
+        // notices.
+        if (advanced.count > 0) {
+          await prisma.vehicleRequestEvent
+            .create({
+              data: {
+                requestId: auction.vehicleRequestId,
+                eventType: "OFFER_READY",
+                actorRole: "SYSTEM",
+                payload: { auctionId, qualifiedOffers: qualified.length },
+                note: "Auction closed with at least one qualified offer (§8c exit).",
+              },
+            })
+            .catch((e) => logger.error(`[processAuctionClose] OFFER_READY event row failed for ${auctionId}:`, e));
+        }
       }
 
-      await prisma.notification.create({
-        data: {
-          buyerId: auction.buyerId,
-          title: `Your auction closed — ${qualified.length} offer${qualified.length !== 1 ? "s" : ""} ready`,
-          body: "Review your ranked offers and select your best deal.",
-          type: "OFFER_RECEIVED",
-          actionUrl: `/buyer/auction/${auctionId}/offers`,
-        },
+      await notifyBuyerOnce(auction.buyerId, `/buyer/auction/${auctionId}/offers`, {
+        title: `Your auction closed — ${qualified.length} offer${qualified.length !== 1 ? "s" : ""} ready`,
+        body: "Review your ranked offers and select your best deal.",
+        type: "OFFER_RECEIVED",
       });
 
       await enqueueCloseNotice(auction, auctionId, qualified.length, now);
@@ -293,13 +323,10 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       // The deposit remains refundable on request, subject to manual AutoLenis
       // review (§23.1); any refund must be issued deliberately by an admin via the
       // manual refund tools.
-      await prisma.notification.create({
-        data: {
-          buyerId: auction.buyerId,
-          title: "Auction closed — no offers received",
-          body: `Your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit secured your private auction. Since no competitive offer was received, you can request a refund — our team reviews every request. You may also start a new request or request a specific vehicle.`,
-          type: "DEAL_STAGE_CHANGED",
-        },
+      await notifyBuyerOnce(auction.buyerId, `/buyer/auction/${auctionId}`, {
+        title: "Auction closed — no offers received",
+        body: `Your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit secured your private auction. Since no competitive offer was received, you can request a refund — our team reviews every request. You may also start a new request or request a specific vehicle.`,
+        type: "DEAL_STAGE_CHANGED",
       });
 
       await enqueueCloseNotice(auction, auctionId, 0, now);
@@ -329,12 +356,24 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
 
     return { offers: qualified.length };
   } catch (err) {
-    // Release the claim so the reconciler retries on the next pass. Post-close
-    // processing moves no money (the deposit is never auto-refunded), the outbox
-    // rows are idempotent on their dedup keys and the exception is idempotent on
-    // (code, refs), so a retry cannot double-anything.
+    // Release the claim so the reconciler retries on the next pass — BUT ONLY THIS RUN'S CLAIM.
+    //
+    // `where: { id }` alone is a lost update, and the row it loses is the one that matters most.
+    // `commitOfferSelection` stamps `postCloseProcessedAt` inside the selection transaction
+    // precisely so the reconciler can never re-claim an auction the buyer has already bought on
+    // (`select-offer.service.ts`). A buyer selecting between this run's claim and this run's
+    // failure would have their stamp overwritten with NULL, the next tick would re-claim, and —
+    // because the winner is now ACCEPTED and the losers DECLINED, so nothing is QUALIFIED — the
+    // auction would fall into the zero-offer branch: the buyer who has just bought a car gets
+    // "Auction closed — no offers received", an Operations case is opened against their Deal, and
+    // every invited dealership including the winner is told there was no winner.
+    //
+    // The compare-and-swap releases only a marker still equal to the one this run wrote.
     await prisma.auction
-      .updateMany({ where: { id: auctionId }, data: { postCloseProcessedAt: null } })
+      .updateMany({
+        where: { id: auctionId, postCloseProcessedAt: now },
+        data: { postCloseProcessedAt: null },
+      })
       .catch(() => {});
     logger.error(
       `[processAuctionClose] side effects failed for ${auctionId} — claim released for retry:`,
@@ -382,6 +421,33 @@ export async function expireLapsedOffers(
     data: { status: OfferStatus.EXPIRED },
   });
   return res.count;
+}
+
+/**
+ * One in-app row per auction outcome, however many times the close is reprocessed.
+ *
+ * The `notifications` table carries no dedup key and no auction reference, so the identity used
+ * here is `(buyerId, actionUrl)` — the action URL is auction-scoped by construction and is what the
+ * buyer clicks. The guard is a read, not a constraint, which is sufficient for what it defends
+ * against: the reconciler retry loop, whose passes are serialised by the atomic claim. It is not a
+ * defence against two simultaneous claims, and cannot be — only one of those exists.
+ *
+ * WHY IT IS NEEDED AT ALL. Under the old code these writes ended in `.catch(() => {})` and nothing
+ * after them could throw, so a retry loop did not exist. Now the notices and the exception
+ * propagate on purpose, and the cron re-enters every five minutes — which without this would
+ * append 288 identical bell rows a day for one buyer while an outbox outage lasted.
+ */
+async function notifyBuyerOnce(
+  buyerId: string,
+  actionUrl: string,
+  data: { title: string; body: string; type: NotificationType },
+): Promise<void> {
+  const existing = await prisma.notification.findFirst({
+    where: { buyerId, actionUrl },
+    select: { id: true },
+  });
+  if (existing) return;
+  await prisma.notification.create({ data: { buyerId, actionUrl, ...data } });
 }
 
 /** The qualified count, for callers that did not win the claim and must still report honestly. */

@@ -17,6 +17,7 @@ import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifica
 import { assertOtdComponentsMatch } from "./otd";
 import { classifyFeeItems } from "./junk-fee.service";
 import { defaultOfferExpiry } from "./offer-validity";
+import { computeFeatureMatch } from "./feature-match";
 import { recheckApproval } from "@/lib/services/prequal/approval-recheck";
 export { assertOtdComponentsMatch };
 
@@ -138,6 +139,23 @@ export interface OfferInput {
   auctionVehicleId?: string | null;
   /** §8a — the rooftop that made the offer. Phase 1 shipped the column; nothing wrote it. */
   rooftopId?: string | null;
+
+  // ── A2b — THE VEHICLE SNAPSHOT (§8a "Vehicle snapshot required on every offer") ────────────
+  //
+  // Nine Phase 1 columns describing WHICH CAR the offer is for. All optional here and prefilled
+  // from the bound candidate's listing, because the candidate row already IS the vehicle the
+  // auction named — asking a dealership to retype a VIN AutoLenis holds invites a transcription
+  // error into the field the whole deal is keyed on. What the caller passes always wins.
+  vin?: string | null;
+  stockNumber?: string | null;
+  vehicleYear?: number | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleTrim?: string | null;
+  odometer?: number | null;
+  vehicleCondition?: string | null;
+  exteriorColor?: string | null;
+  interiorColor?: string | null;
   /**
    * §8a — "Offer expiration", a REQUIRED field. Defaults to `OFFER_VALIDITY_HOURS` after the
    * auction closes (`defaultOfferExpiry`), never to the close itself — see the write site.
@@ -219,7 +237,26 @@ export async function submitOffer(input: OfferInput) {
     // the binding is what makes §8b's cap enforceable at the database rather than only in code.
     const candidates = await tx.auctionVehicle.findMany({
       where: { auctionId: input.auctionId, candidateStatus: "ACTIVE" },
-      select: { id: true },
+      // A2b / A17b read the SAME rows the binding check already fetches: the vehicle snapshot is
+      // prefilled from the candidate an offer answers, and the feature match is computed against
+      // that candidate's listing. One query, not three.
+      select: {
+        id: true,
+        year: true,
+        make: true,
+        model: true,
+        trim: true,
+        mileage: true,
+        inventoryItem: {
+          // No `stockNumber` on `InventoryItem` — a dealer's own stock number is not something a
+          // marketplace feed carries, so `offers.stock_number` is filled only when the submitter
+          // states one. Prefilling it from anything here would be inventing it.
+          select: {
+            vin: true, year: true, make: true, model: true, trim: true,
+            mileage: true, condition: true, exteriorColor: true, interiorColor: true, features: true,
+          },
+        },
+      },
     });
     if (candidates.length > 0) {
       if (!input.auctionVehicleId) {
@@ -232,6 +269,49 @@ export async function submitOffer(input: OfferInput) {
     // No candidates: a CUSTOM REQUEST, where §8c binds the offer to the criteria set instead. The
     // binding stays null rather than being invented, per parity row C3b.
     const auctionVehicleId = candidates.length > 0 ? input.auctionVehicleId ?? null : null;
+
+    const boundCandidate = auctionVehicleId ? candidates.find((c) => c.id === auctionVehicleId) ?? null : null;
+
+    // ── A2b — THE VEHICLE SNAPSHOT (§8a "Vehicle snapshot required on every offer") ───────────
+    //
+    // Nine `offers` columns shipped in the Phase 1 wave describing WHICH CAR an offer is for, and
+    // the dealer form posts money only — so the buyer's report compared four prices with no way to
+    // tell whether they were for the same vehicle, and a Deal's lineage recorded a VIN it never
+    // captured.
+    //
+    // PREFILLED FROM THE BOUND CANDIDATE rather than demanded from the dealer. The candidate row
+    // IS the vehicle the auction named; asking a dealership to retype a VIN AutoLenis already
+    // holds invites a transcription error into the one field the whole deal is keyed on. What the
+    // caller passes always wins — a dealer offering a different trim than the one listed must be
+    // able to say so — and the listing fills the rest.
+    const listing = boundCandidate?.inventoryItem ?? null;
+    const snapshot = {
+      vin: input.vin ?? listing?.vin ?? null,
+      stockNumber: input.stockNumber ?? null,
+      vehicleYear: input.vehicleYear ?? boundCandidate?.year ?? listing?.year ?? null,
+      vehicleMake: input.vehicleMake ?? boundCandidate?.make ?? listing?.make ?? null,
+      vehicleModel: input.vehicleModel ?? boundCandidate?.model ?? listing?.model ?? null,
+      vehicleTrim: input.vehicleTrim ?? boundCandidate?.trim ?? listing?.trim ?? null,
+      odometer: input.odometer ?? boundCandidate?.mileage ?? listing?.mileage ?? null,
+      vehicleCondition: input.vehicleCondition ?? listing?.condition ?? null,
+      exteriorColor: input.exteriorColor ?? listing?.exteriorColor ?? null,
+      interiorColor: input.interiorColor ?? listing?.interiorColor ?? null,
+    };
+
+    // ── A17b — THE REQUIRED-FEATURE MATCH ────────────────────────────────────────────────────
+    //
+    // §8c's tie-break is "lowest out-the-door, then BEST REQUIRED-FEATURE MATCH, then shortest
+    // distance, then earliest submission". Its second key had nothing to read: both columns shipped
+    // with no writer. Computed here, against the buyer's stated requirements and the bound
+    // candidate's listing, and persisted so the ranked report is reproducible from the row rather
+    // than recomputed differently by each reader. Unknown stays NULL — see `feature-match.ts`.
+    const requestCriteria = auction.vehicleRequestId
+      ? await tx.vehicleRequest.findUnique({
+          where: { id: auction.vehicleRequestId },
+          select: { requiredFeatures: true },
+        })
+      : null;
+    const featureMatch = computeFeatureMatch(requestCriteria?.requiredFeatures, listing?.features);
 
     // The rooftop is the invitation's, not the caller's: §7 issues one invitation per rooftop, so
     // that row is the authority on which rooftop this dealer is bidding for. Taking it from the
@@ -326,6 +406,9 @@ export async function submitOffer(input: OfferInput) {
         // expires together — see OFFER_VALIDITY_HOURS. A dealer who states a shorter expiration
         // is taken at their word.
         expiresAt: input.expiresAt ?? defaultOfferExpiry(auction.endsAt, now),
+        ...snapshot,
+        requiredFeatureMatches: featureMatch.matches as unknown as Prisma.InputJsonValue,
+        requiredFeatureMismatches: featureMatch.mismatches as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -501,10 +584,29 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
   // the version the buyer is actually shown.
   const classifiedFeeItems = await classifyFeeItems(merged.junkFeeItems);
   const revised = await prisma.$transaction(async (tx) => {
-    const stillOriginal = await tx.offer.findFirst({
+    // ── WITHDRAW FIRST, THEN INSERT. THE ORDER IS THE CORRECTNESS. ───────────────────────────
+    //
+    // `offers_one_live_per_rooftop_candidate_key` is a partial unique over
+    // `(auction_id, rooftop_id, auction_vehicle_id) WHERE status = 'SUBMITTED'`. The revision
+    // carries both scope columns forward — it has to, or §8b's cap stops binding and the
+    // dealership can hold two live offers on one vehicle — so while the original is still
+    // SUBMITTED the new row collides with it: `23505`, P2002, the whole Serializable transaction
+    // rolls back, and the dealer's revise endpoint returns "Failed to revise offer. Please try
+    // again." for every rooftop-bound offer on a candidate auction. That is the mainline.
+    //
+    // It was invisible before Phase 6 only because both columns were NULL on the revision and
+    // PostgreSQL treats NULLs as distinct — the same inertness that made the index meaningless.
+    // Writing the columns is what makes the index real, and a real index has to be respected in
+    // the statement order.
+    //
+    // THE WITHDRAW IS ALSO THE COMPARE-AND-SWAP. `updateMany` on the exact prior status either
+    // claims the row or reports 0, which is a stronger guard than the read-then-write it replaces:
+    // a concurrent revision cannot pass a `findFirst` check and then have both callers insert.
+    const claimed = await tx.offer.updateMany({
       where: { id: offerId, dealerId, status: OfferStatus.SUBMITTED },
+      data: { status: OfferStatus.WITHDRAWN },
     });
-    if (!stillOriginal) throw new Error("Offer was modified concurrently");
+    if (claimed.count !== 1) throw new Error("Offer was modified concurrently");
 
     const created = await tx.offer.create({
       data: {
@@ -550,9 +652,10 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
         //   expiresAt           §8a's required field, dropped on revision — the revised offer
         //                       inherited no expiry at all.
         //
-        // Re-derived rather than copied where the source is authoritative: the expiry comes from
-        // the auction's own deadline again, so a revision cannot extend its own validity past
-        // the window every other offer on the auction gets.
+        // The expiry is COPIED, not re-derived, and that is what keeps every offer on an auction
+        // lapsing together: a revision must not restart its own window, or a dealer who revised
+        // three times would outlive the competitors who did not. Re-derivation is only the
+        // fallback for a pre-Phase-6 row that carries no expiry at all.
         auctionVehicleId: original.auctionVehicleId,
         rooftopId: original.rooftopId,
         submittedByAdminId: original.submittedByAdminId,
@@ -560,10 +663,25 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
         externalDealerEmail: original.externalDealerEmail,
         externalDealerPhone: original.externalDealerPhone,
         expiresAt: original.expiresAt ?? defaultOfferExpiry(auction.endsAt),
+        // A2b / A17b: the vehicle snapshot and the feature match describe WHICH CAR, not what it
+        // costs. A revision changes the price; it does not change the car, so both carry forward
+        // rather than being recomputed (recomputing would let a listing edited mid-auction rewrite
+        // the record of what was offered).
+        vin: original.vin,
+        stockNumber: original.stockNumber,
+        vehicleYear: original.vehicleYear,
+        vehicleMake: original.vehicleMake,
+        vehicleModel: original.vehicleModel,
+        vehicleTrim: original.vehicleTrim,
+        odometer: original.odometer,
+        vehicleCondition: original.vehicleCondition,
+        exteriorColor: original.exteriorColor,
+        interiorColor: original.interiorColor,
+        requiredFeatureMatches: original.requiredFeatureMatches ?? Prisma.DbNull,
+        requiredFeatureMismatches: original.requiredFeatureMismatches ?? Prisma.DbNull,
       },
     });
 
-    await tx.offer.update({ where: { id: offerId }, data: { status: OfferStatus.WITHDRAWN } });
     return created;
   }, { isolationLevel: "Serializable" });
 

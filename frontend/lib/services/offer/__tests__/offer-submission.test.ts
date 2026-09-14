@@ -32,6 +32,7 @@ let approval: Rec;
 let created: Rec[];
 let invitationUpdates: Rec[];
 
+let requestCriteria: Rec | null;
 let originalOffer: Rec | null;
 let offerUpdates: Rec[];
 
@@ -41,6 +42,7 @@ const tx = {
     update: async (a: Rec) => { invitationUpdates.push(a); return {}; },
   },
   auction: { findUnique: async () => auction },
+  vehicleRequest: { findUnique: async () => requestCriteria },
   auctionVehicle: { findMany: async () => candidates },
   offer: {
     // HONOURS THE `where`. A fake that returned every seeded row regardless of scope would have
@@ -59,9 +61,22 @@ const tx = {
       created.push(row);
       return row;
     },
-    // `reviseOffer` re-reads the original inside the transaction as its concurrency guard.
     findFirst: async () => originalOffer,
     update: async (a: Rec) => { offerUpdates.push(a); return {}; },
+    // `reviseOffer`'s compare-and-swap: withdrawing the original IS the claim, and it happens
+    // BEFORE the superseding row is inserted — because both now carry the scope columns the
+    // partial unique index is over, so inserting first collides with the still-live original.
+    // The real proof of that ordering is `__tests__/destructive/offer-revision-index.test.ts`,
+    // which runs against a database that has the index; this fake only mirrors the contract.
+    updateMany: async (a: Rec) => {
+      const where = a.where as Rec;
+      if (!originalOffer || originalOffer.id !== where.id || originalOffer.status === "WITHDRAWN") {
+        return { count: 0 };
+      }
+      offerUpdates.push(a);
+      originalOffer = { ...originalOffer, ...(a.data as Rec) };
+      return { count: 1 };
+    },
   },
   notification: { create: async () => ({}) },
 };
@@ -103,11 +118,22 @@ const AUCTION_ENDS = new Date(Date.now() + 3_600_000);
 beforeEach(() => {
   auction = { id: "auc_1", status: "ACTIVE", endsAt: AUCTION_ENDS, buyerId: "b1", vehicleRequestId: "vr_1", depositId: "dep_1" };
   invitation = { id: "inv_1", rooftopId: "roof_1" };
-  candidates = [{ id: "cand_1" }, { id: "cand_2" }];
+  candidates = [
+    {
+      id: "cand_1", year: 2023, make: "Honda", model: "Accord", trim: "EX-L", mileage: 18_400,
+      inventoryItem: {
+        vin: "1HGCV1F30PA000001", year: 2023, make: "Honda", model: "Accord", trim: "EX-L",
+        mileage: 18_400, condition: "used", exteriorColor: "Platinum White", interiorColor: "Black",
+        features: ["Heated Seats", "Apple CarPlay", "Sunroof"],
+      },
+    },
+    { id: "cand_2", year: 2022, make: "Toyota", model: "Camry", trim: null, mileage: null, inventoryItem: null },
+  ];
   liveOffers = [];
   approval = { ok: true, approvedAmountCents: 4_000_000, expiresAt: new Date() };
   created = [];
   invitationUpdates = [];
+  requestCriteria = { requiredFeatures: ["Heated Seats", "AWD"] };
   originalOffer = null;
   offerUpdates = [];
 });
@@ -301,6 +327,7 @@ test("a revision carries the candidate, rooftop, outside identity and expiry for
     externalDealerEmail: "sales@outside.test",
     externalDealerPhone: "+15550100",
     expiresAt: EXPIRY,
+    status: "SUBMITTED",
   };
 
   const { reviseOffer } = await import("../offer.service");
@@ -338,4 +365,80 @@ test("a revision cannot extend its own validity past the window the auction gave
     AUCTION_ENDS.getTime() + OFFER_VALIDITY_HOURS * 3_600_000,
     "a legacy row with no expiry must get the same window every other offer on this auction has",
   );
+});
+
+// ── A2b / A17b — the vehicle snapshot and the required-feature match ────────────────────────────
+
+test("the vehicle snapshot is prefilled from the candidate the offer answers (A2b)", async () => {
+  // Nine Phase 1 columns describing WHICH CAR an offer is for, and the dealer form posts money
+  // only — so the buyer's report compared four prices with no way to tell whether they were for
+  // the same vehicle, and a Deal's lineage recorded a VIN it never captured.
+  await submit();
+  const o = created[0];
+  assert.equal(o.vin, "1HGCV1F30PA000001");
+  assert.equal(o.vehicleYear, 2023);
+  assert.equal(o.vehicleMake, "Honda");
+  assert.equal(o.vehicleModel, "Accord");
+  assert.equal(o.vehicleTrim, "EX-L");
+  assert.equal(o.odometer, 18_400);
+  assert.equal(o.vehicleCondition, "used");
+  assert.equal(o.exteriorColor, "Platinum White");
+  assert.equal(o.interiorColor, "Black");
+});
+
+test("what the submitter states always beats the listing", async () => {
+  // A dealership offering a different trim, or a car whose odometer has moved since the feed last
+  // saw it, must be able to say so — the prefill is a convenience, not an override.
+  await submit(base({ vehicleTrim: "Sport", odometer: 21_000, stockNumber: "A-4417" }));
+  assert.equal(created[0].vehicleTrim, "Sport");
+  assert.equal(created[0].odometer, 21_000);
+  assert.equal(created[0].stockNumber, "A-4417", "a dealer's own stock number has no source but the dealer");
+});
+
+test("a candidate with no listing yields its own year/make/model and nothing invented", async () => {
+  await submit(base({ auctionVehicleId: "cand_2" }));
+  const o = created[0];
+  assert.equal(o.vehicleMake, "Toyota");
+  assert.equal(o.vin, null, "a VIN was invented for a candidate that has no listing");
+  assert.equal(o.exteriorColor, null);
+});
+
+test("the required-feature match is computed and persisted (A17b)", async () => {
+  // §8c's tie-break reads this. Both columns shipped in the Phase 1 wave with no writer, so its
+  // second key — "then best required-feature match" — had nothing to read.
+  await submit();
+  assert.deepEqual(created[0].requiredFeatureMatches, ["Heated Seats"]);
+  assert.deepEqual(created[0].requiredFeatureMismatches, ["AWD"]);
+});
+
+test("an unknown feature list persists NULL, not a full sheet of mismatches", async () => {
+  // `InventoryItem.features` defaults to `[]`, so a feed that publishes none would otherwise mark
+  // every required feature a mismatch and bottom out that dealership for someone else's data gap.
+  await submit(base({ auctionVehicleId: "cand_2" }));
+  assert.equal(created[0].requiredFeatureMatches, null);
+  assert.equal(created[0].requiredFeatureMismatches, null);
+});
+
+test("a revision keeps the vehicle it was for", async () => {
+  // A revision changes the price, not the car. Recomputing the match would let a listing edited
+  // mid-auction rewrite the record of what was offered.
+  originalOffer = {
+    id: "off_orig", auctionId: "auc_1", dealerId: "d1", version: 1,
+    otdPriceCents: 3_000_000, vehiclePriceCents: 2_800_000, taxCents: 150_000, feesCents: 50_000,
+    junkFeeItems: [], includesFinancing: false, aprRate: null, termMonths: null,
+    auctionVehicleId: "cand_1", rooftopId: "roof_1",
+    submittedByAdminId: null, externalDealerName: null, externalDealerEmail: null, externalDealerPhone: null,
+    expiresAt: null,
+    vin: "1HGCV1F30PA000001", stockNumber: "A-1", vehicleYear: 2023, vehicleMake: "Honda",
+    vehicleModel: "Accord", vehicleTrim: "EX-L", odometer: 18_400, vehicleCondition: "used",
+    exteriorColor: "Platinum White", interiorColor: "Black",
+    requiredFeatureMatches: ["Heated Seats"], requiredFeatureMismatches: ["AWD"],
+    status: "SUBMITTED",
+  };
+  const { reviseOffer } = await import("../offer.service");
+  await reviseOffer("off_orig", "d1", { otdPriceCents: 2_900_000, vehiclePriceCents: 2_700_000 } as never);
+  assert.equal(created[0].vin, "1HGCV1F30PA000001");
+  assert.equal(created[0].odometer, 18_400);
+  assert.deepEqual(created[0].requiredFeatureMatches, ["Heated Seats"]);
+  assert.deepEqual(created[0].requiredFeatureMismatches, ["AWD"]);
 });

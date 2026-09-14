@@ -32,16 +32,20 @@ let offers: Rec[];
 let candidates: Rec[];
 let claimCount: number;
 let buyer: Rec | null;
+let requestStatus: string;
 
 let notifications: Rec[];
 let enqueued: Rec[];
 let raised: Rec[];
 let candidateUpdates: Rec[];
 let requestUpdates: Rec[];
+let requestEvents: Rec[];
 let offerUpdates: Rec[];
 let auctionUpdates: Rec[];
 let dealerNoWinnerEmails: Rec[];
 let ranked: string[];
+let persisted: boolean[];
+let existingRanking: Rec | null;
 let enqueueThrows: Error | null;
 
 /**
@@ -109,10 +113,20 @@ const db = {
   vehicleRequest: {
     updateMany: async (a: Rec) => {
       requestUpdates.push(a);
-      return { count: 1 };
+      // The conditional update's own answer: it advanced iff the request was in a pre-offer
+      // status. The fake honours that so the event row cannot be asserted on a no-op.
+      const statuses = ((a.where as Rec).status as Rec).in as string[];
+      return { count: statuses.includes(requestStatus) ? 1 : 0 };
     },
   },
-  notification: { create: async (a: Rec) => { notifications.push(a.data as Rec); return {}; } },
+  vehicleRequestEvent: { create: async (a: Rec) => { requestEvents.push(a.data as Rec); return {}; } },
+  notification: {
+    // The idempotency guard reads before it writes, so the fake has to answer the read from what
+    // it has already stored — otherwise the retry test passes for the wrong reason.
+    findFirst: async ({ where }: { where: Rec }) =>
+      notifications.find((n) => n.buyerId === where.buyerId && n.actionUrl === where.actionUrl) ?? null,
+    create: async (a: Rec) => { notifications.push(a.data as Rec); return {}; },
+  },
   buyer: { findUnique: async () => buyer },
   auctionInvitation: { findMany: async () => [{ dealer: { dealershipName: "D1", user: { email: "d1@x.test" } } }] },
 };
@@ -122,7 +136,10 @@ mock.module("@/lib/services/auction/dealer-invitation.service", {
   namedExports: { releaseAuctionLoad: async () => {} },
 });
 mock.module("@/lib/services/offer/best-price.service", {
-  namedExports: { rankOffers: async (id: string) => { ranked.push(id); } },
+  namedExports: {
+    rankOffers: async (id: string, _term: number, opts: Rec = {}) => { ranked.push(id); persisted.push(!!opts.persistLog); },
+    getPersistedRanking: async () => existingRanking,
+  },
 });
 mock.module("@/lib/services/email/resend.service", {
   namedExports: {
@@ -168,10 +185,14 @@ beforeEach(() => {
   raised = [];
   candidateUpdates = [];
   requestUpdates = [];
+  requestEvents = [];
+  requestStatus = "ACTIVE_SOURCING";
   offerUpdates = [];
   auctionUpdates = [];
   dealerNoWinnerEmails = [];
   ranked = [];
+  persisted = [];
+  existingRanking = null;
   enqueueThrows = null;
 });
 
@@ -298,6 +319,26 @@ test("a successful close advances the vehicle request to OFFER_READY", async () 
 test("a zero-offer close does NOT advance the request", async () => {
   await close();
   assert.equal(requestUpdates.length, 0);
+  assert.equal(requestEvents.length, 0);
+});
+
+test("the OFFER_READY transition writes a timeline event (C12)", async () => {
+  offers = [offer()];
+  await close();
+  assert.equal(requestEvents.length, 1, "the status moved with no record of why");
+  assert.equal(requestEvents[0].eventType, "OFFER_READY");
+  assert.equal(requestEvents[0].actorRole, "SYSTEM");
+  assert.equal((requestEvents[0].payload as Rec).qualifiedOffers, 1);
+});
+
+test("a reprocessed auction does not write a SECOND OFFER_READY event", async () => {
+  // The compare-and-swap already advanced the request, so a later reconciler pass matches
+  // nothing. Writing the event unconditionally would stamp a transition that did not happen.
+  offers = [offer()];
+  requestStatus = "OFFER_READY";
+  await close();
+  assert.equal(requestUpdates.length, 1, "the conditional update must still be attempted");
+  assert.equal(requestEvents.length, 0);
 });
 
 // ── (5) THE NOTICES, AND THE RELEASE THEY USED TO HIDE ──────────────────────────────────────────
@@ -362,4 +403,61 @@ test("a buyer with no mailbox does not stall the close forever", async () => {
   assert.equal(res.offers, 1);
   assert.equal(enqueued.length, 0);
   assert.equal(notifications.length, 1);
+});
+
+// ── the review findings, pinned ─────────────────────────────────────────────────────────────────
+
+test("the claim release is a COMPARE-AND-SWAP — it cannot erase a selection's marker", async () => {
+  // `commitOfferSelection` stamps `postCloseProcessedAt` inside the selection transaction so the
+  // reconciler can never re-claim an auction the buyer has already bought on. A buyer selecting
+  // between this run's claim and this run's failure would, under an unconditional release, have
+  // that stamp overwritten with NULL — and the next tick would find one ACCEPTED offer and the
+  // rest DECLINED, count ZERO qualified, and tell a buyer holding a Deal that no offers came in.
+  offers = [offer()];
+  enqueueThrows = new Error("outbox unavailable");
+  await assert.rejects(() => close());
+  const release = auctionUpdates.at(-1)!;
+  const where = release.where as Rec;
+  assert.ok(
+    where.postCloseProcessedAt instanceof Date,
+    "the release has no precondition — it can clear a marker another writer set",
+  );
+});
+
+test("a retrying close does not append a second bell row", async () => {
+  // Under the old code these writes were swallowed and nothing after them could throw, so the
+  // retry loop did not exist. Now it does: the cron re-enters every five minutes.
+  offers = [offer()];
+  enqueueThrows = new Error("outbox unavailable");
+  await assert.rejects(() => close());
+  await assert.rejects(() => close());
+  await assert.rejects(() => close());
+  assert.equal(notifications.length, 1, `${notifications.length} identical bell rows for one auction`);
+});
+
+test("a retrying close does not append a second ranking audit row", async () => {
+  offers = [offer()];
+  enqueueThrows = new Error("outbox unavailable");
+  await assert.rejects(() => close());
+  assert.deepEqual(persisted, [true], "the first pass must persist the ranking");
+
+  // The second pass finds a persisted ranking and must not write another — `bestPriceCalculationLog`
+  // has no dedup key, and re-ranking would also change the report under a buyer reading it.
+  existingRanking = { termMonths: 60, weights: {}, ranked: [] };
+  await assert.rejects(() => close());
+  assert.deepEqual(persisted, [true, false]);
+});
+
+test("an offer that cannot be attributed to a candidate suspends the sweep", async () => {
+  // The deploy-window residue: a pre-Phase-6 offer carries a NULL binding, so on an auction that
+  // spans the deploy its candidate is unidentifiable. Closing the others with "No qualified offer
+  // at auction close" would be false about a candidate that may well have been answered.
+  candidates = [
+    { id: "cand_1", auctionId: "auc_1", candidateStatus: "ACTIVE" },
+    { id: "cand_2", auctionId: "auc_1", candidateStatus: "ACTIVE" },
+  ];
+  offers = [offer({ auctionVehicleId: "cand_1" }), offer({ id: "legacy", auctionVehicleId: null })];
+  await close();
+  assert.equal(candidateUpdates.length, 0);
+  assert.equal(candidates.every((c) => c.candidateStatus === "ACTIVE"), true);
 });

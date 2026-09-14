@@ -253,7 +253,13 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
                 <HelpCircle size={12} /> Why this rank?
               </button>
               <span className="absolute left-0 top-full mt-1 w-56 bg-slate-800 text-white text-xs leading-snug rounded-lg px-3 py-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg">
-                Offers are ranked by total out-the-door price first, then by dealer tier and reliability. The lowest all-in price you&apos;ll pay earns the #1 spot.
+                {/* §8c parity row C9: the old copy named "dealer tier and reliability" as a
+                    tie-break. The engine has never read either — the real order is out-the-door,
+                    then required-feature match, then distance, then who submitted first, and
+                    equal offers share a rank rather than being separated by an invented rule. */}
+                Offers are ranked by total out-the-door price first. Ties go to the closer match on
+                your required features, then the shorter distance, then whoever submitted first —
+                and offers that are genuinely equal share the same rank.
               </span>
             </div>
 

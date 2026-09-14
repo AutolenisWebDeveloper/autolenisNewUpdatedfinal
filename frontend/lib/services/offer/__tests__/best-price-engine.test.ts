@@ -1,0 +1,322 @@
+// §8c — THE BEST PRICE ENGINE: within-candidate ranking, cross-candidate discount, one store.
+//
+// The engine had NO test of any kind before this phase. Parity rows C6/C7/C8 and §8.2 defect 9 are
+// all here:
+//
+//   C6  "Rank WITHIN a candidate". Every offer on the auction was ranked in one pool, so on a
+//       two-candidate auction the cheaper CAR won every rank and the dealership with the best
+//       offer on the other candidate was reported #3 of 3 — a comparison the buyer never asked
+//       for, since they put both cars up precisely because they are different.
+//       Fees and junk fees were also collapsed: the engine added `weightFees` and `weightJunkFees`
+//       together and applied the sum to ONE junk-fee rank, so 20% of the configured model was
+//       spent on a dimension the administrator never pointed it at.
+//
+//   C7  Cross-candidate ranking on DISCOUNT to listed market price — missing entirely.
+//
+//   C8  ONE STORE. The log was written at close and the per-offer rank columns only by the admin
+//       re-run, so the two records of the same auction could disagree with nothing to say which
+//       was current; and the log insert ended in `.catch(() => {})`, so "never a black box"
+//       quietly meant "unless the insert failed, in which case there is no trace of that either".
+//
+//   Ranking also ignored `is_disqualified` and `expires_at`, so a §13-D40 over-ceiling offer and a
+//   lapsed one were both ranked and both shown to the buyer.
+//
+//   npx tsx --test --experimental-test-module-mocks \
+//     lib/services/offer/__tests__/best-price-engine.test.ts
+
+import test, { mock, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+
+type Rec = Record<string, unknown>;
+
+let offers: Rec[];
+let weightConfig: Rec | null;
+let logsCreated: Rec[];
+let offerUpdates: Rec[];
+let txCalls: number;
+
+function matches(o: Rec, where: Rec): boolean {
+  for (const [k, v] of Object.entries(where)) {
+    if (k === "OR") {
+      if (!(v as Rec[]).some((c) => matches(o, c))) return false;
+      continue;
+    }
+    const actual = o[k];
+    if (v !== null && typeof v === "object") {
+      const cond = v as Rec;
+      if ("gt" in cond && !(actual instanceof Date && actual.getTime() > (cond.gt as Date).getTime())) return false;
+      continue;
+    }
+    if (actual !== v) return false;
+  }
+  return true;
+}
+
+mock.module("@/lib/prisma", {
+  namedExports: {
+    prisma: {
+      // HONOURS THE `where`. The defect under test includes an unfiltered query, so a fake that
+      // returned every seeded row would make the qualification assertions pass for the wrong reason.
+      offer: {
+        findMany: async ({ where }: { where: Rec }) => offers.filter((o) => matches(o, where)),
+        update: (a: Rec) => { offerUpdates.push(a); return a; },
+      },
+      bestPriceWeightConfig: { findFirst: async () => weightConfig },
+      bestPriceCalculationLog: {
+        create: (a: Rec) => { logsCreated.push((a as { data: Rec }).data); return a; },
+        findFirst: async () => (logsCreated.length ? { ...logsCreated[logsCreated.length - 1], calculatedAt: new Date() } : null),
+      },
+      // The persistence is one transaction — both halves commit together or neither does.
+      $transaction: async (ops: unknown[]) => { txCalls++; return ops; },
+    },
+  },
+});
+
+const FUTURE = new Date(Date.now() + 72 * 3_600_000);
+const PAST = new Date(Date.now() - 3_600_000);
+
+function offer(over: Rec = {}): Rec {
+  return {
+    id: `off_${offers.length + 1}`,
+    auctionId: "auc_1",
+    dealerId: "d1",
+    status: "SUBMITTED",
+    isDisqualified: false,
+    expiresAt: FUTURE,
+    otdPriceCents: 3_000_000,
+    feesCents: 50_000,
+    junkFeeItems: [],
+    includesFinancing: false,
+    aprRate: null,
+    termMonths: null,
+    aprFlag: null,
+    submittedAt: new Date("2026-09-01T00:00:00Z"),
+    auctionVehicleId: "cand_1",
+    requiredFeatureMatches: null,
+    requiredFeatureMismatches: null,
+    dealer: { id: "d1", tier: "STANDARD", dealershipName: "D" },
+    auctionVehicle: { id: "cand_1", distanceMiles: 20, listingSnapshot: { priceCents: 3_200_000 }, inventoryItem: { priceCents: 3_200_000 } },
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  offers = [];
+  weightConfig = { weightOtd: 0.4, weightMonthly: 0.25, weightFees: 0.2, weightJunkFees: 0.15 };
+  logsCreated = [];
+  offerUpdates = [];
+  txCalls = 0;
+});
+
+async function rank(term = 60, opts: Rec = {}) {
+  const { rankOffers } = await import("../best-price.service");
+  return rankOffers("auc_1", term, opts as never);
+}
+
+// ── qualification ───────────────────────────────────────────────────────────────────────────────
+
+test("a disqualified offer is never ranked (§8c: never presented as qualified)", async () => {
+  offers = [offer(), offer({ id: "bad", isDisqualified: true, otdPriceCents: 2_000_000 })];
+  const r = await rank();
+  assert.equal(r.length, 1);
+  assert.equal(r[0].offerId, "off_1", "the over-ceiling offer took the top of the buyer's report");
+});
+
+test("a lapsed offer is never ranked", async () => {
+  offers = [offer(), offer({ id: "old", expiresAt: PAST, otdPriceCents: 2_000_000 })];
+  const r = await rank();
+  assert.equal(r.length, 1);
+});
+
+test("a withdrawn revision is never ranked", async () => {
+  offers = [offer(), offer({ id: "w", status: "WITHDRAWN", otdPriceCents: 2_000_000 })];
+  assert.equal((await rank()).length, 1);
+});
+
+// ── C6 — within-candidate ───────────────────────────────────────────────────────────────────────
+
+test("each candidate has its own #1 — the cheaper CAR does not win every rank", async () => {
+  const cheapCar = { id: "cand_1", distanceMiles: 10, listingSnapshot: { priceCents: 3_200_000 }, inventoryItem: null };
+  const dearCar = { id: "cand_2", distanceMiles: 10, listingSnapshot: { priceCents: 5_000_000 }, inventoryItem: null };
+  offers = [
+    offer({ id: "a1", auctionVehicleId: "cand_1", auctionVehicle: cheapCar, otdPriceCents: 3_000_000 }),
+    offer({ id: "a2", auctionVehicleId: "cand_1", auctionVehicle: cheapCar, otdPriceCents: 3_100_000 }),
+    offer({ id: "b1", auctionVehicleId: "cand_2", auctionVehicle: dearCar, otdPriceCents: 4_600_000 }),
+    offer({ id: "b2", auctionVehicleId: "cand_2", auctionVehicle: dearCar, otdPriceCents: 4_700_000 }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  assert.equal(byId.get("a1")!.rankCash, 1);
+  assert.equal(byId.get("b1")!.rankCash, 1, "the best offer on the second candidate was ranked against the first car");
+  assert.equal(byId.get("a2")!.rankCash, 2);
+  assert.equal(byId.get("b2")!.rankCash, 2);
+});
+
+test("a custom request (no candidate) forms one group rather than one group per offer", async () => {
+  offers = [
+    offer({ id: "c1", auctionVehicleId: null, auctionVehicle: null, otdPriceCents: 3_000_000 }),
+    offer({ id: "c2", auctionVehicleId: null, auctionVehicle: null, otdPriceCents: 3_100_000 }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  assert.equal(byId.get("c1")!.rankCash, 1);
+  assert.equal(byId.get("c2")!.rankCash, 2);
+});
+
+test("fees and junk fees are ranked SEPARATELY", async () => {
+  // The old engine never ranked total fees at all: it added `weightFees` to `weightJunkFees` and
+  // applied the sum to one junk-fee rank. A dealership with low junk fees but a high total fee
+  // load was scored as though the administrator had never weighted total fees.
+  offers = [
+    offer({ id: "lowfees", feesCents: 10_000, junkFeeItems: [{ name: "Doc", amountCents: 90_000, isJunk: true }] }),
+    offer({ id: "lowjunk", feesCents: 90_000, junkFeeItems: [{ name: "Doc", amountCents: 10_000, isJunk: true }] }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  assert.equal(byId.get("lowfees")!.rankFees, 1);
+  assert.equal(byId.get("lowjunk")!.rankFees, 2);
+  assert.equal(byId.get("lowjunk")!.rankJunkFees, 1);
+  assert.equal(byId.get("lowfees")!.rankJunkFees, 2);
+});
+
+test("a cash offer gets no monthly rank, and a financed one does", async () => {
+  offers = [
+    offer({ id: "cash" }),
+    offer({ id: "fin", includesFinancing: true, aprRate: 6.9, termMonths: 60, otdPriceCents: 3_100_000 }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  assert.equal(byId.get("cash")!.rankMonthly, null);
+  assert.equal(byId.get("fin")!.rankMonthly, 1);
+  assert.ok(byId.get("fin")!.monthlyPayment! > 0);
+});
+
+test("equal offers share the overall rank and name each other", async () => {
+  offers = [
+    offer({ id: "x", submittedAt: new Date("2026-09-01T00:00:00Z") }),
+    offer({ id: "y", submittedAt: new Date("2026-09-02T00:00:00Z") }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  assert.equal(byId.get("x")!.rankOverall, 1);
+  assert.equal(byId.get("y")!.rankOverall, 1, "identical offers were badged #1 and #2");
+  assert.deepEqual(byId.get("x")!.tiedWith, ["y"]);
+});
+
+// ── C7 — cross-candidate ────────────────────────────────────────────────────────────────────────
+
+test("cross-candidate ranks on DISCOUNT, not on price", async () => {
+  // Across different cars the cheapest offer is simply the cheapest car, which the buyer already
+  // knew. The question §8c asks is which dealership gives up the most against the listed price.
+  offers = [
+    offer({
+      id: "sedan", auctionVehicleId: "cand_1", otdPriceCents: 2_400_000,
+      auctionVehicle: { id: "cand_1", distanceMiles: 10, listingSnapshot: { priceCents: 2_500_000 }, inventoryItem: null },
+    }),
+    offer({
+      id: "truck", auctionVehicleId: "cand_2", otdPriceCents: 6_300_000,
+      auctionVehicle: { id: "cand_2", distanceMiles: 10, listingSnapshot: { priceCents: 7_000_000 }, inventoryItem: null },
+    }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  // The truck is far more expensive but gives up 10% against its listing; the sedan gives up 4%.
+  assert.equal(byId.get("truck")!.rankCrossCandidate, 1);
+  assert.equal(byId.get("sedan")!.rankCrossCandidate, 2);
+  assert.equal(byId.get("truck")!.discountToListedCents, 700_000);
+  assert.ok(Math.abs(byId.get("truck")!.discountToListedPct! - 0.1) < 1e-9);
+});
+
+test("an unknown listed price is EXCLUDED from the cross-candidate rank, not ranked last", async () => {
+  // An unknown discount is not a small one.
+  offers = [
+    offer({ id: "known" }),
+    offer({
+      id: "unknown", auctionVehicleId: "cand_2",
+      auctionVehicle: { id: "cand_2", distanceMiles: 10, listingSnapshot: null, inventoryItem: null },
+    }),
+  ];
+  const byId = new Map((await rank()).map((r) => [r.offerId, r]));
+  assert.equal(byId.get("known")!.rankCrossCandidate, 1);
+  assert.equal(byId.get("unknown")!.rankCrossCandidate, null);
+  assert.equal(byId.get("unknown")!.discountToListedCents, null);
+});
+
+test("the listed price comes from the SNAPSHOT, not from today's inventory row", async () => {
+  // The snapshot is what the listing carried when the buyer chose this candidate. Reading today's
+  // price would let a dealership that cut its sticker mid-auction shrink every rival's discount.
+  offers = [offer({
+    id: "s", otdPriceCents: 3_000_000,
+    auctionVehicle: { id: "cand_1", distanceMiles: 10, listingSnapshot: { priceCents: 3_500_000 }, inventoryItem: { priceCents: 3_050_000 } },
+  })];
+  const r = await rank();
+  assert.equal(r[0].discountToListedCents, 500_000);
+});
+
+// ── C8 — one store ──────────────────────────────────────────────────────────────────────────────
+
+test("persistLog writes the log AND the per-offer columns, in one transaction", async () => {
+  offers = [offer({ id: "p1" }), offer({ id: "p2", otdPriceCents: 3_100_000 })];
+  await rank(60, { persistLog: true });
+  assert.equal(txCalls, 1, "the two halves of the record can no longer be written apart");
+  assert.equal(logsCreated.length, 1);
+  assert.equal(logsCreated[0].offerCount, 2);
+  assert.equal(offerUpdates.length, 2, "the per-offer rank columns were still admin-re-run-only");
+  const cols = (offerUpdates[0] as { data: Rec }).data;
+  assert.ok("rankCash" in cols && "rankBalanced" in cols && "bestPriceScore" in cols);
+});
+
+test("the log carries the candidate binding and the tie information, not just prices", async () => {
+  offers = [offer({ id: "l1" }), offer({ id: "l2" })];
+  await rank(60, { persistLog: true });
+  const rows = logsCreated[0].result as Rec[];
+  assert.equal(rows.length, 2);
+  assert.ok("auctionVehicleId" in rows[0], "the persisted ranking cannot be reproduced per candidate");
+  assert.ok("tiedWith" in rows[0]);
+  assert.ok("rankCrossCandidate" in rows[0]);
+});
+
+test("nothing is persisted without persistLog — the polled buyer GET must not append rows", async () => {
+  offers = [offer()];
+  await rank();
+  assert.equal(logsCreated.length, 0);
+  assert.equal(offerUpdates.length, 0);
+});
+
+test("getPersistedRanking serves the committed ranking back", async () => {
+  offers = [offer({ id: "g1" })];
+  await rank(72, { persistLog: true });
+  const { getPersistedRanking } = await import("../best-price.service");
+  const got = await getPersistedRanking("auc_1");
+  assert.equal(got!.termMonths, 72);
+  assert.equal(got!.ranked[0].offerId, "g1");
+});
+
+test("getPersistedRanking returns null when nothing was ever persisted", async () => {
+  const { getPersistedRanking } = await import("../best-price.service");
+  assert.equal(await getPersistedRanking("auc_1"), null);
+});
+
+// ── the three cards ─────────────────────────────────────────────────────────────────────────────
+
+test("the cards are chosen across the AUCTION, not from whichever candidate sorts first", async () => {
+  // `rankCash === 1` no longer identifies one offer: with within-candidate ranking there is a
+  // rank-1 per candidate, so picking "the first row whose rank is 1" would hand Best Cash to
+  // whichever candidate happened to come first.
+  const carA = { id: "cand_1", distanceMiles: 10, listingSnapshot: null, inventoryItem: null };
+  const carB = { id: "cand_2", distanceMiles: 10, listingSnapshot: null, inventoryItem: null };
+  offers = [
+    offer({ id: "a1", auctionVehicleId: "cand_1", auctionVehicle: carA, otdPriceCents: 4_000_000 }),
+    offer({ id: "b1", auctionVehicleId: "cand_2", auctionVehicle: carB, otdPriceCents: 2_800_000 }),
+  ];
+  const ranked = await rank();
+  const { selectTopOffers } = await import("../best-price.service");
+  const top = selectTopOffers(ranked);
+  assert.equal(top.bestCash!.offerId, "b1");
+  assert.equal(top.bestMonthly, null, "no offer carries financing, so the card is genuinely absent");
+});
+
+test("Best Monthly is the lowest monthly payment, and never a cash offer", async () => {
+  offers = [
+    offer({ id: "cash", otdPriceCents: 2_800_000 }),
+    offer({ id: "fin_hi", includesFinancing: true, aprRate: 12, termMonths: 48, otdPriceCents: 3_000_000 }),
+    offer({ id: "fin_lo", includesFinancing: true, aprRate: 3, termMonths: 72, otdPriceCents: 3_050_000 }),
+  ];
+  const top = (await import("../best-price.service")).selectTopOffers(await rank());
+  assert.equal(top.bestCash!.offerId, "cash");
+  assert.equal(top.bestMonthly!.offerId, "fin_lo");
+});

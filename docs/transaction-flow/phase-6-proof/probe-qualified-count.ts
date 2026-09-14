@@ -97,3 +97,24 @@ async function main() {
 main()
   .then(() => db.$disconnect())
   .catch(async (e) => { console.error("FAILED:", e.message); await db.$disconnect(); process.exit(1); });
+
+// ── PROBE 2 — `id: { notIn: [] }` ───────────────────────────────────────────────────────────────
+//
+// `processAuctionClose` closes ACTIVE candidates with `id: { notIn: [...answered] }`, and the
+// answered set is legitimately EMPTY on a zero-offer auction — where every candidate must close.
+// Whether that works depends entirely on how Prisma compiles an empty `notIn`, which is not
+// something to reason about: SQL's own `x NOT IN ()` is a syntax error, so the client must be
+// rewriting it, and the rewrite could go either way.
+//
+// Recorded result (PostgreSQL 16.13, 2026-09-14), read from Prisma's own query log:
+//
+//   empty:     ... WHERE (candidate_status = $1 AND 1=1)        → MATCHES EVERYTHING
+//   non-empty: ... WHERE (candidate_status = $1 AND id NOT IN ($2,$3))
+//
+// Both directions are load-bearing. The zero-offer arm relies on "matches everything" to close the
+// candidates; the success arm relies on the guard in `auction.service.ts`, because an empty
+// answered set there means the offers could not be attributed — not that nothing was answered.
+export async function probeEmptyNotIn(db: PrismaClient): Promise<void> {
+  await db.auctionVehicle.count({ where: { candidateStatus: "ACTIVE", id: { notIn: [] } } });
+  await db.auctionVehicle.count({ where: { candidateStatus: "ACTIVE", id: { notIn: ["a", "b"] } } });
+}

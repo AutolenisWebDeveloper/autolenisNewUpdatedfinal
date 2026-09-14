@@ -620,6 +620,13 @@ const skipIfOffersNoLongerReady: StateRecheckFn = async (ctx) => {
  */
 const skipIfOffersArrived: StateRecheckFn = async (ctx) => {
   if (!ctx.auctionId) return { proceed: false, reason: "zero-offer notice with no auction reference" };
+  // AN ACCEPTED OFFER IS THE STRONGEST POSSIBLE REFUTATION and it does not count as qualified —
+  // selection moves the winner to ACCEPTED and the rest to DECLINED, so an auction the buyer has
+  // just bought on has a qualified count of ZERO. Without this the recheck would happily deliver
+  // "no dealership submitted a qualified offer" to a buyer holding a Deal. Checked first, and
+  // deliberately mirroring `skipIfOffersNoLongerReady`.
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "an offer on this auction was already selected" };
   const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
   if (qualified > 0) return { proceed: false, reason: `${qualified} qualified offer(s) arrived after the close` };
   return { proceed: true };
