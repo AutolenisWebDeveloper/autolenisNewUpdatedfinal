@@ -1392,6 +1392,90 @@ PROGRESSIVE, the rest KEPT.
   authority.
 - **No email was sent, no credit spent, and nothing was applied to production.**
 
+#### The review round — ten defects found AFTER the implementation was written (2026-09-14)
+
+The `autolenis-code-verification` loop's second and third passes. Two reviewers read the whole diff
+from a clean context — one adversarial on correctness, architecture and concurrency, one on
+security only. Between them: **1 blocker, 1 high-severity disclosure, 6 major, 5 minor, 2 nits.**
+Six were introduced by this phase. Every fix carries a regression test that was proven to fail
+against the code it replaces.
+
+Recorded here rather than in a commit message alone, because the pattern in them is the finding:
+**four of the ten are columns or rows this phase started WRITING for the first time, reaching a
+reader that had always seen null.** A projection that was safe for two years stopped being safe the
+day `persistRanking` ran.
+
+| # | Severity | Defect | Fix |
+| --- | --- | --- | --- |
+| R1 | HIGH | `/api/dealer/offers` returned the `Offer` row unprojected. `persistRanking` and §13-D40 filled `rank_cash`/`rank_monthly`/`rank_balanced`/`best_price_score` and `disqualified_reason` — the last carrying the buyer's approved ceiling as a dollar figure and their prequalification state. One over-budget probe returned both | `DEALER_OFFER_SELECT`: ONE projection for every dealer-facing reader. `isDisqualified` still returned; the number and the reason never |
+| R2 | BLOCKER | The dealer bid form sent no `auctionVehicleId`, and `submitOffer` now refuses an offer that names no candidate on an auction that has them — every sourced auction. The only dealer submit surface was dead, and the route's substring error map turned the refusal into "please try again" | Candidate selector on the quick-offer page (auto-selected at one candidate); `OfferRefusedError` marks a refusal dealer-readable at the point it is raised |
+| R3 | MAJOR | `releaseAuctionLoad` was a blind `decrement: 1` as the first statement of the claimed close block. Phase 6 made that block's failure path routine, so an hour-long outbox outage decremented every invited dealership twelve times. No floor: a dealership at `-12` scores `+60` and never trips capacity | Derived from the live invitation set — idempotent by construction, and it repairs drift that already exists |
+| R4 | MAJOR | `sweepUnselectedAuctions` raised `BUYER_DOES_NOT_SELECT` with no explicit key, so a RESOLVED case reopened on the next tick and threw after fifty; and its candidate set never drained, so past fifty auctions some buyers were never swept at all | `idempotencyKey: BUYER_DOES_NOT_SELECT:<auctionId>` (strict once-ever); the case itself is the terminal marker; `orderBy: { closedAt: "asc" }` |
+| R5 | MAJOR | An auction whose offers were ALL over budget was told "no offers received" at close, then — once `expireLapsedOffers` flipped the same rows to EXPIRED — "your offers expired without a selection", plus a second case | The sweep requires a lapsed offer that is `isDisqualified: false` |
+| R6 | MAJOR | §23.2a touchpoints 3 and 4 had NO CONSUMER. Nothing called `/api/buyer/plan/invitation`, so the invitation was never shown, no dismissal was recorded, and touchpoint 4 — which fires only on a dismissal — could never fire. Separately, no writer ever recorded an impression for an EMAIL touchpoint, so §23.2b's two-email ceiling could never bind | `PremiumInvitation` mounts on the deal page; the email ask is recorded in the send-time recheck, where `proceed: true` is the decision to actually ask |
+| R7 | MAJOR | The dealer form sent only the fees its own hard-coded heuristic flagged; everything else was folded into `feesCents`, so an administrator's `JunkFeePattern` could never match a fee the client missed. The in-code claim that "the server re-classifies" was true only of the subset already flagged | Every itemised fee is sent; `classifyFeeItems` is the only thing that decides `isJunk` |
+| R8 | MINOR | PAY-73 suppression matched any open case on the BUYER, so an unresolved case on one transaction silenced the Premium ask on every later one, permanently | Scoped to this request, plus buyer-level cases that name no request at all |
+| R9 | MINOR | `POST /api/admin/auctions` missed `REOPENED` on both guards and checked only the relaunch count — two live auctions on one $99, outside the partial unique | `resolveRelaunchEligibility`, as the sibling `launch-auction` route already did |
+| R10 | MINOR | `launchFromCase` would let `sweepSourcingCases` spend the buyer's one free §8c relaunch. `deposit-activation.service.ts` states the opposite rule explicitly | `allowRelaunch` defaults to false; the ORIGINAL launch is unaffected |
+
+Also fixed, below the table's threshold but in the same pass: a second submission through one invite
+link hit an unhandled `P2002` and a 500 (a regression from the authorized invite-token security fix
+— the invite's back-link now moves to the newest submission, as its own `submission_id` already
+did); the buyer's "N offers" bell and the first-offer email counted disqualified offers;
+`commitOfferSelection` bound neither auction to buyer nor offer to auction; `POST
+/api/buyer/plan/invitation` had no rate limit; `rooftopId` precedence contradicted its own comment;
+and the comparison-term control was four buttons that did nothing behind a comment claiming they
+did something.
+
+**One CI failure the gates caught that this session had not.** `test:parity-ledger` went red on the
+document close-out commit: the K27-1328 a/b/c/d split was written into §10 and never into
+`parity/control.table.md`, which is the source §10 is generated from, and three of the new rows
+carried `**AS BUILT (Phase 6)**` as their DISPOSITION — outside the seven-value vocabulary, so the
+tally stopped being a partition. Corrected at the source, regenerated, and the dispositions now
+read `TO EXTEND — **AS BUILT (Phase 6)**` / `TO IMPLEMENT — **AS BUILT (Phase 6)**`, which
+classify and stay honest. The cause was mine and is worth naming: **`pnpm test:all` was run before
+the last commit, not after it.**
+
+#### REPORTED, NOT BUILT — from the same review round
+
+Each is real, each is evidenced, and each is outside §8.1 row 6 or needs a decision that is not
+mine:
+
+1. **The post-close claim has no lease.** `postCloseProcessedAt` is stamped at claim time and the
+   auction is selected for reprocessing only while it is NULL. A function timeout between the claim
+   and the catch leaves the auction stamped with none of its side effects done, and the reconciler
+   excludes it forever: a buyer who paid $99 is never told their auction closed and nothing reports
+   it. The claim shape predates this phase; the work held under it is much larger now. The fix
+   needs a second column (`post_close_completed_at`) and therefore a second migration, which is why
+   it is reported rather than built.
+2. **`POST /api/buyer/requests/[requestId]/offer/respond`** checks "one Deal per request" with a
+   read outside its transaction and `Deal.vehicleRequestId` is not unique, so two concurrent
+   ACCEPTs on two `SENT` offers can both commit. The auction path serialises on `SELECT … FOR
+   UPDATE`; this path has no equivalent. Needs either a lock or a partial unique — a migration
+   again.
+3. **The dealer "no winner" mail** is the last notice on the close path still on the direct Resend
+   rail with a swallowed error, while every sibling moved to `enqueueTransactional`. It is
+   idempotency-keyed, so there is no double-send; what it lacks is a `template_key`, refs, and a
+   visible failure.
+4. **`GET /api/dealer/offers/competitiveness-check`** returns STRONG/MODERATE/WEAK to a bidding
+   dealer and is polled on every keystroke. That is a bucketed function of the competing offers on
+   a live auction. Unchanged by this phase, and it wants a ruling against §29 P3.
+5. **`GET /api/dealer/offers` returns `conciergeSubmissions` with `include: { vehicleOffer: true }`**,
+   and `VehicleOffer` carries the buyer's budget, monthly payment, down payment and city/state/zip.
+   Pre-existing, unchanged by this phase, and the same class as R1.
+6. **`app/(public)/dealer-offer/[token]/page.tsx`** passes the same buyer budget and trade packet to
+   an UNAUTHENTICATED dealer form, and the `dealer-offer-docs` bucket is created `{ public: true }`
+   with buyer documents in it. Both pre-existing; both want their own authorized batch.
+
+#### One observation about the visual baseline, not a defect
+
+`components/public/StatsStrip.tsx` renders only when the platform has activity, so the committed
+marketing baseline encodes an EMPTY database. Running the e2e suites against the same local
+Postgres seeded six buyers and the strip appeared, changing the homepage text by 100 characters.
+CI is unaffected — `visual.yml` is a separate workflow with its own freshly-migrated database — but
+the baseline is data-dependent on that one component, and a future job that seeds before it renders
+would fail the guardrail for a reason that has nothing to do with design.
+
 
 ### 8.2 Phase scopes
 
