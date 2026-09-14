@@ -7,6 +7,28 @@ import { hasSelectedOffer } from "@/lib/qstash/state";
 
 export const dynamic = "force-dynamic";
 
+// ── SUPERSEDED BY §9's SELECTION REMINDER — REPORTED, NOT DELETED ──────────────────────────────
+//
+// Parity row S14 names this route as the thing to retire: it sends "review it before it expires"
+// copy against NO REAL EXPIRY. `offers.expires_at` shipped in the Phase 1 wave with no writer, so
+// until Phase 6 there was nothing for "before it expires" to refer to — the deadline in this copy
+// was a figure of speech, and the second touch's "your dealer offer is about to expire" was simply
+// not true of anything.
+//
+// The replacement is `scheduleSelectionReminder` (`lib/services/auction/auction.service.ts`): ONE
+// message, through the §27 dispatcher, scheduled 24 hours before the EARLIEST real expiry on the
+// auction, cancelled by key the moment the buyer selects, and re-decided at send time.
+//
+// This route is left in place because retiring it is a capability decision rather than a refactor,
+// and because in-flight QStash schedules may still call it — deleting the handler would turn those
+// into 404s rather than into the no-ops they become when nothing schedules new ones. Its own
+// `hasSelectedOffer` guard already stops it for a buyer who has chosen. What it needs is for the
+// SCHEDULING side to stop, which is a Phase 10 consolidation (`I-11`), and an owner decision on
+// whether the SMS half of it is wanted on the new rail at all — the dispatcher row is email-only.
+//
+// Do not add new callers.
+
+
 interface Payload {
   buyerId: string;
   firstName: string;

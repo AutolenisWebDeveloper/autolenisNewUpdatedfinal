@@ -47,6 +47,7 @@ let ranked: string[];
 let persisted: boolean[];
 let existingRanking: Rec | null;
 let enqueueThrows: Error | null;
+let enqueueFilter: ((input: Rec) => void) | null;
 
 /**
  * HONOURS THE `where`, including the `OR` that `qualifiedOfferWhere` builds.
@@ -94,6 +95,21 @@ const db = {
   },
   offer: {
     findMany: async ({ where }: { where: Rec }) => offers.filter((o) => matches(o, where)),
+    // The earliest-expiry lookup for the selection reminder: honours the id set AND the ordering,
+    // so a test that seeds a later offer first still gets the earliest back.
+    findFirst: async ({ where, orderBy }: { where: Rec; orderBy?: Rec }) => {
+      const ids = (where.id as Rec | undefined)?.in as string[] | undefined;
+      const rest = { ...where };
+      delete rest.id;
+      const hit = offers
+        .filter((o) => (!ids || ids.includes(o.id as string)) && matches(o, rest))
+        .sort((a, b) =>
+          orderBy && (orderBy as Rec).expiresAt === "asc"
+            ? ((a.expiresAt as Date | null)?.getTime() ?? Infinity) - ((b.expiresAt as Date | null)?.getTime() ?? Infinity)
+            : 0,
+        );
+      return hit[0] ?? null;
+    },
     count: async ({ where }: { where: Rec }) => offers.filter((o) => matches(o, where)).length,
     updateMany: async (a: Rec) => {
       const hit = offers.filter((o) => matches(o, a.where as Rec));
@@ -150,6 +166,7 @@ mock.module("@/lib/services/comms/transactional-dispatcher.service", {
   namedExports: {
     enqueueTransactional: async (input: Rec) => {
       if (enqueueThrows) throw enqueueThrows;
+      if (enqueueFilter) enqueueFilter(input);
       enqueued.push(input);
       return { enqueued: true, id: "co_1", dedupKey: String(input.idempotencyKey) };
     },
@@ -194,6 +211,7 @@ beforeEach(() => {
   persisted = [];
   existingRanking = null;
   enqueueThrows = null;
+  enqueueFilter = null;
 });
 
 async function close() {
@@ -346,11 +364,13 @@ test("a reprocessed auction does not write a SECOND OFFER_READY event", async ()
 test("the offers-ready notice rides the dispatcher, auction-scoped", async () => {
   offers = [offer(), offer({ auctionVehicleId: "cand_1", id: "off_2" })];
   await close();
-  assert.equal(enqueued.length, 1);
-  assert.equal(enqueued[0].templateKey, "offers_ready");
-  assert.equal(enqueued[0].auctionId, "auc_1");
+  // The selection reminder rides the same close, so this asserts on the offers-ready row by name
+  // rather than on the array length — which is what a later touchpoint must not be able to break.
+  const ready = enqueued.filter((e) => e.templateKey === "offers_ready");
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0].auctionId, "auc_1");
   assert.equal(
-    enqueued[0].idempotencyKey,
+    ready[0].idempotencyKey,
     "offers_ready:email:auc_1",
     "a buyer's SECOND auction would collide with their first on a recipient-derived key",
   );
@@ -460,4 +480,66 @@ test("an offer that cannot be attributed to a candidate suspends the sweep", asy
   await close();
   assert.equal(candidateUpdates.length, 0);
   assert.equal(candidates.every((c) => c.candidateStatus === "ACTIVE"), true);
+});
+
+// ── §9 / S14 — the pre-expiry selection reminder ────────────────────────────────────────────────
+
+test("a successful close schedules ONE reminder, 24h before the EARLIEST expiry", async () => {
+  // §9: "Offers carry an expiration. Remind the buyer before offers expire." Before this the
+  // deadline existed in the database and nothing referred to it — the QStash copy that said
+  // "before it expires" was written when `offers.expires_at` had no writer at all.
+  //
+  // THE EARLIEST, not each offer's own: offers on one auction share a window by construction, but
+  // a dealership may state a shorter one, and the moment that matters to the buyer is when their
+  // choice starts shrinking. One message about the whole report, not one per offer.
+  const SOON = new Date(Date.now() + 48 * 3_600_000);
+  const LATER = new Date(Date.now() + 72 * 3_600_000);
+  offers = [offer({ id: "late", expiresAt: LATER }), offer({ id: "soon", expiresAt: SOON })];
+
+  await close();
+  const reminder = enqueued.find((e) => e.templateKey === "selection_reminder");
+  assert.ok(reminder, "no selection reminder was scheduled");
+  const runAt = reminder!.runAt as Date;
+  assert.equal(runAt.getTime(), SOON.getTime() - 24 * 3_600_000, "scheduled against the wrong expiry");
+  assert.equal(reminder!.idempotencyKey, "selection_reminder:email:auc_1");
+  assert.equal(reminder!.cancelKey, "selection-reminder:auc_1", "§27's cancellation rule needs a key");
+  assert.equal(enqueued.filter((e) => e.templateKey === "selection_reminder").length, 1);
+});
+
+test("no reminder is scheduled when the lead time has already passed", async () => {
+  // A dealer-stated expiry shorter than the lead time puts the reminder in the past. A message
+  // saying "expires soon" about something expiring within the hour, sent now, is a worse artefact
+  // than no message.
+  offers = [offer({ expiresAt: new Date(Date.now() + 2 * 3_600_000) })];
+  await close();
+  assert.equal(enqueued.some((e) => e.templateKey === "selection_reminder"), false);
+});
+
+test("a pre-Phase-6 offer with no expiry gets no reminder — there is no deadline to warn about", async () => {
+  offers = [offer({ expiresAt: null })];
+  await close();
+  assert.equal(enqueued.some((e) => e.templateKey === "selection_reminder"), false);
+  // ...but the offers-ready notice still goes, because the auction succeeded.
+  assert.equal(enqueued.some((e) => e.templateKey === "offers_ready"), true);
+});
+
+test("a zero-offer close schedules no reminder", async () => {
+  await close();
+  assert.equal(enqueued.some((e) => e.templateKey === "selection_reminder"), false);
+});
+
+test("a reminder that cannot be scheduled does not release the close claim", async () => {
+  // The buyer has already been told their offers are ready. Releasing the claim over a failed
+  // reminder would re-run the close and tell them again.
+  offers = [offer()];
+  let calls = 0;
+  enqueueFilter = (input: Rec) => {
+    calls++;
+    if (input.templateKey === "selection_reminder") throw new Error("outbox unavailable");
+  };
+  const res = await close();
+  assert.equal(res.offers, 1);
+  assert.ok(calls >= 2, "the reminder enqueue was never attempted");
+  const release = auctionUpdates.at(-1)!;
+  assert.notEqual((release.data as Rec).postCloseProcessedAt, null, "the claim was released over a reminder");
 });

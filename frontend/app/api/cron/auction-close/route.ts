@@ -4,7 +4,12 @@
 import { logger } from "@/lib/logger";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { closeExpiredAuctions, expireLapsedOffers, processAuctionClose } from "@/lib/services/auction/auction.service";
+import {
+  closeExpiredAuctions,
+  expireLapsedOffers,
+  processAuctionClose,
+  sweepUnselectedAuctions,
+} from "@/lib/services/auction/auction.service";
 import {
   sendDealerOfferRevisionClosingEmail,
 } from "@/lib/services/email/resend.service";
@@ -39,6 +44,15 @@ export async function GET(request: NextRequest) {
   // processed below. Sweeping first also means `processAuctionClose`'s qualified count and the
   // stored `OfferStatus` cannot disagree within the same run.
   const expiredOffers = await expireLapsedOffers(null, now);
+
+  // §9 / S15 — an auction whose offers ALL lapsed without a selection. Run immediately after the
+  // sweep so the statuses it reads are the ones the sweep just wrote, rather than a tick behind.
+  // Idempotent: the exception dedupes on (code, refs) while its row is open and the notice dedupes
+  // on the auction-scoped outbox key, so running it every five minutes writes each at most once.
+  const unselected = await sweepUnselectedAuctions(now).catch((e) => {
+    logger.error("[auction-close] unselected sweep failed:", e);
+    return 0;
+  });
 
   const closedAuctions = await prisma.auction.findMany({
     where: { status: "CLOSED", postCloseProcessedAt: null },
@@ -119,7 +133,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-    return { closed: count, processed: closedAuctions.length, expiredOffers, timestamp: now.toISOString() };
+    return { closed: count, processed: closedAuctions.length, expiredOffers, unselected, timestamp: now.toISOString() };
   });
 
   if (!run.ok) {

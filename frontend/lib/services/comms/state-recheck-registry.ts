@@ -567,6 +567,10 @@ export const PHASE_6_TEMPLATES = {
   AUCTION_ZERO_OFFERS: "auction_zero_offers",
   /** §27.1 K27-1330 / §23.2a touchpoint 4 — one hour after acceptance, only if declined. */
   PREMIUM_FOLLOW_UP: "premium_follow_up",
+  /** §9 / parity row S14 — "remind the buyer before offers expire". NEW §27.1 row, Phase 6. */
+  SELECTION_REMINDER: "selection_reminder",
+  /** §9 / parity row S15 — every offer lapsed without a selection. Buyer told either way. */
+  OFFERS_EXPIRED_UNSELECTED: "offers_expired_unselected",
 } as const;
 
 export type Phase6TemplateKey = (typeof PHASE_6_TEMPLATES)[keyof typeof PHASE_6_TEMPLATES];
@@ -680,3 +684,48 @@ const skipIfUpgradeNoLongerAskable: StateRecheckFn = async (ctx) => {
 };
 
 registerStateRecheck(PHASE_6_TEMPLATES.PREMIUM_FOLLOW_UP, skipIfUpgradeNoLongerAskable);
+
+/**
+ * §9 / S14 — the pre-expiry selection reminder, re-decided at send time.
+ *
+ * Scheduled at close for 24 hours before the earliest expiry, which means it sits in the outbox
+ * for two days — the longest gap between enqueue and drain anywhere in this phase, and therefore
+ * the one most likely to have become false. THREE things can make it false, and the cancel key
+ * only covers the first:
+ *
+ *   the buyer selected          `cancelByKey` fires on selection, but a cancel that failed (or a
+ *                               selection through a path that forgot it) must not produce "your
+ *                               offers expire soon — choose one" for a buyer holding a Deal.
+ *   the offers went            withdrawn, disqualified on re-evaluation, or already lapsed.
+ *                               Reminding someone to choose from nothing is worse than silence.
+ *   nothing is left to choose   the same read, stated as the qualified count.
+ */
+const skipIfSelectionNoLongerNeeded: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "selection reminder with no auction reference" };
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "the buyer has already selected" };
+  const qualified = await countQualifiedOffers(ctx, ctx.auctionId);
+  if (qualified === 0) return { proceed: false, reason: "no qualified offer remains to choose from" };
+  return { proceed: true };
+};
+
+/**
+ * §9 / S15 — "non-selection → revalidation with dealerships or closure; buyer informed EITHER WAY".
+ *
+ * The one thing that makes this false is a selection that landed between the sweep and the drain.
+ * A lapsed offer does NOT make it false — the message is about the lapse.
+ */
+const skipIfSelectedAfterExpiry: StateRecheckFn = async (ctx) => {
+  if (!ctx.auctionId) return { proceed: false, reason: "expiry notice with no auction reference" };
+  const accepted = await ctx.db.offer.count({ where: { auctionId: ctx.auctionId, status: "ACCEPTED" } });
+  if (accepted > 0) return { proceed: false, reason: "the buyer selected before the offers lapsed" };
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_6_TEMPLATES.SELECTION_REMINDER, skipIfSelectionNoLongerNeeded);
+registerStateRecheck(PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED, skipIfSelectedAfterExpiry);
+
+/** §27's cancellation rule. One key for the reminder, cancelled the moment the buyer chooses. */
+export function selectionReminderCancelKey(auctionId: string): string {
+  return `selection-reminder:${auctionId}`;
+}

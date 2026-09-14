@@ -150,3 +150,65 @@ export function renderPremiumFollowUp(input: {
   const cta = { label: "See what Premium includes", url: input.upgradeUrl };
   return { subject, html: layout(subject, lines.map(paragraph).join(""), cta), text: textFrom(subject, lines, cta) };
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Stage 9 — the selection window
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * §9 / parity row S14 — "Offers carry an expiration. Remind the buyer BEFORE offers expire."
+ *
+ * URGENCY WITHOUT PRESSURE, and the distinction is the whole copy problem. The deadline is real
+ * and the buyer needs it, so the message states it plainly — but it must not imply the offers get
+ * worse, that they are being outbid, or that hesitating costs them anything beyond the deadline
+ * itself, because none of that is true once the auction has closed and the prices are fixed.
+ *
+ * It also says what happens if they do nothing, because §9's failure path is a real branch and a
+ * buyer deciding whether to act deserves to know the alternative is a conversation rather than a
+ * penalty.
+ */
+export function renderSelectionReminder(input: {
+  firstName?: string | null;
+  qualifiedOfferCount: number;
+  expiresAt: Date;
+  offersUrl: string;
+}): RenderedEmail {
+  const name = input.firstName?.trim() || "there";
+  const n = input.qualifiedOfferCount;
+  const subject = "Your offers expire soon";
+  const lines = [
+    `Hi ${name},`,
+    n === 1
+      ? `Your offer is held until ${input.expiresAt.toUTCString()}.`
+      : `Your ${n} offers are held until ${input.expiresAt.toUTCString()}.`,
+    "Nothing about them changes before then — the prices are fixed and the dealerships are committed. This is only so the deadline does not pass without you knowing it was there.",
+    "If it does pass, nothing is lost and nothing is charged: we ask the dealerships to revalidate, or we close the request with you. Either way somebody talks to you first.",
+  ];
+  const cta = { label: "Choose your deal", url: input.offersUrl };
+  return { subject, html: layout(subject, lines.map(paragraph).join(""), cta), text: textFrom(subject, lines, cta) };
+}
+
+/**
+ * §9 / parity row S15 — every offer lapsed without a selection. "Buyer informed EITHER WAY."
+ *
+ * NO BLAME, AND NO AUTOMATIC LOSS. §23.1 keeps the $99 and makes a refund a reviewed request, and
+ * S16 records that a closed request with no selection does not auto-refund — so the copy must not
+ * promise a refund, and equally must not imply the money is gone. What it can promise is that a
+ * person picks this up, because `BUYER_DOES_NOT_SELECT` is raised in the same sweep.
+ */
+export function renderOffersExpiredUnselected(input: {
+  firstName?: string | null;
+  depositAmount: string;
+  dashboardUrl: string;
+}): RenderedEmail {
+  const name = input.firstName?.trim() || "there";
+  const subject = "Your offers have expired — what happens next";
+  const lines = [
+    `Hi ${name},`,
+    "The offers on your request have reached their expiration without a selection. That is a normal outcome and nothing has gone wrong.",
+    `Your ${input.depositAmount} Auction Access Deposit has not been spent and remains refundable on request — our team reviews every request.`,
+    "Someone from our team is reviewing your options now: asking the dealerships to revalidate their offers, running your auction again at no additional cost, or closing the request with you. We will be in touch before anything is decided.",
+  ];
+  const cta = { label: "View your request", url: input.dashboardUrl };
+  return { subject, html: layout(subject, lines.map(paragraph).join(""), cta), text: textFrom(subject, lines, cta) };
+}

@@ -42,6 +42,8 @@
 import { prisma } from "@/lib/prisma";
 import { DealStatus, OfferStatus } from "@prisma/client";
 import { writeDealCreationRecord } from "./deal-creation";
+import { cancelByKey } from "@/lib/services/comms/transactional-dispatcher.service";
+import { selectionReminderCancelKey } from "@/lib/services/comms/state-recheck-registry";
 
 /** Thrown when a concurrent selection has already won this auction. */
 export class OfferSelectionRaceLostError extends Error {
@@ -212,6 +214,20 @@ export async function commitOfferSelection(
         postCloseProcessedAt: now,
       },
     });
+
+    // §9 / S14 — the pre-expiry reminder is about a decision that has now been made. §27's
+    // cancellation rule, inside the same transaction as the selection: a cancelled row leaves an
+    // operator reading the outbox the true record — an ask that was scheduled and never made —
+    // where relying on the send-time recheck alone would leave a row that looks pending for two
+    // days and then silently skips.
+    //
+    // Cancellation never touches a row that has already been SENT; that is `cancelByKey`'s own
+    // rule, and it is the right one — a message that has left cannot be unsent.
+    await cancelByKey(
+      selectionReminderCancelKey(auctionId),
+      "the buyer selected an offer",
+      tx,
+    );
 
     return {
       dealId: created.id,

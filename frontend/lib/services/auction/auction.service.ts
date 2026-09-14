@@ -4,14 +4,19 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { AuctionStatus, NotificationType, OfferStatus, Prisma, VehicleRequestStatus } from "@prisma/client";
-import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
+import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_USD, SELECTION_REMINDER_LEAD_HOURS } from "@/lib/constants";
 import { releaseAuctionLoad } from "@/lib/services/auction/dealer-invitation.service";
 import { rankOffers, getPersistedRanking } from "@/lib/services/offer/best-price.service";
 import { sendDealerAuctionClosedNoWinnerEmail } from "@/lib/services/email/resend.service";
 import { qualifiedOfferWhere, lapsedOfferWhere } from "@/lib/services/offer/offer-validity";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
-import { PHASE_6_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
-import { renderOffersReady, renderAuctionZeroOffers } from "@/lib/services/comms/phase6-email-content";
+import { PHASE_6_TEMPLATES, selectionReminderCancelKey } from "@/lib/services/comms/state-recheck-registry";
+import {
+  renderOffersReady,
+  renderAuctionZeroOffers,
+  renderSelectionReminder,
+  renderOffersExpiredUnselected,
+} from "@/lib/services/comms/phase6-email-content";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 // Same resolution as the Phase 5 dispatcher callers (`sourcing-driver.service.ts:46`) so a link in
@@ -316,6 +321,15 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       });
 
       await enqueueCloseNotice(auction, auctionId, qualified.length, now);
+
+      // §9 / S14 — "remind the buyer BEFORE offers expire". Scheduled here rather than by a
+      // sweeping cron, because the close is the one moment that knows the window has just opened.
+      // Non-blocking: a reminder that fails to schedule is an ask that does not happen, which is
+      // never a reason to release the claim and re-notify a buyer who has already been told their
+      // offers are ready.
+      await scheduleSelectionReminder(auction, auctionId, qualified.map((o) => o.id)).catch((e) =>
+        logger.error(`[processAuctionClose] selection reminder not scheduled for ${auctionId}:`, e),
+      );
     } else {
       // NO AUTO-REFUND. The $99 Auction Access Deposit is not automatically
       // refunded when an auction closes with no qualified offer — it is retained
@@ -521,6 +535,171 @@ async function enqueueCloseNotice(
       text: rendered.text,
       // A BUYER's transactional mail keeps the HARD suppression tier: someone who unsubscribed
       // from marketing still receives their own deal mail (§27).
+      type: "transactional",
+      idempotencyKey: key,
+    },
+  });
+}
+
+/**
+ * §9 / parity row S14 — one reminder, 24 hours before the EARLIEST expiry on the auction.
+ *
+ * THE EARLIEST, not each offer's own. Offers on one auction share a window by construction
+ * (`defaultOfferExpiry` measures from the close), but a dealership may state a shorter one — and
+ * the moment that matters to the buyer is when their choice starts shrinking, not when the last
+ * option goes. One message about the whole report is also the honest shape: a reminder per offer
+ * would be three emails about one decision.
+ *
+ * Skipped entirely when the lead time has already passed — a short dealer-stated expiry can put
+ * the reminder in the past, and a message that says "expires soon" about something that expires in
+ * an hour, sent now, is a worse artefact than no message.
+ */
+async function scheduleSelectionReminder(
+  auction: { buyerId: string; vehicleRequestId: string | null },
+  auctionId: string,
+  qualifiedOfferIds: string[],
+): Promise<void> {
+  const earliest = await prisma.offer.findFirst({
+    where: { id: { in: qualifiedOfferIds }, expiresAt: { not: null } },
+    orderBy: { expiresAt: "asc" },
+    select: { expiresAt: true },
+  });
+  // No expiry on any qualified offer is a pre-Phase-6 auction. There is no deadline to warn about.
+  if (!earliest?.expiresAt) return;
+
+  const runAt = new Date(earliest.expiresAt.getTime() - SELECTION_REMINDER_LEAD_HOURS * 3_600_000);
+  if (runAt.getTime() <= Date.now()) return;
+
+  const buyer = await prisma.buyer.findUnique({
+    where: { id: auction.buyerId },
+    select: { firstName: true, user: { select: { email: true } } },
+  });
+  const email = buyer?.user?.email;
+  if (!email) return;
+
+  const rendered = renderSelectionReminder({
+    firstName: buyer?.firstName ?? null,
+    qualifiedOfferCount: qualifiedOfferIds.length,
+    expiresAt: earliest.expiresAt,
+    offersUrl: `${APP_URL}/buyer/auction/${auctionId}/offers`,
+  });
+  const key = `${PHASE_6_TEMPLATES.SELECTION_REMINDER}:email:${auctionId}`;
+  await enqueueTransactional({
+    triggerEvent: "auction.selection_window_opened",
+    templateKey: PHASE_6_TEMPLATES.SELECTION_REMINDER,
+    channel: "email",
+    recipientKind: "buyer",
+    recipientId: auction.buyerId,
+    to: email,
+    auctionId,
+    vehicleRequestId: auction.vehicleRequestId,
+    idempotencyKey: key,
+    runAt,
+    // §27's cancellation rule. Selection cancels it outright rather than relying on the send-time
+    // recheck alone — a cancelled row leaves no trace of an ask that was never made, which is what
+    // an operator reading the outbox should see.
+    cancelKey: selectionReminderCancelKey(auctionId),
+    payload: {
+      email,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      type: "transactional",
+      idempotencyKey: key,
+    },
+  });
+}
+
+/**
+ * §9 / parity row S15 — EVERY offer on a closed auction has lapsed and nobody selected.
+ *
+ * "Non-selection → revalidation with dealerships or closure; buyer informed EITHER WAY." Before
+ * this the auction simply sat there: the offers were stale, no case existed, and the buyer heard
+ * nothing at all. S16 stays exactly as it was — nothing here refunds anything, because §23.1 makes
+ * every refund a reviewed request and a request that ends without a selection is not an exception
+ * to that.
+ *
+ * Idempotent twice over: `raiseException` dedupes on (code, refs) while the row is open, and the
+ * outbox dedupes on the auction-scoped key. It is safe to run every five minutes, which it does.
+ */
+export async function sweepUnselectedAuctions(now: Date = new Date(), limit = 50): Promise<number> {
+  const candidates = await prisma.auction.findMany({
+    where: {
+      status: "CLOSED",
+      // Processed, so the buyer was told their offers were ready in the first place.
+      postCloseProcessedAt: { not: null },
+      // Nothing accepted...
+      offers: { none: { status: OfferStatus.ACCEPTED } },
+      // ...and at least one offer that HAS lapsed, which is what makes this auction interesting.
+      AND: [{ offers: { some: { status: OfferStatus.EXPIRED } } }],
+    },
+    select: { id: true, buyerId: true, depositId: true, vehicleRequestId: true },
+    take: limit,
+  });
+
+  let swept = 0;
+  for (const auction of candidates) {
+    // The expensive check, and only for the shortlist: is there anything LEFT to choose from?
+    // An auction with one lapsed offer and two live ones is a buyer still deciding.
+    const remaining = await prisma.offer.count({
+      where: { auctionId: auction.id, ...qualifiedOfferWhere(now) },
+    });
+    if (remaining > 0) continue;
+
+    try {
+      await raiseException({
+        code: "BUYER_DOES_NOT_SELECT",
+        auctionId: auction.id,
+        buyerId: auction.buyerId,
+        depositId: auction.depositId,
+        vehicleRequestId: auction.vehicleRequestId,
+        detail: "every offer on this auction reached its expiration without a selection",
+      });
+      await enqueueExpiredNotice(auction, auction.id);
+      swept++;
+    } catch (e) {
+      // Best-effort per auction: one failure must not stop the sweep reaching the others, and the
+      // next tick retries this one — both writes are idempotent.
+      logger.error(`[sweepUnselectedAuctions] failed for ${auction.id}:`, e);
+    }
+  }
+  return swept;
+}
+
+async function enqueueExpiredNotice(
+  auction: { buyerId: string; vehicleRequestId: string | null },
+  auctionId: string,
+): Promise<void> {
+  const buyer = await prisma.buyer.findUnique({
+    where: { id: auction.buyerId },
+    select: { firstName: true, user: { select: { email: true } } },
+  });
+  const email = buyer?.user?.email;
+  if (!email) {
+    logger.error(`[sweepUnselectedAuctions] buyer ${auction.buyerId} has no email — expiry notice not enqueued`);
+    return;
+  }
+  const rendered = renderOffersExpiredUnselected({
+    firstName: buyer?.firstName ?? null,
+    depositAmount: DEPOSIT_AMOUNT_USD,
+    dashboardUrl: `${APP_URL}/buyer/dashboard`,
+  });
+  const key = `${PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED}:email:${auctionId}`;
+  await enqueueTransactional({
+    triggerEvent: "auction.offers_expired_unselected",
+    templateKey: PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED,
+    channel: "email",
+    recipientKind: "buyer",
+    recipientId: auction.buyerId,
+    to: email,
+    auctionId,
+    vehicleRequestId: auction.vehicleRequestId,
+    idempotencyKey: key,
+    payload: {
+      email,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
       type: "transactional",
       idempotencyKey: key,
     },

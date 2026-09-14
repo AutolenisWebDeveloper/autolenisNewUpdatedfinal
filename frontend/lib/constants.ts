@@ -64,6 +64,16 @@ export const AUCTION_EXTENSION_HOURS = 24;
  */
 export const OFFER_VALIDITY_HOURS = 72;
 
+/**
+ * §9 — how far AHEAD of the expiry the buyer is reminded to choose.
+ *
+ * "Offers carry an expiration. Remind the buyer before offers expire." A reminder that lands as the
+ * offers lapse is a notification of a loss, not a reminder; a day is enough to act on and short
+ * enough that the offers are still the thing the buyer is thinking about. It has to be strictly
+ * less than `OFFER_VALIDITY_HOURS`, or the reminder would be due before the window opens.
+ */
+export const SELECTION_REMINDER_LEAD_HOURS = 24;
+
 // ─── Commission Rates (3-level ONLY — D2) ─────────────────────────────────────
 // L4 and L5 do not exist. Commission walk depth: maximum 3 levels.
 // Rate is persisted on each Commission row at creation time, so changes here
