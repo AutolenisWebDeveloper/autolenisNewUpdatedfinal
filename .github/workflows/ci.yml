@@ -490,6 +490,19 @@ jobs:
           NODE_OPTIONS: --conditions=react-server
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase5-sourcing-journeys.spec.ts
 
+      # The Phase 6 offer journeys (§12.4): close → rank → report → select → Deal lineage, the
+      # zero-offer branch, the partial-candidate branch, the all-lapsed sweep, and the tie rule.
+      #
+      # LISTED HERE for the same reason the two steps above are: `tests/e2e/` is not globbed by any
+      # step, so a spec that is written and not named here is a spec CI never runs.
+      #
+      # Same `--conditions=react-server` requirement as the Phase 5 step — this spec also calls
+      # services in-process, and `server-only` throws without it.
+      - name: E2E — Phase 6 offer journeys
+        env:
+          NODE_OPTIONS: --conditions=react-server
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase6-offer-journeys.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
