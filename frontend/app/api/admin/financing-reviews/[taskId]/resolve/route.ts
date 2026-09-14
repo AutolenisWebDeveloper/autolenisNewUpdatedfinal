@@ -1,21 +1,25 @@
-// POST /api/admin/financing-reviews/[taskId]/resolve — a human resolves a financing
-// review task. The decision (if any) is VALIDATED by the state machine unless the
-// admin explicitly overrides; the resolution is recorded on the tamper-evident
-// audit trail (HUMAN_OVERRIDE + REVIEW_RESOLVED).
+// POST /api/admin/financing-reviews/[taskId]/resolve — a human resolves a financing follow-up.
+//
+// RE-POINTED IN PHASE 7 (§13-D25). The previous handler resolved a `financing_review_tasks` row
+// and could carry a `decision` that drove a `CreditApplication` through its own state machine,
+// with an `override` flag to bypass the machine's validation. Both are gone with the machine: §12
+// says AutoLenis "does not accept a lender application, does not pull lender credit, does not
+// underwrite", so there is no application for an admin to decide and nothing to override.
+//
+// What remains is what §26 gives every exception: a resolution note, an actor, and a
+// compare-and-set that refuses to record a resolution the database did not perform. That CAS is
+// the reason this delegates to `resolve` in the queue-item service rather than writing the row
+// here — `control/X-01` records the path this replaces, which caught the database error, returned
+// as if the write had happened, and wrote an audit row saying "resolved".
 import { NextRequest } from "next/server";
 import { getAdminWithRole, adminError, adminSuccess, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
 import { z } from "zod";
-import { resolveReviewTask } from "@/lib/services/financing/review-queue.service";
+import { resolveFinancingFollowUp } from "@/lib/services/financing/financing-follow-up.service";
 
 interface Props { params: Promise<{ taskId: string }> }
 
 const schema = z.object({
   resolution: z.string().min(1, "A resolution note is required").max(2000),
-  // The safe set a human may drive an application to. No adverse-action content is
-  // authored here — a DECLINED resolution still routes through the fail-closed notice
-  // path if a rule is later injected.
-  decision: z.enum(["APPROVED", "DECLINED", "CONDITIONAL", "WITHDRAWN", "HUMAN_REVIEW"]).optional(),
-  override: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest, { params }: Props) {
@@ -35,15 +39,14 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   try {
-    await resolveReviewTask(taskId, {
-      adminId: admin.adminId,
+    await resolveFinancingFollowUp({
+      queueItemId: taskId,
       resolution: parsed.data.resolution,
-      decision: parsed.data.decision,
-      override: parsed.data.override,
+      resolvedBy: admin.adminId,
     });
   } catch (e) {
-    // Not found, already resolved (CAS), or an illegal validated transition.
-    return adminError("RESOLVE_FAILED", e instanceof Error ? e.message : "Could not resolve the task", 409);
+    // Not found, or already resolved by someone else (the compare-and-set matched nothing).
+    return adminError("RESOLVE_FAILED", e instanceof Error ? e.message : "Could not resolve the follow-up", 409);
   }
 
   return adminSuccess({ taskId, resolved: true });

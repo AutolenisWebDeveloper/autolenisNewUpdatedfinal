@@ -1,0 +1,70 @@
+-- Migration 113 — identity-firewall release revocation (§13-D38, ruled OPTION C).
+--
+-- WHAT §13-D38 ASKED, AND WHAT ITS STATED EVIDENCE GOT WRONG.
+--
+-- The register row proposed extending `identity_firewall_entries` "with release semantics
+-- (deal_id, released_at, released_by, scope) rather than create a second table", on the stated
+-- ground that the table "exists ... with zero code references (`schema.prisma:2755-2765`)".
+--
+-- Both halves of that evidence were stale by the time Phase 7 opened, and the correction changes
+-- the migration:
+--   • `schema.prisma:2755-2765` is `admin_support_notes`. The model is at `3254-3275`.
+--   • Phase 5 already landed TWO-THIRDS of the proposal under different column names —
+--     `auction_id`, `rooftop_id`, `state` ('WITHHELD' | 'LIFTED'), `lifted_at`, `lifted_by`, and
+--     `@@unique([auctionId, rooftopId])` — in 20261113000000_phase5_sourcing_invitations, with a
+--     writer at `lib/services/auction/auction-invitation.service.ts:466`.
+--
+-- SO `deal_id` IS NOT ADDED, and that is a decision rather than an omission. `deals.auction_id`
+-- and `deals.rooftop_id` both exist (Phase 1 wave), so the entry for a Deal is
+-- `(deal.auction_id, deal.rooftop_id)` — fully derivable, already uniquely indexed, and a second
+-- key would be a second way to be wrong. `scope` is not added either: §25.1 defines ONE release
+-- (buyer and co-buyer contact, the trade packet, the secure handoff) and there is no partial
+-- release in the document to model.
+--
+-- WHAT IS ADDED, AND WHY — OPTION C, ruled.
+--
+-- The question D38 actually asks is what a lift means for a deal that never completes. Three
+-- answers were put to the owner:
+--   A  lift is permanent; the dealership keeps seeing the buyer in its portal forever.
+--   B  re-withhold on return-to-offers or cancellation by flipping `state` back to 'WITHHELD'.
+--   C  lift is permanent and append-only; add `revoked_at`/`revoked_by`; dealer surfaces render
+--      identity only while LIFTED, not revoked, and the deal is live.
+--
+-- B was rejected because it DESTROYS THE §25.2 EVIDENCE — "this rooftop was given the buyer's
+-- details at time T" is the one fact this table exists to hold, and a state flip overwrites it.
+-- A was rejected because a dead deal should not leave a dealership looking at a buyer.
+--
+-- THE HONEST LIMIT, RECORDED HERE SO NOBODY LATER MISTAKES C FOR A RECALL MECHANISM.
+-- The lift's purpose is the secure handoff: at reaffirmation the buyer's and co-buyer's contact
+-- details and the trade packet are SENT to the dealership. No option here recalls what was sent.
+-- Revocation is a PORTAL-SURFACE control — it stops `app/dealer/**` and `app/api/dealer/**`
+-- rendering identity — and nothing more. The control that governs a dealership's conduct after the
+-- handoff is §25.2 anti-circumvention, not this column.
+--
+-- SHAPE. Both columns are nullable with no default, so every existing row (production holds ZERO)
+-- is valid unchanged and `revoked_at IS NULL` reads as "not revoked" without a backfill.
+-- `revoked_by` is free TEXT holding an actor identifier, matching `lifted_by` beside it rather
+-- than introducing an FK this table has never had.
+--
+-- CORE RULE 11 DOES NOT APPLY: no unique, CHECK or FK is narrowed. `@@unique([auctionId,
+-- rooftopId])` is untouched, so the one guarantee callers have — at most one firewall entry per
+-- auction per rooftop — is unchanged in both directions.
+--
+-- IDEMPOTENT: `ADD COLUMN IF NOT EXISTS` twice is a no-op. The CI `migrations` job applies the
+-- chain twice against an empty database and proves it.
+--
+-- ORDERING AGAINST THE APPLICATION DEPLOY — MIGRATION FIRST, and this one is asymmetric.
+-- `dealerIdentityVisible()` (lib/services/deal/identity-firewall.service.ts) reads `revoked_at`
+-- on every dealer surface that renders buyer identity. Deploying the application first would make
+-- every such read fail with `42703 undefined_column`, and because the firewall predicate FAILS
+-- CLOSED that surfaces as "identity withheld" rather than as a leak — safe, but every winning
+-- dealership loses the buyer's details until the migration lands. Migration first is harmless:
+-- nothing writes either column until the application ships.
+--
+-- ROLLBACK. `ALTER TABLE "identity_firewall_entries" DROP COLUMN IF EXISTS "revoked_at", DROP
+-- COLUMN IF EXISTS "revoked_by";` — but note the asymmetry above runs in reverse too: drop the
+-- columns while the application is still deployed and every dealer identity read fails closed.
+-- Revert the application first.
+
+ALTER TABLE "identity_firewall_entries" ADD COLUMN IF NOT EXISTS "revoked_at" TIMESTAMP(3);
+ALTER TABLE "identity_firewall_entries" ADD COLUMN IF NOT EXISTS "revoked_by" TEXT;

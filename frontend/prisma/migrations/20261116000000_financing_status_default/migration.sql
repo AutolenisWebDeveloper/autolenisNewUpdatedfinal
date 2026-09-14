@@ -1,0 +1,51 @@
+-- Migration 112 — move the `financing.status` column DEFAULT off a legacy value (§13-D18).
+--
+-- WHY THIS EXISTS AT ALL, stated plainly because it was not in the Phase 7 plan.
+--
+-- §13-D18, ruled: the four legacy `FinancingStatus` values (`PENDING`, `SELECTED`, `APPROVED`,
+-- `DECLINED`) stay in the Postgres enum — values cannot be dropped without a type rebuild — and
+-- CODE REFUSES TO WRITE THEM. Phase 7 builds that refusal into the single writer
+-- (`lib/services/financing/financing-checkpoint.service.ts`).
+--
+-- A column default is not code. Today:
+--
+--   "status" "FinancingStatus" NOT NULL DEFAULT 'PENDING'
+--     -- 20260423180146_complete_schema:206, unchanged since.
+--
+-- so an INSERT that omits `status` writes `PENDING` from the DATABASE, and D18's "code refuses to
+-- write them" is untrue by construction — the refusal can be perfect and the legacy value still
+-- lands. Parity row `deal-early/D4a` specified "default → `NOT_STARTED`" as part of the Phase 1
+-- wave; the wave added the seven enum labels (20261106000000_transaction_spine_enums) and the nine
+-- columns (20261106000100) but not the default. This migration is that missed half, moved to the
+-- phase that makes it load-bearing.
+--
+-- WHAT IT CHANGES, AND WHAT IT DOES NOT. It changes the default for FUTURE inserts only.
+-- `ALTER COLUMN ... SET DEFAULT` rewrites the catalogue entry (`pg_attrdef`), never a row: no
+-- table rewrite, no row lock beyond the ACCESS EXCLUSIVE the ALTER itself takes, and no existing
+-- value is touched. Production holds ZERO `financing` rows, so there is also nothing to touch —
+-- which makes this a forward guard rather than a migration, exactly as D18's ruling says.
+--
+-- IDEMPOTENT. `SET DEFAULT` is idempotent by nature: re-running sets the same catalogue value and
+-- emits no error. There is no `IF NOT EXISTS` form and none is needed. The CI `migrations` job
+-- applies the whole chain twice against an empty database and the second pass is a no-op here.
+--
+-- CORE RULE 11 DOES NOT APPLY. This narrows no unique index, no CHECK and no foreign key, so there
+-- is no prior guarantee for callers to have relied on and nothing to re-derive. It only removes a
+-- way for the database to write a value the application has been told to refuse.
+--
+-- ORDERING AGAINST THE APPLICATION DEPLOY — EITHER ORDER IS SAFE, and this is asserted rather than
+-- assumed. Every Phase 7 write of `financing` goes through `recordFinancingCheckpoint`, which
+-- always passes `status` explicitly (a `FinancingStatus` argument with no default), so no code
+-- path depends on the column default in either direction:
+--   • migration first, application later — nothing inserts `financing` rows in the interim;
+--     production holds zero and the two buyer routes that used to insert are removed by this
+--     phase's application deploy.
+--   • application first, migration later — every insert names its status, so the default is never
+--     reached.
+-- The one behaviour that differs is a MANUAL `INSERT` run by a human without a status, which is
+-- not a path this codebase has.
+--
+-- ROLLBACK. `ALTER TABLE "financing" ALTER COLUMN "status" SET DEFAULT 'PENDING';` restores the
+-- previous catalogue value exactly. No data step, no ordering constraint.
+
+ALTER TABLE "financing" ALTER COLUMN "status" SET DEFAULT 'NOT_STARTED';

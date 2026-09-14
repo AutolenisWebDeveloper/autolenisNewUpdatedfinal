@@ -67,10 +67,30 @@ const FROZEN = /^(CreditApplication|creditApplication|credit_applications|Credit
  * on the day it landed.
  */
 const ALLOWLIST: ReadonlyArray<{ file: string; removedInPhase: number; why: string }> = [
-  { file: "app/buyer/financing/page.tsx", removedInPhase: 7, why: "buyer financing page — reads existing applications" },
-  { file: "lib/services/financing/credit-application.service.ts", removedInPhase: 7, why: "the model's own service — dormant" },
-  { file: "lib/services/financing/financing-orchestrator.service.ts", removedInPhase: 7, why: "dormant orchestrator — one read" },
-  { file: "lib/services/financing/review-queue.service.ts", removedInPhase: 7, why: "human review over existing rows — status type only" },
+  // PHASE 7 — EMPTY, AND THAT IS THE END STATE §8.2a DESCRIBES.
+  //
+  // All four entries were removed in this phase, each as its reference disappeared:
+  //   app/buyer/financing/page.tsx                            the last read — the page now routes
+  //                                                           to §12's external paths
+  //   lib/services/financing/credit-application.service.ts    deleted (the model's own service)
+  //   lib/services/financing/financing-orchestrator.service.ts deleted (dormant, zero callers)
+  //   lib/services/financing/review-queue.service.ts           deleted; the REVIEW CAPABILITY moved
+  //                                                           to queue_items (§13-D25) rather than
+  //                                                           being removed
+  //
+  // THE GUARD IS RE-VERIFIED HERE, NOT RE-ESTABLISHED. §8.2a: the model was recorded as frozen in
+  // Phase 1 and the SSN write path was shut in Phase 0. Phase 7 removes the read-only references
+  // that made an allowlist necessary and runs the same scan against the shortened list — which is
+  // now the empty one.
+  //
+  // AN EMPTY ALLOWLIST MAKES THIS GUARD STRICTLY STRONGER, because the stale-entry check below
+  // has nothing left to exempt: ANY AST-visible reference to CreditApplication, creditApplication,
+  // credit_applications or CreditApplicationStatus anywhere under app/, lib/, components/ or
+  // scripts/ now fails the build.
+  //
+  // THE TABLE AND ITS ROWS ARE UNTOUCHED. Physical deletion needs separate retention, legal and
+  // owner approval (§13-D9, §13-D25) and is outside this series. What a future deletion would
+  // require is recorded in §8.2a's lifecycle table.
 ];
 
 /**
@@ -138,6 +158,22 @@ test("every allowlist entry still references the model — a stale entry fails",
   );
 });
 
+test("the allowlist is EMPTY — Phase 7's end state, asserted positively", () => {
+  // A POSITIVE assertion rather than a consequence of the two tests above. Those pass vacuously on
+  // an empty list: "no offender outside the allowlist" and "no stale entry" are both trivially
+  // true when there is nothing in it, so neither would notice an entry being quietly re-added.
+  //
+  // §13-D50 asks whether "the allowlist shrinking to zero at Phase 7 is the intended end state".
+  // It is, and this is where that answer lives. Re-adding an entry now requires deleting this
+  // test, which is a decision somebody has to make on purpose rather than a diff nobody reads.
+  assert.deepEqual(
+    ALLOWLIST.map((a) => a.file),
+    [],
+    "§8.2a: Phase 7 removes the last read-only reference to credit_applications. Any entry here " +
+      "is a new reference to a frozen model and needs an owner decision, not an allowlist row.",
+  );
+});
+
 test("every allowlist entry names the phase that removes it", () => {
   for (const entry of ALLOWLIST) {
     assert.equal(entry.removedInPhase, 7, `${entry.file}: §8.2a assigns every remaining read path to Phase 7`);
@@ -182,6 +218,25 @@ test("the retired apply route is NOT allowlisted, and holds no AST reference", (
   };
   ts.forEachChild(sf, walk);
   assert.equal(readsBody, false, "the retired route must never read a request body");
+
+  // PHASE 7 — the 410 became a redirect (§8.2 Phase 7), and the STATUS is load-bearing.
+  // 307 and 308 PRESERVE the method and the body, so a client still POSTing an SSN payload would
+  // have the browser re-send it to the redirect target — reopening through the redirect exactly
+  // the exposure Phase 0 closed. 303 See Other makes the client re-issue as GET and drop the body.
+  // Asserted here rather than trusted to the comment, because the comment cannot fail a build.
+  const statuses: number[] = [];
+  const walkStatus = (n: ts.Node): void => {
+    if (ts.isPropertyAssignment(n) && ts.isIdentifier(n.name) && n.name.text === "status") {
+      if (ts.isNumericLiteral(n.initializer)) statuses.push(Number(n.initializer.text));
+    }
+    ts.forEachChild(n, walkStatus);
+  };
+  ts.forEachChild(sf, walkStatus);
+  assert.ok(
+    statuses.length > 0 && statuses.every((s) => s === 303 || s === 410),
+    `the retired route answers 303 (See Other — drops the body) or 410; found ${statuses.join(", ") || "no literal status"}. ` +
+      "307/308 would re-send an SSN payload to the redirect target.",
+  );
 });
 
 test("the detector sees a real reference and ignores prose — proved both ways", () => {

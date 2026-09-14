@@ -40,19 +40,27 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // would make each one stuck by construction: `canTransition` refuses to leave a state with no
   // edges, and only CANCELLED/REFUNDED are reachable from anywhere.
   //
-  // THE EDGE EXISTS; NOTHING IN PHASE 6 TAKES IT — also the ruling, and for the same reason
-  // K27-1328 was decided against: a path that can be taken before anything can enforce it is the
-  // defect, not the fix. Phase 7 owns the `dealer_reaffirmations` flow and wires the caller behind
-  // it. No Phase 6 code path calls `advanceDealStatus` out of this state.
+  // PHASE 7 REPLACED THE DIRECT EDGE. Phase 6 wrote `DEALER_CONFIRMATION: ["FINANCING_PENDING"]`
+  // with no domain caller and recorded that deliberately (§8.1f). Reading it at the start of
+  // Phase 7 found it was NOT unreachable: `POST /api/admin/deals/[dealId]/action` with
+  // `DEAL_STAGE_ADVANCED` resolves the target at runtime and reaches `advanceDealStatus`
+  // NON-FORCED (`action/route.ts:65-79`), and two admin dropdowns offered `FINANCING_PENDING` as
+  // the next stage for a `DEALER_CONFIRMATION` deal. An operations admin could therefore move a
+  // deal past reaffirmation, the vehicle hold and the condition disclosure with an ordinary,
+  // fully-legal transition — the gate Phase 7 exists to build, skippable by the surface most
+  // likely to skip it.
   //
-  // It is also what makes a revert safe. `FINANCING_PENDING` is now reachable from BOTH the legacy
-  // entry (ACTIVE, for deals created before this phase) and the new one, so reverting Phase 6
-  // leaves any in-flight Deal in a legal state rather than stranded behind an edge that vanished.
+  // The path now runs through the two stages the document describes:
+  //   Stage 10  DEALER_CONFIRMATION -> RECAP_PENDING   (dealer-reaffirmation.service)
+  //   Stage 11  RECAP_PENDING       -> FINANCING_PENDING (deal-recap.service)
+  // `force: true` still overrides both, and still audit-logs that it did — which is the whole
+  // difference between an override and a gap.
   //
-  // If you are reading this in a later phase and see an unused edge: it is deliberate, not an
-  // oversight. Recorded in §8.1f's AS BUILT record.
-  DEALER_CONFIRMATION: ["FINANCING_PENDING"],
-  RECAP_PENDING: [],
+  // REVERT SAFETY IS UNCHANGED. `FINANCING_PENDING` stays reachable from the legacy entry
+  // (`ACTIVE`, for deals created before Phase 6), so reverting Phase 7 leaves any in-flight Deal
+  // in a legal state rather than stranded behind an edge that vanished.
+  DEALER_CONFIRMATION: ["RECAP_PENDING"],
+  RECAP_PENDING: ["FINANCING_PENDING"],
   DEALER_EXECUTED: [],
   FUNDING_PENDING: [],
   PICKUP_READINESS: [],
@@ -264,6 +272,25 @@ async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: Adva
   // INSURANCE_PENDING, and INSURANCE_PENDING cannot re-enter this branch.
   if (newStatus === DealStatus.FEE_PENDING || newStatus === DealStatus.FEE_PAID) {
     await settleFeeLadderIfPaid(dealId, actor);
+  }
+  // §Stage 11's recap is built ON ARRIVAL at RECAP_PENDING, for the same reason the fee ladder
+  // settles here: the stage is reachable from the reaffirmation flow, from an admin correction and
+  // from a `force` override, and a recap built at only one of those leaves the other two on a
+  // stage with nothing to confirm. `buildRecap` is idempotent — a deal that already has a live
+  // version returns it — so re-arrival is free. Dynamic import keeps the recap service out of the
+  // deal service's module graph, which the outbox drain also loads.
+  if (newStatus === DealStatus.RECAP_PENDING) {
+    try {
+      const { buildRecap } = await import("./deal-recap.service");
+      await buildRecap({ dealId });
+    } catch (err) {
+      // Never throws onward: the transition is committed and a recap that failed to build is a
+      // repairable condition, not a reason to unwind the stage. Reported rather than swallowed.
+      logger.error("arrival hook: recap build failed at RECAP_PENDING", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

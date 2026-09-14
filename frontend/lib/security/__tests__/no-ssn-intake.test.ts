@@ -188,8 +188,37 @@ test("the retired credit-application route returns 410 and never parses a body",
 
   const mod: { POST: () => Promise<Response> } = await import("@/app/api/buyer/financing/apply/route");
   const res = await mod.POST();
-  assert.equal(res.status, 410, "POST must return 410 Gone");
-  assert.equal(await res.text(), "", "the 410 must carry no body");
+
+  // PHASE 7 CHANGED THE STATUS, DELIBERATELY AND UNDER A RULING. §8.2 Phase 7: "The Phase 0 410
+  // handler becomes a redirect to the external-financing screen." 410 was right while there was
+  // nowhere to send anyone; §12's three paths are now real and reachable.
+  //
+  // WHAT THIS ASSERTION ACTUALLY PROTECTS IS THE BODY, NOT THE NUMBER — and that is why the
+  // allowed set is 303 and 410 rather than "any redirect". 307 and 308 PRESERVE the method and the
+  // body, so a client still POSTing an SSN payload would have the browser RE-SEND it to the
+  // redirect target: the Phase 0 exposure, reopened through the redirect. 303 See Other instructs
+  // the client to issue a GET and drop the body.
+  //
+  // The two properties above this line — the handler takes no parameter, and reads no body — are
+  // unchanged and are the control §8.2 says must never be reverted.
+  // PINNED TO 303 EXACTLY, not to a set. The disjunction this replaced (`303 || 410`) also passed
+  // if the route silently reverted to 410, and left the `location` assertion inside an `if` that a
+  // reverted route would skip — a test that permits the thing it was rewritten to verify is a test
+  // that verifies nothing. 307 and 308 remain excluded for the reason above: they preserve the
+  // method and the body, so a client still POSTing an SSN payload would have the browser RE-SEND
+  // it to the redirect target.
+  assert.equal(
+    res.status,
+    303,
+    `POST must answer 303 See Other — it drops the body. Got ${res.status}. ` +
+      "307/308 would re-send an SSN payload to the redirect target; 410 is the pre-Phase-7 answer.",
+  );
+  assert.equal(await res.text(), "", "the response must carry no body — nothing to reflect a submitted value back");
+  assert.equal(
+    res.headers.get("location"),
+    "/buyer/financing",
+    "the redirect must point at the external-financing screen (§12's three paths)",
+  );
 });
 
 test("the buyer-facing SSN entry surface is gone", () => {

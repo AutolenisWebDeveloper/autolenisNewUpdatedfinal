@@ -1,4 +1,16 @@
-// Route contract for POST /api/buyer/financing/apply — RETIRED, answers 410 Gone.
+// Route contract for POST /api/buyer/financing/apply — RETIRED, answers 303 to the
+// external-financing screen.
+//
+// PHASE 7 CHANGED THE STATUS UNDER A RULING (§8.2 Phase 7: "The Phase 0 410 handler becomes a
+// redirect to the external-financing screen"). 410 was the right answer while there was nowhere to
+// send anyone; §12's three paths are now real and reachable, so the route points at them.
+//
+// EVERY SECURITY ASSERTION BELOW IS UNCHANGED, because the status was never the control. The
+// controls are: the handler accepts no parameter, it never reads a body, it returns no body, and
+// it imports nothing. What the status change adds is one more: the redirect must be 303 See Other,
+// which makes the client re-issue as GET and DROP the body. 307 and 308 preserve the method and
+// body, so a client still POSTing an SSN payload would have the browser re-send it to the
+// redirect target — the Phase 0 exposure, reopened through the redirect.
 //
 // This suite previously asserted the credit-application intake: auth, the
 // PII-encryption fail-closed gate, deal ownership + FINANCING_PENDING, the prequal
@@ -42,12 +54,20 @@ function request(body: unknown): Request {
   });
 }
 
-test("POST answers 410 Gone", async () => {
+test("POST answers 303 See Other, pointing at the external-financing screen", async () => {
   const res = await (await handler())();
-  assert.equal(res.status, 410);
+  assert.equal(res.status, 303, "303 makes the client re-issue as GET and drop the body");
+  assert.equal(res.headers.get("location"), "/buyer/financing");
 });
 
-test("the 410 carries no response body", async () => {
+test("the redirect is NEVER 307 or 308 — those re-send the body", async () => {
+  // The one assertion that is genuinely new in Phase 7, and the reason the redirect is safe.
+  const res = await (await handler())();
+  assert.notEqual(res.status, 307, "307 preserves the method AND the body");
+  assert.notEqual(res.status, 308, "308 preserves the method AND the body");
+});
+
+test("the response carries no body", async () => {
   const res = await (await handler())();
   assert.equal(await res.text(), "", "nothing to echo a submitted value back in");
 });
@@ -56,7 +76,7 @@ test("a legacy SSN payload is never read", async () => {
   const req = request(LEGACY_PAYLOAD);
   const res = await (await handler())(req);
 
-  assert.equal(res.status, 410, "an SSN payload is refused, not processed");
+  assert.equal(res.status, 303, "an SSN payload is redirected away, not processed");
   assert.equal(
     req.bodyUsed, false,
     "the body must never be consumed — an SSN that is not parsed cannot be buffered, " +
@@ -65,12 +85,12 @@ test("a legacy SSN payload is never read", async () => {
 });
 
 test("the answer does not depend on the caller — no session lookup, no 401 branch", async () => {
-  // 410 describes the resource, not the actor. With no auth import there is no path
+  // The answer describes the resource, not the actor. With no auth import there is no path
   // that could answer differently for an anonymous caller than for a signed-in one.
   const first = await (await handler())();
   const second = await (await handler())(request(LEGACY_PAYLOAD));
-  assert.equal(first.status, 410);
-  assert.equal(second.status, 410);
+  assert.equal(first.status, 303);
+  assert.equal(second.status, 303);
 });
 
 test("the route reaches no service, database, or encryption dependency", () => {
@@ -84,6 +104,8 @@ test("the route reaches no service, database, or encryption dependency", () => {
     "@/lib/prisma",
     "@/lib/auth/api",
     "@/lib/security/field-encryption",
+    // Deleted in Phase 7 — the file no longer exists, and the guard keeps naming it so a
+    // restored copy cannot be imported here without failing.
     "@/lib/services/financing/credit-application.service",
     "@/lib/services/prequal/prequal.service",
     "zod",
@@ -97,6 +119,6 @@ test("no CreditApplication can be created through this route", async () => {
   // behavioural statement is that a full, previously-valid submission produces a
   // refusal and no response payload that could carry an application id.
   const res = await (await handler())(request(LEGACY_PAYLOAD));
-  assert.equal(res.status, 410);
+  assert.equal(res.status, 303);
   assert.equal(await res.text(), "", "no applicationId is ever returned");
 });

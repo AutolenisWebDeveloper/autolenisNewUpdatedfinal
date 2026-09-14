@@ -748,3 +748,230 @@ registerStateRecheck(PHASE_6_TEMPLATES.OFFERS_EXPIRED_UNSELECTED, skipIfSelected
 export function selectionReminderCancelKey(auctionId: string): string {
   return `selection-reminder:${auctionId}`;
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// PHASE 7 — Stages 10 to 12: reaffirmation, recap, financing checkpoints
+// ───────────────────────────────────────────────────────────────────────────────
+
+export const PHASE_7_TEMPLATES = {
+  /** §27.1 "Buyer selects offer → winning dealership → reaffirmation request". The K27-1328b half. */
+  REAFFIRMATION_REQUEST: "reaffirmation_request",
+  /** §27.1 "Reaffirmation reminder → winning dealership → 12-hour reminder". */
+  REAFFIRMATION_REMINDER: "reaffirmation_reminder",
+  /** §27.1 "Dealer confirms → Buyer + AutoLenis → confirmed vehicle, condition report, summary". */
+  DEALER_CONFIRMED: "dealer_confirmed",
+  /** §27.1 "Material change proposed → Buyer → side-by-side change with accept or reject". */
+  MATERIAL_CHANGE_PROPOSED: "material_change_proposed",
+  /** §27.1 "Dealer rejects or times out → Buyer + Operations → return-to-offers instructions". */
+  RETURNED_TO_OFFERS: "returned_to_offers",
+  /** §27.1 "Vehicle hold expiring → Buyer + dealership + Operations → extend or release". */
+  VEHICLE_HOLD_EXPIRING: "vehicle_hold_expiring",
+  /** §27.1 "Outside dealer verification needed → Dealership + Operations". */
+  OUTSIDE_DEALER_VERIFICATION: "outside_dealer_verification",
+  /** §27.1 "Recap ready → Buyer + dealership → confirm the final numbers". */
+  RECAP_READY: "recap_ready",
+  /** §27.1 "Financing path selected → Buyer + AutoLenis → external handoff and status". */
+  FINANCING_PATH_SELECTED: "financing_path_selected",
+  /** §27.1 "Financing in progress → Buyer → progress or missing-evidence reminder". */
+  FINANCING_IN_PROGRESS: "financing_in_progress",
+  /** §27.1 "Financing terms locked → Buyer + dealership → terms confirmed; contract next". */
+  FINANCING_TERMS_LOCKED: "financing_terms_locked",
+  /** §27.1 "Financing failed or expired → Buyer + AutoLenis → alternative-path instruction". */
+  FINANCING_FAILED_OR_EXPIRED: "financing_failed_or_expired",
+  /** §23.2a touchpoint 5 — the second and final Premium ask, at reaffirmation or recap. */
+  PREMIUM_FOLLOW_UP_FINAL: "premium_follow_up_final",
+} as const;
+
+export type Phase7TemplateKey = (typeof PHASE_7_TEMPLATES)[keyof typeof PHASE_7_TEMPLATES];
+
+/**
+ * §27's cancellation rule for Stage 10. ONE key covers the request and the 12-hour reminder, so a
+ * confirmation, a rejection, a timeout or a released hold cancels whatever is still queued with a
+ * single call — and a caller cannot cancel the reminder while leaving the request to arrive after
+ * the deal has stood down.
+ */
+export function reaffirmationReminderCancelKey(dealId: string): string {
+  return `reaffirmation:${dealId}`;
+}
+
+/** §27's cancellation rule for Stage 11. Cancelled when both parties have confirmed the recap. */
+export function recapCancelKey(dealId: string): string {
+  return `recap:${dealId}`;
+}
+
+/**
+ * Every Stage 10 message to the dealership is about ONE open window. The window closes four ways —
+ * confirmed, rejected, timed out, or the deal stood down — and in all four the message is a lie by
+ * the time it drains. The cancel key covers the ordinary path; this is what covers a cancel that
+ * failed, or a path that forgot to call it.
+ *
+ * This is the same shape as `skipIfSelectionNoLongerNeeded`, pointed at the reaffirmation row
+ * rather than the offer set.
+ */
+const skipIfReaffirmationClosed: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "reaffirmation message with no deal reference" };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true },
+  });
+  if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+  if (deal.status === "CANCELLED" || deal.status === "REFUNDED") {
+    return { proceed: false, reason: "the deal has stood down" };
+  }
+  const row = await ctx.db.dealerReaffirmation.findFirst({
+    where: { dealId: ctx.dealId },
+    orderBy: { createdAt: "desc" },
+    select: { status: true },
+  });
+  if (!row) return { proceed: false, reason: "no reaffirmation is open for this deal" };
+  if (row.status !== "PENDING") {
+    return { proceed: false, reason: `the dealership has already answered (${row.status})` };
+  }
+  return { proceed: true };
+};
+
+/**
+ * "A change is waiting for your decision" is false once the buyer has decided, and false if the
+ * deal stood down while the message sat in the outbox.
+ */
+const skipIfMaterialChangeDecided: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "material-change notice with no deal reference" };
+  const row = await ctx.db.dealerReaffirmation.findFirst({
+    where: { dealId: ctx.dealId },
+    orderBy: { createdAt: "desc" },
+    select: { status: true },
+  });
+  if (!row) return { proceed: false, reason: "no reaffirmation exists for this deal" };
+  if (row.status !== "MATERIAL_CHANGE_PENDING") {
+    return { proceed: false, reason: `the change is no longer awaiting a decision (${row.status})` };
+  }
+  return { proceed: true };
+};
+
+/** "Confirm the final numbers" is false once both parties have, and false if the recap was superseded. */
+const skipIfRecapConfirmed: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "recap notice with no deal reference" };
+  const recap = await ctx.db.dealRecap.findFirst({
+    where: { dealId: ctx.dealId },
+    orderBy: { version: "desc" },
+    select: { buyerConfirmedAt: true, dealerConfirmedAt: true, supersededBy: true },
+  });
+  if (!recap) return { proceed: false, reason: "no recap exists for this deal" };
+  if (recap.supersededBy) return { proceed: false, reason: "a newer recap version has replaced this one" };
+  if (recap.buyerConfirmedAt && recap.dealerConfirmedAt) {
+    return { proceed: false, reason: "both parties have already confirmed" };
+  }
+  return { proceed: true };
+};
+
+/**
+ * The vehicle hold. Two things make the notice false: the contract has been requested (the hold has
+ * done its job — §10c's predicate is the CONTRACT REQUEST, not the date) or the hold moved.
+ *
+ * The moved-hold check reads the payload's own `holdUntil` rather than only the row: a dealership
+ * that extends between the sweep and the drain should not have the buyer told the old date is
+ * expiring.
+ */
+const skipIfHoldNoLongerExpiring: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "hold notice with no deal reference" };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, vehicleHoldUntil: true },
+  });
+  if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+  const PAST_HOLD = ["CONTRACT_PENDING", "CONTRACT_REVIEW", "CONTRACT_APPROVED", "SIGNING_PENDING", "SIGNED", "DEALER_EXECUTED", "FUNDING_PENDING", "PICKUP_READINESS", "PICKUP_SCHEDULED", "HANDOVER_PENDING", "COMPLETED", "CANCELLED", "REFUNDED"];
+  if (PAST_HOLD.includes(deal.status)) {
+    return { proceed: false, reason: `the hold is no longer the gating fact at ${deal.status}` };
+  }
+  const notifiedFor = typeof ctx.payload.holdUntil === "string" ? ctx.payload.holdUntil : null;
+  if (notifiedFor && deal.vehicleHoldUntil && deal.vehicleHoldUntil.toISOString() !== notifiedFor) {
+    return { proceed: false, reason: "the dealership extended the hold after this notice was queued" };
+  }
+  return { proceed: true };
+};
+
+/**
+ * The financing checkpoint messages. Each is about a status the deal has SINCE left in one
+ * direction only, so the recheck is "is the deal still at the status this message describes".
+ */
+function skipIfFinancingStatusChanged(expected: string[]): StateRecheckFn {
+  return async (ctx) => {
+    if (!ctx.dealId) return { proceed: false, reason: "financing notice with no deal reference" };
+    const deal = await ctx.db.deal.findUnique({ where: { id: ctx.dealId }, select: { status: true } });
+    if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+    if (deal.status === "CANCELLED" || deal.status === "REFUNDED") {
+      return { proceed: false, reason: "the deal has stood down" };
+    }
+    const financing = await ctx.db.financing.findUnique({
+      where: { dealId: ctx.dealId },
+      select: { status: true },
+    });
+    if (!financing) return { proceed: false, reason: "no financing record exists for this deal" };
+    if (!expected.includes(financing.status)) {
+      return { proceed: false, reason: `financing is now ${financing.status}, not ${expected.join(" or ")}` };
+    }
+    return { proceed: true };
+  };
+}
+
+registerStateRecheck(PHASE_7_TEMPLATES.REAFFIRMATION_REQUEST, skipIfReaffirmationClosed);
+registerStateRecheck(PHASE_7_TEMPLATES.REAFFIRMATION_REMINDER, skipIfReaffirmationClosed);
+registerStateRecheck(PHASE_7_TEMPLATES.MATERIAL_CHANGE_PROPOSED, skipIfMaterialChangeDecided);
+registerStateRecheck(PHASE_7_TEMPLATES.RECAP_READY, skipIfRecapConfirmed);
+registerStateRecheck(PHASE_7_TEMPLATES.VEHICLE_HOLD_EXPIRING, skipIfHoldNoLongerExpiring);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.FINANCING_IN_PROGRESS,
+  skipIfFinancingStatusChanged(["NOT_STARTED", "IN_PROGRESS"]),
+);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.FINANCING_TERMS_LOCKED,
+  skipIfFinancingStatusChanged(["TERMS_LOCKED", "NOT_REQUIRED_CASH"]),
+);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.FINANCING_FAILED_OR_EXPIRED,
+  skipIfFinancingStatusChanged(["FAILED", "EXPIRED"]),
+);
+
+// THE FOUR THAT CANNOT BECOME FALSE, each with the reason a reviewer reads rather than a shrug.
+registerStateRecheck(
+  PHASE_7_TEMPLATES.RETURNED_TO_OFFERS,
+  alwaysSend(
+    "The deal stood down. That is a fact about a moment that has passed, and §Stage 10 requires " +
+      "the buyer to be told 'with the reason stated' — a rejection, a timeout, a released hold or " +
+      "a failed verification all owe them that. Nothing that happens afterwards makes it false: a " +
+      "buyer who then selects another offer still needs to know why the first one ended, and " +
+      "suppressing it would leave a deal that silently changed hands with no record of why.",
+  ),
+);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.DEALER_CONFIRMED,
+  alwaysSend(
+    "The dealership confirmed. That is a fact about a moment that has passed — a later rejection, " +
+      "timeout or released hold produces its OWN notice (RETURNED_TO_OFFERS), and suppressing this " +
+      "one would leave the buyer with a deal that silently changed hands and no record of why.",
+  ),
+);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.FINANCING_PATH_SELECTED,
+  alwaysSend(
+    "The buyer chose a path. The message explains the external handoff and what happens next; it " +
+      "stays true whichever way the financing then goes, and the outcomes have their own notices.",
+  ),
+);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.OUTSIDE_DEALER_VERIFICATION,
+  alwaysSend(
+    "A dealership being asked to claim and verify its account needs the instruction whether or not " +
+      "the deal survives — the account outlives this transaction, and a half-claimed account is the " +
+      "state §10b exists to prevent.",
+  ),
+);
+registerStateRecheck(
+  PHASE_7_TEMPLATES.PREMIUM_FOLLOW_UP_FINAL,
+  alwaysSend(
+    "SEE THE NOTE BELOW — this is NOT an unconditional send. §23.2b's suppression set is evaluated " +
+      "by `upgrade-suppression.service` BEFORE the row is enqueued, and §23.2a's own rule is that " +
+      "this is the last ask. The registry entry is `alwaysSend` because the suppression decision is " +
+      "owned by the plan/upgrade area, not because the message cannot become false.",
+  ),
+);

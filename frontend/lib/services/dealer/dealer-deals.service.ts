@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { PickupStatus, type DealStatus } from "@prisma/client";
 import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
+import { dealerIdentityVisible } from "@/lib/services/deal/identity-firewall.service";
 
 export interface DealerDealSummary {
   id: string;
@@ -35,12 +36,33 @@ export interface DealerDealDetail {
     termMonths: number | null;
     auctionId: string;
     dealerId: string;
+    // PHASE 7 — the dealership's OWN offer data, projected so the Stage 10 reaffirmation form can
+    // be PRE-FILLED from it. It was not, and the form's own header said it was: the page passed
+    // `vin: null, odometer: null, deliveryTerms: null` because this projection did not carry them.
+    // A dealership therefore retyped its own VIN, and one wrong character tripped §10a rule 1 —
+    // "This is a different vehicle from the one you chose" to the buyer, a rejection that cancels
+    // the deal, and an SLA failure recorded against the rooftop. For a typo.
+    //
+    // §25.1 is not in play here: every one of these fields is the dealership's own submission.
+    vin: string | null;
+    odometer: number | null;
+    deliveryTerms: string | null;
+    junkFeeItems: unknown;
+    addOnItems: unknown;
+    incentiveItems: unknown;
   } | null;
-  // Buyer contact is included here ONLY for deals where the dealer's offer
-  // was the accepted one. The findFirst query below filters by
-  // offer.dealerId so a dealer can never reach a Deal record that isn't
-  // their own win. Buyer identity is therefore safe to expose on this
-  // endpoint.
+  // PHASE 7 CORRECTED THIS COMMENT, and the correction is the point.
+  //
+  // It used to read: "Buyer identity is therefore safe to expose on this endpoint", on the ground
+  // that the query filters by `offer.dealerId` so a dealership can only reach its own win.
+  // OWNERSHIP IS NOT THE QUESTION §25.1 ASKS. The firewall is about WHEN, not WHOSE: "Name, email,
+  // phone, and exact address are released only at Stage 10, when that dealership has won AND
+  // REAFFIRMED." A dealership that has won and not yet confirmed owns the deal and must still see
+  // nothing — and the platform already told dealerships so, in `app/api/dealer/messages/route.ts`
+  // ("buyer contact details are released to the winning dealership at reaffirmation") and in the
+  // Phase 5 invitation email, while this block released them earlier.
+  //
+  // `null` means withheld; `identityWithheldReason` says why.
   buyer: {
     firstName: string;
     lastName: string;
@@ -50,6 +72,8 @@ export interface DealerDealDetail {
     zip: string | null;
     email: string | null;
   } | null;
+  /** Null when the buyer block is populated. Otherwise the firewall's own reason. */
+  identityWithheldReason: string | null;
   pickup: {
     id: string;
     status: "NOT_SCHEDULED" | "SCHEDULED" | "COMPLETE" | string;
@@ -106,6 +130,12 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
           termMonths: true,
           auctionId: true,
           dealerId: true,
+          vin: true,
+          odometer: true,
+          deliveryTerms: true,
+          junkFeeItems: true,
+          addOnItems: true,
+          incentiveItems: true,
         },
       },
       buyer: {
@@ -140,6 +170,10 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
   });
   if (!deal) return null;
 
+  // Resolved BEFORE the mapping so the projection below has one answer to consult, rather than
+  // each field deciding for itself.
+  const firewall = await dealerIdentityVisible(deal.id, dealerId);
+
   return {
     id: deal.id,
     status: deal.status,
@@ -151,7 +185,18 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
     executedContractAvailable:
       deal.eSignEnvelope?.status === "COMPLETED" &&
       !!(deal.eSignEnvelope as { executedDocumentKey?: string | null } | null)?.executedDocumentKey,
-    buyer: deal.buyer
+    // §25.1, PHASE 7 — the identity firewall, applied.
+    //
+    // This block released the buyer's full contact details on any deal past PENDING, which meant a
+    // dealership saw them from award dispatch onward. §11.6 moves the release to REAFFIRMATION,
+    // and §Stage 10 states it exactly: "At this moment and not before, the identity firewall
+    // lifts." `dealerIdentityVisible` is that predicate and it FAILS CLOSED — a missing
+    // reaffirmation, a revoked release, a dead deal or a query that throws all withhold.
+    //
+    // WITHHELD IS `null`, NOT AN EMPTY OBJECT. A surface rendering `buyer?.firstName` then renders
+    // nothing, and a surface that forgot to check gets a TypeScript error on the null rather than
+    // a blank where a name should be.
+    buyer: firewall.visible && deal.buyer
       ? {
           firstName: deal.buyer.firstName,
           lastName: deal.buyer.lastName,
@@ -162,6 +207,8 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
           email: deal.buyer.user?.email ?? null,
         }
       : null,
+    /** Why the buyer block is null, for a surface that wants to say so rather than show a gap. */
+    identityWithheldReason: firewall.visible ? null : firewall.reason,
     pickup: deal.pickup,
   };
 }

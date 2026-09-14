@@ -1,5 +1,18 @@
-// Route contract for POST /api/admin/financing-reviews/[taskId]/resolve — role
-// gate, validation, delegation to resolveReviewTask, and CAS/illegal-move → 409.
+// Route contract for POST /api/admin/financing-reviews/[taskId]/resolve — role gate, validation,
+// delegation to the §26 queue writer, and CAS/already-resolved → 409.
+//
+// RE-POINTED IN PHASE 7 (§13-D25). This suite asserted delegation to `resolveReviewTask` and that
+// a `decision` (APPROVED / DECLINED / CONDITIONAL / WITHDRAWN) was forwarded to it. Both are gone
+// with the machine they served: `FinancingReviewTask` was keyed on `credit_application_id`, and
+// §12 is explicit that AutoLenis "does not accept a lender application, does not pull lender
+// credit, does not underwrite" — so there is no application for an admin to decide, and an admin
+// picking "APPROVED" here would have been recording a credit decision AutoLenis may not make.
+//
+// WHAT IS UNCHANGED, AND IS THE POINT OF THIS SUITE: the role gate, the required resolution note,
+// the delegation (now to `resolve` in the queue-item service, which owns the compare-and-set), and
+// the 409 when the row was already resolved. `control/X-01` records the path this replaces, which
+// caught the database error, returned as if the write had happened, and wrote an audit row saying
+// "resolved".
 //
 // Run: pnpm test:financing-routes
 
@@ -21,11 +34,12 @@ mock.module("@/lib/auth/admin-api", {
     OPERATIONAL_ROLES: ["SUPER_ADMIN", "OPERATIONS_ADMIN", "COMPLIANCE_ADMIN", "FINANCE_ADMIN"],
   },
 });
-mock.module("@/lib/services/financing/review-queue.service", {
+mock.module("@/lib/services/financing/financing-follow-up.service", {
   namedExports: {
-    resolveReviewTask: async (taskId: string, input: Record<string, unknown>) => {
+    resolveFinancingFollowUp: async (input: Record<string, unknown>) => {
       if (state.resolveThrows) throw state.resolveThrows;
-      state.resolveCalls.push({ taskId, ...input });
+      state.resolveCalls.push({ ...input });
+      return { id: String(input.queueItemId) };
     },
   },
 });
@@ -59,18 +73,26 @@ test("400 on missing resolution", async () => {
   assert.equal(res.status, 400);
 });
 
-test("resolves and forwards adminId + decision to the service", async () => {
-  const res = await POST({ resolution: "stips cleared", decision: "APPROVED" });
+test("resolves and forwards the queue item id + the resolving admin", async () => {
+  const res = await POST({ resolution: "buyer moved to a credit union pre-approval" });
   assert.equal(res.status, 200);
   assert.equal(state.resolveCalls.length, 1);
-  assert.equal(state.resolveCalls[0]!.taskId, "task_1");
-  assert.equal(state.resolveCalls[0]!.adminId, "admin_9");
-  assert.equal(state.resolveCalls[0]!.decision, "APPROVED");
+  assert.equal(state.resolveCalls[0]!.queueItemId, "task_1");
+  assert.equal(state.resolveCalls[0]!.resolvedBy, "admin_9");
+  assert.equal(state.resolveCalls[0]!.resolution, "buyer moved to a credit union pre-approval");
 });
 
-test("409 when the task was already resolved / an illegal move (service throws)", async () => {
+test("§13-D25 — a `decision` is NOT forwarded; there is no credit decision to record", async () => {
+  // The strongest statement of the retirement: even if a caller sends the old field, nothing
+  // carries it onward. An admin may resolve a follow-up; they may not adjudicate an application.
+  const res = await POST({ resolution: "resolved by phone", decision: "APPROVED" });
+  assert.equal(res.status, 200);
+  assert.equal(state.resolveCalls[0]!.decision, undefined);
+});
+
+test("409 when the row was already resolved (the compare-and-set matched nothing)", async () => {
   state.resolveThrows = new Error("Concurrency conflict");
-  const res = await POST({ resolution: "x", decision: "APPROVED" });
+  const res = await POST({ resolution: "x" });
   assert.equal(res.status, 409);
   assert.equal(res.code, "RESOLVE_FAILED");
 });

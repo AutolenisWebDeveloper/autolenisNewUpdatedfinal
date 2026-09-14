@@ -171,8 +171,14 @@ function timeAgo(iso: string): string {
   return days + "d ago";
 }
 
+// PHASE 7 ADDED THE TWO STAGES BETWEEN `ACTIVE` AND `FINANCING_PENDING`, and leaving them out of
+// this list removed an operator recovery path rather than preserving one. The deal ladder now runs
+// ACTIVE → DEALER_CONFIRMATION → RECAP_PENDING → FINANCING_PENDING, and the direct
+// DEALER_CONFIRMATION → FINANCING_PENDING edge no longer exists — so an admin unwedging a stuck
+// deal by selecting "FINANCING PENDING" got a `DealTransitionError` and a 409, and could not
+// select RECAP_PENDING at all. Both are listed here for the same reason every other stage is.
 const DEAL_STAGES = [
-  "PENDING", "ACTIVE", "FINANCING_PENDING", "FEE_PENDING", "FEE_PAID",
+  "PENDING", "ACTIVE", "DEALER_CONFIRMATION", "RECAP_PENDING", "FINANCING_PENDING", "FEE_PENDING", "FEE_PAID",
   "INSURANCE_PENDING", "CONTRACT_PENDING", "CONTRACT_REVIEW", "CONTRACT_APPROVED",
   "SIGNING_PENDING", "SIGNED", "PICKUP_SCHEDULED", "PICKUP_COMPLETE", "COMPLETED",
 ];

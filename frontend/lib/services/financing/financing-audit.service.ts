@@ -45,6 +45,19 @@ export interface HashInput {
   creditApplicationId: string | null;
   dealId: string | null;
   buyerId: string | null;
+  /**
+   * Phase 7. `financing_audit_events.financing_id` has existed since the Phase 1 wave
+   * (20261106000100) with no writer; Phase 7's checkpoint recordings are its first, and they are
+   * the events §12c requires to be tamper-evident.
+   *
+   * IT IS INSIDE THE HASH, and the timing is why that is safe. Adding a field to the canonical
+   * form changes every hash the algorithm would compute, so a chain with existing rows would
+   * become unverifiable under the new form. The chain holds ZERO rows in production — verified at
+   * the Phase 7 preflight — so there is nothing to invalidate, and this is the last moment the
+   * choice is free. The alternative, writing the column but leaving it outside the hash, would put
+   * the one field naming WHICH financing decision an entry is about outside the tamper evidence.
+   */
+  financingId: string | null;
   ruleId: string | null;
   createdAt: string; // ISO-8601
   payload: unknown;
@@ -60,6 +73,7 @@ export function computeEventHash(input: HashInput): string {
     input.creditApplicationId ?? "",
     input.dealId ?? "",
     input.buyerId ?? "",
+    input.financingId ?? "",
     input.ruleId ?? "",
     input.createdAt,
     stableStringify(input.payload),
@@ -74,6 +88,8 @@ export interface AppendAuditInput {
   creditApplicationId?: string | null;
   dealId?: string | null;
   buyerId?: string | null;
+  /** Phase 7 — which `financing` row this entry is about. Inside the hash; see `HashInput`. */
+  financingId?: string | null;
   ruleId?: string | null;
   payload: Record<string, unknown>;
 }
@@ -108,6 +124,7 @@ export async function appendFinancingAuditEvent(input: AppendAuditInput): Promis
             creditApplicationId: input.creditApplicationId ?? null,
             dealId: input.dealId ?? null,
             buyerId: input.buyerId ?? null,
+            financingId: input.financingId ?? null,
             ruleId: input.ruleId ?? null,
             createdAt: createdAt.toISOString(),
             payload: input.payload,
@@ -121,6 +138,7 @@ export async function appendFinancingAuditEvent(input: AppendAuditInput): Promis
               creditApplicationId: input.creditApplicationId ?? null,
               dealId: input.dealId ?? null,
               buyerId: input.buyerId ?? null,
+              financingId: input.financingId ?? null,
               ruleId: input.ruleId ?? null,
               payload: input.payload as object,
               prevHash,
@@ -185,6 +203,8 @@ export interface ChainRow {
   creditApplicationId: string | null;
   dealId: string | null;
   buyerId: string | null;
+  /** Phase 7 — part of the canonical form, so a verifier must read it to recompute a hash. */
+  financingId: string | null;
   ruleId: string | null;
   createdAt: Date | string;
   payload: unknown;
@@ -224,6 +244,7 @@ export function verifyFinancingAuditChain(
       creditApplicationId: e.creditApplicationId,
       dealId: e.dealId,
       buyerId: e.buyerId,
+      financingId: e.financingId,
       ruleId: e.ruleId,
       createdAt: toIso(e.createdAt),
       payload: e.payload,

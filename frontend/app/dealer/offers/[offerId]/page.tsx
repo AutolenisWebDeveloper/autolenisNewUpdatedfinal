@@ -13,9 +13,27 @@ interface Props { params: Promise<{ offerId: string }> }
 export default async function DealerOfferDetailPage({ params }: Props) {
   const { offerId } = await params;
   const dealer = await requireDealer();
+  // PROJECTED, not `include`d — §29 P3 and the §13-D22 guard. Same reason as the list page: the
+  // unprojected read returned `disqualified_reason` (the buyer's approved amount as a dollar
+  // figure), the rank columns and `auction.buyerId`. The auction is projected to the four fields
+  // the revise-eligibility check and the header actually use.
   const offer = await prisma.offer.findFirst({
     where: { id: offerId, dealerId: dealer.id },
-    include: { auction: true },
+    select: {
+      id: true,
+      status: true,
+      version: true,
+      otdPriceCents: true,
+      vehiclePriceCents: true,
+      taxCents: true,
+      feesCents: true,
+      includesFinancing: true,
+      aprRate: true,
+      termMonths: true,
+      aprFlag: true,
+      auctionId: true,
+      auction: { select: { id: true, status: true, endsAt: true } },
+    },
   });
   if (!offer) notFound();
 
