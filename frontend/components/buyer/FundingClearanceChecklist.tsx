@@ -93,7 +93,10 @@ export default function FundingClearanceChecklist({
                     reading the rows that need them. */}
                 {!item.satisfied && !notApplicable && (
                   <p className="text-xs mt-1">
-                    <span className="text-slate-400">Waiting on: </span>
+                    {/* slate-500, not slate-400: 4.76:1 against white where slate-400 is 2.56:1.
+                        "Waiting on:" is the label for the one fact on this row a buyer may have
+                        to act on, so it is body text and owes WCAG AA, not decoration. */}
+                    <span className="text-slate-500">Waiting on: </span>
                     <span
                       className={`font-semibold ${item.owner === "BUYER" ? "text-amber-700" : "text-slate-600"}`}
                     >
@@ -101,7 +104,10 @@ export default function FundingClearanceChecklist({
                     </span>
                   </p>
                 )}
-                {notApplicable && <p className="text-xs text-slate-400 mt-0.5">Not needed for your deal.</p>}
+                {/* Same correction: this sentence IS the third state — the only thing telling a
+                    buyer the row was checked and does not apply. At 2.56:1 it was the least
+                    readable text on the row while carrying its whole meaning. */}
+                {notApplicable && <p className="text-xs text-slate-500 mt-0.5">Not needed for your deal.</p>}
               </div>
             </li>
           );

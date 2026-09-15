@@ -818,7 +818,11 @@ function JourneyStage({ label, done, active, note }: { label: string; done: bool
         {done ? "✓" : pending ? "…" : "·"}
       </div>
       <span className={"text-[9px] font-medium text-center leading-none max-w-[48px] " + (active ? "text-purple-700" : done ? "text-green-700" : pending ? "text-amber-700" : "text-slate-400")}>{label}</span>
-      {note && <span className="text-[8px] text-amber-600 text-center leading-none max-w-[48px]">{note}</span>}
+      {/* amber-700 at 9px, not amber-600 at 8px. amber-600 on white is 3.19:1 — below WCAG AA's
+          4.5:1 — and 8px was smaller than every other label in this rail. The note is the only
+          thing distinguishing "waiting on us" from "not done", so it was the least readable
+          element carrying the most new information. amber-700 is 5.02:1. */}
+      {note && <span className="text-[9px] text-amber-700 text-center leading-tight max-w-[48px]">{note}</span>}
     </div>
   );
 }
