@@ -53,9 +53,14 @@ export async function requestDocument(
     where: { dealId, documentType, status: "PENDING" },
     orderBy: { createdAt: "desc" },
   });
-  if (existing) return existing;
+  // `reused` is returned rather than left for the caller to infer. Inferring it by comparing
+  // the row's createdAt against a caller-supplied clock is fragile in exactly the way that
+  // matters here: a caller passing an explicit `now` (a test, a backfill, a replayed job)
+  // reads a freshly created row as pre-existing and silently skips the dispatch, so the
+  // dealership is never asked and the deadline runs against them anyway.
+  if (existing) return { ...existing, reused: true as const };
 
-  return prisma.documentRequest.create({
+  const row = await prisma.documentRequest.create({
     data: {
       dealId,
       documentType,
@@ -65,6 +70,7 @@ export async function requestDocument(
       buyerId: opts.buyerId ?? null,
     },
   });
+  return { ...row, reused: false as const };
 }
 
 /**

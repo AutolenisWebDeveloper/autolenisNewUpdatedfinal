@@ -157,7 +157,7 @@ test("insurance hard-gate blocks COMPLETED without proof on file", async () => {
 
 test("proof on file advances INSURANCE_PENDING → CONTRACT_PENDING through the guarded seam", async () => {
   ctrl.deal.status = "INSURANCE_PENDING";
-  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
   const { advanceOnInsuranceSatisfied } = await load();
   const advanced = await advanceOnInsuranceSatisfied("d1");
   assert.equal(advanced, true);
@@ -168,8 +168,9 @@ test("proof on file advances INSURANCE_PENDING → CONTRACT_PENDING through the 
   assert.deepEqual(ctrl.commsCalls, [{ dealId: "d1", status: "CONTRACT_PENDING" }]);
 });
 
-for (const satisfied of [InsuranceStatus.VERIFIED, InsuranceStatus.POLICY_BOUND, InsuranceStatus.EXTERNAL_UPLOADED]) {
-  test(`every INSURANCE_SATISFIED value releases the gate (${satisfied})`, async () => {
+// §13-D31: EXTERNAL_UPLOADED is deliberately ABSENT — an upload is not approval.
+for (const satisfied of [InsuranceStatus.VERIFIED, InsuranceStatus.POLICY_BOUND]) {
+  test(`every INSURANCE_SATISFIED value releases the legacy gate (${satisfied})`, async () => {
     ctrl.deal.status = "INSURANCE_PENDING";
     ctrl.deal.insuranceStatus = satisfied;
     const { advanceOnInsuranceSatisfied } = await load();
@@ -198,7 +199,7 @@ test("no-op when the deal is not at INSURANCE_PENDING (never skips or rewinds a 
 
 test("idempotent — re-driving an already-advanced deal does nothing", async () => {
   ctrl.deal.status = "INSURANCE_PENDING";
-  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
   const { advanceOnInsuranceSatisfied } = await load();
   assert.equal(await advanceOnInsuranceSatisfied("d1"), true);
   const swapsAfterFirst = ctrl.updateManyCalls.length;
@@ -218,7 +219,7 @@ test("NEVER rewinds: losing the race to a deal that moved on to CONTRACT_REVIEW 
   // so without a from-guard the race loser re-resolves against the fresh state and
   // legally writes the deal BACKWARDS — stranding a passing Contract Shield deal.
   ctrl.deal.status = "INSURANCE_PENDING";
-  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
   ctrl.raceTo = "CONTRACT_REVIEW"; // another writer advances past us mid-flight
   const { advanceOnInsuranceSatisfied } = await load();
   await advanceOnInsuranceSatisfied("d1");
@@ -237,7 +238,7 @@ test("ARRIVING at INSURANCE_PENDING with proof already on file releases the gate
   // INSURANCE_PENDING with satisfied proof, which is the exact bug the driver exists
   // to prevent.
   ctrl.deal.status = "FEE_PAID";
-  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "INSURANCE_PENDING", { actorRole: "SYSTEM" });
   assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "the gate must release on arrival, not only on upload");
@@ -270,13 +271,13 @@ test("expectedFrom guards advanceDealStatus against advancing from any other sta
 // the deal was still BEFORE FEE_PENDING was banked (feePaidAt set, which is also the
 // duplicate-charge guard) but never advanced — wedging the deal permanently.
 
-test("arriving at FEE_PAID with the fee already recorded continues to INSURANCE_PENDING", async () => {
+test("arriving at FEE_PAID with the fee already recorded continues to CONTRACT_PENDING", async () => {
   ctrl.deal.status = "FEE_PENDING";
   ctrl.deal.feePaidAt = new Date();
   ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", force: true });
-  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "a paid fee must not strand the deal at FEE_PAID");
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "a paid fee must not strand the deal at FEE_PAID — and §13-D28 moved the ladder's last rung off INSURANCE_PENDING");
 });
 
 test("arriving at FEE_PENDING with the fee ALREADY paid settles the whole ladder", async () => {
@@ -286,10 +287,10 @@ test("arriving at FEE_PENDING with the fee ALREADY paid settles the whole ladder
   ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
-  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "a fee paid before the fee stage must not wedge the deal");
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "a fee paid before the fee stage must not wedge the deal");
   assert.deepEqual(
     ctrl.historyCreates.map((h) => h.toStatus),
-    ["FEE_PENDING", "FEE_PAID", "INSURANCE_PENDING"],
+    ["FEE_PENDING", "FEE_PAID", "CONTRACT_PENDING"],
     "every hop is recorded truthfully rather than force-skipped",
   );
 });
@@ -305,10 +306,10 @@ test("arriving at FEE_PENDING with NO fee paid parks the deal there (still await
 test("the fee ladder chains into the insurance gate when proof is already on file", async () => {
   ctrl.deal.status = "FINANCING_PENDING";
   ctrl.deal.feePaidAt = new Date();
-  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
-  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "fee ladder then insurance gate, both already satisfied");
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "the ladder now ends at CONTRACT_PENDING — insurance no longer gates contract entry (§13-D28)");
 });
 
 // ── Cascade-safety regressions found in independent review ──────────────────
@@ -336,7 +337,7 @@ test("the idempotent data-merge path still runs the arrival hooks", async () => 
   ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", data: { feePaidAt: new Date() } });
-  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "recording the fee must settle the ladder even on the no-op path");
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "recording the fee must settle the ladder even on the no-op path");
 });
 
 test("a REFUNDED fee does not re-drive the ladder", async () => {
@@ -348,4 +349,46 @@ test("a REFUNDED fee does not re-drive the ladder", async () => {
   const { settleFeeLadderIfPaid } = await load();
   assert.equal(await settleFeeLadderIfPaid("d1"), false);
   assert.equal(ctrl.deal.status, "FEE_PENDING", "a refunded fee is not a paid fee");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 8 — §13-D28 and §13-D31
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("§13-D31: an EXTERNAL_UPLOADED proof no longer releases the legacy insurance gate", async () => {
+  // THE DEFECT. An uploaded PDF nobody had read satisfied the gate, advanced the deal, and
+  // passed release. Stage 15: "An upload is not approval." It now opens an Operations
+  // review instead, and the driver correctly declines to advance on it.
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false);
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "an unreviewed upload must not move the deal");
+  assert.equal(ctrl.historyCreates.length, 0);
+});
+
+test("§13-D31: UNDER_REVIEW and REJECTED never release the gate either", async () => {
+  const { advanceOnInsuranceSatisfied } = await load();
+  for (const status of [InsuranceStatus.UNDER_REVIEW, InsuranceStatus.REJECTED, InsuranceStatus.EXPIRED, InsuranceStatus.FAILED]) {
+    ctrl.deal.status = "INSURANCE_PENDING";
+    ctrl.deal.insuranceStatus = status;
+    assert.equal(await advanceOnInsuranceSatisfied("d1"), false, `${status} must not release the gate`);
+  }
+});
+
+test("§13-D28: the fee ladder reaches CONTRACT_PENDING with insurance NOT_STARTED", async () => {
+  // The whole point of the ruling: a buyer who has not yet arranged insurance must not hold
+  // up the contract. Insurance is REQUESTED at CONTRACT_PENDING and blocks the vehicle
+  // leaving the lot, never the paperwork being prepared.
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING");
+  assert.equal(
+    ctrl.historyCreates.some((h) => h.toStatus === "INSURANCE_PENDING"),
+    false,
+    "the live path does not pass through INSURANCE_PENDING at all",
+  );
 });

@@ -45,6 +45,8 @@ interface Ctrl {
   emits: Array<{ event: string }>;
   buyerEmails: Array<Record<string, unknown>>;
   dealerPlaceholder: boolean;
+  /** §13-D30: when true the fixture deal names a REQUIRED co-buyer signer. */
+  requiredCoBuyer: boolean;
   // When set, findUnique returns this status instead of the row's actual status —
   // simulating a stale read that a concurrent write has since changed (TOCTOU).
   staleStatus?: string;
@@ -115,8 +117,18 @@ mock.module("@/lib/prisma", {
       eSignEnvelope: {
         findUnique: async () => (ctrl.env ? { ...ctrl.env, ...(ctrl.staleStatus ? { status: ctrl.staleStatus } : {}) } : null),
         findMany: async ({ where }: { where: Record<string, unknown> }) => {
-          const list = ctrl.env ? [ctrl.env] : [];
-          return list.filter((e) => matchesWhere(e, where ?? {})).map((e) => ({ ...e }));
+          // Every envelope written before Phase 8 carries signer_kind = 'BUYER' from the
+          // column default, so the fixture does too — and `signatureProgress` filters on
+          // `signerKind: { in: [...] }`, which `matchesWhere` does not model. Handled here
+          // so the fixture answers the new query the same way the database would.
+          const list = ctrl.env ? [{ signerKind: "BUYER", ...ctrl.env }] : [];
+          const kinds = (where as { signerKind?: { in?: string[] } })?.signerKind?.in;
+          const rest = { ...(where ?? {}) };
+          delete (rest as { signerKind?: unknown }).signerKind;
+          return list
+            .filter((e) => (kinds ? kinds.includes((e as { signerKind: string }).signerKind) : true))
+            .filter((e) => matchesWhere(e, rest))
+            .map((e) => ({ ...e }));
         },
         upsert: async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
           if (!ctrl.env) ctrl.env = { id: "env_1", ...defaultEnv(), ...(create as object) } as Env;
@@ -135,6 +147,11 @@ mock.module("@/lib/prisma", {
           status: ctrl.dealStatus,
           buyerId: "b1",
           buyer: { firstName: "Sam", lastName: "Buyer", phone: null, user: { email: "sam@example.com" } },
+          // PHASE 8 (§13-D30). `signatureProgress` reads the co-buyer to decide who is
+          // REQUIRED. These fixtures are buyer-only deals, so no co-buyer — which is what
+          // makes "the buyer signed" and "the deal is signed" the same thing here, and
+          // exactly the condition under which the old single-envelope reads were correct.
+          coBuyer: ctrl.requiredCoBuyer ? { id: "cb_1", legalFirstName: "Co", legalLastName: "Buyer", email: "co@example.com", isRequiredSigner: true } : null,
           offer: { dealerId: "dealer_1", dealer: { isSystemPlaceholder: ctrl.dealerPlaceholder } },
         }),
       },
@@ -234,6 +251,7 @@ beforeEach(() => {
     advanceCalls: [], audits: [], certPayloads: [],
     executedPayloads: [], executedFails: false, notifications: [], emits: [], buyerEmails: [],
     dealerPlaceholder: false,
+    requiredCoBuyer: false,
   };
 });
 
@@ -377,9 +395,33 @@ test("certificate is generated once, corresponds to the signed document hash, an
 
 test("self-heal: a COMPLETED envelope with a lagging deal is driven to SIGNED (recovery, no cron)", async () => {
   ctrl.dealStatus = "SIGNING_PENDING";
+  // Stated explicitly rather than inherited from whatever the previous test left behind.
+  // PHASE 8 made that leakage visible: `ensureDealSigned` now asks `signatureProgress`
+  // whether EVERY required signer has completed, so a fixture whose envelope is not
+  // actually COMPLETED correctly refuses to advance — which is the guard working, and was
+  // a test depending on ordering rather than on its own setup.
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "COMPLETED", documentVersionId: "cv_1", documentHash: hashOf("THE CONTRACT BYTES"), signedAt: new Date() };
   const { ensureDealSigned } = await load();
   await ensureDealSigned("d1", "b1");
   assert.deepEqual(ctrl.advanceCalls.map(c => c.to), ["SIGNED"]);
+});
+
+test("§13-D30: a COMPLETED buyer envelope does NOT drive SIGNED while a co-buyer is outstanding", async () => {
+  // THE DEFECT. Before the cutover, reaching this line at all meant signing was finished,
+  // because a deal held one envelope. Now the buyer can be done while a required co-buyer
+  // is not — and SIGNED is a predecessor of DEALER_EXECUTED, so advancing here would carry
+  // the error all the way to release.
+  ctrl.dealStatus = "SIGNING_PENDING";
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "COMPLETED", documentVersionId: "cv_1", documentHash: hashOf("THE CONTRACT BYTES"), signedAt: new Date() };
+  ctrl.advanceCalls = [];
+  ctrl.requiredCoBuyer = true;
+  try {
+    const { ensureDealSigned } = await load();
+    await ensureDealSigned("d1", "b1");
+    assert.deepEqual(ctrl.advanceCalls.map(c => c.to), [], "a missing co-buyer signature must block SIGNED");
+  } finally {
+    ctrl.requiredCoBuyer = false;
+  }
 });
 
 // ── Terminal-record immutability & distinct-attempt archival ────────────────

@@ -20,6 +20,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { FinancingStatus } from "@prisma/client";
 import {
+  FINANCING_TRANSITIONS_FOR_TEST,
   LEGACY_FINANCING_STATUSES,
   PHASE_7_WRITABLE,
 } from "../financing-checkpoint.service";
@@ -38,15 +39,20 @@ test("§13-D18 — no legacy value is writable by this phase", () => {
   }
 });
 
-test("§12b — the writable set is the checkpoint states minus COMPLETED (Phase 8's)", () => {
+test("§12b — the writable set is every checkpoint state, COMPLETED included since Phase 8", () => {
+  // PHASE 7 RESERVED `COMPLETED` AND THIS TEST HELD THE RESERVATION. It was checkpoint two —
+  // "after signing, before vehicle release" (§12a) — and parity row deal-early/D3 assigned it,
+  // with funding clearance, to Phase 8.
+  //
+  // Phase 8 has now BUILT checkpoint two, so the gate OPENS rather than being bypassed:
+  // `recordFinancingCompletion` (funding-clearance.service.ts) writes COMPLETED through THIS
+  // writer, which is what keeps §12b's transition map, the actor requirement, the
+  // >=10-character reason and the tamper-evident audit chain on the second checkpoint as
+  // well as the first. The alternative — Phase 8 writing financing.status directly — would
+  // have been a second writer around the guard, which is the thing the guard exists to stop.
   assert.deepEqual(
     [...PHASE_7_WRITABLE].sort(),
-    ["EXPIRED", "FAILED", "IN_PROGRESS", "NOT_REQUIRED_CASH", "NOT_STARTED", "TERMS_LOCKED"],
-  );
-  assert.equal(
-    PHASE_7_WRITABLE.includes(FinancingStatus.COMPLETED),
-    false,
-    "COMPLETED is checkpoint two (§12a) and belongs to Phase 8 — parity row deal-early/D3",
+    ["COMPLETED", "EXPIRED", "FAILED", "IN_PROGRESS", "NOT_REQUIRED_CASH", "NOT_STARTED", "TERMS_LOCKED"],
   );
 });
 
@@ -86,7 +92,23 @@ test("the owner's completion rule survives: nothing here can satisfy completion"
   //
   // What must never be writable here is COMPLETED, which would let this phase satisfy the rule
   // through the financing half without a lender having funded anything.
-  assert.equal(PHASE_7_WRITABLE.includes(FinancingStatus.COMPLETED), false);
+  // PHASE 8: COMPLETED is now writable through this service, and the owner's rule is
+  // unchanged because it never rested on the WRITER — it rests on §12b's transition map,
+  // which still only admits COMPLETED from TERMS_LOCKED. Financing cannot be completed
+  // without having been locked first, whichever phase records it.
+  assert.ok(PHASE_7_WRITABLE.includes(FinancingStatus.COMPLETED));
+  assert.deepEqual(
+    FINANCING_TRANSITIONS_FOR_TEST.TERMS_LOCKED.includes(FinancingStatus.COMPLETED),
+    true,
+    "COMPLETED is reachable only from TERMS_LOCKED — a lender approval must be locked before it can be completed",
+  );
+  for (const from of [FinancingStatus.NOT_STARTED, FinancingStatus.IN_PROGRESS] as FinancingStatus[]) {
+    assert.equal(
+      FINANCING_TRANSITIONS_FOR_TEST[from].includes(FinancingStatus.COMPLETED),
+      false,
+      `${from} -> COMPLETED must stay illegal: nothing may reach completion without locked terms`,
+    );
+  }
   assert.ok(
     PHASE_7_WRITABLE.includes(FinancingStatus.NOT_REQUIRED_CASH),
     "§12d sets NOT_REQUIRED_CASH at this stage",

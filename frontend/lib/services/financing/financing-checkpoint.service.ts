@@ -97,7 +97,13 @@ export const PHASE_7_WRITABLE: readonly FinancingStatus[] = [
 ] as const;
 
 /** §12b's legal edges. Read as: from → the states it may reach. */
-const FINANCING_TRANSITIONS: Record<FinancingStatus, FinancingStatus[]> = {
+/**
+ * Exported for the checkpoint tests. Phase 8 opened COMPLETED to this writer, and the
+ * owner's completion rule — "a Deal can never be marked complete unless financing status
+ * is COMPLETED or NOT_REQUIRED_CASH" — now rests entirely on THIS MAP rather than on the
+ * writable set, so the map is what a test has to be able to assert.
+ */
+export const FINANCING_TRANSITIONS_FOR_TEST: Record<FinancingStatus, FinancingStatus[]> = {
   NOT_STARTED: [FinancingStatus.IN_PROGRESS, FinancingStatus.NOT_REQUIRED_CASH],
   IN_PROGRESS: [
     FinancingStatus.TERMS_LOCKED,
@@ -291,7 +297,7 @@ export async function recordFinancingCheckpoint(
 
     const from = existing?.status ?? null;
     if (from && from !== params.status) {
-      const legal = FINANCING_TRANSITIONS[from] ?? [];
+      const legal = FINANCING_TRANSITIONS_FOR_TEST[from] ?? [];
       if (!legal.includes(params.status)) {
         throw new FinancingCheckpointError(
           "INVALID_TRANSITION",

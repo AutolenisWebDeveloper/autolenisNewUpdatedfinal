@@ -105,7 +105,7 @@ export async function openContractRequest(params: {
     "Stage 13 contract package — dealership determines and confirms the complete package.",
     { dueAt, buyerId: deal.buyerId },
   );
-  const alreadyOpen = contractRequest.createdAt.getTime() < now.getTime() - 1000;
+  const alreadyOpen = contractRequest.reused;
 
   // ── 2. Insurance, requested at the same moment (Stage 15 entry) ────────────
   // No due date: Stage 15 never puts a deadline on the buyer, it blocks RELEASE. A

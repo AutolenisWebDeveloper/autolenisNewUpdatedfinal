@@ -37,7 +37,12 @@ mock.module("@/lib/prisma", {
           id: "deal_1",
           buyerId: "buyer_1",
           status: dealStatus,
-          eSignEnvelope: esignStatus ? { status: esignStatus } : null,
+          // §13-D30: a LIST, one per required signer, plus the co-buyer flag that says who
+          // is required. The route now asks "has EVERY required signer completed?" — which
+          // for a buyer-only deal is the same question it asked before, and for a co-buyer
+          // deal is the one it was getting wrong.
+          eSignEnvelopes: esignStatus ? [{ status: esignStatus, signerKind: "BUYER" }] : [],
+          coBuyer: null,
           offer: dealerId ? { dealerId } : null,
         }),
       },

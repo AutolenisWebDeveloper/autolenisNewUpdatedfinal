@@ -44,12 +44,24 @@ mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: (
 const prismaMock = {
   deal: {
     findFirst: async () => (dealRow ? { ...dealRow } : null),
+    // PHASE 8 (§13-D31). `recordInsuranceUpload` writes through `updateMany` and reads the
+    // deal for the buyer's email, so the mock grew two members. The upload no longer
+    // RELEASES a gate — it opens an Operations review — and these tests assert the write
+    // ordering, which is unchanged.
+    findUnique: async () => (dealRow ? { ...dealRow } : null),
     update: async (a: { data: Record<string, unknown> }) => {
       order.push("deal.update");
       dealUpdates.push(a.data);
       return {};
     },
+    updateMany: async (a: { data: Record<string, unknown> }) => {
+      dealUpdates.push(a.data);
+      return { count: 1 };
+    },
   },
+  // `recordInsuranceUpload` reads the buyer for their email so the "under review" receipt
+  // can go out. No email in this fixture means no message, which is the path under test.
+  buyer: { findUnique: async () => null },
   insurancePolicy: {
     // No prior external proof by default, so the create branch is exercised;
     // set existingPolicy to reach the supersede-in-place branch instead.

@@ -251,7 +251,7 @@ export function renderExecutedContractStored(p: {
 
 /** §27.1 "Financing completed → Buyer + dealership + AutoLenis → Verified checkpoint confirmation". */
 export function renderFinancingCompleted(p: { vehicle: string; dealId: string }): RenderedEmail {
-  const url = appUrl(`/buyer/deals/${p.dealId}`);
+  const url = appUrl("/buyer/deal");
   const headline = "Financing complete";
   const lines = [
     `Financing for ${p.vehicle} is recorded as complete against the lender's own evidence.`,
@@ -266,7 +266,7 @@ export function renderFinancingCompleted(p: { vehicle: string; dealId: string })
 
 /** §27.1 "Funding cleared or blocked → Dealership, buyer, Operations" — the CLEARED half. */
 export function renderFundingCleared(p: { vehicle: string; dealId: string }): RenderedEmail {
-  const url = appUrl(`/buyer/deals/${p.dealId}`);
+  const url = appUrl("/buyer/deal");
   const headline = "Financing complete — preparing your vehicle for delivery";
   const lines = [
     `Funding for ${p.vehicle} has cleared. Every condition has been confirmed against evidence rather than assumed.`,
@@ -286,7 +286,7 @@ export function renderFundingBlocked(p: {
   outstanding: string[];
   dealId: string;
 }): RenderedEmail {
-  const url = appUrl(p.audience === "buyer" ? `/buyer/deals/${p.dealId}` : `/dealer/deals/${p.dealId}`);
+  const url = appUrl(p.audience === "buyer" ? "/buyer/deal" : `/dealer/deals/${p.dealId}`);
   const headline = "Funding is not cleared yet";
   const intro = `Funding for ${p.vehicle} cannot clear until these are resolved:`;
   const closing =
@@ -308,7 +308,7 @@ export function renderFundingBlocked(p: {
 
 /** §27.1 "Premium election reverted to Standard → Buyer → Reversion notice at funding clearance". */
 export function renderPremiumElectionReverted(p: { vehicle: string; dealId: string }): RenderedEmail {
-  const url = appUrl(`/buyer/deals/${p.dealId}`);
+  const url = appUrl("/buyer/deal");
   const headline = "You are on Standard — nothing further is due";
   const lines = [
     `Funding for ${p.vehicle} has cleared, which closes the window to upgrade to Premium.`,

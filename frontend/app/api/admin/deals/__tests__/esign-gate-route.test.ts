@@ -44,14 +44,24 @@ mock.module("@/lib/prisma", {
   },
 });
 
+// §13-D30: the admin route opens signing for EVERY required signer. Preparing only the
+// buyer's envelope here is how a co-buyer deal reaches SIGNING_PENDING half-asked.
+mock.module("@/lib/services/esign/open-signing.service", {
+  namedExports: {
+    openSigningForRequiredSigners: async () => {
+      createEnvelopeCalls += 1;
+      return { prepared: [{ signerKind: "BUYER", envelopeId: "env_1" }], failed: [] };
+    },
+  },
+});
+
 mock.module("@/lib/services/esign/buyer-signing.service", {
   namedExports: {
-    // In-house signing envelope preparation (replaces DocuSign createEnvelope).
-    prepareBuyerSigningEnvelope: async () => {
-      createEnvelopeCalls += 1;
-      return { envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT" };
-    },
+    prepareBuyerSigningEnvelope: async () => ({
+      envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT",
+    }),
     NoSignableDocumentError: class NoSignableDocumentError extends Error {},
+    ESignSchemaUnavailableError: class ESignSchemaUnavailableError extends Error {},
   },
 });
 

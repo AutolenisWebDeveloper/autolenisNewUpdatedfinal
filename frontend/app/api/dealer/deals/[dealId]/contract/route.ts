@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestDealer, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
 import { getExecutedContractUrl } from "@/lib/services/esign/executed-contract.service";
-import { allSignedFrom, pickSignerEnvelope, requiredKindsFrom } from "@/lib/services/esign/required-signers";
+import { allRequiredSignaturesComplete, pickSignerEnvelope } from "@/lib/services/esign/required-signers";
 import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -26,7 +26,6 @@ export async function GET(request: NextRequest, { params }: Props) {
     select: {
       id: true,
       eSignEnvelopes: { select: { id: true, status: true, signerKind: true } },
-      coBuyer: { select: { isRequiredSigner: true } },
     },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
@@ -35,7 +34,14 @@ export async function GET(request: NextRequest, { params }: Props) {
   // every required signer has completed — so releasing it to the dealership must ask the
   // same question. Reading one envelope here would have handed over an "executed contract"
   // while a required co-buyer signature was still outstanding.
-  const allSigned = allSignedFrom(deal.eSignEnvelopes, requiredKindsFrom(deal.coBuyer));
+  //
+  // §25.1: the co-buyer relation is BUYER-SIDE PII and is deliberately NOT selected on this
+  // dealer-facing query — the identity-firewall guard flags any dealer surface that reads a
+  // protected relation, and it was right to flag the first version of this line.
+  // `signatureProgress` answers the same question from its own server-side read, so the
+  // dealership learns whether the contract is fully signed without the co-buyer's record
+  // passing through a dealer-facing projection at all.
+  const allSigned = await allRequiredSignaturesComplete(dealId);
   // The artifact itself is bound to the PRIMARY envelope (see finalizeSignedContract).
   const envelope = pickSignerEnvelope(deal.eSignEnvelopes, "BUYER");
   // executed_document_key only exists once migrations 20261014/20261015 are applied

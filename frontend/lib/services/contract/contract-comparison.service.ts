@@ -97,6 +97,30 @@ function findMoneyNear(text: string, patterns: RegExp[]): number | null {
 
 function compareFact(text: string, fact: AgreedFact): ContractDiscrepancy | null {
   const found = findMoneyNear(text, fact.patterns);
+
+  // A ZERO-VALUE COMPONENT IS NOT OWED A LINE ON THE CONTRACT. "Delivery fee: $0.00" is
+  // not written on real paperwork — absence and zero are the same fact — so demanding it
+  // would produce a NOT_FOUND on nearly every genuine contract and bury the findings that
+  // matter under noise. (Found by the comparison's own test: a contract matching the recap
+  // in every respect still reported an outstanding $0 delivery fee.)
+  //
+  // The other direction is NOT relaxed. A CHARGE appearing where nothing was agreed is an
+  // ADDITION, and that is exactly the kind of quiet insertion §14b exists to catch.
+  if (fact.cents === 0) {
+    if (found === null || found === 0) return null;
+    return {
+      key: fact.key,
+      label: fact.label,
+      kind: "ADDITION",
+      expectedValue: "nothing — this was not part of the agreed terms",
+      foundValue: money(found),
+      source: fact.source,
+      howToFix:
+        `${fact.label} does not appear in the ${fact.source}, but the contract charges ${money(found)}. ` +
+        "Remove it, or take it back to the buyer for an explicit decision before it appears in a contract.",
+    };
+  }
+
   if (found === null) {
     return {
       key: fact.key,
