@@ -12,6 +12,7 @@ import {
   advanceDealStatus,
   DealTransitionError,
   InsuranceRequiredError,
+  ReleaseNotClearedError,
 } from "@/lib/services/deal/deal.service";
 import { Resend } from "resend";
 
@@ -101,6 +102,14 @@ export async function POST(request: NextRequest) {
         "Insurance proof is required before this pickup can be completed.",
         409,
       );
+    }
+    // Phase 8's release gate — the dealership's executed contract, and funding clearance.
+    // Unmapped until 2026-09-15, so it fell through to the rethrow below and reached a dealer
+    // standing at the vehicle as an unhandled 500. Its own code rather than INSURANCE_REQUIRED
+    // because the two are owed by different people: an insurance gap is the buyer's to close,
+    // this one is AutoLenis's and the dealership's. `err.message` carries which of the two.
+    if (err instanceof ReleaseNotClearedError) {
+      return errorResponse("RELEASE_NOT_CLEARED", err.message, 409);
     }
     throw err;
   }
