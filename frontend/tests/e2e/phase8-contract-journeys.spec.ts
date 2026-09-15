@@ -47,6 +47,11 @@ import { evaluateFundingClearance } from "@/lib/services/deal/funding-clearance.
 import { compareContractAgainstAgreedTerms } from "@/lib/services/contract/contract-comparison.service";
 import { signatureProgress, requiredSignersForDeal } from "@/lib/services/esign/required-signers";
 import { openContractRequest } from "@/lib/services/deal/contract-request.service";
+// STATIC, for the reason this file's header records — a runtime `await import("@/…")`
+// escapes Playwright's path transform and fails with "Cannot find module '@/lib/prisma'".
+// (It appears to work elsewhere in this file only where the module is ALREADY statically
+// imported and therefore already in the graph.)
+import { issueSignerToken, resolveSignerToken, consumeSignerToken } from "@/lib/services/esign/invited-signer.service";
 
 const DB = process.env.DATABASE_URL ?? "";
 const HAS_DB = DB.length > 0 && !DB.includes("aieybibvewmvrubcpthm");
@@ -458,4 +463,77 @@ test("DEFECT 9: the full ladder from signature to completion is walkable, edge b
   expect(canTransition("SIGNED", "COMPLETED")).toBe(false);
   expect(canTransition("DEALER_EXECUTED", "PICKUP_SCHEDULED")).toBe(false);
   expect(canTransition("FUNDING_PENDING", "COMPLETED")).toBe(false);
+});
+
+// ── 9. §13-D30's invited-signer link, against a REAL database ───────────────
+//
+// WHY THIS EXISTS WHEN phase8-invited-signer.test.ts ALREADY PASSES. That suite mocks
+// `@/lib/prisma`, so it proves the LOGIC of the six conditions and nothing about whether the
+// columns they read exist. This phase has already shipped two defects of exactly that shape —
+// `e_sign_envelope_history.signer_kind` and `@@index([coBuyerId])` were both declared in the
+// schema, never created by a migration, and would have been 42703 on every write — and the
+// named defect class in §8.1h is "something reported success while checking nothing".
+//
+// A bearer-token surface that authorises a legally significant write is the last place to
+// accept a mocked-only proof. These run the real queries against the real columns.
+
+test("§13-D30: a real token resolves, and the six conditions hold against the database", async () => {
+  test.skip(!HAS_DB, "needs DATABASE_URL pointed at a non-production database");
+  const { deal, coBuyer } = await seedDeal({ withRequiredCoBuyer: true });
+  expect(coBuyer, "the fixture must have a required co-buyer").toBeTruthy();
+
+  // A CO_BUYER envelope, as openSigningForRequiredSigners would create it.
+  await prisma.eSignEnvelope.create({
+    data: {
+      id: `env_co_${deal.id}`, dealId: deal.id, status: "SENT",
+      signerKind: "CO_BUYER", coBuyerId: coBuyer!.id,
+      expiresAt: new Date(Date.now() + 14 * 24 * 3_600_000),
+    },
+  });
+
+  const issued = await issueSignerToken({ dealId: deal.id, coBuyerId: coBuyer!.id });
+  expect(issued, "a prepared co-buyer envelope must yield a link").toBeTruthy();
+
+  // CONDITION 3, against the real column: capped at the envelope's expiry, and 72h here.
+  const hours = (issued!.expiresAt.getTime() - Date.now()) / 3_600_000;
+  expect(hours).toBeGreaterThan(71);
+  expect(hours).toBeLessThan(73);
+
+  // Only the HASH is persisted — the raw token must never be stored anywhere.
+  const stored = await prisma.eSignEnvelope.findUnique({
+    where: { id: `env_co_${deal.id}` },
+    select: { signerAccessTokenHash: true, signerAccessTokenConsumedAt: true },
+  });
+  expect(stored?.signerAccessTokenHash).toBeTruthy();
+  expect(stored?.signerAccessTokenHash).not.toBe(issued!.rawToken);
+  expect(stored?.signerAccessTokenConsumedAt).toBeNull();
+
+  // It resolves, and discloses only the allowlisted projection.
+  const resolved = await resolveSignerToken(issued!.rawToken);
+  expect(resolved.ok, `expected a live token; got ${JSON.stringify(resolved)}`).toBe(true);
+  if (!resolved.ok) return;
+  expect(resolved.view.coBuyerId).toBe(coBuyer!.id);
+  expect(resolved.view.dealId).toBe(deal.id);
+  expect(Object.keys(resolved.view).sort()).toEqual([
+    "coBuyerId", "coBuyerName", "dealId", "documentHash", "documentVersionId",
+    "envelopeId", "primaryBuyerFirstName", "signingClosesAt", "vehicle", "vin",
+  ]);
+
+  // CONDITION 1 against the real CAS: one winner, and the spent token stops resolving.
+  expect(await consumeSignerToken(resolved.view.envelopeId)).toBe(true);
+  expect(await consumeSignerToken(resolved.view.envelopeId)).toBe(false);
+  const afterSpend = await resolveSignerToken(issued!.rawToken);
+  expect(afterSpend.ok).toBe(false);
+  expect(afterSpend.ok === false && afterSpend.reason).toBe("consumed");
+
+  // And re-issuing on a spent envelope is refused — a signature cannot be re-opened by
+  // minting a fresh link.
+  expect(await issueSignerToken({ dealId: deal.id, coBuyerId: coBuyer!.id })).toBeNull();
+});
+
+test("§13-D30: an unknown token touches nothing and resolves as not_found", async () => {
+  test.skip(!HAS_DB, "needs DATABASE_URL pointed at a non-production database");
+  const res = await resolveSignerToken("f".repeat(64));
+  expect(res.ok).toBe(false);
+  expect(res.ok === false && res.reason).toBe("not_found");
 });
