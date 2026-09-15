@@ -24,13 +24,14 @@ one that was proved.
 ```
 bd70a7fa3a65a7fdd73f7dae0ffdea5f643ab98fa5a3077700bb98f506ab7910  20261117000000_phase8_esign_signer_cutover/migration.sql
 c7f533368f08e15fbb2fa5c0f8466b4c41bbecb2a0aee0084806175af936946d  20261117000100_phase8_funding_clearance/migration.sql
-639393f4b086222c…  (see `sha256sum` at the merge commit)          20261117000200_phase8_executed_copy_storage/migration.sql
-9f536c1d2789c5ea…  (see `sha256sum` at the merge commit)          20261117000300_phase8_invited_signer_token/migration.sql
+639393f4b086222ccf12b5f709ca273a84ca7f11b464c8436505a0e2d7cb0b74  20261117000200_phase8_executed_copy_storage/migration.sql
+9f536c1d2789c5eacec95ea88174e47c40aa7028ef08bddd97e4ae1c93029797  20261117000300_phase8_invited_signer_token/migration.sql
 ```
 
-Run `sha256sum frontend/prisma/migrations/2026111700*/migration.sql` at the merge commit for
-the full, current values — the two truncated above are recorded in full in the phase report so
-that a transcription error here cannot silently become the reference.
+Reproduce with `sha256sum frontend/prisma/migrations/2026111700*/migration.sql`. *(The first
+draft of this file abbreviated two of these to a prefix. An integrity section that cannot be
+checked without consulting another document is not an integrity section — the same class of
+error as the rest of this phase, in the artefact meant to guard against it.)*
 
 ## Preconditions — owner-verified 13:43 UTC, and what each one guards
 
