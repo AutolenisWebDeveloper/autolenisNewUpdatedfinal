@@ -46,6 +46,13 @@ const GATED = [
   "executedGeneratedAt",
   "confirmationsSentAt",
   "attemptNumber",
+  // §13-D30's invited-signer link — migration 20261117000300, unapplied in production.
+  // Listed here INDEPENDENTLY of GATED_ENVELOPE_DEFAULTS on purpose: this array is a second
+  // opinion, not a mirror. A test that read the constant it validates would pass for any
+  // classification, including a wrong one.
+  "signerAccessTokenHash",
+  "signerAccessTokenExpiresAt",
+  "signerAccessTokenConsumedAt",
 ];
 
 beforeEach(() => {

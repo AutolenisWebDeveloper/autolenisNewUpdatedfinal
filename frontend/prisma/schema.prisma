@@ -1010,6 +1010,23 @@ model ESignEnvelope {
   // `signerKind` is NOT compliance-gated — it is a spine column, present in production since the
   // Phase 1 wave — so it belongs in LEGACY_ENVELOPE_SELECT, not in GATED_ENVELOPE_DEFAULTS.
   signerKind ESignSignerKind @default(BUYER) @map("signer_kind")
+
+  // ─── §13-D30's invited-signer link (owner-authorised 2026-09-15) ──────────
+  //
+  // A required co-buyer has NO platform account, by the owner's own ruling, so the LINK is
+  // the credential. Same mechanism as Phase 2's claim tokens and Phase 5's invitation
+  // tokens — hashed at rest, single use, TTL-bounded — at higher stakes, and the
+  // authorisation carries six conditions that are enforced in invited-signer.service.ts
+  // rather than trusted to a caller.
+  //
+  // Only ever set on a CO_BUYER envelope; a BUYER signs through their own session. The row
+  // itself binds deal AND co-buyer (dealId + coBuyerId + the [dealId, signerKind] unique),
+  // and resolveSignerToken re-checks both rather than inferring them from the hash alone.
+  signerAccessTokenHash String? @unique @map("signer_access_token_hash")
+  // Own expiry, capped at the envelope's — a signing token never outlives the version it signs.
+  signerAccessTokenExpiresAt DateTime? @map("signer_access_token_expires_at")
+  // Single use. CAS on NULL at signature; Phase 5's H2 was a token written and never consumed.
+  signerAccessTokenConsumedAt DateTime? @map("signer_access_token_consumed_at")
   // Set only on the CO_BUYER envelope. §13-D30 ruled the invited-signer model: the co-buyer signs
   // through a link on the primary buyer's deal with their own consent snapshot, IP, user agent and
   // adopted name, and never becomes a platform identity with its own login. That keeps the PII

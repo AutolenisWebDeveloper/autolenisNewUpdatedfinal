@@ -25,6 +25,7 @@ import {
   PHASE_8_TEMPLATES,
   signatureReminderCancelKey,
 } from "@/lib/services/comms/state-recheck-registry";
+import { issueSignerToken } from "@/lib/services/esign/invited-signer.service";
 import {
   renderSignatureRequired,
   renderSignatureReminder,
@@ -125,13 +126,33 @@ export async function openSigningForRequiredSigners(params: {
     const envelope = await readEnvelopeForDeal(params.dealId, signer.signerKind);
     const expiresAt = envelope?.expiresAt ?? new Date(now.getTime() + 14 * 24 * 3600_000);
 
-    const request = renderSignatureRequired({
-      signerName: name,
-      isCoBuyer,
-      vehicle,
-      expiresAt,
-      dealId: params.dealId,
-    });
+    // §13-D30 — MINT THE INVITED-SIGNER LINK. A co-buyer has no platform account by the
+    // owner's ruling, so the token IS how they reach the ceremony at all. Its expiry is
+    // capped at the envelope's inside issueSignerToken (condition 3); only the hash is
+    // persisted, and the raw value goes into this one email and nowhere else.
+    let signerToken: string | null = null;
+    if (isCoBuyer && signer.coBuyerId) {
+      const issued = await issueSignerToken({ dealId: params.dealId, coBuyerId: signer.coBuyerId, now });
+      signerToken = issued?.rawToken ?? null;
+      if (!signerToken) {
+        // A required signer we cannot make reachable is a FAILED signer, not a sent message.
+        // Emitting the email anyway is what the previous implementation effectively did, and
+        // it produced a co-buyer staring at a sign-in page for an account they will never
+        // have. Recording it here means the deal shows up as needing attention.
+        logger.error("open-signing: could not mint an invited-signer link", {
+          dealId: params.dealId,
+          coBuyerId: signer.coBuyerId,
+        });
+        result.failed.push({ signerKind: signer.signerKind, reason: "signing link could not be issued" });
+        continue;
+      }
+    }
+
+    // The union on SignatureRequiredParams means a co-buyer render cannot compile without a
+    // token — so this branch is the type narrowing, not a runtime guard.
+    const request = isCoBuyer && signerToken
+      ? renderSignatureRequired({ signerName: name, isCoBuyer: true, vehicle, expiresAt, dealId: params.dealId, signerToken })
+      : renderSignatureRequired({ signerName: name, isCoBuyer: false, vehicle, expiresAt, dealId: params.dealId });
     await enqueueTransactional({
       triggerEvent: "contract_approved",
       templateKey: PHASE_8_TEMPLATES.SIGNATURE_REQUIRED,

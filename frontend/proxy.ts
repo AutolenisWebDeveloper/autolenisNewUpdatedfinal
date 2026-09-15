@@ -103,6 +103,13 @@ const PUBLIC_ROUTES = [
   "/buyer-offer-review",
   "/lp",
   "/thank-you",
+  // §13-D30's invited-signer link. A required co-buyer has NO platform account by the
+  // owner's own ruling, so this page and its POST cannot sit behind a session — the
+  // tokenised link IS the credential, and every one of the authorization's six conditions
+  // is enforced in invited-signer.service.ts on each request. Same shape as the dealer
+  // invitation and claim-token routes above: public path, token-gated handler.
+  "/esign/invited",
+  "/api/esign/invited",
   // Hybrid SEO landing system — organic state hub + programmatic city pages.
   "/car-buying-service",
   // Public content/SEO routes — author bios, buying guides, and free tools.

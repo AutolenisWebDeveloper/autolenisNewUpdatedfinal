@@ -42,7 +42,7 @@ const APP_ROOT = process.cwd();
 const REPO_ROOT = resolve(APP_ROOT, "..");
 
 /** The phase this branch implements. */
-const CURRENT_PHASE = 7;
+const CURRENT_PHASE = 8;
 
 /** What each phase is allowed to ADD, beyond the baseline. §8.2 declares these. */
 const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string[]; libDirs: string[]; tables: string[] }> = {
@@ -155,6 +155,35 @@ const PHASE_SCOPE: Record<number, { routeFamilies: string[]; serviceDirs: string
     // the third, so none is this phase's to declare. Phase 7's two migrations change a
     // column DEFAULT and add two nullable columns; neither adds a table.
     routeFamilies: [],
+    serviceDirs: [],
+    libDirs: [],
+    tables: [],
+  },
+  8: {
+    // ONE new route family, and it is the only one this programme has declared so far —
+    // which is the right weight for it.
+    //
+    // `app/api/esign` exists for §13-D30's INVITED-SIGNER LINK: the single route in this
+    // repository where a party with NO platform account performs a legally significant
+    // write. It could not be folded into `app/api/buyer` — every route under that family is
+    // Supabase-authenticated, and a required co-buyer has no account by the owner's own
+    // ruling, which is precisely why the deal deadlocked before this existed.
+    //
+    // It ships under a SEPARATE, CONDITIONAL AUTHORIZATION (2026-09-15), not under the
+    // §13-D30 design ruling — a server-authorization change needs its own, per CLAUDE.md.
+    // The six conditions are enforced in lib/services/esign/invited-signer.service.ts and
+    // pinned one-per-test in __tests__/phase8-invited-signer.test.ts, each proven to fail on
+    // a deliberately reintroduced defect.
+    //
+    // Declaring it here is the point of this guard: a new API family is exactly the kind of
+    // scope growth that should cost a deliberate line in a manifest rather than happening
+    // quietly.
+    routeFamilies: ["esign"],
+    // Everything else extended pre-existing directories: lib/services/deal (contract-request,
+    // dealer-execution, funding-clearance, insurance-review), lib/services/esign
+    // (required-signers, signer-kinds, open-signing, invited-signer), lib/services/comms
+    // (email-layout, phase8-email-content) and lib/services/contract-shield. The three
+    // migrations add columns and indexes; none adds a table.
     serviceDirs: [],
     libDirs: [],
     tables: [],

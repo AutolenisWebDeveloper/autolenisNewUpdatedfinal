@@ -151,19 +151,37 @@ export function renderContractApproved(p: {
 }
 
 /** §27.1 "Signature required → Buyer + co-buyer → Secure signing link and deadline". */
-export function renderSignatureRequired(p: {
+/**
+ * §13-D30 — the signature request, and the type that makes the deadlock unrepresentable.
+ *
+ * A CO-BUYER RENDER REQUIRES A TOKEN, enforced by this union rather than by a runtime
+ * fallback. That is deliberate: the deadlock was a co-buyer sent to `/buyer/esign`, which
+ * calls requireBuyer() and redirects to Supabase sign-in, for an account they do not have by
+ * the owner's own ruling. A fallback branch would let that shape exist again the next time
+ * someone adds a caller. Now it does not compile.
+ *
+ * The raw token appears in the rendered email and NOWHERE else — never logged, never
+ * persisted (only its SHA-256 is), never echoed by any route.
+ */
+export type SignatureRequiredParams = {
   signerName: string | null;
-  isCoBuyer: boolean;
   vehicle: string;
   expiresAt: Date;
   dealId: string;
-}): RenderedEmail {
-  const url = appUrl(`/buyer/esign?dealId=${p.dealId}${p.isCoBuyer ? "&signer=co-buyer" : ""}`);
+} & (
+  | { isCoBuyer: true; signerToken: string }
+  | { isCoBuyer: false; signerToken?: never }
+);
+
+export function renderSignatureRequired(p: SignatureRequiredParams): RenderedEmail {
+  const url = p.isCoBuyer
+    ? appUrl(`/esign/invited/${p.signerToken}`)
+    : appUrl(`/buyer/esign?dealId=${p.dealId}`);
   const headline = "Your signature is needed";
   const lines = [
     `${p.signerName ?? "Hello"}, the contract for ${p.vehicle} has passed Contract Shield and is ready for your signature.`,
     p.isCoBuyer
-      ? "You are named as a required signer on this purchase, so the contract cannot proceed without you."
+      ? "You are named as a required signer on this purchase, so the contract cannot proceed without you. Your link signs you in — you do not need an AutoLenis account."
       : "You can read the whole contract and see what Contract Shield checked before you sign.",
     `This signing link expires ${deadline(p.expiresAt)}. If it does, it can be reissued against the same approved contract.`,
     "Signing requires affirmative electronic-records consent and an adopted name.",

@@ -69,6 +69,21 @@ export const GATED_ENVELOPE_DEFAULTS = {
   executedGeneratedAt: null,
   confirmationsSentAt: null,
   attemptNumber: 1,
+  // §13-D30's invited-signer link (migration 20261117000300, UNAPPLIED in production).
+  //
+  // These sit here rather than in LEGACY_ENVELOPE_SELECT for the plain reason that the
+  // columns are not physically present until that migration runs — unlike `signerKind` and
+  // `coBuyerId`, which Phase 1's spine created and which production has had all along.
+  //
+  // `null` is the TRUTH while unapplied, not a placeholder: with no column there can be no
+  // token, so no link can be live. The reads that matter fail CLOSED on their own besides —
+  // `resolveSignerToken` does a `findUnique` on `signerAccessTokenHash`, which raises 42703
+  // against a database without it rather than resolving something. That is the correct
+  // ordering: the surface cannot authorise a signature before the migration that makes it
+  // real has been applied.
+  signerAccessTokenHash: null,
+  signerAccessTokenExpiresAt: null,
+  signerAccessTokenConsumedAt: null,
 } as const;
 
 /**
