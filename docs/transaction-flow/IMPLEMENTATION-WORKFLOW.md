@@ -2449,6 +2449,101 @@ rather than copied and renumbered — eight proof directories holding eight hand
 eight chances to make the same mistake, which is the shape that produced this table in the first
 place.
 
+#### The fix in #435 was half a fix — found by asking the coverage question
+
+Answering the owner's question meant sweeping every proof directory for the same shape. That sweep
+found it **still live in `phase-8-proof`**, in the two places the correction had not looked.
+
+**1. `verify.sql`'s PHYSICAL half named none of the objects of migrations 000200 and 000300.**
+Assertions 1-10 cover the `e_sign_envelopes` index cutover and the four `financing` clearance
+columns — the objects of 000000 and 000100. Verified by grep: `executed_document_key`,
+`signer_access_token_hash`, `_expires_at`, `_consumed_at` and `contract_versions` each occurred
+**zero** times in the file. Seven objects, unasserted:
+
+| Migration | Object | Was asserted? |
+| --- | --- | --- |
+| 000200 | `contract_versions.executed_document_key` | no |
+| 000300 | `e_sign_envelopes.signer_access_token_hash` | no |
+| 000300 | `e_sign_envelopes.signer_access_token_expires_at` | no |
+| 000300 | `e_sign_envelopes.signer_access_token_consumed_at` | no |
+| 000300 | those two timestamps being **tz-naive** | no |
+| 000300 | `e_sign_envelopes_signer_access_token_hash_key` (unique) | no |
+| 000300 | `e_sign_envelopes_live_signer_token_idx` (partial) | no |
+
+So the *corrected* file still had the property the correction existed to remove. Run it against a
+database where 000200 and 000300 were recorded with `migrate resolve --applied` and their SQL never
+executed, and **every row prints PRESENT**: the ledger half is satisfied by the rows, and the
+physical half never mentions the objects. That is verbatim what the file's own header condemns —
+*"a ledger row with a missing object is a silent lie"* — reached by fixing one half and calling the
+file fixed.
+
+**The tell was in the owner's own message.** They verified those objects **by hand** at 17:33 UTC:
+"deal_id_key gone, composite unique and both token indexes present, and all three token columns
+landed as `timestamp without time zone`." A proof file is wrong when the person running it has to
+check something it does not. Seven assertions added; the tz-naive one asserts the *type*, because
+the drift gate's finding was that a `TIMESTAMPTZ` there puts every co-buyer signing window out by
+the server's UTC offset, silently.
+
+**2. The terminal row's count was wrong, and the correction made it worse.** It read
+*"16 assertions: 13 physical, 3 ledger."* The split never matched the file — 11 physical and 4
+ledger even before today — and the **total** went stale the moment the ledger CTE grew from two
+names to four. A file whose whole subject is a typed count drifting beside a hand-written list
+shipped a typed count drifting beside a hand-written list, *in the commit that fixed the first
+one.* It now reads 25 / 18 / 6 and is no longer maintained by hand: the guard parses the file,
+computes the rows it really emits — one per assertion, N per `VALUES` list, one per name in the
+CTE — and fails the build on disagreement.
+
+Writing that parser produced **the anti-vacuity assertion firing a third time in the same file.**
+The first draft masked string literals before stripping comments, and the apostrophes in the
+comments (`verify.sql's`, `nobody checked it`) desynchronised the quote scan: it found **4
+statements instead of 16**, which would have made every count `0 === 0` and green forever. Caught
+by `assert.ok(stmts.length >= 15)`. Both breaks were then proved: claiming 24 rows instead of 25
+goes red; adding an assertion without touching the count goes red naming 26 against 25; restoring
+returns 6/6.
+
+**3. `preflight.sql` still names two of the four — REPORTED, NOT FIXED.** It is the *blocking*
+gate ("a `BLOCK` row stops the run"), and it carries no precondition for 000200 or 000300 at all.
+Its assertion 7 states the governing rule explicitly — *"`ADD COLUMN IF NOT EXISTS` would silently
+no-op over a column of a DIFFERENT type added out of band"* — and applies it only to the `financing`
+columns, though every column in 000200 and 000300 is `ADD COLUMN IF NOT EXISTS` too.
+
+Not patched here, deliberately, because the naive patch is wrong: **all four migrations are already
+applied in production**, so a precondition asserting those columns do *not* yet exist would now
+BLOCK a correctly-deployed database. What a preflight should assert for an already-applied
+migration is a design question, and it belongs to the owner rather than to this commit.
+
+#### The cross-phase sweep — the shape exists nowhere else
+
+All eight proof directories audited, each by an investigator and then an adversarial refuter that
+re-opened every file rather than trusting the quotes.
+
+| Directory | Migrations owned | Named in proof | The two-list shape? |
+| --- | --- | --- | --- |
+| `migration-110-proof` | 1 | 1 | no |
+| `phase-1-proof` | 2 | 2 | no — **no ledger half at all**; every total derived over 16 CTEs |
+| `phase-3-proof` | 1 | — | no — no `.sql` files |
+| `phase-4-proof` | 1 | — | not applicable — diagnostics only |
+| `phase-5-proof` | 1 | 1 | no |
+| `phase-6-proof` | 1 | 1 | no |
+| `phase-7-proof` | 2 | 2 | no |
+| **`phase-8-proof`** | **4** | **2 in `preflight.sql`** | **yes — the only one** |
+
+**Why Phase 8 and nothing else: it is the only wave that grew after its proof was written.** Every
+other phase owns one or two migrations, fixed before the proof existed. When migration 110 arrived
+after Phase 5's package was written, the repository gave it **its own directory** rather than
+extending a hand-written list — which is why `phase-5-proof` is clean. Phase 8 added two migrations
+into an existing package instead. *The defect is not carelessness in one file; it is what this
+repository does when a wave grows.*
+
+**One unrelated finding, REPORTED not actioned.** `phase-1-proof`'s object census is measurably
+incomplete: the wave adds **281** unique `table.column` pairs and `verify.sql` asserts **142**;
+it creates **48** indexes and asserts **30**. Nothing it asserts is wrong — the refuter confirmed
+every asserted column really is added by the wave — and its totals are derived rather than typed,
+so it is not this defect class. It is a separate coverage gap in the largest proof file in the
+repository, and it is the owner's call whether Phase 1's package is reopened for it. Two other
+directories drew severity labels from the adversarial pass on points outside this class that
+**I have not independently verified**, and I am recording them as leads rather than findings.
+
 #### Two spec defects, fixed before the run could be trusted
 
 - The browser journeys guarded on `E2E_STORAGE_STATE`, which `ci.yml` sets at the **job** level to
