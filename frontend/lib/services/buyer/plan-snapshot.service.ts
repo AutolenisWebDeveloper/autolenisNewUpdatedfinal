@@ -66,6 +66,11 @@ export type PlanTouchpoint =
   | "downgrade"
   /** Phase 6 — the Deal-level snapshot written at creation (§11.6 ruling 8, §9a "Recorded"). */
   | "deal_created"
+  /** Phase 8 — §23.2 / §26: the window closed at funding clearance and an UNPAID election
+   *  reverted to Standard. Its own label so the reversion is distinguishable from a
+   *  buyer-initiated §23.3 downgrade, which is a different event with a different refund
+   *  question attached to it. */
+  | "funding_clearance_revert"
   /** Phase 6 — §23.2a's own five, so a conversion can be stamped where it happened. */
   | UpgradeTouchpoint;
 

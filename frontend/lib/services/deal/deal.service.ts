@@ -360,6 +360,25 @@ async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: Adva
       });
     }
   }
+  // §27.1 "Buyer signatures completed → Dealership → Dealer execution request". Driven from
+  // the ARRIVAL at SIGNED rather than from the signing route, for the same reason the contract
+  // request is driven from CONTRACT_PENDING: SIGNED is reachable from the buyer's ceremony, the
+  // co-buyer's, an admin correction and a `force` override, and a request sent from only one of
+  // them leaves the other three with a dealership that was never asked to execute.
+  //
+  // After §13-D30, arriving at SIGNED already means EVERY required signer completed —
+  // `ensureDealSigned` will not advance otherwise — so this cannot fire on a half-signed deal.
+  if (newStatus === DealStatus.SIGNED) {
+    try {
+      const { requestDealerExecution } = await import("./dealer-execution.service");
+      await requestDealerExecution(dealId);
+    } catch (err) {
+      logger.error("arrival hook: dealer execution request failed at SIGNED", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   if (newStatus === DealStatus.RECAP_PENDING) {
     try {
       const { buildRecap } = await import("./deal-recap.service");

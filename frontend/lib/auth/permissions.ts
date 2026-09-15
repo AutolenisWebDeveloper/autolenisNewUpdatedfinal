@@ -89,6 +89,17 @@ export const PERMISSION_ROLES = {
   // Credit + money movement — policy 2, FINANCE-only. Never SUPPORT.
   "finance.preapproval.decide": MONEY,   // approve/reject an external pre-approval
   "finance.payment_link.send": MONEY,    // Stripe Checkout link to the buyer
+  // §13-D32, RULED 2026-09-15: MONEY tier — SUPER_ADMIN and FINANCE_ADMIN only.
+  //
+  // The register's stated alternative ("a new FINANCE_ADMIN role") did not exist as a
+  // choice: FINANCE_ADMIN is already a real AdminRole and already half of MONEY, so there
+  // was nothing to create. The live question was tier WIDTH, and the ruling is NARROW.
+  // Stage 14 says "an authorized Finance OR OPERATIONS administrator", but that is the
+  // specification describing who does the work, not a permission grant — and admitting
+  // OPERATIONS_ADMIN to a MONEY-tier permission is an authorization widening that would be
+  // hard to reverse once surfaces depend on it. Narrow is reversible; wide is not. The
+  // spec's own wording is recorded here so whoever revisits this has both.
+  "finance.funding.clear": MONEY,        // Stage 14 — record financing completion and clear funding
                                          // (amount is server-fixed from constants)
 
   // Buyer account state, split by the owner's ruling:

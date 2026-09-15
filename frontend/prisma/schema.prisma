@@ -2538,6 +2538,23 @@ model Financing {
   termsLockedAt        DateTime?             @map("terms_locked_at")
   verifiedAt           DateTime?             @map("verified_at")
   verifiedBy           String?               @map("verified_by")
+  // ── Phase 8 (§Stage 14): three of the six funding-clearance items ─────────
+  // Recorded HERE rather than on a new table because all three are financing facts about
+  // this deal's money, and `Financing` already carries the deal-time down payment, the
+  // verifier and the external reference. A `funding_clearance` table would have been a
+  // second home for the same subject, and the fourth, fifth and sixth items already have
+  // homes (the deposit's own status, the fee's refund marker, and the recap's
+  // payoff_good_through_date) — so a new table would have held half a concept.
+  //
+  // Item 2 — "Every external lender condition and stipulation is satisfied."
+  lenderConditionsClearedAt DateTime?         @map("lender_conditions_cleared_at")
+  // Item 3's second half — "...and its METHOD recorded by the dealership". The amount
+  // alone is a number nobody can reconcile; the method is what makes it an arrangement.
+  downPaymentMethod         String?           @map("down_payment_method")
+  // Item 4 — "The dealership confirms funding or funding authorization."
+  dealerFundingConfirmedAt  DateTime?         @map("dealer_funding_confirmed_at")
+  // Who recorded items 2-4. §12c: every recording names its verifier.
+  fundingRecordedBy         String?           @map("funding_recorded_by")
   // Phase 1 transaction spine (20261106000100) — back-relations.
   financingAuditEvents FinancingAuditEvent[]
 

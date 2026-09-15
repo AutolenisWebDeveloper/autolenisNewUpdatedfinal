@@ -71,7 +71,20 @@ export const LEGACY_FINANCING_STATUSES: readonly FinancingStatus[] = [
   FinancingStatus.DECLINED,
 ] as const;
 
-/** The states this phase may write. `COMPLETED` is Phase 8's — see the header. */
+/**
+ * The states the CHECKPOINT WRITER may write.
+ *
+ * PHASE 8 ADDED `COMPLETED` (2026-09-15). Phase 7 reserved it deliberately — "checkpoint two,
+ * after signing, before vehicle release (§12a), owned by Phase 8 together with funding
+ * clearance" — and `assertPhase7Writable` refused it by name so the reservation was mechanical
+ * rather than remembered. Phase 8 now owns it, so the gate opens rather than being bypassed:
+ * `recordFinancingCompletion` in funding-clearance.service.ts goes through THIS writer, which
+ * is what keeps the §12b transition map, the ≥10-character reason, the actor requirement and
+ * the tamper-evident audit chain on the second checkpoint as well as the first.
+ *
+ * The name is kept. Renaming it would rewrite the history of why it existed, and the array
+ * says which states the writer accepts, not which phase wrote them.
+ */
 export const PHASE_7_WRITABLE: readonly FinancingStatus[] = [
   FinancingStatus.NOT_STARTED,
   FinancingStatus.IN_PROGRESS,
@@ -79,6 +92,8 @@ export const PHASE_7_WRITABLE: readonly FinancingStatus[] = [
   FinancingStatus.FAILED,
   FinancingStatus.EXPIRED,
   FinancingStatus.NOT_REQUIRED_CASH,
+  // Phase 8 — §Stage 14's "financing.status = COMPLETED".
+  FinancingStatus.COMPLETED,
 ] as const;
 
 /** §12b's legal edges. Read as: from → the states it may reach. */
@@ -165,9 +180,7 @@ function assertPhase7Writable(status: FinancingStatus): void {
   if (!PHASE_7_WRITABLE.includes(status)) {
     throw new FinancingCheckpointError(
       "NOT_THIS_PHASE",
-      `"${status}" is checkpoint two — "after signing, before vehicle release" (§12a) — and is ` +
-        `owned by Phase 8 (parity row deal-early/D3), together with funding clearance. This ` +
-        `service writes the terms-locked checkpoint only.`,
+      `"${status}" is not a state this writer accepts. Use one of ${PHASE_7_WRITABLE.join(", ")}.`,
     );
   }
 }
