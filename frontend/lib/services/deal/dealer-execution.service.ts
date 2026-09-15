@@ -185,6 +185,12 @@ export async function recordDealerExecution(params: {
     data: {
       executedAt: now,
       executedDocumentHash,
+      // WHERE THE DOCUMENT IS, not just what it hashed to. The hash was being recorded and
+      // the location discarded, so §14d's "stores it ... and grants access to the buyer, the
+      // dealership, and authorized administrators" had nothing to serve — while the
+      // `executed_contract_stored` notice was already telling all three parties they could
+      // retrieve it. A fingerprint of a document nobody can produce is not stored evidence.
+      executedDocumentKey: params.executedDocumentUrl,
       isDealerExecuted: true,
     },
   });
@@ -200,12 +206,27 @@ export async function recordDealerExecution(params: {
     logger.error("dealer execution: could not close the document request", err),
   );
 
-  await advanceDealStatus(params.dealId, DealStatus.DEALER_EXECUTED, {
+  // THE RETURN VALUE IS CHECKED, and that is the fix rather than a nicety. `expectedFrom`
+  // makes this a silent no-op when the deal is not at SIGNED — so a deal whose envelopes were
+  // all COMPLETED but whose status had been forced elsewhere got its contract version stamped
+  // executed, got `dealerExecutedContractId` set, and kept a status saying execution never
+  // happened. The route then answered 201 {executed: true}. Half-written and reported as
+  // success is the worst of the three possible outcomes; `clearFunding`'s own
+  // `expectedFrom: DEALER_EXECUTED` would then never fire either.
+  const advanced = await advanceDealStatus(params.dealId, DealStatus.DEALER_EXECUTED, {
     actorId: params.actorId,
     actorRole: params.actorRole ?? "DEALER",
     reason: `Fully executed copy stored against contract version ${approved.version} (hash ${executedDocumentHash.slice(0, 12)}…)`,
     expectedFrom: DealStatus.SIGNED,
   });
+  if (!advanced) {
+    throw new DealerExecutionError(
+      "STATE_MOVED",
+      "The executed copy was recorded against the approved contract version, but the deal was " +
+        "no longer awaiting execution when the status was written — so it has NOT been advanced " +
+        "to dealer-executed. Operations must reconcile this deal before funding can clear.",
+    );
+  }
 
   await notifyExecutedStored(params.dealId).catch((err) =>
     logger.error("dealer execution: notification failed (non-fatal)", err),

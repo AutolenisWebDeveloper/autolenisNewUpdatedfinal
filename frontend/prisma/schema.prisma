@@ -3144,6 +3144,10 @@ model ContractVersion {
   documentHash                 String?               @map("document_hash")
   executedAt                   DateTime?             @map("executed_at")
   executedDocumentHash         String?               @map("executed_document_hash")
+  // §14d: "returns the fully executed copy ... STORES IT, records its hash". The hash was
+  // recorded and the artifact's location discarded, so nothing could serve the document the
+  // executed-contract notice tells all three parties they can access.
+  executedDocumentKey          String?               @map("executed_document_key")
   isDealerExecuted             Boolean               @default(false) @map("is_dealer_executed")
   // Phase 1 transaction spine (20261106000100) — back-relations.
   deals_dealerExecutedContract Deal[]                @relation("deals_dealer_executed_contract_idTocontract_versions")
