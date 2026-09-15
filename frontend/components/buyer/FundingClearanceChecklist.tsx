@@ -71,6 +71,16 @@ export default function FundingClearanceChecklist({
               ) : (
                 <CircleDashed size={17} className="text-amber-500 mt-0.5 flex-shrink-0" aria-hidden="true" />
               )}
+              {/* The state in WORDS, for a reader that never sees the icon. The icons are
+                  aria-hidden because they are decorative beside a text label — but that left
+                  "satisfied" carrying NO textual signal at all: outstanding rows say "Waiting on",
+                  not-applicable rows say "Not needed", and a satisfied row said nothing, so a
+                  screen-reader user could only infer it from the absence of the other two. Shape
+                  varies as well as colour, so this is not WCAG 1.4.1 — it is the plainer problem
+                  of a state that is visible and unreadable. */}
+              <span className="sr-only">
+                {notApplicable ? "Not applicable:" : item.satisfied ? "Complete:" : "Outstanding:"}
+              </span>
               <div className="min-w-0">
                 <p
                   className={`text-sm ${item.satisfied && !notApplicable ? "text-slate-500" : "font-medium text-slate-800"}`}
