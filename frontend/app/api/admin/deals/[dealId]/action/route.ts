@@ -10,6 +10,7 @@ import {
   cancelDeal,
   DealTransitionError,
   InsuranceRequiredError,
+  ReleaseNotClearedError,
 } from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
@@ -85,6 +86,19 @@ export async function POST(request: NextRequest, { params }: Props) {
         }
         if (err instanceof InsuranceRequiredError) {
           return adminError("INSURANCE_REQUIRED", err.message + ". Pass force:true to override.", 409);
+        }
+        // Phase 8's release gate — the dealership's executed contract, and funding clearance.
+        // Unmapped until 2026-09-15, so it fell through to the rethrow and surfaced as a 500
+        // on every non-forced advance to COMPLETED. `funding_cleared_at` has no satisfiable
+        // writer today, so that was not an edge case: it was the only outcome.
+        //
+        // Deliberately does NOT end with "Pass force:true to override." like the two above.
+        // Owner ruling 2026-09-15: force may skip an ORDERING constraint, never a FACT.
+        // Funding clearance and the executed contract are facts about the world, and forcing
+        // them writes a completed deal that is false in the database. Advertising the override
+        // here would point an administrator at exactly that.
+        if (err instanceof ReleaseNotClearedError) {
+          return adminError("RELEASE_NOT_CLEARED", err.message, 409);
         }
         throw err;
       }

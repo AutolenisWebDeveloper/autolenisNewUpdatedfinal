@@ -22,6 +22,12 @@ class InsuranceRequiredError extends Error {
   code = "INSURANCE_REQUIRED";
   constructor() { super("Insurance proof is required"); this.name = "InsuranceRequiredError"; }
 }
+class ReleaseNotClearedError extends Error {
+  constructor(public readonly detail: string) {
+    super(`This deal is not cleared for release: ${detail}.`);
+    this.name = "ReleaseNotClearedError";
+  }
+}
 class DealTransitionError extends Error {
   code = "INVALID_TRANSITION";
   constructor() { super("Invalid transition"); this.name = "DealTransitionError"; }
@@ -76,13 +82,19 @@ mock.module("@/lib/prisma", {
 
 mock.module("@/lib/services/deal/deal.service", {
   namedExports: {
-    INSURANCE_SATISFIED: ["VERIFIED", "POLICY_BOUND", "EXTERNAL_UPLOADED"],
+    // MUST MATCH lib/services/deal/deal.service.ts. This list read
+    // ["VERIFIED", "POLICY_BOUND", "EXTERNAL_UPLOADED"] until 2026-09-15 — a stale COPY of a
+    // constant §13-D31 had already narrowed. EXTERNAL_UPLOADED now means "Operations owes a
+    // decision" (INSURANCE_AWAITING_REVIEW), not "released". A mock that grants the gate the
+    // real code refuses is a test asserting against a world that does not exist.
+    INSURANCE_SATISFIED: ["VERIFIED", "POLICY_BOUND"],
     advanceDealStatus: async (dealId: string, to: string) => {
       if (advanceThrows) throw advanceThrows;
       advanceCalls.push({ dealId, to });
     },
     DealTransitionError,
     InsuranceRequiredError,
+    ReleaseNotClearedError,
   },
 });
 
@@ -193,6 +205,46 @@ test("insurance revoked between the pre-check and the advance → 409, not a 500
   const body = await res.json();
   assert.equal(body.error.code, "INSURANCE_REQUIRED");
   assert.equal(txCalls, 0, "pickup must not be marked complete when the deal did not advance");
+});
+
+// ── The release gate Phase 8 added, and the 500 it produces today ────────────────────────
+//
+// Phase 8 gave `advanceDealStatus` a third rejection at COMPLETED: `ReleaseNotClearedError`,
+// thrown when the dealership's executed contract is not on file or funding is not cleared.
+// This route was not taught about it, so it falls through to `throw err` and surfaces as an
+// unhandled 500 — to a dealer standing at the vehicle with the buyer.
+//
+// It is not the TOCTOU case above. `deals.funding_cleared_at` has NO satisfiable writer today
+// (`clearFunding` refuses unless every clearance item passes, and two of its inputs —
+// `downPaymentMethod` and `dealerFundingConfirmedAt` — have no production writer at all), so
+// for a non-forced completion this is not an edge case. It is the ONLY outcome.
+//
+// The two are mapped to their own code rather than folded into INSURANCE_REQUIRED because
+// deal.service.ts says why: "an insurance gap is the buyer's to close, while an uncleared
+// funding or a missing executed contract is AutoLenis's and the dealership's. A caller that
+// cannot tell them apart cannot say who has to act."
+
+test("funding not cleared → 409, not a 500", async () => {
+  advanceThrows = new ReleaseNotClearedError("funding has not been cleared for this deal");
+  const res = await scan();
+  assert.equal(res.status, 409, "the seam's release rejection must be mapped, not thrown as a 500");
+  const body = await res.json();
+  assert.equal(body.error.code, "RELEASE_NOT_CLEARED");
+  assert.equal(txCalls, 0, "pickup must not be marked complete when the deal did not advance");
+  assert.equal(
+    body.error.message.includes("funding has not been cleared"),
+    true,
+    "the detail says who has to act; a generic message sends the dealer to the wrong party",
+  );
+});
+
+test("the dealership's executed contract not on file → 409, not a 500", async () => {
+  advanceThrows = new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
+  const res = await scan();
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.error.code, "RELEASE_NOT_CLEARED");
+  assert.equal(txCalls, 0);
 });
 
 test("an illegal deal transition → 409 and the pickup row is not marked complete", async () => {
