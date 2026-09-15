@@ -1977,9 +1977,28 @@ are covered by the bare `test` script and `test:all` is back to main's 70 segmen
 Implemented on `claude/txflow-08-contract` from base `12e9b29e`. This section records how the phase
 was actually built where that differs from how it was planned, and carries the mandatory
 before → after capability map. **Nothing was applied to production and no migration was run** — the
-two migrations are authored and proved on a throwaway loopback database, and applying them is the
+migrations are authored and proved on a throwaway loopback database, and applying them is the
 owner's under the per-run protocol in CLAUDE.md. This session held **no database credential of any
 kind**, so every statement about production state below is marked NOT VERIFIED and is not asserted.
+
+> **TWO CORRECTIONS TO THAT PARAGRAPH, 2026-09-15 (Phase 9 opening).** Both were found by the
+> Phase 9 investigation reading this section as its entry state, which is what an AS BUILT record
+> is for.
+>
+> 1. **It said "the two migrations". The phase shipped FOUR** — `executed_copy_storage` and
+>    `invited_signer_token` were added after this paragraph was written, and it was not updated.
+>    That is the same drift, in the same phase, on the same day, as the `verify.sql` list the owner
+>    caught at 17:33 UTC and as `preflight.sql`'s list. Three hand-maintained copies of one set,
+>    two of them stale. The count is removed rather than corrected to four: a number here earns
+>    nothing that the migration table below does not already carry.
+> 2. **"Nothing was applied to production" is true of the AUTHORING SESSION and no longer true of
+>    the outcome.** The owner applied all four under the per-run protocol and verified them
+>    independently at 17:33 UTC — ledger **119 rows / 117 distinct / 0 unfinished**, every row
+>    finished with `applied_steps_count` 1, `deal_id_key` gone, the composite unique and both token
+>    indexes present, and all three token columns `timestamp without time zone`. A later reader
+>    taking the sentence as the state of production would be wrong. Following the same correction
+>    made at Phase 6's close rather than editing the original, because what the authoring session
+>    did is still accurately described by it.
 
 #### Core rule 11 IN REVERSE — the named instance, and the front of the migration plan
 
