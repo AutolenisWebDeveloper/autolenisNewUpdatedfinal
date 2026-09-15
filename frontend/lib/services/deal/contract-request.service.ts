@@ -126,7 +126,43 @@ export async function openContractRequest(params: {
     return { created: false, dueAt: contractRequest.dueAt, reason: "already_open" };
   }
 
-  // ── 3. The dealership's request and its escalation ─────────────────────────
+  // ── 3. The buyer's insurance request ───────────────────────────────────────
+  //
+  // FIRST, AND INDEPENDENT OF THE DEALERSHIP, which is the whole point of its position here.
+  // It used to sit after the `no_dealer_channel` return below, so a missing DEALERSHIP email
+  // silently suppressed the BUYER's insurance request — two independent facts about two
+  // different people, coupled by a single early return. Nothing went red: the request RECORD
+  // was still written, Stage 15 blocks RELEASE rather than entry, and the deal ran all the way
+  // to funding clearance before being held on a document the buyer had never been asked for.
+  // On the concierge lineage (deals_offer_lineage_check permits `offer_id IS NULL` when
+  // `vehicle_request_offer_id IS NOT NULL`) `deal.offer` is null by construction, so that was
+  // EVERY such deal. Pinned by DEFECT 7 in __tests__/phase8-contract-request.test.ts.
+  const buyer = await prisma.buyer.findUnique({
+    where: { id: deal.buyerId },
+    select: { user: { select: { email: true } } },
+  });
+  const buyerEmail = buyer?.user?.email ?? null;
+  if (buyerEmail) {
+    const insurance = renderInsuranceRequired({ vehicle, vin: deal.vin });
+    await enqueueTransactional({
+      triggerEvent: "contract_pending",
+      templateKey: PHASE_8_TEMPLATES.INSURANCE_REQUIRED,
+      channel: "email",
+      recipientKind: "buyer",
+      recipientId: deal.buyerId,
+      to: buyerEmail,
+      payload: { email: buyerEmail, subject: insurance.subject, html: insurance.html, text: insurance.text },
+      dealId: params.dealId,
+      idempotencyKey: `${PHASE_8_TEMPLATES.INSURANCE_REQUIRED}:${params.dealId}`,
+      cancelKey: insuranceReviewCancelKey(params.dealId),
+    });
+  } else {
+    logger.error("contract request: buyer has no email — insurance request not enqueued", {
+      dealId: params.dealId,
+    });
+  }
+
+  // ── 4. The dealership's request and its escalation ─────────────────────────
   const dealershipEmail = deal.offer?.dealer?.isSystemPlaceholder
     ? deal.offer.externalDealerEmail
     : deal.offer?.dealer?.user?.email ?? null;
@@ -194,32 +230,6 @@ export async function openContractRequest(params: {
     runAt: dueAt,
     cancelKey: contractRequestCancelKey(params.dealId),
   });
-
-  // ── 4. The buyer's insurance request ───────────────────────────────────────
-  const buyer = await prisma.buyer.findUnique({
-    where: { id: deal.buyerId },
-    select: { user: { select: { email: true } } },
-  });
-  const buyerEmail = buyer?.user?.email ?? null;
-  if (buyerEmail) {
-    const insurance = renderInsuranceRequired({ vehicle, vin: deal.vin });
-    await enqueueTransactional({
-      triggerEvent: "contract_pending",
-      templateKey: PHASE_8_TEMPLATES.INSURANCE_REQUIRED,
-      channel: "email",
-      recipientKind: "buyer",
-      recipientId: deal.buyerId,
-      to: buyerEmail,
-      payload: { email: buyerEmail, subject: insurance.subject, html: insurance.html, text: insurance.text },
-      dealId: params.dealId,
-      idempotencyKey: `${PHASE_8_TEMPLATES.INSURANCE_REQUIRED}:${params.dealId}`,
-      cancelKey: insuranceReviewCancelKey(params.dealId),
-    });
-  } else {
-    logger.error("contract request: buyer has no email — insurance request not enqueued", {
-      dealId: params.dealId,
-    });
-  }
 
   return { created: true, dueAt };
 }

@@ -6,11 +6,28 @@ import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, FileText, ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
 import { getActiveConsentPolicy, type ConsentAckKey } from "@/lib/services/esign/consent-policy";
 
+interface ShieldFinding {
+  item: string | null;
+  found: string | null;
+  expected: string | null;
+  howToFix: string | null;
+}
+
+interface ShieldResult {
+  status: string;
+  score: number;
+  scannedAt: string;
+  findings: ShieldFinding[];
+  checked: string[];
+}
+
 interface Presentation {
   status: string | null;
   dealStatus: string;
   contractViewUrl: string | null;
   signable: boolean;
+  /** §14b's verdict on the EXACT version being signed. Null before a scan exists. */
+  shield: ShieldResult | null;
 }
 
 type Phase = "loading" | "review" | "completed" | "unavailable" | "error";
@@ -170,6 +187,76 @@ export default function SigningCeremony({ dealId }: { dealId: string }) {
         </a>
         .
       </p>
+
+      {/* WHAT CONTRACT SHIELD FOUND. §14b runs a comparison on the buyer's behalf — against
+          the winning offer, the dealership's reaffirmation and the recap they confirmed —
+          and until now its result appeared nowhere on this page. A buyer was asked to sign a
+          legally binding contract with the outcome of the review hidden from them, which
+          makes Contract Shield a thing we say rather than a thing they get.
+
+          The checks are listed even when nothing was found, so an empty panel reads as "we
+          looked and it matched" rather than "nothing was looked at". */}
+      {data?.shield && (
+        <section
+          className="rounded-xl border border-slate-200 bg-white p-5 mb-6"
+          aria-labelledby="shield-heading"
+          data-testid="esign-shield-panel"
+        >
+          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+            <div className="flex items-start gap-2">
+              <ShieldCheck size={18} className="text-al-primary mt-0.5" aria-hidden="true" />
+              <div>
+                <h2 id="shield-heading" className="font-semibold text-slate-900 text-sm">
+                  What Contract Shield checked
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  We compared this exact contract against your accepted offer, the dealership&apos;s
+                  reaffirmation, and the recap you confirmed.
+                </p>
+              </div>
+            </div>
+            <Badge variant={data.shield.status === "PASS" ? "green" : "amber"} data-testid="esign-shield-status">
+              {data.shield.status === "PASS" ? "No mismatches found" : data.shield.status}
+            </Badge>
+          </div>
+
+          {data.shield.findings.length === 0 ? (
+            <p className="text-sm text-slate-600" data-testid="esign-shield-clean">
+              Everything on this contract matched what you agreed to.
+            </p>
+          ) : (
+            <ul className="space-y-3 mb-4" data-testid="esign-shield-findings">
+              {data.shield.findings.map((f, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <AlertTriangle size={15} className="text-amber-500 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                  <div className="text-sm">
+                    <p className="font-medium text-slate-800">{f.item ?? "Difference found"}</p>
+                    {f.expected && f.found && (
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Agreed: <span className="font-medium text-slate-700">{f.expected}</span>
+                        {" · "}
+                        On the contract: <span className="font-medium text-slate-700">{f.found}</span>
+                      </p>
+                    )}
+                    {f.howToFix && <p className="text-xs text-slate-500 mt-0.5">{f.howToFix}</p>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <details className="mt-3">
+            <summary className="text-xs font-medium text-al-primary cursor-pointer">
+              See everything we checked
+            </summary>
+            <ul className="mt-2 space-y-1 pl-4 list-disc text-xs text-slate-500">
+              {data.shield.checked.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex items-start gap-2 mb-4">

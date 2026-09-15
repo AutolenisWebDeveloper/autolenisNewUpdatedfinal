@@ -9,6 +9,8 @@ import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import PremiumInvitation from "@/components/buyer/PremiumInvitation";
+import FundingClearanceChecklist from "@/components/buyer/FundingClearanceChecklist";
+import { evaluateFundingClearance } from "@/lib/services/deal/funding-clearance.service";
 import Link from "next/link";
 import { ArrowRight, Car } from "lucide-react";
 
@@ -36,6 +38,14 @@ export default async function DealPage() {
     );
   }
 
+  // §Stage 14. Shown from DEALER_EXECUTED onward — the stage at which the six conditions
+  // become the only thing between the buyer and their vehicle. Showing it earlier would
+  // present six outstanding items as a problem when they are simply not due yet.
+  const CLEARANCE_VISIBLE_FROM: string[] = ["DEALER_EXECUTED", "FUNDING_PENDING", "PICKUP_READINESS", "PICKUP_SCHEDULED"];
+  const clearance = CLEARANCE_VISIBLE_FROM.includes(deal.status)
+    ? await evaluateFundingClearance(deal.id)
+    : null;
+
   const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
   const dealerName = buyerFacingDealerName(deal.offer);
 
@@ -45,7 +55,12 @@ export default async function DealPage() {
     { label: "Service Fee", done: !!deal.feePaidAt || buyer.plan !== "PREMIUM", href: "/buyer/deal/payment" },
     { label: "Insurance", done: deal.insuranceStatus !== "NOT_STARTED", href: "/buyer/insurance" },
     { label: "Contract Shield", done: deal.contractShieldStatus === "PASS", href: "/buyer/contract-shield" },
-    { label: "Sign Documents", done: deal.status === "SIGNED" || deal.status === "COMPLETED", href: "/buyer/esign" },
+    { label: "Sign Documents", done: ["SIGNED", "DEALER_EXECUTED", "FUNDING_PENDING", "COMPLETED"].includes(deal.status), href: "/buyer/esign" },
+    // §13-D29: the dealership's countersignature is a stage of its own. It was invisible —
+    // the buyer signed and the next thing they saw was "Pickup", with nothing explaining the
+    // wait while release stayed blocked on a step nobody had told them about.
+    { label: "Dealer Countersignature", done: ["DEALER_EXECUTED", "FUNDING_PENDING", "COMPLETED"].includes(deal.status) },
+    { label: "Funding Cleared", done: ["COMPLETED"].includes(deal.status) || !!deal.fundingClearedAt },
     { label: "Pickup", done: deal.status === "COMPLETED", href: "/buyer/pickup" },
   ];
 
@@ -98,6 +113,12 @@ export default async function DealPage() {
       )}
 
       {/* Review flow — captured at peak satisfaction (post-purchase) */}
+      {clearance && (
+        <div className="mb-6">
+          <FundingClearanceChecklist items={clearance.items} clear={clearance.clear} />
+        </div>
+      )}
+
       {deal.status === "COMPLETED" && (
         <div
           className="bg-green-50 border border-green-200 rounded-2xl p-5 mt-4"

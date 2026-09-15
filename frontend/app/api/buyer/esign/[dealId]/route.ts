@@ -71,6 +71,35 @@ export async function GET(request: NextRequest, { params }: Props) {
     if (contract) contractViewUrl = await getContractViewUrl(contract.documentUrl);
   }
 
+  // WHAT CONTRACT SHIELD FOUND, so the buyer can see it before signing.
+  //
+  // §14b describes a comparison run on the buyer's behalf, and the buyer had no way to see
+  // its result: the ceremony rendered the contract and asked for a signature with the
+  // review's outcome nowhere on the page. A buyer signing a legally binding contract is
+  // entitled to know what was checked and what came back — that is the entire product
+  // promise, and hiding it makes Contract Shield a thing we say rather than a thing they get.
+  //
+  // Bound to the SCAN THAT JUDGED THE SIGNED VERSION, not the newest scan on the deal. An
+  // earlier revision's findings shown against this document would be actively misleading.
+  const scan = envelope?.documentVersionId
+    ? await prisma.contractScan.findFirst({
+        where: { dealId, contractVersionId: envelope.documentVersionId },
+        orderBy: { scannedAt: "desc" },
+        select: { status: true, score: true, fixList: true, scannedAt: true },
+      })
+    : null;
+  // The fix list is written by AutoLenis's own rules and comparison — no buyer PII, no
+  // dealer identity, no internal ids beyond a rule key. Projected to the three fields the
+  // buyer needs rather than passed through whole, so a future field cannot leak by default.
+  const shieldFindings = Array.isArray(scan?.fixList)
+    ? (scan!.fixList as Array<Record<string, unknown>>).map((f) => ({
+        item: typeof f.item === "string" ? f.item : null,
+        found: typeof f.foundValue === "string" ? f.foundValue : null,
+        expected: typeof f.expectedValue === "string" ? f.expectedValue : null,
+        howToFix: typeof f.howToFix === "string" ? f.howToFix : null,
+      }))
+    : [];
+
   const fresh = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
   // §11: return ONLY a buyer-safe summary — never the raw envelope (which carries
   // IP, user-agent, the consent snapshot's forensic attribution, and internal
@@ -82,6 +111,26 @@ export async function GET(request: NextRequest, { params }: Props) {
     dealStatus: fresh?.status ?? deal.status,
     contractViewUrl,
     signable: !!signable,
+    shield: scan
+      ? {
+          status: scan.status,
+          score: scan.score,
+          scannedAt: scan.scannedAt,
+          findings: shieldFindings,
+          // The checks Shield runs, stated so an empty findings list reads as "we looked and
+          // found nothing" rather than as "nothing was looked at" — which is the difference
+          // between reassurance and a blank panel.
+          checked: [
+            "Vehicle and VIN, and the odometer reading",
+            "Every out-the-door component against the recap you confirmed",
+            "Documentation fee, taxes, title and registration",
+            "Trade allowance and payoff figures, and your down payment",
+            "Financing terms — APR and length",
+            "Each optional product you accepted or declined, individually",
+            "Junk-fee patterns, fee caps, payment packing and required disclosures",
+          ],
+        }
+      : null,
   });
 }
 

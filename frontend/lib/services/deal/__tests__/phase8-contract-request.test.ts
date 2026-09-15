@@ -157,3 +157,50 @@ test("the request record is written BEFORE the message, so a send failure cannot
   assert.ok(created.some((r) => r.documentType === "SALES_CONTRACT" && r.dueAt),
     "a request that exists only as a sent message disappears when the message cannot be sent");
 });
+
+// ── DEFECT 7 ────────────────────────────────────────────────────────────────
+//
+// FOUND BY THE PHASE 8 PLAYWRIGHT RUN, not by reading the code — the e2e fixture builds a
+// deal on the CONCIERGE lineage (vehicle_requests + vehicle_request_offers), which is a
+// lineage the schema explicitly permits: deals_offer_lineage_check is
+// `offer_id IS NOT NULL OR vehicle_request_offer_id IS NOT NULL`
+// (20261106000100_transaction_spine_foundation/migration.sql:1233). Such a deal has NO `Offer`
+// row, so `deal.offer` is null and the dealership channel is absent by construction.
+//
+// THE DEFECT. The buyer's insurance request sat AFTER the `no_dealer_channel` early return, so
+// a missing DEALERSHIP email silently suppressed the BUYER's insurance request. Those are
+// independent facts about two different people. The consequence is the worst shape a bug can
+// take here, because nothing goes red: Stage 15 blocks RELEASE on insurance, so the deal runs
+// the whole way to funding clearance and is then held on a document the buyer was never asked
+// for — and the hold names insurance, not the request that never went out. On the concierge
+// lineage that was EVERY deal.
+//
+// The service's own header states the rule this broke: insurance is requested at contract
+// request "so the buyer has the full window to bind", and asking later "would make the
+// parallel track a serial one again, with the buyer as the bottleneck".
+test("DEFECT 7: a dealership with no email does not suppress the BUYER's insurance request", async () => {
+  // A concierge-lineage deal: no Offer row at all, which is what the check constraint allows.
+  dealRow = { ...DEAL, offer: null };
+  const { openContractRequest } = await mod();
+  const result = await openContractRequest({ dealId: "d1" });
+
+  assert.equal(result.reason, "no_dealer_channel");
+  assert.ok(exceptions.includes("COMMS_NO_DELIVERABLE_CHANNEL"),
+    "the dealership's missing channel is still its own exception");
+
+  // BOTH request records are still opened — that half was already unconditional.
+  assert.ok(created.some((r) => r.documentType === "SALES_CONTRACT"), "the contract request record");
+  assert.ok(created.some((r) => r.documentType === "INSURANCE_PROOF"), "the insurance request record");
+
+  // AND THE BUYER IS ACTUALLY ASKED. This is the assertion that was failing: the record
+  // existing is not the buyer being told it exists.
+  assert.ok(
+    enqueued.some((e) => e.templateKey.includes("insurance")),
+    `the buyer must still be asked for proof of insurance; enqueued=${JSON.stringify(enqueued.map((e) => e.templateKey))}`,
+  );
+  // And nothing was sent to a dealership that has no address.
+  assert.ok(
+    !enqueued.some((e) => e.templateKey.includes("contract")),
+    "no dealership message, because there is no dealership channel",
+  );
+});

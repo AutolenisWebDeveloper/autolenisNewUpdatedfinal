@@ -519,6 +519,23 @@ jobs:
           NODE_OPTIONS: --conditions=react-server
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase7-reaffirmation-journeys.spec.ts
 
+      # The Phase 8 contract journeys (§12.4): the Stage 13 request with its 24-hour deadline,
+      # Contract Shield's comparison against the confirmed recap, the §13-D30 co-buyer signature,
+      # §13-D29's dealer-execution predecessor, Stage 14's six-item clearance list and its full
+      # send-back, and §13-D31's insurance review — plus two narrow-viewport renders.
+      #
+      # ADDED IN THE SAME COMMIT AS THE SPEC, which is the whole of #433's lesson: `tests/e2e/`
+      # is not globbed by any script and `check-test-coverage.ts` exempts the Playwright scripts
+      # from the test:all chain, so a spec that is not named HERE is a spec CI never runs. Phase
+      # 7's shipped without this step and covered fourteen journeys by hand only.
+      #
+      # Same `--conditions=react-server` requirement as the steps above: this spec calls services
+      # in-process, and `server-only` throws without it.
+      - name: E2E — Phase 8 contract journeys
+        env:
+          NODE_OPTIONS: --conditions=react-server
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase8-contract-journeys.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

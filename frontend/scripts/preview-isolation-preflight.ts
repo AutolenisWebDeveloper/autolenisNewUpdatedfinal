@@ -152,6 +152,47 @@ async function main() {
   if (paid.length) fail(7, "Paid APIs disabled", `${paid.join(", ")} present — a quota-capped live key is still live. ABORT.`);
   else pass(7, "Paid APIs disabled", "MARKETCHECK_API_KEY, APOLLO_API_KEY, FIRECRAWL_API_KEY, GOOGLE_MAPS_API_KEY all unset.");
 
+  // ── 7b. §13-D4's compliance gate — PREVIEW ONLY ─────────────────────────
+  // ESIGN_EXECUTED_ARTIFACT_ENABLED activates the executed-artifact and consent-record
+  // behaviour. It is owner-gated on attorney/compliance sign-off and must NEVER be set in
+  // production until that sign-off exists.
+  //
+  // Phase 8 is the first phase that needs it ON to verify anything — the signing ceremony
+  // fails closed while it is off, by design — so the assertion is not "it must be off". It
+  // is that a run with the flag ON is a run against a target this preflight has already
+  // positively identified as NOT production (steps 1-2 above). Those steps gate this one, so
+  // reaching here with the flag on means the target was proven non-production first.
+  //
+  // The flag reads as enabled ONLY on the exact string "true" (esign-schema-gate.ts), so
+  // "1"/"TRUE"/"yes" are reported as OFF rather than assumed on — the same strictness the
+  // gate itself applies, stated here so a misconfigured preview is visible rather than quiet.
+  const esignFlag = process.env.ESIGN_EXECUTED_ARTIFACT_ENABLED ?? "";
+  if (esignFlag === "true") {
+    pass(
+      7.5,
+      "E-sign artifact flag (§13-D4)",
+      "ESIGN_EXECUTED_ARTIFACT_ENABLED=true. Steps 1-2 already established this target is NOT the " +
+        "production project, so the compliance-gated behaviour is active in PREVIEW ONLY. It must " +
+        "never be set in production until the attorney/compliance sign-off §13-D4 records exists.",
+    );
+  } else if (esignFlag === "") {
+    unverified(
+      7.5,
+      "E-sign artifact flag (§13-D4)",
+      "ESIGN_EXECUTED_ARTIFACT_ENABLED is unset, so the signing ceremony fails closed and the " +
+        "Phase 8 signing journeys cannot be exercised. That is SAFE, and it is also NOT VERIFIED — " +
+        "a green run here proves nothing about signing.",
+      'ESIGN_EXECUTED_ARTIFACT_ENABLED="true" in the PREVIEW environment only',
+    );
+  } else {
+    fail(
+      7.5,
+      "E-sign artifact flag (§13-D4)",
+      `ESIGN_EXECUTED_ARTIFACT_ENABLED="${esignFlag}" is neither "true" nor unset. The gate reads ` +
+        `only the exact string "true", so this value silently disables signing while looking enabled.`,
+    );
+  }
+
   // Steps 1–7 gate step 8. Nothing is written while any of them failed.
   const blocked = steps.filter((s) => s.status === "FAIL");
   if (blocked.length) {
