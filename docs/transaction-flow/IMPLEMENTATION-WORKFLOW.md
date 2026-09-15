@@ -2327,9 +2327,10 @@ Failing closed was the correct interim.
 
 #### THE DEFECT CLASS THIS PROGRAMME KEEPS PRODUCING — name it, and test for it
 
-**Something reported success while checking nothing.** Six instances, across eight phases, in
+**Something reported success while checking nothing.** Seven instances, across eight phases, in
 three different layers. Naming it here because the sixth was found the same way as the first,
-which means it is a class and not a run of bad luck:
+which means it is a class and not a run of bad luck — and because the seventh is a guard built
+to catch this class that nearly fell to it:
 
 | # | Phase | Where | What reported success | What it had actually checked |
 | --- | --- | --- | --- | --- |
@@ -2339,12 +2340,49 @@ which means it is a class and not a run of bad luck:
 | 4 | 8 | proof harness | *"6 assertions, all rolled back"* | **zero** — the transaction aborted on the first INSERT and every assertion was skipped |
 | 5 | 8 | test | `has("contract_overdue")` passing | `dedupKey`, not the `templateKey` **column** it claimed to read — so the row lookup beside it was silently `undefined` |
 | 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
+| 7 | 8 (#435) | **the guard written for this class** | two passing comparisons in `phase8-proof-sql.test.ts`, the drift guard added *because of* this table | **nothing** — the first draft filtered on `/^2026111700\d{2}_phase8_/`, **ten digits against a fourteen-digit stamp**, so `onDisk` and `named` were both empty and both tests passed by comparing nothing to nothing |
 
-**The three layers matter.** #1 and #2 are runtime; #3, #4 and #5 are the tests and harnesses
-that are supposed to catch runtime; #6 is the *written record* that is supposed to describe
-both. The class reaches all the way up: a verification artefact is just as capable of
+**The three layers matter.** #1 and #2 are runtime; #3, #4, #5 and #7 are the tests and
+harnesses that are supposed to catch runtime; #6 is the *written record* that is supposed to
+describe both. The class reaches all the way up: a verification artefact is just as capable of
 asserting nothing as the code it verifies, and a prose claim is the least checkable artefact
 of all.
+
+**#7 is the most persuasive of the seven, and it is the newest.** The other six were written by
+someone not thinking about this class. #7 was not. It is a guard built *specifically* to catch
+the under-assertion shape, in the file whose entire purpose is that shape, written by an author
+who had just finished documenting the class — and on its first run two of its five assertions
+were vacuous. Being on guard against the failure mode did not prevent the failure mode.
+
+The only reason it was caught is that the same awareness had already produced a *mechanical*
+check three lines above it: `assert.ok(found.length >= 4)`, which goes red when the fixture is
+empty. Delete that one assertion and the guard goes green, stays green forever, and guards
+nothing — while its own header goes on claiming *"add a Phase 8 migration without updating
+verify.sql and the build fails here, naming the file and the missing migration"*
+(`phase8-proof-sql.test.ts:16-17`), and `verify.sql:105-108` cites the test right back as the
+thing that keeps its list honest. Two artefacts vouching for each other, neither checking.
+**Vigilance is not a control. The anti-vacuity assertion
+was.** Every gate in this programme should carry one: an assertion that the fixture it reasons
+over is non-empty, failing loudly when the search finds nothing, because *zero results and
+nothing to check are indistinguishable to every assertion downstream of them.*
+
+**Re-proved against the merged code on 2026-09-15 rather than recalled**, because a claim about a
+gate is exactly the kind this table is about. Reintroducing the ten-digit prefix and running
+`npx tsx --test prisma/__tests__/phase8-proof-sql.test.ts`:
+
+```
+not ok 1 - the migrations exist on disk at all — the fixture is not empty
+ok 2 - verify.sql names every phase 8 migration on disk
+ok 3 - verify.sql names no migration that does not exist
+ok 4 - verify.sql states no hardcoded count of phase 8 migrations
+ok 5 - the proof files the migration package promises are all present
+# tests 5 | # pass 4 | # fail 1
+```
+
+Tests 2 and 3 — the two that exist to compare the list against the disk — report **green while
+comparing an empty set to an empty set**. One assertion out of five stands between that and a
+committed guard that guards nothing. Restoring the fourteen-digit pattern returns 5/5, and the
+file is byte-identical to the committed version.
 
 **The counter-measure, and it is cheap.** *Before trusting any gate, prove it fails on a
 deliberately reintroduced defect.* Break the thing the gate exists to catch, watch it go red,
@@ -2362,6 +2400,54 @@ Three tells, for the next reader:
 - **A claim about a structure, made without querying the structure.** #6's "preserved through
   the correct predecessor" is a statement about a graph; ten lines of code would have
   falsified it, and none were written.
+
+#### What that guard actually covers — asked by the owner, answered 2026-09-15
+
+The owner asked directly whether `phase8-proof-sql.test.ts` covers the *shape* or only Phase 8.
+
+**It covers only Phase 8 — and not even all of Phase 8.** Established by reading the source and
+then by running its own two regexes against candidate directory names, rather than by reasoning
+about them:
+
+| Candidate migration directory | Seen by the guard? |
+| --- | --- |
+| `20261117000300_phase8_invited_signer_token` | yes |
+| `20261120000000_phase8_followup_fix` — a **later Phase 8** migration | **no** |
+| `20261201000000_phase9_pickup_readiness` | **no** |
+
+Three bindings, all literal:
+
+1. `PROOF_DIR` is `docs/transaction-flow/phase-8-proof`. The guard opens no other directory.
+   Seven other proof directories exist — `migration-110`, `phase-1`, `phase-3` through `phase-7` —
+   and it reads none of them.
+2. `phase8MigrationsOnDisk()` filters on `/^20261117\d{6}_phase8_/`. **The wave stamp is part of
+   the pattern**, not merely the `_phase8_` token.
+3. `migrationsNamedIn()` extracts with that same anchored prefix, so a name it cannot generate is
+   also a name it cannot find.
+
+**Answering the question as asked: if a Phase 9 proof file grows the same two-list structure with
+a hardcoded count, nothing in this repository catches it.** Not a near miss — the guard never
+opens the file.
+
+**The second hole is inside Phase 8's own scope, and it is the more interesting one.** A Phase 8
+follow-up migration stamped outside the `20261117` wave is invisible to `phase8MigrationsOnDisk()`,
+and the anti-vacuity assertion does **not** save it: `found.length >= 4` still passes on the four
+original directories. The guard would report a clean verify while silently ignoring the new
+migration — the exact defect it exists to catch, one axis over, in a file written with this defect
+class explicitly in mind. The correction is one character class: `\d{14}_phase8_` in place of
+`20261117\d{6}_phase8_`.
+
+That makes #7 a **two-part** instance. The vacuous-fixture half was caught before commit, by the
+anti-vacuity assertion. The wave-prefix half shipped, was caught by nothing, and is recorded here
+rather than found later — which is the only difference between this paragraph and an eighth row in
+the table above.
+
+**Deliberately not fixed here.** Owner instruction, 2026-09-15: *"do not generalise the guard now.
+Phase 9 can carry it when it has its own proof files."* Both holes are recorded as the first thing
+Phase 9 inherits. When Phase 9 does carry it, the guard should be **parameterised on the phase**
+rather than copied and renumbered — eight proof directories holding eight hand-copied guards is
+eight chances to make the same mistake, which is the shape that produced this table in the first
+place.
 
 #### Two spec defects, fixed before the run could be trusted
 
