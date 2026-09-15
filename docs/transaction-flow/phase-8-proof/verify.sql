@@ -91,6 +91,28 @@ SELECT 'e_sign_envelopes.signer_kind is NOT NULL with a default' AS object,
 -- render as PRESENT rather than MISSING — production reads 115 rows against 113 distinct
 -- names for exactly that reason.
 
+-- THE EXPECTED SET, DECLARED ONCE.
+--
+-- It used to be written out twice — once as a VALUES list and once as an IN list — and both
+-- named only the first two migrations. `executed_copy_storage` and `invited_signer_token`
+-- were added to the phase afterwards and neither list was updated, so this file would have
+-- reported PRESENT on a deploy with HALF THE MIGRATIONS MISSING. It under-asserted rather
+-- than mis-asserted, which is worse: a verify that cannot fail is the exact class of gate
+-- §8.1h spends its report warning about, and it was sitting inside the proof directory.
+--
+-- Found by the owner's independent verification at 17:33 UTC, after all four had applied.
+--
+-- ONE list now, consumed by both queries below, so the two can no longer disagree. The list
+-- itself is checked against the migration directories on disk by
+-- `frontend/prisma/__tests__/phase8-proof-sql.test.ts`, which fails the build when a Phase 8
+-- migration is added and this file is not updated — because a list maintained by hand is how
+-- this drifted in the first place.
+WITH phase8_expected(name) AS (
+  VALUES ('20261117000000_phase8_esign_signer_cutover'),
+         ('20261117000100_phase8_funding_clearance'),
+         ('20261117000200_phase8_executed_copy_storage'),
+         ('20261117000300_phase8_invited_signer_token')
+)
 SELECT 'ledger ' || expected.name AS object,
        CASE WHEN (SELECT count(*) FROM _prisma_migrations m
                    WHERE m.migration_name = expected.name
@@ -100,17 +122,26 @@ SELECT 'ledger ' || expected.name AS object,
                    WHERE m.migration_name = expected.name AND m.rolled_back_at IS NOT NULL) > 0
             THEN 'a rolled-back row sits beside this one: RETRY HISTORY, not a failure'
             ELSE 'no ledger row means Prisma will re-apply this on the next deploy' END AS remedy
-  FROM (VALUES ('20261117000000_phase8_esign_signer_cutover'),
-               ('20261117000100_phase8_funding_clearance')) AS expected(name);
+  FROM phase8_expected AS expected;
 
--- Exactly ONE applied row each. More than one means the SQL ran twice.
+-- Exactly ONE applied row each, and exactly as many as the phase has migrations. The count is
+-- derived from the same list rather than restated as a literal — a hardcoded `= 2` beside a
+-- four-name list is precisely the drift this file just suffered.
+WITH phase8_expected(name) AS (
+  VALUES ('20261117000000_phase8_esign_signer_cutover'),
+         ('20261117000100_phase8_funding_clearance'),
+         ('20261117000200_phase8_executed_copy_storage'),
+         ('20261117000300_phase8_invited_signer_token')
+)
 SELECT 'ledger has exactly one applied row per phase 8 migration' AS object,
-       CASE WHEN (SELECT count(*) FROM _prisma_migrations
-                   WHERE migration_name IN ('20261117000000_phase8_esign_signer_cutover',
-                                            '20261117000100_phase8_funding_clearance')
-                     AND finished_at IS NOT NULL AND rolled_back_at IS NULL) = 2
+       CASE WHEN (SELECT count(*) FROM _prisma_migrations m
+                   JOIN phase8_expected e ON e.name = m.migration_name
+                   WHERE m.finished_at IS NOT NULL AND m.rolled_back_at IS NULL)
+                 = (SELECT count(*) FROM phase8_expected)
             THEN 'PRESENT' ELSE 'MISSING' END AS status,
-       'two applied rows, one per migration; more means the SQL ran twice' AS remedy;
+       'one applied row per phase 8 migration (' ||
+         (SELECT count(*) FROM phase8_expected)::text ||
+         ' expected); more means the SQL ran twice, fewer means one did not apply' AS remedy;
 
 -- No migration stuck mid-chain.
 SELECT 'no stuck migrations in the chain' AS object,
