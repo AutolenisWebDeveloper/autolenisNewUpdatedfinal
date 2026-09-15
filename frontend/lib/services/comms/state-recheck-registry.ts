@@ -975,3 +975,214 @@ registerStateRecheck(
       "owned by the plan/upgrade area, not because the message cannot become false.",
   ),
 );
+
+// ───────────────────────────────────────────────────────────────────────────────
+// PHASE 8 — Stages 13 to 15: contract, Contract Shield, signatures, dealer
+// execution, funding clearance, insurance
+// ───────────────────────────────────────────────────────────────────────────────
+
+export const PHASE_8_TEMPLATES = {
+  /** §27.1 "Contract requested → Winning dealership → Secure upload link and 24-hour deadline". */
+  CONTRACT_REQUESTED: "contract_requested",
+  /** §27.1 "Contract overdue → Dealership + Operations → Reminder and escalation". */
+  CONTRACT_OVERDUE: "contract_overdue",
+  /** §27.1 "Contract revision required → Buyer + dealership → Specific mismatches and required correction". */
+  CONTRACT_REVISION_REQUIRED: "contract_revision_required",
+  /** §27.1 "Contract approved → Buyer + dealership → Signing readiness". */
+  CONTRACT_APPROVED: "contract_approved",
+  /** §27.1 "Signature required → Buyer + co-buyer → Secure signing link and deadline". */
+  SIGNATURE_REQUIRED: "signature_required",
+  /** §27.1 "Signature reminder or expiration → Required signer → Remaining time or reissue instruction". */
+  SIGNATURE_REMINDER: "signature_reminder",
+  /** §27.1 "Buyer signatures completed → Dealership → Dealer execution request". */
+  DEALER_EXECUTION_REQUESTED: "dealer_execution_requested",
+  /** §27.1 "Fully executed contract stored → Buyer + dealership → Executed-document access notice". */
+  EXECUTED_CONTRACT_STORED: "executed_contract_stored",
+  /** §27.1 "Financing completed → Buyer + dealership + AutoLenis → Verified checkpoint confirmation". */
+  FINANCING_COMPLETED: "financing_completed",
+  /** §27.1 "Funding cleared or blocked → Dealership, buyer, Operations → Release result or missing requirement". */
+  FUNDING_CLEARED: "funding_cleared",
+  /** The blocked half of the same §27.1 row — the specific outstanding condition and who owns it. */
+  FUNDING_BLOCKED: "funding_blocked",
+  /** §27.1 "Insurance required → Buyer → Requirements and secure submission link". */
+  INSURANCE_REQUIRED: "insurance_required",
+  /** §27.1 "Insurance uploaded → Buyer + Operations → Receipt and review task". */
+  INSURANCE_UPLOADED: "insurance_uploaded",
+  /** §27.1 "Insurance verified → Buyer + dealership → Clearance confirmation". */
+  INSURANCE_VERIFIED: "insurance_verified",
+  /** §27.1 "Insurance rejected or expired → Buyer → Specific correction required". */
+  INSURANCE_REJECTED: "insurance_rejected",
+  /** §27.1 "Premium election reverted to Standard → Buyer → Reversion notice at funding clearance". */
+  PREMIUM_ELECTION_REVERTED: "premium_election_reverted",
+} as const;
+
+export type Phase8TemplateKey = (typeof PHASE_8_TEMPLATES)[keyof typeof PHASE_8_TEMPLATES];
+
+/**
+ * §27's cancellation rule for Stage 13/14a. ONE key covers the contract request and its overdue
+ * reminder, so an upload — from the dealership or from an admin on their behalf — cancels whatever
+ * is still queued with a single call. A caller cannot cancel the reminder and leave the request to
+ * arrive after the contract is already in review.
+ */
+export function contractRequestCancelKey(dealId: string): string {
+  return `contract-request:${dealId}`;
+}
+
+/**
+ * §27's cancellation rule for Stage 13/14c. Covers the signature request and every reminder for one
+ * signer. Keyed per SIGNER, not per deal: the co-buyer's reminders must keep running after the
+ * buyer signs, and a single deal-wide key would cancel them.
+ */
+export function signatureReminderCancelKey(dealId: string, signerKind: string): string {
+  return `signature:${dealId}:${signerKind}`;
+}
+
+/** §27's cancellation rule for Stage 15. Cancelled when Operations decides. */
+export function insuranceReviewCancelKey(dealId: string): string {
+  return `insurance:${dealId}`;
+}
+
+/**
+ * The contract request and its overdue reminder. Both become false the moment a contract version
+ * is actually under review — the predicate is the UPLOAD, not the deal status, because
+ * CONTRACT_REVIEW → CONTRACT_PENDING is a legal edge (re-submit) and a status check alone would
+ * let a reminder fire for a request the dealership had already answered.
+ */
+const skipIfContractUploaded: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "contract notice with no deal reference" };
+  const deal = await ctx.db.deal.findUnique({ where: { id: ctx.dealId }, select: { status: true } });
+  if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+  if (deal.status === "CANCELLED" || deal.status === "REFUNDED") {
+    return { proceed: false, reason: "the deal has stood down" };
+  }
+  const request = await ctx.db.documentRequest.findFirst({
+    where: { dealId: ctx.dealId, documentType: "SALES_CONTRACT" },
+    orderBy: { createdAt: "desc" },
+    select: { status: true },
+  });
+  if (request && request.status !== "PENDING") {
+    return { proceed: false, reason: `the contract request is ${request.status}, not outstanding` };
+  }
+  return { proceed: true };
+};
+
+/**
+ * The signature request and its reminders, for ONE signer. False once that signer's envelope has
+ * reached a terminal state — signed, declined, voided or expired. Read per signer because after the
+ * §13-D30 cutover a deal carries one envelope per required signer and "the deal is signed" is no
+ * longer a single row's status.
+ */
+const skipIfSignerCompleted: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "signature notice with no deal reference" };
+  const deal = await ctx.db.deal.findUnique({ where: { id: ctx.dealId }, select: { status: true } });
+  if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+  if (deal.status === "CANCELLED" || deal.status === "REFUNDED") {
+    return { proceed: false, reason: "the deal has stood down" };
+  }
+  const signerKind = typeof ctx.payload.signerKind === "string" ? ctx.payload.signerKind : "BUYER";
+  const envelope = await ctx.db.eSignEnvelope.findFirst({
+    where: { dealId: ctx.dealId, signerKind: signerKind as "BUYER" | "CO_BUYER" },
+    select: { status: true },
+  });
+  if (!envelope) return { proceed: false, reason: `no ${signerKind} envelope exists for this deal` };
+  if (["COMPLETED", "DECLINED", "VOIDED", "EXPIRED"].includes(envelope.status)) {
+    return { proceed: false, reason: `the ${signerKind} envelope is ${envelope.status}` };
+  }
+  return { proceed: true };
+};
+
+/**
+ * The insurance review task. False once Operations has decided — which is any state that is not
+ * "waiting on us". EXTERNAL_UPLOADED is read as awaiting review rather than migrated, so a
+ * pre-§13-D31 row still counts as outstanding (§13-D31).
+ */
+const skipIfInsuranceDecided: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "insurance notice with no deal reference" };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, insuranceStatus: true },
+  });
+  if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+  if (deal.status === "CANCELLED" || deal.status === "REFUNDED") {
+    return { proceed: false, reason: "the deal has stood down" };
+  }
+  if (!["EXTERNAL_UPLOADED", "UNDER_REVIEW"].includes(deal.insuranceStatus)) {
+    return { proceed: false, reason: `insurance is ${deal.insuranceStatus}, so the review is closed` };
+  }
+  return { proceed: true };
+};
+
+/**
+ * The insurance REQUEST. False once the buyer has given us anything at all, or once coverage is
+ * already verified or bound — asking a buyer who has already uploaded is the kind of message that
+ * makes people distrust every other one.
+ */
+const skipIfInsuranceProvided: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: false, reason: "insurance request with no deal reference" };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, insuranceStatus: true },
+  });
+  if (!deal) return { proceed: false, reason: "the deal no longer exists" };
+  if (deal.status === "CANCELLED" || deal.status === "REFUNDED") {
+    return { proceed: false, reason: "the deal has stood down" };
+  }
+  const OUTSTANDING = ["NOT_STARTED", "QUOTE_REQUESTED", "QUOTE_RECEIVED", "POLICY_SELECTED", "REJECTED", "EXPIRED", "FAILED"];
+  if (!OUTSTANDING.includes(deal.insuranceStatus)) {
+    return { proceed: false, reason: `insurance is ${deal.insuranceStatus} — the buyer has already responded` };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_8_TEMPLATES.CONTRACT_REQUESTED, skipIfContractUploaded);
+registerStateRecheck(PHASE_8_TEMPLATES.CONTRACT_OVERDUE, skipIfContractUploaded);
+registerStateRecheck(PHASE_8_TEMPLATES.SIGNATURE_REQUIRED, skipIfSignerCompleted);
+registerStateRecheck(PHASE_8_TEMPLATES.SIGNATURE_REMINDER, skipIfSignerCompleted);
+registerStateRecheck(PHASE_8_TEMPLATES.INSURANCE_REQUIRED, skipIfInsuranceProvided);
+registerStateRecheck(PHASE_8_TEMPLATES.INSURANCE_UPLOADED, skipIfInsuranceDecided);
+
+// THE REST ARE alwaysSend, each with the reason a reviewer reads rather than a shrug. Every one
+// reports a decision that HAS BEEN TAKEN and recorded. A recheck asks "is this still true?", and
+// for a recorded decision the answer is permanently yes: Contract Shield did hold this version,
+// the dealership did execute, funding did clear, the election did revert. Suppressing one because
+// the deal has since moved on would delete the only notice that it happened.
+registerStateRecheck(
+  PHASE_8_TEMPLATES.CONTRACT_REVISION_REQUIRED,
+  alwaysSend("Contract Shield held a specific version and named the discrepancies. A later corrected upload does not unmake the hold, and both parties are owed the list that produced it."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.CONTRACT_APPROVED,
+  alwaysSend("An approval binds to the exact reviewed version and is recorded. A later revision creates a NEW review; it does not retract the fact that this one passed."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.DEALER_EXECUTION_REQUESTED,
+  alwaysSend("Every required signature was recorded. The dealership is owed the request even if the deal is later cancelled — it is what tells them to stop waiting or to stand down."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.EXECUTED_CONTRACT_STORED,
+  alwaysSend("A legally executed contract exists and both parties are entitled to know where it is. Nothing that happens afterwards makes that untrue."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.FINANCING_COMPLETED,
+  alwaysSend("A verified checkpoint was recorded against external evidence. A later financing change sends the deal back through recap and signatures; it does not unrecord this checkpoint."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.FUNDING_CLEARED,
+  alwaysSend("Funding clearance is the no-spot-delivery guarantee's own record. It was evidenced when it was written."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.FUNDING_BLOCKED,
+  alwaysSend("The outstanding items were the ones outstanding when the block was recorded. Suppressing it because one has since been resolved would leave the owner of the others never told."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.INSURANCE_VERIFIED,
+  alwaysSend("Operations decided and recorded a verification. A later expiry is its own notice, not a reason to withhold this one."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.INSURANCE_REJECTED,
+  alwaysSend("A rejection names a specific defect the buyer has to correct. It is the only message that tells them what is wrong, so it is never suppressed."),
+);
+registerStateRecheck(
+  PHASE_8_TEMPLATES.PREMIUM_ELECTION_REVERTED,
+  alwaysSend("A plan changed and money stopped being due. §23.5 requires the buyer be told, and a reversion cannot become un-reverted."),
+);

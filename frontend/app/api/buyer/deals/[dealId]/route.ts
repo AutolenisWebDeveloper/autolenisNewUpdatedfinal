@@ -17,9 +17,12 @@ export async function GET(request: NextRequest, { params }: Props) {
   return successResponse({
     deal: {
       ...deal,
-      eSignEnvelope: deal.eSignEnvelope
-        ? toBuyerEnvelopeSummary(withBuyerGatedDefaults(deal.eSignEnvelope))
-        : null,
+      // §13-D30. A list, because a deal can require two signatures. Each is shaped
+      // through the same buyer-safe allow-list — the co-buyer's forensic record is no
+      // more exposable than the buyer's.
+      eSignEnvelopes: deal.eSignEnvelopes.map((e) =>
+        toBuyerEnvelopeSummary(withBuyerGatedDefaults(e)),
+      ),
     },
   });
 }

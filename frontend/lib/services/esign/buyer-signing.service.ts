@@ -21,6 +21,8 @@
 //    advanceDealStatus CAS guarantees it).
 
 import { prisma } from "@/lib/prisma";
+import type { ESignSignerKind } from "@prisma/client";
+import { signatureProgress } from "./required-signers";
 import { ESignStatus, NotificationType, Prisma } from "@prisma/client";
 import { createHash } from "crypto";
 import { logger } from "@/lib/logger";
@@ -141,6 +143,25 @@ async function loadEnvelope(where: Prisma.ESignEnvelopeWhereUniqueInput): Promis
   return normalizeEnvelope(row);
 }
 
+/**
+ * ONE signer's envelope on a deal.
+ *
+ * §13-D30 CUTOVER. This replaces nine `loadEnvelope({ dealId })` call sites. `dealId`
+ * alone is no longer a unique selector — a deal carries one envelope per required
+ * signer — so every read has to say WHOSE signature it means. Defaulting to BUYER is
+ * deliberate and safe: it is the signer every deal has, every envelope written before
+ * this phase carries `signer_kind = 'BUYER'` from the column default, and a caller
+ * that forgets to think about the co-buyer gets the buyer's envelope rather than an
+ * arbitrary one. What it must never do is answer "is this deal signed?" — that is
+ * `signatureProgress`, which reads every required signer.
+ */
+async function loadSignerEnvelope(
+  dealId: string,
+  signerKind: ESignSignerKind = "BUYER",
+): Promise<EnvelopeRow | null> {
+  return loadEnvelope({ dealId_signerKind: { dealId, signerKind } });
+}
+
 function historySnapshot(e: EnvelopeRow) {
   return {
     dealId: e.dealId,
@@ -190,11 +211,13 @@ function historySnapshot(e: EnvelopeRow) {
 export async function prepareBuyerSigningEnvelope(
   dealId: string,
   signer?: { signerUserId?: string; signerName?: string; signerEmail?: string },
+  signerKind: ESignSignerKind = "BUYER",
+  coBuyerId: string | null = null,
 ): Promise<PrepareResult> {
   // Fail closed before anything is written: a prepared envelope would only lead the
   // buyer to a signature that recordBuyerSignature must then refuse.
   if (!isExecutedArtifactEnabled()) throw new ESignSchemaUnavailableError();
-  const existing = await loadEnvelope({ dealId });
+  const existing = await loadSignerEnvelope(dealId, signerKind);
 
   // COMPLETED signed evidence is permanent — never superseded, never reset.
   if (existing?.status === "COMPLETED") {
@@ -219,7 +242,7 @@ export async function prepareBuyerSigningEnvelope(
     sentAt: new Date(),
     documentVersionId: contract.id,
     documentHash,
-    signerRole: SIGNER_ROLE,
+    signerRole: signerKind === "CO_BUYER" ? "CO_BUYER" : SIGNER_ROLE,
     signerUserId: signer?.signerUserId ?? null,
     signerName: signer?.signerName ?? null,
     signerEmail: signer?.signerEmail ?? null,
@@ -278,14 +301,16 @@ export async function prepareBuyerSigningEnvelope(
   // No envelope yet, or a still-live non-terminal attempt (PENDING/SENT/DELIVERED)
   // re-bound to the current approved document — same attempt, safe in place.
   const envelope = await prisma.eSignEnvelope.upsert({
-    where: { dealId },
+    where: { dealId_signerKind: { dealId, signerKind } },
     create: {
       dealId,
+      signerKind,
+      coBuyerId,
       status: ESignStatus.SENT,
       sentAt: new Date(),
       documentVersionId: contract.id,
       documentHash,
-      signerRole: SIGNER_ROLE,
+      signerRole: signerKind === "CO_BUYER" ? "CO_BUYER" : SIGNER_ROLE,
       signerUserId: signer?.signerUserId ?? null,
       signerName: signer?.signerName ?? null,
       signerEmail: signer?.signerEmail ?? null,
@@ -296,7 +321,10 @@ export async function prepareBuyerSigningEnvelope(
       sentAt: new Date(),
       documentVersionId: contract.id,
       documentHash,
-      signerRole: SIGNER_ROLE,
+      signerRole: signerKind === "CO_BUYER" ? "CO_BUYER" : SIGNER_ROLE,
+      // Keep the co-buyer binding current on a re-prepare: a co-buyer added or
+      // corrected after the first envelope must not leave the row pointing at nobody.
+      ...(coBuyerId ? { coBuyerId } : {}),
       ...(signer?.signerUserId ? { signerUserId: signer.signerUserId } : {}),
       ...(signer?.signerName ? { signerName: signer.signerName } : {}),
       ...(signer?.signerEmail ? { signerEmail: signer.signerEmail } : {}),
@@ -317,8 +345,11 @@ export async function prepareBuyerSigningEnvelope(
  * need the whole row. Goes through the same schema gate as every internal read,
  * so no caller has to know whether the executed-artifact migrations are applied.
  */
-export async function readEnvelopeForDeal(dealId: string): Promise<EnvelopeRow | null> {
-  return loadEnvelope({ dealId });
+export async function readEnvelopeForDeal(
+  dealId: string,
+  signerKind: ESignSignerKind = "BUYER",
+): Promise<EnvelopeRow | null> {
+  return loadSignerEnvelope(dealId, signerKind);
 }
 
 /** A short-lived signed URL to VIEW the contract document being signed. */
@@ -338,6 +369,14 @@ export async function getContractViewUrl(documentUrl: string, expirySeconds = 90
 
 export interface RecordSignatureParams {
   dealId: string;
+  /**
+   * §13-D30. WHOSE ceremony this is. Defaults to BUYER, which is what every envelope
+   * written before this phase carries and what a caller that has not thought about the
+   * co-buyer should get — never an arbitrary row.
+   */
+  signerKind?: ESignSignerKind;
+  /** Set on a CO_BUYER ceremony so the evidence binds to the CoBuyer record. */
+  coBuyerId?: string | null;
   signerUserId: string;
   signerName: string;
   signerEmail: string;
@@ -374,7 +413,7 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
   validateConsentOrThrow(params.acknowledgments);
   if (!params.signatureText?.trim()) throw new ConsentRequiredError();
 
-  const envelope = await loadEnvelope({ dealId: params.dealId });
+  const envelope = await loadSignerEnvelope(params.dealId, params.signerKind ?? "BUYER");
   if (!envelope) throw new NoSignableDocumentError();
 
   // Idempotent: already signed → no-op (never double-sign / double-advance).
@@ -519,17 +558,30 @@ export async function ensureDealSigned(dealId: string, actorId?: string): Promis
   if (deal.status === "CONTRACT_APPROVED") {
     await advanceDealStatus(dealId, "SIGNING_PENDING", { actorId, actorRole: "BUYER", reason: "In-house signature recorded" });
   }
+
+  // §13-D30. SIGNED means EVERY REQUIRED SIGNER, not "a signature arrived". Before the
+  // cutover a deal held one envelope, so reaching this line at all meant the signing was
+  // finished; now the buyer can sign while the co-buyer has not, and advancing here would
+  // declare the contract signed with a required signature missing — and SIGNED is a
+  // predecessor of DEALER_EXECUTED, so the error would propagate all the way to release.
+  const progress = await signatureProgress(dealId);
+  if (!progress.allSigned) return;
+
   const after = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
   if (after?.status === "SIGNING_PENDING") {
-    await advanceDealStatus(dealId, "SIGNED", { actorId, actorRole: "BUYER", reason: "In-house signature recorded" });
+    await advanceDealStatus(dealId, "SIGNED", {
+      actorId,
+      actorRole: "BUYER",
+      reason: `All required signatures recorded (${progress.completed.join(", ")})`,
+    });
   }
 }
 
 /** Buyer declines to sign — truthful terminal exception; deal is NOT advanced.
  *  No-op on an already-terminal record: a terminal signing record is immutable and
  *  never cross-transitioned (e.g. VOIDED must not become DECLINED). */
-export async function declineBuyerSignature(dealId: string, reason?: string): Promise<void> {
-  const envelope = await loadEnvelope({ dealId });
+export async function declineBuyerSignature(dealId: string, reason?: string, signerKind: ESignSignerKind = "BUYER"): Promise<void> {
+  const envelope = await loadSignerEnvelope(dealId, signerKind);
   if (!envelope || isTerminalStatus(envelope.status)) return;
   // CAS on the observed non-terminal status so we can never overwrite a record
   // that became terminal concurrently.
@@ -543,8 +595,8 @@ export async function declineBuyerSignature(dealId: string, reason?: string): Pr
 
 /** Void a signing envelope (admin action or internal re-issue). Deal not advanced.
  *  No-op on an already-terminal record — terminal signing records are immutable. */
-export async function voidEnvelopeInternal(dealId: string, reason: string): Promise<void> {
-  const envelope = await loadEnvelope({ dealId });
+export async function voidEnvelopeInternal(dealId: string, reason: string, signerKind: ESignSignerKind = "BUYER"): Promise<void> {
+  const envelope = await loadSignerEnvelope(dealId, signerKind);
   if (!envelope || isTerminalStatus(envelope.status)) return;
   const swap = await prisma.eSignEnvelope.updateMany({
     where: { id: envelope.id, status: envelope.status },
@@ -668,8 +720,11 @@ export async function reconcileSignedContracts(
  *  Compare-and-swap on the OBSERVED non-terminal status so a signature that
  *  completes concurrently (SENT→COMPLETED between the read and the write) can never
  *  be overwritten to EXPIRED — a terminal signed record stays immutable. */
-export async function expireIfElapsed(dealId: string): Promise<boolean> {
-  const envelope = await loadEnvelope({ dealId });
+export async function expireIfElapsed(
+  dealId: string,
+  signerKind: ESignSignerKind = "BUYER",
+): Promise<boolean> {
+  const envelope = await loadSignerEnvelope(dealId, signerKind);
   if (!envelope || !envelope.expiresAt) return false;
   const signable = envelope.status === "SENT" || envelope.status === "DELIVERED" || envelope.status === "PENDING";
   if (signable && envelope.expiresAt.getTime() < Date.now()) {
@@ -691,9 +746,12 @@ export async function expireIfElapsed(dealId: string): Promise<boolean> {
  * missing certificate is regenerated on demand (e.g. from the download route),
  * so no reconciliation cron is needed.
  */
-export async function finalizeBuyerSignatureCertificate(dealId: string): Promise<string | null> {
+export async function finalizeBuyerSignatureCertificate(
+  dealId: string,
+  signerKind: ESignSignerKind = "BUYER",
+): Promise<string | null> {
   try {
-    const envelope = await loadEnvelope({ dealId });
+    const envelope = await loadSignerEnvelope(dealId, signerKind);
     if (!envelope || envelope.status !== "COMPLETED") return null;
     if (envelope.certificatePdfPath) return envelope.certificatePdfPath; // idempotent
     if (!envelope.documentVersionId || !envelope.documentHash || !envelope.signedAt) return null;
@@ -752,16 +810,33 @@ export async function finalizeSignedContract(dealId: string): Promise<FinalizeSi
   // vacuous success: an unfinalized signature must stay visibly unfinalized.
   if (!isExecutedArtifactEnabled()) return notReady;
   try {
-    const envelope = await loadEnvelope({ dealId });
+    // §13-D30. Finalisation is a DEAL-level act — one executed artifact, one set of
+    // confirmations — so it waits for EVERY required signer. Finalising on the first
+    // COMPLETED envelope would produce an "executed contract" and tell both parties it
+    // was ready while a required signature was still outstanding.
+    const progress = await signatureProgress(dealId);
+    if (!progress.allSigned) return notReady;
+
+    // The artifact is generated from the PRIMARY buyer's frozen evidence: it is the
+    // envelope that carries the pinned ContractVersion and document hash. Each signer's
+    // own ceremony evidence lives in their own certificate, below.
+    const envelope = await loadSignerEnvelope(dealId, "BUYER");
     if (!envelope || envelope.status !== "COMPLETED") return notReady;
 
     // 1) Executed artifact — generated from FROZEN evidence, immutable once set.
     const artifactKey = await ensureExecutedArtifact(envelope);
     if (!artifactKey) return notReady; // gen failed → do NOT confirm; cron re-drives
 
-    // 2) Evidence certificate (idempotent).
-    const certPath = await finalizeBuyerSignatureCertificate(dealId);
-    if (!certPath) return { artifactReady: true, certificateReady: false, confirmationsSent: false };
+    // 2) Evidence certificate, ONE PER SIGNER (idempotent). Each ceremony has its own
+    //    consent snapshot, IP, user agent and adopted name, so each needs its own
+    //    certificate — a single certificate cannot evidence two ceremonies, which is the
+    //    same reason the co-buyer needs a second envelope at all.
+    const certPaths = await Promise.all(
+      progress.required.map((signer) => finalizeBuyerSignatureCertificate(dealId, signer.signerKind)),
+    );
+    if (certPaths.some((path) => !path)) {
+      return { artifactReady: true, certificateReady: false, confirmationsSent: false };
+    }
 
     // 3) Confirmations — only now that artifact + certificate both exist.
     const confirmationsSent = await emitSignatureConfirmations(dealId);
@@ -839,7 +914,10 @@ async function emitSignatureConfirmations(dealId: string): Promise<boolean> {
   // Without confirmations_sent_at there is no exactly-once marker, so sending
   // would risk re-notifying the buyer and dealer on every sweep. Do not send.
   if (!isExecutedArtifactEnabled()) return false;
-  const envelope = await loadEnvelope({ dealId });
+  // The one-way marker lives on the PRIMARY envelope, so "have the confirmations gone
+  // out for this deal?" stays a single fact even though the deal now holds several
+  // envelopes. Callers reach this only after signatureProgress reported allSigned.
+  const envelope = await loadSignerEnvelope(dealId, "BUYER");
   if (!envelope || envelope.status !== "COMPLETED") return false;
   if (!envelope.executedDocumentKey || !envelope.certificatePdfPath) return false; // artifact not ready
   if (envelope.confirmationsSentAt) return true; // already sent

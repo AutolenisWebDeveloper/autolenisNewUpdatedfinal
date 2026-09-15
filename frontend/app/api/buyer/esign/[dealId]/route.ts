@@ -31,14 +31,31 @@ export async function GET(request: NextRequest, { params }: Props) {
   // does not yet have. Only the status is needed here.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    select: { id: true, status: true, eSignEnvelope: { select: { status: true } } },
+    select: {
+      id: true,
+      status: true,
+      eSignEnvelopes: { select: { status: true, signerKind: true } },
+      coBuyer: { select: { isRequiredSigner: true } },
+    },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
-  await expireIfElapsed(dealId);
-  if (deal.eSignEnvelope?.status === "COMPLETED") await ensureDealSigned(dealId, buyer.id);
+  // §13-D30. WHICH ceremony this request is for. The co-buyer reaches the same route
+  // through their invited link with `?signer=co-buyer`; anything else is the buyer's own.
+  // A co-buyer ceremony is refused outright when the deal does not name one as a required
+  // signer, so the query parameter cannot conjure a signer the deal never had.
+  const requestedSigner =
+    new URL(request.url).searchParams.get("signer") === "co-buyer" ? "CO_BUYER" : "BUYER";
+  if (requestedSigner === "CO_BUYER" && !deal.coBuyer?.isRequiredSigner) {
+    return errorResponse("NOT_FOUND", "This deal has no co-buyer signer", 404);
+  }
 
-  const envelope = await readEnvelopeForDeal(dealId);
+  await expireIfElapsed(dealId, requestedSigner);
+  // Advance only when EVERY required signer is done — ensureDealSigned re-derives that
+  // itself, so this is a cheap pre-check rather than the decision.
+  if (deal.eSignEnvelopes.some((e) => e.status === "COMPLETED")) await ensureDealSigned(dealId, buyer.id);
+
+  const envelope = await readEnvelopeForDeal(dealId, requestedSigner);
   let contractViewUrl: string | null = null;
   // recordBuyerSignature fails closed while the schema gate is closed, so a
   // "signable" envelope would render a ceremony whose submit can only 503. Report
@@ -49,7 +66,7 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (signable && envelope?.documentVersionId) {
     // Record first-view evidence (best-effort) and mint a view URL.
     // Narrowed RETURNING — an unprojected update returns every scalar.
-    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() }, select: { id: true } }).catch(() => {});
+    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId_signerKind: { dealId, signerKind: requestedSigner } }, data: { viewedAt: new Date() }, select: { id: true } }).catch(() => {});
     const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
     if (contract) contractViewUrl = await getContractViewUrl(contract.documentUrl);
   }

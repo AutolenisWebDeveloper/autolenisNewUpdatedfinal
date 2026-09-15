@@ -14,7 +14,7 @@ export default async function ESignPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT } },
+    include: { eSignEnvelopes: { select: BUYER_SAFE_ENVELOPE_SELECT } },
     orderBy: { createdAt: "desc" },
   });
 

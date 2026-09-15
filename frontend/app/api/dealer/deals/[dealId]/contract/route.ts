@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestDealer, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
 import { getExecutedContractUrl } from "@/lib/services/esign/executed-contract.service";
+import { allSignedFrom, pickSignerEnvelope, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -22,16 +23,26 @@ export async function GET(request: NextRequest, { params }: Props) {
   // Ownership gate: only a deal whose winning offer belongs to THIS dealer.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, offer: { dealerId: dealer.id } },
-    select: { id: true, eSignEnvelope: { select: { id: true, status: true } } },
+    select: {
+      id: true,
+      eSignEnvelopes: { select: { id: true, status: true, signerKind: true } },
+      coBuyer: { select: { isRequiredSigner: true } },
+    },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
-  const envelope = deal.eSignEnvelope;
+  // §13-D30 RE-DERIVED. The executed copy is a DEAL-level artifact, generated only once
+  // every required signer has completed — so releasing it to the dealership must ask the
+  // same question. Reading one envelope here would have handed over an "executed contract"
+  // while a required co-buyer signature was still outstanding.
+  const allSigned = allSignedFrom(deal.eSignEnvelopes, requiredKindsFrom(deal.coBuyer));
+  // The artifact itself is bound to the PRIMARY envelope (see finalizeSignedContract).
+  const envelope = pickSignerEnvelope(deal.eSignEnvelopes, "BUYER");
   // executed_document_key only exists once migrations 20261014/20261015 are applied
   // and the gate is opened; while it is closed no executed copy can exist, so the
   // dealer correctly sees the same "not available yet" response.
   const executedDocumentKey =
-    envelope && isExecutedArtifactEnabled()
+    envelope && allSigned && isExecutedArtifactEnabled()
       ? (
           await prisma.eSignEnvelope.findUnique({
             where: { id: envelope.id },
@@ -39,10 +50,10 @@ export async function GET(request: NextRequest, { params }: Props) {
           })
         )?.executedDocumentKey ?? null
       : null;
-  if (!envelope || envelope.status !== "COMPLETED" || !executedDocumentKey) {
+  if (!envelope || !allSigned || !executedDocumentKey) {
     return errorResponse(
       "NOT_AVAILABLE",
-      "The executed contract is not available yet. It will appear here once the buyer has signed.",
+      "The executed contract is not available yet. It will appear here once every required signer has signed.",
       404,
     );
   }

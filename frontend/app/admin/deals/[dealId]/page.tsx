@@ -28,7 +28,7 @@ export default async function AdminDealDetailPage({ params }: Props) {
       buyer: { include: { user: true } },
       offer: { include: { dealer: { include: { user: true } }, auction: { include: { deposit: true } } } },
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT },
+      eSignEnvelopes: { select: LEGACY_ENVELOPE_SELECT },
       pickup: true,
     },
   });
@@ -92,7 +92,7 @@ type DealForTimeline = {
   insuranceStatus: string;
   contractShieldStatus: string | null;
   contractShieldScore: number | null;
-  eSignEnvelope: { sentAt: Date | null; completedAt: Date | null } | null;
+  eSignEnvelopes: { sentAt: Date | null; completedAt: Date | null; signerKind: string }[];
   pickup: { scheduledAt: Date | null; completedAt: Date | null } | null;
 };
 
@@ -103,8 +103,16 @@ function buildDealTimeline(deal: DealForTimeline) {
     deal.feePaidAt ? { stage: "FEE PAID", timestamp: deal.feePaidAt, description: `$${(deal.feeAmountCents ?? PREMIUM_FEE_CENTS) / 100} concierge fee paid` } : null,
     deal.insuranceStatus !== "NOT_STARTED" ? { stage: "INSURANCE", timestamp: deal.updatedAt, description: `Status: ${deal.insuranceStatus.replace(/_/g, " ")}` } : null,
     deal.contractShieldStatus ? { stage: `CONTRACT SHIELD: ${deal.contractShieldStatus}`, timestamp: deal.updatedAt, description: `Score: ${deal.contractShieldScore}` } : null,
-    deal.eSignEnvelope?.sentAt ? { stage: "SENT FOR SIGNING", timestamp: deal.eSignEnvelope.sentAt, description: "Signing envelope sent to buyer" } : null,
-    deal.eSignEnvelope?.completedAt ? { stage: "SIGNED", timestamp: deal.eSignEnvelope.completedAt, description: "All documents signed" } : null,
+    // §13-D30. One pair of events PER SIGNER. A single "SIGNED" row was accurate while a deal
+    // held one envelope; with a co-buyer it would report the deal signed at the moment the first
+    // signer finished, which is the exact misreading the cutover was written to prevent.
+    ...deal.eSignEnvelopes.flatMap((e) => {
+      const who = e.signerKind === "CO_BUYER" ? "co-buyer" : "buyer";
+      return [
+        e.sentAt ? { stage: `SENT FOR SIGNING (${who})`, timestamp: e.sentAt, description: `Signing envelope sent to ${who}` } : null,
+        e.completedAt ? { stage: `SIGNED (${who})`, timestamp: e.completedAt, description: `Contract signed by ${who}` } : null,
+      ];
+    }),
     deal.pickup?.scheduledAt ? { stage: "PICKUP SCHEDULED", timestamp: deal.pickup.scheduledAt, description: "Vehicle pickup scheduled" } : null,
     deal.pickup?.completedAt ? { stage: "PICKUP COMPLETE", timestamp: deal.pickup.completedAt, description: "Vehicle delivered to buyer" } : null,
   ].filter(Boolean);

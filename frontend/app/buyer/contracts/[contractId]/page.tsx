@@ -10,6 +10,7 @@ import { Shield, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-reac
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import ContractPdfViewer from "@/components/buyer/ContractPdfViewer";
+import { pickSignerEnvelope, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,8 @@ export default async function ContractDetailPage({ params }: Props) {
     where: { id: contractId, buyerId: buyer.id },
     include: {
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT },
+      eSignEnvelopes: { select: BUYER_SAFE_ENVELOPE_SELECT },
+      coBuyer: { select: { isRequiredSigner: true } },
       offer: { include: { dealer: { select: { dealershipName: true, tier: true, isSystemPlaceholder: true } } } },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
@@ -56,8 +58,14 @@ export default async function ContractDetailPage({ params }: Props) {
   const statusTimeline = [
     { label: "Contract received", done: !!latestScan, date: latestScan?.scannedAt },
     { label: "Contract Shield scan", done: !!latestScan, date: latestScan?.scannedAt, result: latestScan?.status },
-    { label: "Sent for signing", done: !!deal.eSignEnvelope?.sentAt, date: deal.eSignEnvelope?.sentAt },
-    { label: "Signed", done: deal.eSignEnvelope?.status === "COMPLETED", date: deal.eSignEnvelope?.completedAt },
+    // §13-D30. The buyer sees their own signature row, and the co-buyer's when one is a
+    // required signer — otherwise "Signed" would tick while the contract still could not
+    // proceed, which is the opposite of telling somebody where their purchase stands.
+    ...requiredKindsFrom(deal.coBuyer).map((kind) => {
+      const envelope = pickSignerEnvelope(deal.eSignEnvelopes, kind);
+      const who = kind === "CO_BUYER" ? "Co-buyer signature" : "Your signature";
+      return { label: who, done: envelope?.status === "COMPLETED", date: envelope?.completedAt ?? null };
+    }),
   ];
 
   return (

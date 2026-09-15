@@ -336,10 +336,18 @@ export async function getAdminBuyerDetailData(buyerId: string) {
               dealer: { select: { dealershipName: true, city: true, state: true } },
             },
           },
-          // Explicit projection — `eSignEnvelope: true` selects every scalar,
+          // Explicit projection — `eSignEnvelopes: true` selects every scalar,
           // including the columns migrations 20261014/20261015 add but production
-          // does not yet have. Only these four are serialized below.
-          eSignEnvelope: { select: { status: true, docusignEnvelopeId: true, sentAt: true, completedAt: true } },
+          // does not yet have. Only these five are serialized below.
+          //
+          // §13-D30: a LIST. A deal can require a co-buyer signature, and the command
+          // centre is where an admin goes to find out why a deal has not moved — a view
+          // that showed one envelope would answer "waiting on signature" without saying
+          // whose, which is the one thing the admin needed.
+          eSignEnvelopes: {
+            select: { status: true, signerKind: true, docusignEnvelopeId: true, sentAt: true, completedAt: true },
+            orderBy: { signerKind: "asc" },
+          },
           pickup: true,
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },
@@ -500,14 +508,13 @@ export async function getAdminBuyerDetailData(buyerId: string) {
             dealerState: d.offer.dealer.state,
           }
         : null,
-      eSignEnvelope: d.eSignEnvelope
-        ? {
-            status: d.eSignEnvelope.status,
-            docusignEnvelopeId: d.eSignEnvelope.docusignEnvelopeId,
-            sentAt: d.eSignEnvelope.sentAt?.toISOString() ?? null,
-            completedAt: d.eSignEnvelope.completedAt?.toISOString() ?? null,
-          }
-        : null,
+      eSignEnvelopes: d.eSignEnvelopes.map((e) => ({
+        status: e.status,
+        signerKind: e.signerKind,
+        docusignEnvelopeId: e.docusignEnvelopeId,
+        sentAt: e.sentAt?.toISOString() ?? null,
+        completedAt: e.completedAt?.toISOString() ?? null,
+      })),
       pickup: d.pickup
         ? {
             status: d.pickup.status,

@@ -255,10 +255,22 @@ UNION ALL SELECT 'MISSING', 'rls_enabled', name FROM expected_rls r
                     WHERE n.nspname='public' AND c.relname=r.name AND c.relrowsecurity)
 UNION ALL SELECT 'MISSING', 'rls_policy_present_unexpectedly', r.name FROM expected_rls r
   WHERE EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename=r.name)
--- Phase 1 is additive: the LIVE unique on deal_id must still be here afterwards. Its removal is the
--- signatures-phase cutover, not this wave. Flag it if this wave dropped it.
-UNION ALL SELECT 'MISSING', 'live_constraint_wrongly_dropped', 'e_sign_envelopes_deal_id_key'
-  WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_key')
+-- Phase 1 is additive: the LIVE unique on deal_id had to still be here afterwards, and this
+-- assertion held that line for six phases.
+--
+-- RETIRED 2026-09-15 BY PHASE 8. The signatures phase it was waiting for has arrived:
+-- 20261117000000_phase8_esign_signer_cutover drops `e_sign_envelopes_deal_id_key` so the co-buyer
+-- can hold a second envelope (§13-D30). The assertion was written unconditionally, so from the
+-- moment that migration applies it would emit MISSING on every run of run-proof.sh and turn CI's
+-- phase1-proof job red for a drop the comment itself anticipated.
+--
+-- What replaces it is NOT nothing. The guarantee Phase 1 cared about was "e_sign_envelopes always
+-- has uniqueness on deal_id", and that guarantee survives in a stricter form: the composite
+-- `(deal_id, signer_kind)`, created by Phase 1 itself, is what now enforces it. So the assertion is
+-- INVERTED rather than deleted — the replacement must be present, which is the property that made
+-- the drop safe in the first place.
+UNION ALL SELECT 'MISSING', 'signer_unique_replacement_absent', 'e_sign_envelopes_deal_id_signer_kind_key'
+  WHERE NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='e_sign_envelopes_deal_id_signer_kind_key')
 -- A CHECK must still admit every value production admitted, plus the wave's additions. The literal
 -- is matched QUOTED on both sides, and that is what makes it exact: `'deposit_reminder_1'` cannot be
 -- satisfied by `'deposit_reminder_10'`, nor `'sent'` by `'suppressed'`, because the closing quote

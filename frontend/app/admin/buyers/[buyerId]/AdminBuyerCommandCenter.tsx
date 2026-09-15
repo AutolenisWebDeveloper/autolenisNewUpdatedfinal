@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -62,10 +62,11 @@ type BuyerData = {
       otdPriceCents: number; dealerId: string;
       dealerName: string; dealerCity: string | null; dealerState: string | null;
     } | null;
-    eSignEnvelope: {
-      status: string; docusignEnvelopeId: string | null;
+    // §13-D30: one envelope per required signer.
+    eSignEnvelopes: {
+      status: string; signerKind: string; docusignEnvelopeId: string | null;
       sentAt: string | null; completedAt: string | null;
-    } | null;
+    }[];
     pickup: {
       status: string; scheduledAt: string | null; completedAt: string | null;
       location: string | null; qrCodeImage: string | null;
@@ -945,7 +946,17 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
     { key: "fee", label: "Fee", done: !!(activeDeal?.feePaidAt) },
     { key: "insurance", label: "Insurance", done: ["VERIFIED", "POLICY_BOUND", "EXTERNAL_UPLOADED"].includes(activeDeal?.insuranceStatus ?? "") },
     { key: "contract", label: "Contract", done: !!(activeDeal?.latestContractVersion) },
-    { key: "esign", label: "E-Sign", done: activeDeal?.eSignEnvelope?.status === "COMPLETED" },
+    // §13-D30: the step is done when EVERY required signer is done. `eSignEnvelopes`
+    // holds exactly the required signers (the service selects them for this deal), so
+    // "every envelope COMPLETED" is the same question — and a non-empty guard keeps it
+    // fail-closed, since an empty list is a deal whose signers could not be read.
+    {
+      key: "esign",
+      label: "E-Sign",
+      done:
+        (activeDeal?.eSignEnvelopes?.length ?? 0) > 0 &&
+        (activeDeal?.eSignEnvelopes ?? []).every((e) => e.status === "COMPLETED"),
+    },
     { key: "pickup", label: "Pickup", done: activeDeal?.pickup?.status === "COMPLETED" },
     { key: "complete", label: "Complete", done: deals.some((d) => d.status === "COMPLETED") },
   ];
@@ -1599,11 +1610,17 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                       {d.latestContractScan.fixListCount > 0 && <p className="text-[10px] text-orange-600">{d.latestContractScan.fixListCount} issues</p>}
                     </div>
                   )}
-                  {d.eSignEnvelope && (
+                  {d.eSignEnvelopes.length > 0 && (
                     <div className="bg-slate-50 rounded-xl p-3">
                       <p className="text-[10px] text-slate-400 mb-0.5">E-Sign</p>
-                      <p className="text-xs font-semibold text-slate-800">{d.eSignEnvelope.status}</p>
-                      {d.eSignEnvelope.completedAt && <p className="text-[10px] text-green-600">{fmtDate(d.eSignEnvelope.completedAt)}</p>}
+                      {d.eSignEnvelopes.map((e) => (
+                        <div key={e.signerKind}>
+                          <p className="text-xs font-semibold text-slate-800">
+                            {e.signerKind === "CO_BUYER" ? "Co-buyer: " : "Buyer: "}{e.status}
+                          </p>
+                          {e.completedAt && <p className="text-[10px] text-green-600">{fmtDate(e.completedAt)}</p>}
+                        </div>
+                      ))}
                     </div>
                   )}
                   {d.pickup && (
@@ -1617,7 +1634,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                 <div className="px-5 pb-4 flex gap-3">
                   <Link href={"/admin/deals/" + d.id} className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />Deal Detail</Link>
                   <Link href={"/admin/deals/" + d.id + "/billing"} className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />Billing</Link>
-                  {d.eSignEnvelope && <Link href={"/admin/deals/" + d.id + "/esign"} className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />E-Sign</Link>}
+                  {d.eSignEnvelopes.length > 0 && <Link href={"/admin/deals/" + d.id + "/esign"} className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />E-Sign</Link>}
                   {d.pickup && <Link href={"/admin/deals/" + d.id + "/pickup"} className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />Pickup</Link>}
                 </div>
               </div>
@@ -1776,15 +1793,18 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                         )}
                       </>
                     )}
-                    {activeDeal.eSignEnvelope && (
-                      <>
-                        <InfoRow label="E-Sign Status" value={activeDeal.eSignEnvelope.status} />
-                        {activeDeal.eSignEnvelope.docusignEnvelopeId && (
-                          <InfoRow label="Envelope ID" value={<span className="font-mono text-[10px]">{activeDeal.eSignEnvelope.docusignEnvelopeId.slice(0, 12)}…</span>} />
+                    {activeDeal.eSignEnvelopes.map((e) => (
+                      <React.Fragment key={e.signerKind}>
+                        <InfoRow
+                          label={e.signerKind === "CO_BUYER" ? "Co-buyer e-sign" : "Buyer e-sign"}
+                          value={e.status}
+                        />
+                        {e.docusignEnvelopeId && (
+                          <InfoRow label="Envelope ID" value={<span className="font-mono text-[10px]">{e.docusignEnvelopeId.slice(0, 12)}…</span>} />
                         )}
-                        {activeDeal.eSignEnvelope.completedAt && <InfoRow label="Signed At" value={fmtDate(activeDeal.eSignEnvelope.completedAt)} />}
-                      </>
-                    )}
+                        {e.completedAt && <InfoRow label="Signed at" value={fmtDate(e.completedAt)} />}
+                      </React.Fragment>
+                    ))}
                   </div>
                 ) : (
                   <p className="text-slate-400 text-sm text-center py-2">No contract uploaded</p>

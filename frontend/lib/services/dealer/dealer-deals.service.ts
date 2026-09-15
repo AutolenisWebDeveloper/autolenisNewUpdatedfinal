@@ -4,6 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { PickupStatus, type DealStatus } from "@prisma/client";
+import { allSignedFrom, pickSignerEnvelope, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 import { dealerIdentityVisible } from "@/lib/services/deal/identity-firewall.service";
 
@@ -173,11 +174,12 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
       // signer evidence (§11). executedDocumentKey is projected ONLY while the
       // executed-artifact schema gate is open; with migrations 20261014/20261015
       // unapplied the column does not exist and no executed copy can exist either.
-      eSignEnvelope: {
+      eSignEnvelopes: {
         select: isExecutedArtifactEnabled()
-          ? { status: true, executedDocumentKey: true }
-          : { status: true },
+          ? { status: true, signerKind: true, executedDocumentKey: true }
+          : { status: true, signerKind: true },
       },
+      coBuyer: { select: { isRequiredSigner: true } },
     },
   });
   if (!deal) return null;
@@ -194,9 +196,17 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
     contractShieldStatus: deal.contractShieldStatus,
     financingPath: deal.financingPath,
     offer: deal.offer,
+    // §13-D30 RE-DERIVED. "Available" means the DEAL's executed artifact exists, which
+    // requires EVERY required signer — not whichever envelope this read happened to get.
+    // Shown to the dealership, so an over-permissive answer here is the dealership being
+    // told to expect a document that the release gate will refuse them.
     executedContractAvailable:
-      deal.eSignEnvelope?.status === "COMPLETED" &&
-      !!(deal.eSignEnvelope as { executedDocumentKey?: string | null } | null)?.executedDocumentKey,
+      allSignedFrom(deal.eSignEnvelopes, requiredKindsFrom(deal.coBuyer)) &&
+      !!(
+        pickSignerEnvelope(deal.eSignEnvelopes, "BUYER") as
+          | { executedDocumentKey?: string | null }
+          | null
+      )?.executedDocumentKey,
     // §25.1, PHASE 7 — the identity firewall, applied.
     //
     // This block released the buyer's full contact details on any deal past PENDING, which meant a

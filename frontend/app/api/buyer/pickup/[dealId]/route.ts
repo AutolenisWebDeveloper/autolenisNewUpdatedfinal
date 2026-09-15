@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { reschedulePickup } from "@/lib/services/pickup/scheduling.service";
 import { proposePickup, coordHttp } from "@/lib/services/pickup/pickup-coordination.service";
+import { allSignedFrom, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -32,7 +33,8 @@ export async function POST(request: NextRequest, { params }: Props) {
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
     include: {
-      eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT },
+      eSignEnvelopes: { select: LEGACY_ENVELOPE_SELECT },
+      coBuyer: { select: { isRequiredSigner: true } },
       offer: { select: { dealerId: true } },
     },
   });
@@ -51,10 +53,20 @@ export async function POST(request: NextRequest, { params }: Props) {
     );
   }
 
-  if (deal.eSignEnvelope?.status !== "COMPLETED") {
+  // §13-D30 RE-DERIVED. This read was `deal.eSignEnvelope?.status !== "COMPLETED"` — correct
+  // by construction while a deal could hold only one envelope, and silently wrong the moment
+  // the co-buyer gained one of their own: it would have read "SOME signer finished" and let a
+  // buyer schedule pickup on a contract their required co-buyer had never signed.
+  const requiredKinds = requiredKindsFrom(deal.coBuyer);
+  if (!allSignedFrom(deal.eSignEnvelopes, requiredKinds)) {
+    const outstanding = requiredKinds.filter(
+      (kind) => !deal.eSignEnvelopes.some((e) => e.signerKind === kind && e.status === "COMPLETED"),
+    );
     return errorResponse(
       "PREREQUISITE_NOT_MET",
-      "Pickup can only be scheduled after you've signed your contract.",
+      outstanding.includes("CO_BUYER") && !outstanding.includes("BUYER")
+        ? "Pickup can only be scheduled once your co-buyer has signed as well."
+        : "Pickup can only be scheduled after you've signed your contract.",
       400
     );
   }
