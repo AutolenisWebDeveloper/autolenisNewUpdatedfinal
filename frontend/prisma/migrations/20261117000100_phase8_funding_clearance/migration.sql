@@ -33,6 +33,35 @@
 -- clearance evaluation to reporting items 2-4 as outstanding. That is the correct
 -- degraded behaviour — clearance fails closed rather than clearing on missing evidence.
 
+-- ── AND THE COLUMN THE SIGNER ARCHIVE NEEDS ───────────────────────────────────
+--
+-- §13-D30 gives ESignEnvelopeHistory a `signer_kind` too, and this creates it. Without the
+-- column the archive collapses the buyer's and the co-buyer's terminal attempts into one
+-- undifferentiated list — which is precisely the evidence a signature dispute turns on —
+-- and, worse, every archive write would fail with 42703 the moment the Prisma model
+-- declared the field.
+--
+-- FOUND BY THE DRIFT GATE, NOT BY REVIEW. schema.prisma declared the field and no migration
+-- created it; `check-migration-drift.ts` reported "missing column: signer_kind" against a
+-- chain-built database. That is the functional half of the gate, held at hard zero for
+-- exactly this failure: a column the application asks for and the database does not have.
+--
+-- NOT NULL DEFAULT 'BUYER' mirrors e_sign_envelopes: every archived attempt that exists was
+-- a buyer's, so the default is the truth for every historical row rather than a placeholder.
+ALTER TABLE "e_sign_envelope_history"
+  ADD COLUMN IF NOT EXISTS "signer_kind" "ESignSignerKind" NOT NULL DEFAULT 'BUYER';
+
+-- The index on the co-buyer foreign key. Phase 1 created `co_buyer_id` and its FK but not an
+-- index, because nothing read the column — Phase 8's Prisma relation is its first reader, and
+-- `@@index([coBuyerId])` declared without a matching CREATE INDEX is drift the gate reports as
+-- a structural statement (it did: 345 against a pinned 344).
+--
+-- It is worth having rather than worth un-declaring: a co-buyer's envelope is looked up FROM
+-- the co-buyer on the signing surface, and an unindexed FK on a table that grows with every
+-- deal is a sequential scan waiting for volume.
+CREATE INDEX IF NOT EXISTS "e_sign_envelopes_co_buyer_id_idx"
+  ON "e_sign_envelopes" ("co_buyer_id");
+
 ALTER TABLE "financing"
   ADD COLUMN IF NOT EXISTS "lender_conditions_cleared_at" TIMESTAMP(3),
   ADD COLUMN IF NOT EXISTS "down_payment_method"          TEXT,

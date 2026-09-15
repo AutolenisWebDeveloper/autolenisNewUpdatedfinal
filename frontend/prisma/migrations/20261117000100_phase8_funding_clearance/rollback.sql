@@ -19,6 +19,13 @@
 --       OR down_payment_method IS NOT NULL
 --       OR dealer_funding_confirmed_at IS NOT NULL;
 
+DROP INDEX IF EXISTS "e_sign_envelopes_co_buyer_id_idx";
+
+-- The signer axis on the archive is LEFT IN PLACE deliberately. Dropping it would destroy
+-- the record of WHOSE terminal signing attempt each archived row was — the evidence a
+-- signature dispute turns on — and an additive column with a default costs nothing to keep.
+-- A re-apply of the forward migration is a no-op against it.
+
 ALTER TABLE "financing"
   DROP COLUMN IF EXISTS "lender_conditions_cleared_at",
   DROP COLUMN IF EXISTS "down_payment_method",

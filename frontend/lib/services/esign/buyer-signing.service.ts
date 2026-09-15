@@ -166,6 +166,10 @@ function historySnapshot(e: EnvelopeRow) {
   return {
     dealId: e.dealId,
     envelopeId: e.id,
+    // §13-D30. WHOSE attempt this was. Without it the archive collapses the buyer's and
+    // the co-buyer's terminal attempts into one undifferentiated list, which is exactly
+    // the evidence a signature dispute turns on.
+    signerKind: e.signerKind,
     attemptNumber: e.attemptNumber,
     status: e.status,
     documentVersionId: e.documentVersionId,

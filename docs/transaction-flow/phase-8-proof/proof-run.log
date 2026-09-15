@@ -1,0 +1,181 @@
+== server_version=16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) ==
+   DEGRADED: production runs PostgreSQL 17.x. This run is 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1), so it proves the DDL,
+   the behaviour, the idempotency and the restore path but NOT 17.x-specific behaviour.
+   Every statement here (DROP INDEX IF EXISTS, ADD COLUMN IF NOT EXISTS, CREATE UNIQUE
+   INDEX IF NOT EXISTS, and the DO-block guards) is invariant across 11-17 — but the
+   17.6 run is CI's `migrations` job on the pull request, not this script.
+   PostgreSQL 17.6 was not obtainable in the authoring session: only 16.x is installed,
+   the Docker daemon is unavailable (/var/run/docker.sock absent), and apt.postgresql.org
+   is policy-denied by the egress proxy (403). Recorded rather than approximated.
+
+== 1. empty database ==
+== 2. apply the chain UP TO BUT NOT INCLUDING Phase 8 ==
+   chain applied: 113 migrations
+== 2b. PREFLIGHT — every row must read CHECKED ==
+SET
+                         assertion                          | detail  | verdict 
+------------------------------------------------------------+---------+---------
+ replacement index e_sign_envelopes_deal_id_signer_kind_key | present | CHECKED
+
+                         assertion                          | detail | verdict 
+------------------------------------------------------------+--------+---------
+ replacement index is VALID (not a failed concurrent build) | valid  | CHECKED
+
+                 assertion                  |          detail          | verdict 
+--------------------------------------------+--------------------------+---------
+ index to drop e_sign_envelopes_deal_id_key | present, will be dropped | CHECKED
+
+              assertion               | detail | verdict 
+--------------------------------------+--------+---------
+ deals holding more than one envelope | 0      | CHECKED
+
+             assertion             | detail | verdict 
+-----------------------------------+--------+---------
+ envelopes with a NULL signer_kind | 0      | CHECKED
+
+              assertion              | detail  | verdict 
+-------------------------------------+---------+---------
+ e_sign_envelopes.co_buyer_id column | present | CHECKED
+
+             assertion             | detail  | verdict 
+-----------------------------------+---------+---------
+ e_sign_envelopes_co_buyer_id_fkey | present | CHECKED
+
+                    assertion                    | detail | verdict 
+-------------------------------------------------+--------+---------
+ financing clearance columns not already present | none   | CHECKED
+
+             assertion              | detail | verdict 
+------------------------------------+--------+---------
+ phase 8 migrations not yet applied | none   | CHECKED
+
+    assertion     | detail | verdict 
+------------------+--------+---------
+ stuck migrations | none   | CHECKED
+
+               assertion                |                 detail                  | verdict 
+----------------------------------------+-----------------------------------------+---------
+ chain totals (reported, never a BLOCK) | 113 rows / 113 distinct / 0 rolled back | CHECKED
+
+     assertion      |    detail     | verdict 
+--------------------+---------------+---------
+ preflight complete | 10 assertions | CHECKED
+
+   preflight clean
+== 2c. BEFORE snapshot: the inverted assertion must read MISSING, and it must be LIVE ==
+   before state clean: the index to drop is present, the columns to add are absent
+== 3. apply Phase 8 ==
+Applying migration `20261117000000_phase8_esign_signer_cutover`
+Applying migration `20261117000100_phase8_funding_clearance`
+  └─ 20261117000000_phase8_esign_signer_cutover/
+  └─ 20261117000100_phase8_funding_clearance/
+== 4. verify — BOTH halves ==
+   PRESENT  index e_sign_envelopes_deal_id_key is REMOVED              the absolute unique on deal_id must be gone, or the co-buyer envelope 
+   PRESENT  index e_sign_envelopes_deal_id_signer_kind_key             the composite unique is now the ONLY thing preventing two BUYER envelo
+   PRESENT  e_sign_envelopes_deal_id_signer_kind_key is VALID          an invalid index enforces nothing while looking present
+   PRESENT  financing.lender_conditions_cleared_at                     evaluateFundingClearance reads this; without it items 2-4 report outst
+   PRESENT  financing.down_payment_method                              evaluateFundingClearance reads this; without it items 2-4 report outst
+   PRESENT  financing.dealer_funding_confirmed_at                      evaluateFundingClearance reads this; without it items 2-4 report outst
+   PRESENT  financing.funding_recorded_by                              evaluateFundingClearance reads this; without it items 2-4 report outst
+   PRESENT  financing clearance columns are all NULLABLE               a NOT NULL clearance column makes a financing row unwritable before Fi
+   PRESENT  e_sign_envelopes.signer_kind                               schema.prisma declares this since Phase 8; absent means 42703 on every
+   PRESENT  e_sign_envelopes.co_buyer_id                               schema.prisma declares this since Phase 8; absent means 42703 on every
+   PRESENT  e_sign_envelopes.signer_kind is NOT NULL with a default    a nullable signer_kind lets two rows share (deal_id, NULL) and defeats
+   PRESENT  ledger 20261117000000_phase8_esign_signer_cutover          no ledger row means Prisma will re-apply this on the next deploy
+   PRESENT  ledger 20261117000100_phase8_funding_clearance             no ledger row means Prisma will re-apply this on the next deploy
+   PRESENT  ledger has exactly one applied row per phase 8 migration   two applied rows, one per migration; more means the SQL ran twice
+   PRESENT  no stuck migrations in the chain                           a name with no finished, non-rolled-back row means a deploy died mid-c
+   PRESENT  verify complete — BOTH halves                            16 assertions: 13 physical, 3 ledger. A MISSING row is REPORTED, never
+   all 16 assertions PRESENT
+== 5. BEHAVIOUR — the ruling, not just the DDL ==
+BEGIN
+CREATE TABLE
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+             assertion              
+------------------------------------
+ OK    a BUYER envelope is accepted
+
+INSERT 0 1
+SAVEPOINT
+INSERT 0 1
+                                       assertion                                       
+---------------------------------------------------------------------------------------
+ OK    a CO_BUYER envelope on the SAME deal is now ACCEPTED (§13-D30, the whole point)
+
+INSERT 0 1
+SAVEPOINT
+psql:/home/user/autolenisNewUpdatedfinal/docs/transaction-flow/phase-8-proof/behaviour.sql:80: ERROR:  duplicate key value violates unique constraint "e_sign_envelopes_deal_id_signer_kind_key"
+DETAIL:  Key (deal_id, signer_kind)=(d_proof8, BUYER) already exists.
+ROLLBACK
+                                        assertion                                         
+------------------------------------------------------------------------------------------
+ OK    a SECOND BUYER envelope is still REFUSED — the composite unique is doing real work
+
+INSERT 0 1
+SAVEPOINT
+psql:/home/user/autolenisNewUpdatedfinal/docs/transaction-flow/phase-8-proof/behaviour.sql:91: ERROR:  duplicate key value violates unique constraint "e_sign_envelopes_deal_id_signer_kind_key"
+DETAIL:  Key (deal_id, signer_kind)=(d_proof8, CO_BUYER) already exists.
+ROLLBACK
+                              assertion                               
+----------------------------------------------------------------------
+ OK    exactly TWO envelopes on the deal — one per signer, never more
+
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+                                 assertion                                  
+----------------------------------------------------------------------------
+ OK    an INSERT omitting signer_kind takes 'BUYER' from the column default
+
+INSERT 0 1
+INSERT 0 1
+                                  assertion                                  
+-----------------------------------------------------------------------------
+ OK    a financing row is writable with every clearance column still unknown
+
+INSERT 0 1
+                            assertion                            
+-----------------------------------------------------------------
+ OK    behaviour proof complete — 6 of 6 assertions ran and held
+
+ROLLBACK
+   every behaviour assertion RAN and held (7 OK rows)
+== 6. idempotency: re-apply BOTH migrations BY HAND and prove the no-op ==
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000000_phase8_esign_signer_cutover/migration.sql:110: NOTICE:  index "e_sign_envelopes_deal_id_key" does not exist, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:52: NOTICE:  column "signer_kind" of relation "e_sign_envelope_history" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:63: NOTICE:  relation "e_sign_envelopes_co_buyer_id_idx" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:69: NOTICE:  column "lender_conditions_cleared_at" of relation "financing" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:69: NOTICE:  column "down_payment_method" of relation "financing" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:69: NOTICE:  column "dealer_funding_confirmed_at" of relation "financing" already exists, skipping
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:69: NOTICE:  column "funding_recorded_by" of relation "financing" already exists, skipping
+   digest before re-apply: 9d5f9ac086d7dc3f4b44589ed5d93e08
+   digest after  re-apply: 9d5f9ac086d7dc3f4b44589ed5d93e08
+   identical — both migrations are idempotent
+== 7. verify again after the re-apply ==
+   verification output byte-identical across the re-apply
+== 8. ROLLBACK REHEARSAL — the part a destructive migration cannot skip ==
+   rollback restored e_sign_envelopes_deal_id_key
+   clearance rollback dropped all four columns
+== 9. and the forward migrations re-apply on top of the rollback ==
+psql:/home/user/autolenisNewUpdatedfinal/frontend/prisma/migrations/20261117000100_phase8_funding_clearance/migration.sql:52: NOTICE:  column "signer_kind" of relation "e_sign_envelope_history" already exists, skipping
+   forward migrations re-applied; schema digest identical — the revert path is round-trip clean
+== 10. drift gate — the chain must still match schema.prisma ==
+Migration-chain drift (database built from prisma/migrations vs schema.prisma)
+
+  ok       missing table: 0
+  ok       missing column: 0
+  ok       missing enum value: 0
+
+  structural statements: 344 (baseline 344)
+
+OK — no functional drift; structural drift at baseline.
+
+== PHASE 8 MIGRATION PROOF: PASS on PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) ==
+   preflight -> apply -> verify (physical + ledger) -> behaviour -> re-apply -> no-op
+   -> verify -> ROLLBACK -> index restored -> re-apply -> digest identical -> drift at baseline
