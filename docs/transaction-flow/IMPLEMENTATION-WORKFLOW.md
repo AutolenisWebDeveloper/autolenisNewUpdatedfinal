@@ -2099,6 +2099,28 @@ will complete later.** This is structural, not procedural:
 - `FUNDING_PENDING → PICKUP_READINESS` is deliberately **left closed here**. Phase 9 opens it with
   its own driver, so this phase cannot accidentally ship a release path it does not own.
 
+**THIS SECTION ALSO OVERSTATED ITS CASE, and the correction is the substance.** It claimed the
+rule was "structural, not procedural" while **no release gate read `funding_cleared_at` at all**.
+The transition map was the whole of the enforcement, and the transition map is not the only way a
+deal reaches release:
+
+- `schedulePickup` advanced with **`force: true`** from ANY status, so an admin could schedule a
+  pickup on an unsigned, un-executed deal with financing still `IN_PROGRESS`;
+- the dealer QR scan then advances straight to `COMPLETED`, and its only gate was **insurance**.
+
+Between them, the exact conditional delivery §Stage 14 forbids was reachable through two admin and
+dealer screens — the defect §8.2's own defect (1) says Phase 8 fixes, unfixed, under a claim that
+it had been. Found by the independent review, not by this phase.
+
+**What makes it structural now.** `advanceDealStatus` hard-gates `COMPLETED` on **three** facts
+rather than one — `INSURANCE_SATISFIED`, `dealerExecutedContractId` and `fundingClearedAt` — checked
+at WRITE time against the row as read, so they hold whatever route got the deal there. A new
+`ReleaseNotClearedError` is kept distinct from `InsuranceRequiredError` because the two are told to
+different people: an insurance gap is the buyer's to close, an uncleared funding is AutoLenis's and
+the dealership's. The `force: true` in `schedulePickup` is gone. `force` still overrides the gates
+for an audited admin, and still records that it did in `DealStatusHistory` — which is the difference
+between an override and a gap, and why a release that no human can ever unblock is not the goal.
+
 #### The before → after capability map
 
 Every route, control, action and workflow this phase touched, with a disposition. Counts reconcile.
@@ -2111,7 +2133,7 @@ Every route, control, action and workflow this phase touched, with a disposition
 | 4 | `Deal.eSignEnvelope` (to-one) | **RENAMED + REGROUPED** | `Deal.eSignEnvelopes` (to-many) keyed `[dealId, signerKind]`; 32 sites re-derived |
 | 5 | Buyer signing ceremony | **PROGRESSIVE** | now shows the Shield verdict bound to the scan that judged the signed version |
 | 6 | Co-buyer signing | **NEW** | required only when `CoBuyer.isRequiredSigner`; invited-signer link, no second account (§13-D30) |
-| 7 | `SIGNED → PICKUP_*` edges | **REMOVED — and this is the one REMOVED in the map** | **Owner-signed-off as §13-D29.** Replaced by `SIGNED → DEALER_EXECUTED → FUNDING_PENDING`. The removal IS the fix: those edges were the spot-delivery path |
+| 7 | `SIGNED → PICKUP_*` edges | **MOVED** — *this row said REMOVED and said the capability was preserved; both halves were wrong. See the correction below* | The edge now runs `FUNDING_PENDING → PICKUP_SCHEDULED`: pickup is reachable only AFTER the six-item clearance list, where before Phase 8 a buyer's signature reached it directly |
 | 8 | Contract Shield scan | **PROGRESSIVE** | gained `APR_VALIDATION`, `PAYMENT_PACKING`, `DISCLOSURE_CHECK`, `FINANCE_MARKUP`, and the comparison against the confirmed recap |
 | 9 | Three ad-hoc `contractVersion` writers | **REGROUPED** | one canonical service; the three are neutralised, reported, not deleted |
 | 10 | Funding clearance | **NEW** | the six-item list, buyer-visible from `DEALER_EXECUTED` |
@@ -2119,10 +2141,51 @@ Every route, control, action and workflow this phase touched, with a disposition
 | 12 | Insurance review | **NEW** | `EXTERNAL_UPLOADED → UNDER_REVIEW → VERIFIED \| POLICY_BOUND \| REJECTED \| EXPIRED`; an upload is never approval |
 | 13 | Financing change after execution | **NEW** | a FULL return path — envelopes voided, contract versions and recap superseded, both confirmations cleared — never a status flip |
 
-**Reconciliation: 13 capabilities · KEPT 2 · MOVED 2 · REGROUPED 2 (one shared with RENAMED) ·
-PROGRESSIVE 4 · RENAMED 1 (shared) · NEW 4 · REMOVED 1.** The single `REMOVED` is item 7 and carries
-explicit owner sign-off as §13-D29; it is the removal of a defect path, and the capability it
-served (reaching pickup) is preserved through the correct predecessor.
+**Reconciliation: 13 capabilities · KEPT 2 · MOVED 3 · REGROUPED 2 (one shared with RENAMED) ·
+PROGRESSIVE 4 · RENAMED 1 (shared) · NEW 4 · REMOVED 0.**
+
+#### The capability map was WRONG, and the invariant caught nothing
+
+This is recorded in full rather than corrected in place, because the failure is the interesting
+part and a silently amended map teaches nobody.
+
+Row 7 originally read **REMOVED**, with the justification *"the capability it served (reaching
+pickup) is preserved through the correct predecessor."* **That sentence was false when it was
+written.** Closing `SIGNED → PICKUP_SCHEDULED` was right — it was the spot-delivery edge — but
+nothing was opened in its place. Measured after the independent review raised it:
+`PICKUP_SCHEDULED` had **ZERO inbound edges**. `pickup-coordination.service.ts` advances to it
+NON-forced, so every dealer confirmation threw `DealTransitionError`, and every buyer saw
+*"We couldn't confirm the pickup right now. Please try again."* — forever. Pickup was not moved.
+It was destroyed.
+
+**Why nothing went red.** `pickup-coordination.test.ts` mocks `advanceDealStatus`, so the unit
+suite never consults the transition map. The Phase 8 e2e spec asserted the **removal**
+(`canTransition("SIGNED","PICKUP_SCHEDULED") === false`) and never asked whether pickup was still
+reachable from anywhere. Both suites were green on a broken ladder, because both tested the half
+of the change that was intended.
+
+**Three lessons, kept because they generalise past this row:**
+
+1. **A map that says MOVED must name where it moved TO, as an edge that exists.** "Preserved
+   through the correct predecessor" is a claim about the graph, and it was never checked against
+   the graph. The capability-preservation invariant is only as good as the evidence behind each
+   disposition — writing MOVED in a table is not evidence.
+2. **Assert the property, not the change.** A test that pins the edge you closed passes on a
+   system where nothing works. The regression test added for this is a WALK of the whole ladder —
+   `SIGNED → DEALER_EXECUTED → FUNDING_PENDING → PICKUP_SCHEDULED → COMPLETED` — plus the
+   skip-a-rung cases, because the defect lived in the GAP between two edges that were each
+   individually correct.
+3. **This is core rule 11 in reverse again, in a third shape.** The cutover section above records
+   the constraint-widening form. This is the transition-map form: removing an edge breaks callers
+   who never mentioned it, nobody edits their code, and the compiler cannot see a string-keyed
+   graph. The check is the same sentence with one word changed: *list every caller that depends
+   on this edge, and re-derive each.* Three did — the buyer proposal gate, `CONFIRMABLE_DEAL_
+   STATUSES`, and the admin scheduler — and none was re-derived until the review forced it.
+
+**The corrected disposition is MOVED**, and the destination is `FUNDING_PENDING →
+PICKUP_SCHEDULED`. That is strictly stronger than what this repository had before Phase 8: pickup
+is now reachable only after the six-item clearance list, where a buyer's signature used to reach
+it directly. **No capability is REMOVED by this phase.**
 
 #### Parity rows
 
@@ -2182,6 +2245,22 @@ is the argument for running them.
 | 5 | `@@index([coBuyerId])` declared but never created | migration `…000100` |
 | 6 | `alreadyOpen` inferred from a timestamp against a caller-supplied clock | `requestDocument` returns `reused` |
 | **7** | **The buyer's insurance request sat AFTER `openContractRequest`'s `no_dealer_channel` early return** | **decoupled — see below** |
+| **8** | **`PICKUP_SCHEDULED` had zero inbound edges — pickup was destroyed, not moved** | the transition map, plus the three callers |
+| **9** | **No release gate read `funding_cleared_at`; `schedulePickup` used `force: true`** | three hard gates in `advanceDealStatus` |
+| **10** | **Accepted optional products were compared by LABEL ONLY — the amount was never read** | `contract-comparison.service.ts`, both directions |
+| 11 | One Shield comparison finding scored EXACTLY the PASS threshold and auto-approved | the verdict, structurally — not the deduction |
+| 12 | `findMoneyNear` took "the next digits within 80 chars", `$` optional, crossing newlines | a currency-shaped token, bounded to the label's line |
+| 13 | The admin E-Sign tab read the retired to-one relation — a confident empty on every deal | one block per signer |
+| 14 | `DEAL_STAGES` lacked the two new stages, so a stuck deal had no admin route back | both added |
+| 15 | The command centre counted `EXTERNAL_UPLOADED` as Insurance done (§13-D31) | `UNDER_REVIEW` as a rendered third state |
+| 16 | Its E-Sign step asked "every envelope PRESENT" and fails OPEN on a partial failure | `allSignedFrom`, fail-closed both ways |
+| 17 | `recordDealerExecution` half-wrote then reported 201 on a silent `expectedFrom` no-op | the result is checked; `STATE_MOVED` → 409 |
+| 18 | §14d's executed copy was hashed and its location discarded | `contract_versions.executed_document_key` |
+
+**Defects 8 through 18 came from the independent adversarial review, and that is the argument for
+running one.** Eleven of eighteen. Two of them (8 and 9) falsified claims this very section had
+already made — that pickup was preserved, and that the no-conditional-delivery rule was structural.
+A phase that reviews itself finds the defects it was looking for.
 
 **Defect 7 is the instructive one.** A missing **dealership** email silently suppressed the
 **buyer's** insurance request: two independent facts about two different people, coupled by one
@@ -2192,6 +2271,32 @@ that never went out. On the **concierge lineage** — which `deals_offer_lineage
 permits (`offer_id IS NULL` when `vehicle_request_offer_id IS NOT NULL`) — `deal.offer` is null by
 construction, so that was **every such deal**. It is the same shape as the cutover above: correct
 for the common case, wrong for the case nobody had a fixture for.
+
+#### NOT COMPLETE — a required co-buyer still cannot sign
+
+Stated plainly because it is the one place this phase does not deliver §13-D30, and because the
+reason it stopped is a rule rather than a difficulty.
+
+**The defect.** `openSigningForRequiredSigners` creates a `CO_BUYER` envelope and emails a link to
+`/buyer/esign`. That page calls `requireBuyer()`, which is Supabase authentication — and §13-D30's
+own ruling is that the co-buyer has **no second account**. So the link redirects them to a sign-in
+they cannot complete; the primary buyer cannot sign on their behalf either, because the sign
+endpoint takes no signer and always resolves the BUYER envelope. `signatureProgress.allSigned`
+never becomes true, the deal never reaches `SIGNED`, and the co-buyer's envelope expires at 14
+days. **Every deal with `CoBuyer.isRequiredSigner` set deadlocks.**
+
+**What it needs, and why it is not here.** A tokenised, unauthenticated signing route with its own
+consent snapshot, plus a column to hash the token into. Both were written and **withdrawn**. A
+route that lets a party with no platform account legally execute a contract is a
+**server-authorization change**, and CLAUDE.md puts those behind separate explicit authorization —
+*"No merging, deploying, production changes, or server-authorization changes without separate
+explicit authorization."* The owner's §13-D30 ruling settles the **design**; it is not the
+authorization for the surface.
+
+Shipping the column alone would have been worse than shipping neither: a column with no writer
+reads as a capability that exists, which is precisely the failure mode this document spends two
+sections on. **Reported, not half-built.** The safe consequence to note meanwhile: the gating is
+fail-CLOSED, so the deadlock is visible and no deal advances incorrectly.
 
 #### Two spec defects, fixed before the run could be trusted
 
