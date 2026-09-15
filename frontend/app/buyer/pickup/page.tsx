@@ -10,6 +10,7 @@ import PickupScheduleForm from "@/components/buyer/PickupScheduleForm";
 import PickupRescheduleButton from "@/components/buyer/PickupRescheduleButton";
 import PickupCounterClient from "@/components/buyer/PickupCounterClient";
 import { resolveDealerAvailability } from "@/lib/services/pickup/availability.service";
+import { allSignedFrom, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +28,16 @@ export default async function PickupPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { pickup: true, eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT }, offer: { select: { dealerId: true } } },
+    include: { pickup: true, eSignEnvelopes: { select: BUYER_SAFE_ENVELOPE_SELECT }, coBuyer: { select: { isRequiredSigner: true } }, offer: { select: { dealerId: true } } },
     orderBy: { createdAt: "desc" },
   });
 
   const pickup = deal?.pickup;
   const status = pickup?.status;
-  const eSignCompleted = deal?.eSignEnvelope?.status === "COMPLETED";
+    // §13-D30 RE-DERIVED. The page must agree with the server gate in
+  // app/api/buyer/pickup/[dealId]/route.ts, which requires EVERY required signer — a page
+  // that offers scheduling the API then refuses is worse than one that never offered it.
+  const eSignCompleted = allSignedFrom(deal?.eSignEnvelopes, requiredKindsFrom(deal?.coBuyer));
   const availability = await resolveDealerAvailability(deal?.offer?.dealerId ?? null);
   const hint = {
     minLeadTimeHours: availability.minLeadTimeHours,

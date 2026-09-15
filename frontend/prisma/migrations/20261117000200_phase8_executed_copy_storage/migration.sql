@@ -1,0 +1,26 @@
+-- Phase 8 — where §14d's fully executed contract is STORED.
+--
+-- `contract_versions.executed_document_hash` already existed and was already being written by
+-- recordDealerExecution. The artifact's storage location was not, so the hash proved the
+-- integrity of a document the system could no longer produce — while the
+-- `executed_contract_stored` notice ("Executed-document access notice") was telling the buyer,
+-- the dealership and Operations they could retrieve it. §14d asks for the copy to be stored
+-- and access granted, not for a fingerprint of something discarded.
+--
+-- ADDITIVE AND NULLABLE, so this is the safe direction of core rule 11: no existing reader
+-- relied on a guarantee that changes, and no existing row becomes invalid. The rule that DOES
+-- apply is the mirror one recorded in §8.1h — a column gaining its first writer breaks readers
+-- that relied on its emptiness. This column has no reader before this wave, so that list is
+-- empty by construction, and it is stated rather than assumed.
+--
+-- WHAT IS DELIBERATELY NOT HERE. The review also proved a required co-buyer cannot sign at
+-- all: §13-D30's invited-signer link needs a tokenised, unauthenticated signing route, and a
+-- column to hash the token into. Both were drafted and WITHDRAWN. Creating a route that lets a
+-- party with no platform account legally execute a contract is a server-authorization change,
+-- and CLAUDE.md puts those behind separate explicit authorization ("No merging, deploying,
+-- production changes, or server-authorization changes without separate explicit
+-- authorization"). The owner's §13-D30 ruling settles the DESIGN; it is not the authorization
+-- for the surface. Shipping the column without the route would be worse than shipping
+-- neither — a column with no writer reads as a capability that exists.
+ALTER TABLE "contract_versions"
+  ADD COLUMN IF NOT EXISTS "executed_document_key" TEXT;

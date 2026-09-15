@@ -61,16 +61,23 @@ mock.module("@/lib/services/deal/deal.service", {
   },
 });
 
+// §13-D30: the auto-advance on a PASS opens signing for EVERY required signer rather than
+// preparing the buyer's envelope alone, so the mock follows the call the service now makes.
+mock.module("@/lib/services/esign/open-signing.service", {
+  namedExports: {
+    openSigningForRequiredSigners: async (params: { dealId: string; buyerEmail?: string; buyerName?: string }) => {
+      envelopeCalls.push([params.dealId, params.buyerEmail, params.buyerName]);
+      return { prepared: [{ signerKind: "BUYER", envelopeId: "env_1" }], failed: [] };
+    },
+  },
+});
+
 mock.module("@/lib/services/esign/buyer-signing.service", {
   namedExports: {
-    // In-house signing envelope preparation (replaces DocuSign createEnvelope).
-    prepareBuyerSigningEnvelope: async (
-      dealId: string,
-      signer?: { signerName?: string; signerEmail?: string },
-    ) => {
-      envelopeCalls.push([dealId, signer?.signerEmail, signer?.signerName]);
-      return { envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT" };
-    },
+    prepareBuyerSigningEnvelope: async () => ({
+      envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT",
+    }),
+    NoSignableDocumentError: class NoSignableDocumentError extends Error {},
   },
 });
 

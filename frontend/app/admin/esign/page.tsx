@@ -17,6 +17,12 @@ export default async function AdminESignPage() {
     id: true,
     dealId: true,
     status: true,
+    // §13-D30. WITHOUT THIS the hub renders two visually identical rows for any deal with
+    // a co-buyer — same buyer name, same date, both "SENT" — and an admin resending or
+    // voiding one has no way to tell which signer they acted on. The query compiled
+    // before and after the cutover; only its meaning changed. This is the silent half of
+    // Core Rule 11 in reverse, caught by re-derivation rather than by the compiler.
+    signerKind: true,
     docusignEnvelopeId: true,
     createdAt: true,
     deal: { select: { buyer: { select: { firstName: true, lastName: true } } } },
@@ -27,7 +33,9 @@ export default async function AdminESignPage() {
   try {
     envelopes = await prisma.eSignEnvelope.findMany({
       select: ENVELOPE_LIST_SELECT,
-      orderBy: { createdAt: "desc" }, take: 50,
+      // Deal first, then signer, so a deal's two envelopes sit together rather than
+      // scattered through the list by whichever was created first.
+      orderBy: [{ createdAt: "desc" }, { signerKind: "asc" }], take: 50,
     });
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Unknown error loading envelopes";
@@ -53,7 +61,12 @@ export default async function AdminESignPage() {
             <div key={env.id} data-testid={`envelope-row-${env.id}`}
               className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
               <div>
-                <p className="font-semibold text-slate-900 text-sm">{env.deal?.buyer?.firstName ?? ""} {env.deal?.buyer?.lastName ?? ""}</p>
+                <p className="font-semibold text-slate-900 text-sm">
+                  {env.deal?.buyer?.firstName ?? ""} {env.deal?.buyer?.lastName ?? ""}
+                  <span className="ml-2 text-xs font-medium text-slate-500">
+                    {env.signerKind === "CO_BUYER" ? "co-buyer signature" : "buyer signature"}
+                  </span>
+                </p>
                 <p className="text-xs text-slate-400">Envelope: {env.docusignEnvelopeId?.slice(-8) ?? "Pending"} · {env.createdAt.toLocaleDateString()}</p>
               </div>
               <div className="flex items-center gap-2">

@@ -84,12 +84,24 @@ mock.module("@/lib/services/deal/deal.service", {
   },
 });
 
+// §13-D30: the approve route no longer prepares ONE envelope. It opens signing for EVERY
+// required signer through `openSigningForRequiredSigners`, which also enqueues each signer's
+// request and reminder — because four call sites each preparing "the buyer's envelope" was
+// four chances to forget the co-buyer, and forgetting produces a deal that waits forever on
+// a signature nobody was asked for.
+mock.module("@/lib/services/esign/open-signing.service", {
+  namedExports: {
+    openSigningForRequiredSigners: async () => {
+      envelopeCalls += 1;
+      return { prepared: [{ signerKind: "BUYER", envelopeId: "env_1" }], failed: [] };
+    },
+  },
+});
 mock.module("@/lib/services/esign/buyer-signing.service", {
   namedExports: {
-    prepareBuyerSigningEnvelope: async () => {
-      envelopeCalls += 1;
-      return { envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT" };
-    },
+    prepareBuyerSigningEnvelope: async () => ({
+      envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT",
+    }),
   },
 });
 

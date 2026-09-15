@@ -13,10 +13,13 @@
 // Operations is a decision to make when there are people in both roles, and inventing the split
 // now would be a permissions-model change nobody asked for.
 //
-// `COMPLETED` IS REFUSED HERE, by the service, and the refusal is explicit rather than silent.
-// That is checkpoint two — "after signing, before vehicle release" (§12a) — and parity row
-// `deal-early/D3` assigns it, with funding clearance, to Phase 8. An admin who tries gets a
-// message naming the phase rather than a 500 or, worse, a quiet no-op.
+// `COMPLETED` IS NOT WRITTEN HERE, AND THAT IS STILL DELIBERATE. Phase 7 refused it because it
+// was checkpoint two's and Phase 8's; Phase 8 has now built checkpoint two, and it lives at
+// POST /api/admin/deals/[dealId]/funding-clearance — where recording completion and clearing
+// funding are two explicit steps by an authorized Finance administrator against evidence, which
+// is what §Stage 14 describes. Keeping it out of this route's enum keeps the two checkpoints on
+// two surfaces, so "financing terms are locked" and "financing is complete and funding has
+// cleared" cannot be collapsed into one click.
 import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { requirePermissionStrict } from "@/lib/auth/permissions";

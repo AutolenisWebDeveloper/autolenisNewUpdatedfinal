@@ -1,4 +1,5 @@
 // lib/services/dealer/dealer-contract.service.ts
+import { computeDocumentHash } from "@/lib/services/esign/buyer-signing.service";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { scanContract } from "@/lib/services/contract-shield/contract-shield.service";
@@ -240,6 +241,29 @@ export async function scanContractVersion(contractVersionId: string): Promise<vo
 
   try {
     const text = await extractContractText(cv.documentUrl);
+
+    // §14b: "`contract_versions` gains `document_hash` so the approved bytes are
+    // identifiable." Phase 1 added the COLUMN; nothing ever wrote it. Without a hash
+    // taken HERE, the only hash in the system was computed later at envelope-prepare
+    // time from a fresh download of the same storage key — so nothing proved the bytes
+    // the buyer signed were the bytes Contract Shield judged. A storage object replaced
+    // in place between the two would have been invisible.
+    //
+    // Recorded BEFORE the verdict, so even a REJECTED version carries the hash of what
+    // was rejected — which is what makes a re-upload provably a different document.
+    // Guarded null-only: a hash is a fact about bytes that have already been read, and
+    // re-scanning the same version must never rewrite it.
+    const documentHash = await computeDocumentHash(cv.documentUrl).catch((err) => {
+      logger.error(`[contract-shield] could not hash version ${cv.id}`, err);
+      return null;
+    });
+    if (documentHash) {
+      await prisma.contractVersion.updateMany({
+        where: { id: cv.id, documentHash: null },
+        data: { documentHash },
+      });
+    }
+
     // Pass cv.id so the ContractScan row records WHICH document it judged —
     // the link the admin approval gate binds to.
     const result = await scanContract(cv.dealId, text, cv.deal.offer?.dealerId ?? cv.uploadedBy, cv.id);

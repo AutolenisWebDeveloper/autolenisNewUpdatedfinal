@@ -15,7 +15,13 @@ import { NextRequest } from "next/server";
 process.env.ESIGN_EXECUTED_ARTIFACT_ENABLED = "true";
 
 let dealer: { id: string } | null = { id: "dealer_1" };
-let dealRow: { id: string; eSignEnvelope: { id: string; status: string; executedDocumentKey: string | null } | null } | null = null;
+// §13-D30: a deal carries one envelope per required signer, so the route selects a LIST and
+// the co-buyer flag that says who is required. These fixtures are buyer-only deals.
+let dealRow: {
+  id: string;
+  eSignEnvelopes: { id: string; status: string; signerKind: string; executedDocumentKey: string | null }[];
+  coBuyer: { isRequiredSigner: boolean } | null;
+} | null = null;
 let signedUrlCalls = 0;
 
 mock.module("@/lib/auth/dealer-api", {
@@ -34,11 +40,21 @@ mock.module("@/lib/prisma", {
         // isn't THIS dealer's accepted offer returns null → 404 (IDOR-safe).
         findFirst: async ({ where }: { where: { id: string; offer: { dealerId: string } } }) =>
           dealRow && where.offer.dealerId === "dealer_1" ? dealRow : null,
+        // §25.1 + §13-D30. `allRequiredSignaturesComplete` resolves the required signers
+        // through its OWN server-side read rather than the route selecting the co-buyer
+        // relation onto a dealer-facing projection — the identity-firewall guard flags any
+        // dealer surface that reads a protected relation, and it flagged the first version
+        // of that line. This mock stands in for that internal read.
+        findUnique: async () => ({
+          buyer: { firstName: "Sam", lastName: "Buyer", user: { email: "sam@example.com" } },
+          coBuyer: null,
+        }),
       },
       // The executed-artifact key is read in a second, gate-guarded query so the
       // column is never named while migrations 20261014/20261015 are unapplied.
       eSignEnvelope: {
-        findUnique: async () => ({ executedDocumentKey: dealRow?.eSignEnvelope?.executedDocumentKey ?? null }),
+        findUnique: async () => ({ executedDocumentKey: dealRow?.eSignEnvelopes?.[0]?.executedDocumentKey ?? null }),
+        findMany: async () => (dealRow?.eSignEnvelopes ?? []).map((e) => ({ signerKind: e.signerKind, status: e.status })),
       },
     },
   },
@@ -55,7 +71,7 @@ const request = () => new NextRequest("http://localhost/api/dealer/deals/d1/cont
 
 beforeEach(() => {
   dealer = { id: "dealer_1" };
-  dealRow = { id: "d1", eSignEnvelope: { id: "env_1", status: "COMPLETED", executedDocumentKey: "executed/d1/env_1.pdf" } };
+  dealRow = { id: "d1", coBuyer: null, eSignEnvelopes: [{ id: "env_1", status: "COMPLETED", signerKind: "BUYER", executedDocumentKey: "executed/d1/env_1.pdf" }] };
   signedUrlCalls = 0;
   process.env.ESIGN_EXECUTED_ARTIFACT_ENABLED = "true";
 });
@@ -84,7 +100,7 @@ test("a DIFFERENT dealer cannot retrieve the contract → 404 (IDOR blocked, no 
 });
 
 test("before the buyer signs (no executed artifact) → 404 not-available", async () => {
-  dealRow = { id: "d1", eSignEnvelope: { id: "env_1", status: "SENT", executedDocumentKey: null } };
+  dealRow = { id: "d1", coBuyer: null, eSignEnvelopes: [{ id: "env_1", status: "SENT", signerKind: "BUYER", executedDocumentKey: null }] };
   const { GET } = await import("@/app/api/dealer/deals/[dealId]/contract/route");
   const res = await GET(request(), params);
   assert.equal(res.status, 404);

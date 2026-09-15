@@ -41,7 +41,7 @@ asserting something is never treated as evidence.
 
 | File | Expected SHA-256 | Observed SHA-256 (this session) | Result |
 | --- | --- | --- | --- |
-| `docs/transaction-flow/AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `a8f68aefb1b5214f13445bb340473e42e07191d3ac08ca678e7d546d9751bf62` | `a8f68aefb1b5214f13445bb340473e42e07191d3ac08ca678e7d546d9751bf62` | **VERIFIED — match** |
+| `docs/transaction-flow/AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `a8f68aefb1b5214f13445bb340473e42e07191d3ac08ca678e7d546d9751bf62` **(superseded at the Phase 8 close — see below)** | `a8f68aefb1b5214f13445bb340473e42e07191d3ac08ca678e7d546d9751bf62` at Phase 8 STOP 1; `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` after the owner-authorised §34 correction | **VERIFIED — match at read time; then MOVED BY OWNER INSTRUCTION, one clause, recorded in §8.1h** |
 | `docs/transaction-flow/AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | **VERIFIED — match** |
 | Stale Markdown hash to reject | `e1156882c25e84ceeec1a1b8fdc3e3a72aeb9a924918a180a9553eb12d203a05` | not observed | **Rejected — not present** |
 
@@ -95,7 +95,7 @@ for one later.
 | D5 | Markdown heading numbering: Stage 13's sub-sections are titled 14a–14d and Stage 18's are 19a–19c; HTML `FIN_CP` labels "Financing completed" as Stage 15 while the Markdown places it in Stage 14. | Label drift only. This plan cites Markdown line numbers, never sub-section labels, to avoid ambiguity. |
 | D6 | HTML `S[]` Stage 5 buyer column says Premium may be added "any time before accepting an offer"; Markdown §5b and §23.2 say the window stays open "until funding clears". | Markdown governs (window closes at funding clearance). The HTML line is presentational shorthand for the Stage 5 screen; the buyer copy on that screen will state the Markdown rule. |
 
-| D7 | **Internal to the Markdown, not a difference between the files (recorded 2026-09-09).** §34's acceptance-test list (L1572) says "an unpaid Premium balance reverting to Standard **at acceptance**"; §22 L1031, Stage 14 L843, §23.2 L1149, §23.4 L1199, §26 L1281 and §27 L1350 all put the reversion at **funding clearance**, several stages later. | Stale §34 phrasing, not a live ambiguity: one clause against six. Already routed to an owner decision by `tests/T37` ("spec: at acceptance; plan: at funding clearance / window close"; owner decision: revert point) at **Phase 8**, which is where the close predicate lands because nothing writes `deals.funding_cleared_at` until then (§11.6 rulings 2–3). Phase 3 is unaffected — it records only the window OPEN. Left in place deliberately rather than edited here, so the owner decision at Phase 8 rules on the specification's own words rather than on a correction already made for them. |
+| D7 | **Internal to the Markdown, not a difference between the files (recorded 2026-09-09).** §34's acceptance-test list (L1572) says "an unpaid Premium balance reverting to Standard **at acceptance**"; §22 L1031, Stage 14 L843, §23.2 L1149, §23.4 L1199, §26 L1281 and §27 L1350 all put the reversion at **funding clearance**, several stages later. | Stale §34 phrasing, not a live ambiguity: one clause against six. Already routed to an owner decision by `tests/T37` ("spec: at acceptance; plan: at funding clearance / window close"; owner decision: revert point) at **Phase 8**, which is where the close predicate lands because nothing writes `deals.funding_cleared_at` until then (§11.6 rulings 2–3). Phase 3 is unaffected — it records only the window OPEN. Left in place deliberately rather than edited here, so the owner decision at Phase 8 rules on the specification's own words rather than on a correction already made for them. **RULED AND CORRECTED AT PHASE 8 (2026-09-15): funding clearance.** The owner ruled the revert point at funding clearance and instructed the clause be corrected in the implementing commit. §34 L1572 now reads "reverting to Standard **at funding clearance**". **The clause was STALE AND CORRECTED, NOT OVERRULED** — that distinction is the record: one clause disagreed with six others in the same document, so the ruling restored the specification's own internal consistency rather than overriding it. This is the FIRST and only edit to a governing specification in this programme; it moves that file's SHA-256 from `a8f68aef…bf62` to `71456998…ab90`, both recorded in §1 and in §8.1h. |
 
 **Conflicts requiring STOP:** none found.
 
@@ -799,7 +799,7 @@ block. This rule is about reviews already running.
 | 5 | **Dealer sourcing ladder, validation, invitations, launch readiness; identity firewall** (built here; the *lift* at reaffirmation is Phase 7 — §11.6) | Stage 6 (6a–6c), Stage 7, §25, §26 sourcing/invitation rows, §27.1 sourcing/auction rows | S[5..6]; MONEY_PANELS “Identity and circumvention” | 7, 8, 9, 29 | 3, 4 |
 | 6 | **Offers, validation, ranking, close, selection, Deal lineage, Premium invitation** — **AS BUILT 2026-09-14, §8.1f** | Stage 8 (8a–8c), Stage 9 (9a), §22a ranking rows, §23.2a touchpoints 2–4, §26 offer/selection rows, §27.1 offer/selection rows | S[7..8]; PLAN_SEQ rows 2–4 | 10, 12 (Deal creation half), 15 (touchpoints) | 5 |
 | 7 | **Dealer reaffirmation, vehicle hold, disclosure, material changes, outside-winner verification, deal recap, financing checkpoints, `credit_applications` freeze** — **AS BUILT 2026-09-14, §8.1g** | Stage 10 (10a–10c), Stage 11 (11a–11b), Stage 12 (12a–12d), §23.2a touchpoint 5, §26 rows, §27.1 rows | S[9..11]; FIN_CP; FIN_PANELS | 12, 13, 14, 27 (reaffirmation consequences) | 6 |
-| 8 | **Contract request, Contract Shield, buyer + co-buyer signing, dealer execution, financing completion & funding clearance, insurance review** | Stage 13 (14a–14d), Stage 14, Stage 15, §26 rows, §27.1 rows | S[12..14] | 16, 17, 18, 19 (activation owner-gated), 20 | 7 |
+| 8 | **Contract request, Contract Shield, buyer + co-buyer signing, dealer execution, financing completion & funding clearance, insurance review** — **AS BUILT 2026-09-15, §8.1h** | Stage 13 (14a–14d), Stage 14, Stage 15, §26 rows, §27.1 rows | S[12..14] | 16, 17, 18, 19 (activation owner-gated), 20 | 7 |
 | 9 | **Pickup readiness, scheduling, release token, reminders, handover, possession, atomic completion, post-completion obligations** | Stage 16–21, §26 rows, §27.1 rows | S[15..20] | 21, 22, 26, 27 (no-show/overdue consequences) | 8 |
 | 10 | **Control-plane completion: cancellation orchestration, exception register, communications register, legacy neutralisation, cross-portal parity** | §24, §26 (all 48 rows wired), §27.1 (all 76 rows wired), §28.3, §29 (re-verified), §25.2 consequences | EXC; SAFE; TRANSITION; every portal status surface | 25, 27, 23/24 (completeness) | 9 |
 | 11 | **Acceptance** (no new capability) | §34, §35, master §13 | ACCEPT | — | 10 |
@@ -1972,6 +1972,415 @@ of the money — golden rule 2, and the reason #6 existed at all. `test:buyer-ui
 `a0b573ac` for a directory that is now empty, is REMOVED from `package.json`; the relocated tests
 are covered by the bare `test` script and `test:all` is back to main's 70 segments.
 
+### 8.1h Phase 8 — AS BUILT (2026-09-15)
+
+Implemented on `claude/txflow-08-contract` from base `12e9b29e`. This section records how the phase
+was actually built where that differs from how it was planned, and carries the mandatory
+before → after capability map. **Nothing was applied to production and no migration was run** — the
+two migrations are authored and proved on a throwaway loopback database, and applying them is the
+owner's under the per-run protocol in CLAUDE.md. This session held **no database credential of any
+kind**, so every statement about production state below is marked NOT VERIFIED and is not asserted.
+
+#### Core rule 11 IN REVERSE — the named instance, and the front of the migration plan
+
+This phase carries the programme's first constraint **widening**, and it is recorded here as a
+named instance because the failure mode is inverted and the correction came from inside the phase
+rather than from a reviewer.
+
+§13-D30 needs a deal to hold more than one e-sign envelope — one per required signer. That means
+`e_sign_envelopes.deal_id` loses its unique index. Core rule 11 was written for a constraint that
+**narrows**: the danger is code that relied on a guarantee which no longer holds, and it is
+invisible because nobody edited that code. **Widening inverts every row of that table except the
+last one:**
+
+| | a constraint narrows | **a constraint widens** |
+| --- | --- | --- |
+| The change | a guarantee is removed | a guarantee is removed |
+| What breaks | readers that relied on the guarantee | readers that relied on the CARDINALITY |
+| When it breaks | as soon as a violating row exists | **only once a SECOND row exists** |
+| Test sees it | only if a fixture models the cardinality | **only if a fixture creates two rows — and none did** |
+| The check | list every reader and re-derive each | **list every reader and re-derive each** |
+
+The consequence is the part worth keeping: **with one row per deal, every old reader still returns
+the right answer.** A to-one join, a `findFirst` with no ordering, a "the envelope" variable — all
+of them keep working, in development, in CI and in production, until the day the first co-buyer
+signs. Nothing goes red. There is no window in which the defect is visible before it is harmful.
+
+**THE CORRECTION MADE AGAINST MY OWN PLAN, and it is the front of the migration plan rather than a
+footnote.** The first plan sequenced the Prisma schema change and the DDL as two steps, taking the
+schema change to be the risky half and the `DROP INDEX` to be the safe one. That is backwards:
+
+- Removing `@unique` from the defining side of a relation Prisma still believes is to-one **hard
+  fails `prisma validate`**. It cannot ship silently. It is the LOUD half.
+- Dropping the database index while the schema still says `@unique` is the **SILENT** half. Prisma
+  keeps emitting a to-one join, the client keeps type-checking, every existing reader keeps
+  compiling — and the database now permits the second row that makes all of them wrong.
+
+**So the schema change and the DDL ship as ONE unit** (commit `fdae979`), and the DDL alone is the
+failure to guard against. The migration additionally refuses to run unless the replacement
+composite index already exists and no deal already holds two envelopes, so the guarantee is never
+absent even for the length of one transaction.
+
+**The enumeration, which is what core rule 11 actually asks for.** `Deal.eSignEnvelope` was renamed
+to `Deal.eSignEnvelopes` **deliberately, to weaponise the compiler**: a rename cannot be
+compiled-through, where a type change from `T` to `T[]` could be in places that only tested for
+truthiness. It produced **127 compile errors across 32 production sites**, and every one was
+re-derived by hand against `requiredSignersForDeal`. A silent `findFirst` was never possible,
+because no call site survived.
+
+#### The owner's rulings, as built
+
+§13-D4, D28, D29, D30, D31, D32, D33 and D34 are each recorded on their own §13 row. Two of those
+rows were **amended by the ruling rather than merely answered by it**, and both amendments are on
+the rows themselves:
+
+- **§13-D29** — the row asserts that either option "adds `deals.dealer_executed_at`". The ruling
+  departed from that wording. Phase 1 never added that column; it added the stronger
+  `deals.dealer_executed_contract_id`, a foreign key to the stored executed copy. A timestamp
+  records THAT execution happened; the FK records WHICH artifact it happened to, and §14d asks for
+  a stored fully-executed copy with a hash, not a moment. Adding the timestamp beside it would
+  create a second, weaker source of truth for one fact. **No new column was added**; execution is
+  recorded on the FK plus a `DealStatusHistory` row, which already carries the time, the actor and
+  the reason.
+- **§13-D32** — the row offers "a new `FINANCE_ADMIN` role" as the alternative to its proposal.
+  That alternative does not exist: `FINANCE_ADMIN` is already a member of the `AdminRole` enum
+  (`prisma/schema.prisma:1833`) and already one of the two roles the MONEY tier resolves to
+  (`lib/auth/permissions.ts:54`). The proposal and the alternative were the same thing described
+  twice — a choice with one option. Measured in the code before the ruling was taken, not recalled.
+
+**THE PATTERN, stated because it recurred twice in one phase and will recur again.** The §13 rows
+were written **before the code was read**. They are a faithful record of what was believed at
+survey time, and that is exactly why a recommendation that contradicts one is more often right than
+wrong: the contradiction is usually the code disagreeing with a belief formed without it. Neither
+D29 nor D32 was a judgement call about design — both were the register being factually out of date
+about this repository. The correct handling is the one used here: name the contradiction, cite the
+file and line, and amend the row — never quietly implement around it, and never implement the row
+against the evidence.
+
+#### The §34 correction — stale, not overruled
+
+§2 difference **D7** recorded that §34's acceptance-test list (L1572) put the unpaid-Premium
+reversion "at acceptance" while §22 L1031, Stage 14 L843, §23.2 L1149, §23.4 L1199, §26 L1281 and
+§27 L1350 all put it at **funding clearance** — one clause against six — and deliberately left the
+clause unedited so the Phase 8 owner decision would rule on the specification's own words.
+
+The owner ruled **funding clearance** and instructed the clause be corrected in the implementing
+commit. It now reads "reverting to Standard **at funding clearance**".
+
+**The clause was STALE AND CORRECTED, NOT OVERRULED.** That distinction is the record. The ruling
+did not override the specification; it restored the specification's internal consistency, which one
+sentence had broken. Had it been an override, the six agreeing clauses would have been the thing
+overridden.
+
+This is the **first and only edit to a governing specification in this programme**, and it moves a
+hash that every prior phase verified against:
+
+| File | Before | After | Change |
+| --- | --- | --- | --- |
+| `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `a8f68aefb1b5214f13445bb340473e42e07191d3ac08ca678e7d546d9751bf62` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | §34 L1572, three words |
+| `AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | unchanged | — |
+
+Both values were verified at STOP 1 against §1 before a line was read, so every §-citation in this
+record refers to text that was hash-verified at read time. §1's table carries both values.
+
+#### The hard rule, and where it is enforced
+
+**No conditional or spot delivery. A vehicle is never released on the expectation that financing
+will complete later.** This is structural, not procedural:
+
+- `clearFunding()` has **no override parameter at all** — not a `force`, not an admin bypass. The
+  only way past it is satisfying all six items.
+- Clearance item 1 requires financing at **`COMPLETED`**, not `TERMS_LOCKED`. A locked rate is a
+  promise; a completed funding is a fact.
+- The transition map opens `DEALER_EXECUTED → FUNDING_PENDING` and **does not** open
+  `SIGNED → PICKUP_READINESS` or `SIGNED → PICKUP_SCHEDULED`. Before this phase both were open and
+  pickup scheduling reached them with `force: true` — a buyer could sign, schedule a pickup and
+  take delivery of a vehicle the dealership had never countersigned.
+- `FUNDING_PENDING → PICKUP_READINESS` is deliberately **left closed here**. Phase 9 opens it with
+  its own driver, so this phase cannot accidentally ship a release path it does not own.
+
+**THIS SECTION ALSO OVERSTATED ITS CASE, and the correction is the substance.** It claimed the
+rule was "structural, not procedural" while **no release gate read `funding_cleared_at` at all**.
+The transition map was the whole of the enforcement, and the transition map is not the only way a
+deal reaches release:
+
+- `schedulePickup` advanced with **`force: true`** from ANY status, so an admin could schedule a
+  pickup on an unsigned, un-executed deal with financing still `IN_PROGRESS`;
+- the dealer QR scan then advances straight to `COMPLETED`, and its only gate was **insurance**.
+
+Between them, the exact conditional delivery §Stage 14 forbids was reachable through two admin and
+dealer screens — the defect §8.2's own defect (1) says Phase 8 fixes, unfixed, under a claim that
+it had been. Found by the independent review, not by this phase.
+
+**What makes it structural now.** `advanceDealStatus` hard-gates `COMPLETED` on **three** facts
+rather than one — `INSURANCE_SATISFIED`, `dealerExecutedContractId` and `fundingClearedAt` — checked
+at WRITE time against the row as read, so they hold whatever route got the deal there. A new
+`ReleaseNotClearedError` is kept distinct from `InsuranceRequiredError` because the two are told to
+different people: an insurance gap is the buyer's to close, an uncleared funding is AutoLenis's and
+the dealership's. The `force: true` in `schedulePickup` is gone. `force` still overrides the gates
+for an audited admin, and still records that it did in `DealStatusHistory` — which is the difference
+between an override and a gap, and why a release that no human can ever unblock is not the goal.
+
+#### The before → after capability map
+
+Every route, control, action and workflow this phase touched, with a disposition. Counts reconcile.
+
+| # | Capability | Disposition | Where it went |
+| --- | --- | --- | --- |
+| 1 | Admin types `CONTRACT_PENDING` into `POST /api/admin/deals/[dealId]/action` | **KEPT** | unchanged; it now also fires the arrival hook every other path fires |
+| 2 | The single deadline-free contract email | **MOVED + PROGRESSIVE** | `openContractRequest()` from the central transition, with a 24-hour `document_requests.dueAt`, a future-dated reminder and an escalation |
+| 3 | Insurance as a gate on entry to `CONTRACT_PENDING` | **MOVED** | §13-D28: requested at contract request, enforced at RELEASE. Not removed — relocated to the stage that owns it |
+| 4 | `Deal.eSignEnvelope` (to-one) | **RENAMED + REGROUPED** | `Deal.eSignEnvelopes` (to-many) keyed `[dealId, signerKind]`; 32 sites re-derived |
+| 5 | Buyer signing ceremony | **PROGRESSIVE** | now shows the Shield verdict bound to the scan that judged the signed version |
+| 6 | Co-buyer signing | **NEW — complete, under a separate conditional authorization** | Required only when `CoBuyer.isRequiredSigner`. The tokenised invited-signer link (`/esign/invited/[token]`) is the co-buyer's route to the ceremony, with no second account, per §13-D30. *This row read **NEW — PARTIAL** while the surface was withheld, and the withholding is recorded below rather than erased — the sequence is the point* |
+| 7 | `SIGNED → PICKUP_*` edges | **MOVED** — *this row said REMOVED and said the capability was preserved; both halves were wrong. See the correction below* | The edge now runs `FUNDING_PENDING → PICKUP_SCHEDULED`: pickup is reachable only AFTER the six-item clearance list, where before Phase 8 a buyer's signature reached it directly |
+| 8 | Contract Shield scan | **PROGRESSIVE** | gained `APR_VALIDATION`, `PAYMENT_PACKING`, `DISCLOSURE_CHECK`, `FINANCE_MARKUP`, and the comparison against the confirmed recap |
+| 9 | Three ad-hoc `contractVersion` writers | **REGROUPED** | one canonical service; the three are neutralised, reported, not deleted |
+| 10 | Funding clearance | **NEW** | the six-item list, buyer-visible from `DEALER_EXECUTED` |
+| 11 | Premium upgrade window | **PROGRESSIVE** | closes at funding clearance; an unpaid election reverts through `recordRequestPlanElection` so all three stores agree |
+| 12 | Insurance review | **NEW** | `EXTERNAL_UPLOADED → UNDER_REVIEW → VERIFIED \| POLICY_BOUND \| REJECTED \| EXPIRED`; an upload is never approval |
+| 13 | Financing change after execution | **NEW** | a FULL return path — envelopes voided, contract versions and recap superseded, both confirmations cleared — never a status flip |
+
+**Reconciliation: 13 capabilities · KEPT 2 · MOVED 3 · REGROUPED 2 (one shared with RENAMED) ·
+PROGRESSIVE 4 · RENAMED 1 (shared) · NEW 4 · REMOVED 0.** One capability (row 6) required a
+separate authorization beyond the phase's own scope and is recorded with both its withholding
+and its authorization; one (row 7) was mis-recorded as REMOVED and is corrected below.
+
+**Out of scope, and named so a future reader does not mistake it for Phase 8's.** Commit
+`5df4e44` widens `.claude/settings.json` — `defaultMode: acceptEdits` plus repo-scoped file
+tools — so the phase would not stall on permission prompts. It is a **control-plane change,
+unrelated to Stages 13–15**, requested by the owner and kept on this branch by the owner's
+ruling rather than split into its own PR (splitting it would cost a full CI cycle for two
+lines that revert independently). It is not part of the capability map and implements no
+requirement row.
+
+#### The capability map was WRONG, and the invariant caught nothing
+
+This is recorded in full rather than corrected in place, because the failure is the interesting
+part and a silently amended map teaches nobody.
+
+Row 7 originally read **REMOVED**, with the justification *"the capability it served (reaching
+pickup) is preserved through the correct predecessor."* **That sentence was false when it was
+written.** Closing `SIGNED → PICKUP_SCHEDULED` was right — it was the spot-delivery edge — but
+nothing was opened in its place. Measured after the independent review raised it:
+`PICKUP_SCHEDULED` had **ZERO inbound edges**. `pickup-coordination.service.ts` advances to it
+NON-forced, so every dealer confirmation threw `DealTransitionError`, and every buyer saw
+*"We couldn't confirm the pickup right now. Please try again."* — forever. Pickup was not moved.
+It was destroyed.
+
+**Why nothing went red.** `pickup-coordination.test.ts` mocks `advanceDealStatus`, so the unit
+suite never consults the transition map. The Phase 8 e2e spec asserted the **removal**
+(`canTransition("SIGNED","PICKUP_SCHEDULED") === false`) and never asked whether pickup was still
+reachable from anywhere. Both suites were green on a broken ladder, because both tested the half
+of the change that was intended.
+
+**Three lessons, kept because they generalise past this row:**
+
+1. **A map that says MOVED must name where it moved TO, as an edge that exists.** "Preserved
+   through the correct predecessor" is a claim about the graph, and it was never checked against
+   the graph. The capability-preservation invariant is only as good as the evidence behind each
+   disposition — writing MOVED in a table is not evidence.
+2. **Assert the property, not the change.** A test that pins the edge you closed passes on a
+   system where nothing works. The regression test added for this is a WALK of the whole ladder —
+   `SIGNED → DEALER_EXECUTED → FUNDING_PENDING → PICKUP_SCHEDULED → COMPLETED` — plus the
+   skip-a-rung cases, because the defect lived in the GAP between two edges that were each
+   individually correct.
+3. **This is core rule 11 in reverse again, in a third shape.** The cutover section above records
+   the constraint-widening form. This is the transition-map form: removing an edge breaks callers
+   who never mentioned it, nobody edits their code, and the compiler cannot see a string-keyed
+   graph. The check is the same sentence with one word changed: *list every caller that depends
+   on this edge, and re-derive each.* Three did — the buyer proposal gate, `CONFIRMABLE_DEAL_
+   STATUSES`, and the admin scheduler — and none was re-derived until the review forced it.
+
+**The corrected disposition is MOVED**, and the destination is `FUNDING_PENDING →
+PICKUP_SCHEDULED`. That is strictly stronger than what this repository had before Phase 8: pickup
+is now reachable only after the six-item clearance list, where a buyer's signature used to reach
+it directly. **No capability is REMOVED by this phase.**
+
+#### Parity rows
+
+§10.9 carries **79 rows — P1 11, P3 1, P8 65, P11 2** (the section header's own count, reconciled
+row by row rather than recalled). The **65 P8 rows** are this phase's scope and are satisfied by the
+services, routes, surfaces, migrations and tests in the seven commits above. The 11 P1 rows were
+satisfied by the Phase 1 wave, the single P3 row records the Premium window OPEN, and the 2 P11 rows
+are acceptance-time.
+
+#### The proof, and its honest limit
+
+`docs/transaction-flow/phase-8-proof/` carries `preflight.sql`, `verify.sql`, `behaviour.sql` and
+`run-proof.sh`. The run is **PASS but DEGRADED**: 10 preflight assertions CHECKED, 16 verify
+assertions PRESENT across both halves (physical schema AND `_prisma_migrations`), 6 behaviour
+assertions genuinely executed, the rollback round-trip digest-identical, drift at 344.
+
+**DEGRADED because the available PostgreSQL is 16.13, not production's 17.6.** No Docker daemon is
+available and `apt.postgresql.org` returns 403 through the proxy. The version actually seen is
+recorded rather than approximated, and the phase-1-proof harness's refusal of anything but 17.x is
+accepted as stated: **NOT VERIFIED locally, verified by CI.**
+
+**Two defects in the proof itself, found by the proof and worth more than the proof.** The first
+behaviour run was **VACUOUS**: the opening `INSERT` omitted `users.supabase_id` (NOT NULL), the
+transaction aborted, every subsequent assertion was skipped — and the harness still printed
+"6 assertions, all rolled back" and reported success. A proof that reports success while asserting
+nothing is worse than no proof, because it is believed. Fixed at the cause with a `proof_assertions`
+temp table that counts what actually **ran**, and a harness that requires 7 OK rows. **Verified in
+both directions**: re-breaking the fixture makes the run exit 1 with "only 0 behaviour assertions
+reported OK". The second: the preflight harness grepped its own prose and failed a clean run on an
+assertion labelled "(reported, never a BLOCK)"; it parses the verdict column now.
+
+#### The two CI landmines, disarmed in the same commit as the DDL
+
+Both were verified by the owner independently before the work began, and both fail the build in
+**either** direction — leaving them is a failure, and disarming them without the DDL is also a
+failure. They therefore ship in `fdae979` with the DDL, not as tidy-up:
+
+- `phase-1-proof/verify.sql:259-273` asserted `live_constraint_wrongly_dropped` — an assertion whose
+  whole purpose was to fail if exactly this index were ever dropped. It is **INVERTED, not deleted**,
+  to `signer_unique_replacement_absent`: the guarantee it protected still has an assertion, now
+  pointed at the composite index that replaced it.
+- `prisma/drift-baseline.json` carried four Phase-8 `deferredStatements`. A `deferredStatements`
+  entry matching nothing is itself a build failure, so all four are deleted with
+  `structuralStatements` re-pinned at 344.
+
+#### Defects fixed at the cause, each with a failing-first regression test
+
+Six were found by implementation and review; **the seventh was found by running the journeys**, which
+is the argument for running them.
+
+| # | Defect | Fixed at |
+| --- | --- | --- |
+| 1 | `SIGNED → PICKUP_*` open, reachable with `force: true` — spot delivery | the transition map |
+| 2 | `document_requests.dueAt` had no writer and `requestDocument()` had no callers | `openContractRequest()` |
+| 3 | Contract Shield scored without ever comparing against the agreed terms | `compareContractAgainstAgreedTerms()` |
+| 4 | `e_sign_envelope_history.signer_kind` declared but never created — `42703` on every archive write | migration `…000100` |
+| 5 | `@@index([coBuyerId])` declared but never created | migration `…000100` |
+| 6 | `alreadyOpen` inferred from a timestamp against a caller-supplied clock | `requestDocument` returns `reused` |
+| **7** | **The buyer's insurance request sat AFTER `openContractRequest`'s `no_dealer_channel` early return** | **decoupled — see below** |
+| **8** | **`PICKUP_SCHEDULED` had zero inbound edges — pickup was destroyed, not moved** | the transition map, plus the three callers |
+| **9** | **No release gate read `funding_cleared_at`; `schedulePickup` used `force: true`** | three hard gates in `advanceDealStatus` |
+| **10** | **Accepted optional products were compared by LABEL ONLY — the amount was never read** | `contract-comparison.service.ts`, both directions |
+| 11 | One Shield comparison finding scored EXACTLY the PASS threshold and auto-approved | the verdict, structurally — not the deduction |
+| 12 | `findMoneyNear` took "the next digits within 80 chars", `$` optional, crossing newlines | a currency-shaped token, bounded to the label's line |
+| 13 | The admin E-Sign tab read the retired to-one relation — a confident empty on every deal | one block per signer |
+| 14 | `DEAL_STAGES` lacked the two new stages, so a stuck deal had no admin route back | both added |
+| 15 | The command centre counted `EXTERNAL_UPLOADED` as Insurance done (§13-D31) | `UNDER_REVIEW` as a rendered third state |
+| 16 | Its E-Sign step asked "every envelope PRESENT" and fails OPEN on a partial failure | `allSignedFrom`, fail-closed both ways |
+| 17 | `recordDealerExecution` half-wrote then reported 201 on a silent `expectedFrom` no-op | the result is checked; `STATE_MOVED` → 409 |
+| 18 | §14d's executed copy was hashed and its location discarded | `contract_versions.executed_document_key` |
+
+**Defects 8 through 18 came from the independent adversarial review, and that is the argument for
+running one.** Eleven of eighteen. Two of them (8 and 9) falsified claims this very section had
+already made — that pickup was preserved, and that the no-conditional-delivery rule was structural.
+A phase that reviews itself finds the defects it was looking for.
+
+**Defect 7 is the instructive one.** A missing **dealership** email silently suppressed the
+**buyer's** insurance request: two independent facts about two different people, coupled by one
+`return`. Nothing went red — the request RECORD was still written, and Stage 15 blocks RELEASE
+rather than entry, so the deal ran the whole way to funding clearance and was then held on a
+document the buyer had never been asked for, with the hold naming insurance rather than the request
+that never went out. On the **concierge lineage** — which `deals_offer_lineage_check` explicitly
+permits (`offer_id IS NULL` when `vehicle_request_offer_id IS NOT NULL`) — `deal.offer` is null by
+construction, so that was **every such deal**. It is the same shape as the cutover above: correct
+for the common case, wrong for the case nobody had a fixture for.
+
+#### §13-D30's invited-signer link — WITHHELD, THEN AUTHORISED
+
+Recorded in two halves because the sequence is the point.
+
+**Withheld (2026-09-15, first wave).** `openSigningForRequiredSigners` created a `CO_BUYER`
+envelope and emailed a link to `/buyer/esign`, which calls `requireBuyer()` — Supabase auth —
+while §13-D30's own ruling is that the co-buyer has **no second account**. So the envelope was
+reachable by nobody, `signatureProgress.allSigned` never became true, `ensureDealSigned` never
+advanced, and **every deal with `co_buyers.is_required_signer` set deadlocked** until the
+envelope expired at 14 days. The fix needs a tokenised, unauthenticated route and a column to
+hash the token into. Both were written and withdrawn: a route that lets a party with no
+platform account legally execute a contract is a **server-authorization change**, and
+CLAUDE.md puts those behind separate explicit authorization. **The §13-D30 ruling settled the
+DESIGN. It was not the authorization for the surface.** Shipping the column alone would have
+been worse than shipping neither — a column with no writer reads as a capability that exists.
+
+**Authorised (2026-09-15, owner, with conditions).** The owner's reasoning is worth keeping:
+a design ruled and an authorization withheld is *a deadlock by construction*, and the
+precedent already exists in this codebase — Phase 2's claim tokens and Phase 5's invitation
+tokens are both tokenised, expiring, subject-bound and reachable without an account. **This is
+the same mechanism at higher stakes**, which is why it reuses `account-claim.service.ts`'s
+hashing and result shape rather than inventing a second token scheme.
+
+The six conditions **are** the authorization, so each is enforced in
+`lib/services/esign/invited-signer.service.ts` and pinned by its own test:
+
+| # | Condition | Enforced by |
+| --- | --- | --- |
+| 1 | **Single use** — consumed on signature, never replayable | `consumeSignerToken`, a CAS on `consumedAt: null`. Phase 5's **H2** was a token written and never consumed; that is the named mistake it exists not to repeat |
+| 2 | Bound to **both** the deal and the specific `co_buyers` row | `signerKind`, `coBuyerId` and `CoBuyer.buyerId === deal.buyerId` all re-checked, never inferred from the hash |
+| 3 | Short expiry, **ceilinged** by the 14-day contract expiry | 72-hour TTL, `min()`'d against `envelope.expiresAt`; both checked independently at resolve |
+| 4 | That surface and **nothing else** | `InvitedSignerView` asserted as an exact key set — a widening of what a bearer token discloses fails the test rather than shipping. First name only of the primary buyer |
+| 5 | Own consent snapshot, IP, user agent, adopted name | taken server-side from the request; the client cannot author its own audit trail |
+| 6 | Spent or expired renders a **named state**, not an error | six reasons, each its own sentence. Clicking twice reads *"You've already signed"* |
+
+**The deadlock is now unrepresentable rather than merely fixed.** `SignatureRequiredParams` is
+a union — `{ isCoBuyer: true; signerToken: string } | { isCoBuyer: false; signerToken?: never }`
+— so a co-buyer render without a token does not compile. A future caller cannot forget it.
+
+**Production was clear when the authorization was given** (owner-verified 13:43 UTC): zero
+`co_buyers` rows with `is_required_signer` set, so nothing was stuck while it was withheld.
+Failing closed was the correct interim.
+
+#### THE DEFECT CLASS THIS PROGRAMME KEEPS PRODUCING — name it, and test for it
+
+**Something reported success while checking nothing.** Six instances, across eight phases, in
+three different layers. Naming it here because the sixth was found the same way as the first,
+which means it is a class and not a run of bad luck:
+
+| # | Phase | Where | What reported success | What it had actually checked |
+| --- | --- | --- | --- | --- |
+| 1 | — | cron | a `COMPLETED` cron run | a sweep that had **failed** |
+| 2 | — | admin UI | a page showing **0** | a query that should have returned **17** |
+| 3 | 7 (#433) | test | a passing `buyerId` scanner assertion | **nothing** — the assertion was vacuous |
+| 4 | 8 | proof harness | *"6 assertions, all rolled back"* | **zero** — the transaction aborted on the first INSERT and every assertion was skipped |
+| 5 | 8 | test | `has("contract_overdue")` passing | `dedupKey`, not the `templateKey` **column** it claimed to read — so the row lookup beside it was silently `undefined` |
+| 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
+
+**The three layers matter.** #1 and #2 are runtime; #3, #4 and #5 are the tests and harnesses
+that are supposed to catch runtime; #6 is the *written record* that is supposed to describe
+both. The class reaches all the way up: a verification artefact is just as capable of
+asserting nothing as the code it verifies, and a prose claim is the least checkable artefact
+of all.
+
+**The counter-measure, and it is cheap.** *Before trusting any gate, prove it fails on a
+deliberately reintroduced defect.* Break the thing the gate exists to catch, watch it go red,
+restore, watch it go green. It costs one minute per gate and it is the only evidence that
+distinguishes a guard from a decoration. Phase 8's proof harness now counts assertions that
+actually ran and was re-broken to prove the counter works; each of the six invited-signer
+conditions was re-broken and its test observed to fail. **This is the opening instruction of
+the Phase 9 prompt.**
+
+Three tells, for the next reader:
+
+- **An assertion that cannot fail.** If no input makes it red, it is documentation.
+- **A test that reads the constant it validates.** `esign-schema-gate.test.ts` keeps its own
+  `GATED` list precisely so it is a second opinion rather than a mirror.
+- **A claim about a structure, made without querying the structure.** #6's "preserved through
+  the correct predecessor" is a statement about a graph; ten lines of code would have
+  falsified it, and none were written.
+
+#### Two spec defects, fixed before the run could be trusted
+
+- The browser journeys guarded on `E2E_STORAGE_STATE`, which `ci.yml` sets at the **job** level to
+  an ADMIN JWT session. The buyer pages are **Supabase**-authenticated (`requireBuyer` →
+  `redirect('/auth/signin')`, `lib/auth/session.ts:63`), so the guard would not have skipped — it
+  would have **failed CI on a redirect**. The narrow-viewport run moved to the admin e-sign list, a
+  Phase 8 surface this phase changed and one reachable with a session this repository mints
+  honestly; the buyer page keeps an assertion guarded on `E2E_BUYER_STORAGE_STATE` and skips as
+  **NOT VERIFIED**, which is the correct answer rather than a session to manufacture.
+- The outbox assertion read `templateKey` out of `payload` when it is a **column**, so the row
+  lookup was silently `undefined` while the presence checks still passed through `dedupKey` — the
+  "confident empty" shape this programme keeps guarding against, this time in the test.
+
+**The spec is registered in `ci.yml` in the SAME commit that adds it.** That is #433's lesson
+applied rather than restated: `tests/e2e/` is globbed by nothing and `check-test-coverage.ts`
+exempts the Playwright scripts from the `test:all` chain, so a spec that is not named in the
+workflow is a spec CI never runs — which is how Phase 7's fourteen journeys ran by hand only.
+
 ### 8.2 Phase scopes
 
 #### Phase 0 — Pre-schema security correction: shut down the authenticated SSN intake
@@ -2898,6 +3307,41 @@ change during Phase 6, deliberately and only where the phase was authorised to c
   neither; both are stated in §9 L637 and had no communications row at all. The second exists
   because §9's "buyer informed EITHER WAY" needs a row for the branch where nobody selects;
 - §13-D39, D40 and D41 recorded AS BUILT on their own rows.
+
+Its own hash is therefore new and is reported in the phase report and the pull request rather than
+pinned here.
+
+**Re-verified at the close of Phase 8 (2026-09-15) — AND THIS IS THE ONE PHASE WHERE A GOVERNING
+FILE MOVED.** At STOP 1, before a line of either specification was read, `sha256sum` returned the two
+values recorded in §1 — `a8f68aef…bf62` for the Markdown and `8c268f91…ff89` for the HTML — so every
+§-citation in the Phase 8 record refers to hash-verified text. The Markdown then changed, **once,
+by explicit owner instruction**, and the change is three words:
+
+| File | At STOP 1 | At the Phase 8 close | Change |
+| --- | --- | --- | --- |
+| `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `a8f68aef…bf62` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | §34 L1572: "at acceptance" → "at funding clearance" |
+| `AutoLenis-Transaction-Flow.html` | `8c268f91…ff89` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | none — **VERIFIED unchanged** |
+
+The correction is recorded in full at §2 D7 and §8.1h: the clause was **stale and corrected, not
+overruled** — one sentence disagreed with six others in the same document, and the ruling restored
+the document's own internal consistency. It is called out here rather than folded into the list
+below because "the specification did not move" has been true for every prior phase, and a reader of
+the next phase must not inherit that assumption by default. **§1's expected value for the Markdown
+is superseded from this commit forward**; §1's table carries both.
+
+This document itself also changed during Phase 8, deliberately and only where the phase was
+authorised to correct it:
+
+- the new §8.1h Phase 8 — AS BUILT section, carrying the core-rule-11-in-reverse instance, the
+  before → after capability map, the seven defects and the NOT VERIFIED list;
+- **§13-D29 amended** — the register said either option "adds `deals.dealer_executed_at`". Phase 1
+  never added that column, having added the stronger `deals.dealer_executed_contract_id` instead, so
+  the ruling departed from the row's wording and the row now says so;
+- **§13-D32 corrected** — the row offered "a new `FINANCE_ADMIN` role" as its alternative;
+  `FINANCE_ADMIN` already exists in the `AdminRole` enum and is already half of the MONEY tier, so
+  the row described one option twice;
+- **§2 D7 closed** and **§10.12 T37** marked AS BUILT, both by the §34 ruling above;
+- **§8.1 row 8** marked AS BUILT.
 
 Its own hash is therefore new and is reported in the phase report and the pull request rather than
 pinned here.
@@ -5826,7 +6270,7 @@ Source map: `parity/tests.md` at HEAD 0cd399f, with its "Verification correction
 | T34c | MD §34 L1572; HTML ACCEPT[1][8] | Upgrade from the touchpoint-5 email | No email CTA | MISSING | none | Email template test for touchpoint 5 (financing stage) with the same token and suppression rules | 7 | unit | `premium-touchpoints.test.ts` touchpoint 5 | none | none | TO IMPLEMENT |
 | T35 | MD §34 L1572; HTML ACCEPT[1][8] | Suppressed prompt during an open exception | No tests; no code | MISSING | none | Service test: open `queue_items` exception on the lineage → upgrade prompt suppressed on dashboard and in every email | 10 | unit | `lib/services/plan/__tests__/upgrade-suppression.test.ts` | none | none | TO IMPLEMENT |
 | T36 | MD §34 L1572; HTML ACCEPT[1][9] | Premium→Standard downgrade before and after the $400 settles | `app/api/buyer/plan/` holds only `upgrade/` + `__tests__/`; every `downgrade` hit unrelated (`lib/events/lifecycle-advance.ts:8`) | MISSING | `refund-deposit-charge.test.ts` idempotency pattern to reuse | Route + webhook tests: before settlement cancels intent; after settlement produces idempotency-keyed refund via the single refund primitive; re-upgrade case | 3 | unit, integration | `app/api/buyer/plan/__tests__/downgrade.test.ts` (both timings + replay) | refund/money-path activation | none | TO IMPLEMENT |
-| T37 | MD §34 L1572; HTML ACCEPT[1][9] | Unpaid Premium balance reverts to Standard (spec: at acceptance; plan: at funding clearance / window close) | No tests; no code (`grep plan.*revert` → 0) | MISSING | none | Test: `$400` intent never succeeded → plan snapshot reverts to Standard, fee row $0, Premium window closed; record the acceptance-vs-funding-clearance timing divergence | 8 | state-machine, unit | `release-checkpoints.test.ts` "unpaid election reverts" case | owner decision: revert point (acceptance vs funding clearance) | none | TO IMPLEMENT |
+| T37 | MD §34 L1572; HTML ACCEPT[1][9] | Unpaid Premium balance reverts to Standard (spec: at acceptance; plan: at funding clearance / window close) | No tests; no code (`grep plan.*revert` → 0) | MISSING | none | Test: `$400` intent never succeeded → plan snapshot reverts to Standard, fee row $0, Premium window closed; record the acceptance-vs-funding-clearance timing divergence | 8 | state-machine, unit | `release-checkpoints.test.ts` "unpaid election reverts" case | owner decision: revert point (acceptance vs funding clearance) — **RULED 2026-09-15: funding clearance**, and §34 L1572's "at acceptance" corrected as stale rather than overruled (§8.1h) | none | TO IMPLEMENT — **AS BUILT (Phase 8)** |
 | T38 | MD §34 L1572; HTML ACCEPT[1][9] | Concurrent completion attempts | `advance-deal-status.test.ts:106,112,128`; `scan-route.test.ts:205` (mocked Prisma only) | PARTIAL | CAS + exactly-once completion (mocked) | Add to the real-DB concurrency suite: N parallel scans / possession confirmations → exactly one `COMPLETED` event, one outbox set, in one transaction | 9 | concurrency | New `lib/services/deal/__tests__/complete-deal-concurrency.test.ts` under `test:concurrency` with `/autolenis_e2e/` guard, executed in the CI postgres job | none | Non-crypto pickup QR nonce | TO EXTEND |
 | T39a | MD §34 L1574; HTML ACCEPT[2][0] | Form-walk Playwright suite seeded (homepage, refinance, guest capture, duplicate submit) | No spec submits a public form; `dealer-funnel.spec.ts:33-118` walks authenticated dealer forms only; `ci.yml:300` runs `dealer-outreach.spec.ts` only | MISSING | CI E2E runs with no vendor credentials (`ci.yml:245-246`); specs skip with reasons | Create `tests/e2e/public-forms.spec.ts` under `playwright.e2e.config.ts` with per-form fixtures and Prisma assertions on lane rows; run in the `e2e` CI job | 2 | playwright, integration | `public-forms.spec.ts` homepage/refinance cases green in CI `e2e` job; DB assertion one buyer, one request | none | Two Playwright roots (`e2e/`, `tests/e2e/`) consolidated first (§12.2 item 4) | TO IMPLEMENT |
 | T39b | MD §34 L1574; HTML ACCEPT[2][0] | Every listed form walked (inventory, vehicle detail, shortlist, AMIPS, blog CTAs, social landing, affiliate links, conversational intake, callback, trade-in, prequal, dealer + affiliate application, support) | Same as T39a; `tests/visual/design-system.visual.spec.ts:20-26` screenshots 5 marketing pages only | MISSING | none | Extend `public-forms.spec.ts` to all 16 forms; each proves lane, attribution, ZIP, consent, no duplicate buyer/request | 11 | playwright | `public-forms.spec.ts` 16 cases; `ACCEPTANCE-REPORT.md` form-walk table | Supabase preview project (§12.3 preflight) for authenticated forms (shortlist, trade-in) | none | TO IMPLEMENT |
@@ -6530,10 +6974,10 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D26 | `holds` cron | DECISION | Phase 7 | Proposed: repurpose the documented no-op `app/api/cron/holds` for §10c vehicle-hold expiry (same schedule slot, `withCronRun`), rather than adding a new cron route. Alternative: delete it and add `vehicle-hold-expire`. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D27 | §5c "immediately" touch latency | ACKNOWLEDGEMENT | Phase 3 | The series runs on the every-minute `comms-outbox-drain` (`vercel.json` `* * * * *`), not the 15-minute `lifecycle-touch-drain` (`*/15 * * * *`); no schedule change is needed and the question in §10 *jobs* dissolves. **Verify after (added 2026-09-09 — an acknowledgement with no check cannot be closed as verified either way).** After the cutover, for the six-touch series: `SELECT max(extract(epoch FROM (dispatched_at - run_at))) FROM comms_outbox WHERE template_key LIKE 'deposit_reminder_%' AND dispatched_at IS NOT NULL` is **under 120 seconds** (two drain ticks, which is the honest bound on a once-a-minute cron — not zero), and `SELECT count(*) FROM lifecycle_touch_schedule WHERE sequence LIKE 'deposit_reminder_%' AND status='pending'` is **0**, which is what proves the series actually moved rather than running on both rails. | BLOCKING A NAMED LATER PHASE (Phase 3) |
 | D28 | Insurance leaves the contract-entry path | DECISION | Phase 8 | Code gates `INSURANCE_PENDING → CONTRACT_PENDING` (`deal.service.ts:320-330`); the spec requests insurance **at** contract request and never lets it block contract preparation. Proposed: insurance becomes a parallel track (`InsuranceStatus` on the Deal, release-gated at funding clearance/pickup), the `INSURANCE_PENDING` deal status is retained only for historical rows, and deals currently parked at `INSURANCE_PENDING` (count taken at Phase 8 preflight) are advanced by an audited admin action, not by migration SQL. | BLOCKING A NAMED LATER PHASE (Phase 8) |
-| D29 | Dealer execution mechanics (14d) | DECISION | Phase 8 | No dealer countersignature or executed-copy upload exists; the buyer's signature alone drives `SIGNED` and `SIGNED → PICKUP_SCHEDULED` is open. Proposed: in-app dealer countersign ceremony on the **same hashed version** through the existing e-sign engine (second signer role), producing the executed artifact; alternative: dealer uploads an executed package that is hash-checked against the approved version. Either adds `deals.dealer_executed_at` and a release gate. | BLOCKING A NAMED LATER PHASE (Phase 8) |
+| D29 | Dealer execution mechanics (14d) | DECISION | Phase 8 | No dealer countersignature or executed-copy upload exists; the buyer's signature alone drives `SIGNED` and `SIGNED → PICKUP_SCHEDULED` is open. Proposed: in-app dealer countersign ceremony on the **same hashed version** through the existing e-sign engine (second signer role), producing the executed artifact; alternative: dealer uploads an executed package that is hash-checked against the approved version. Either adds `deals.dealer_executed_at` and a release gate. | BLOCKING A NAMED LATER PHASE (Phase 8) **RULED 2026-09-15 — the UPLOAD-AND-HASH alternative, and the register's wording is AMENDED because the ruling departed from it.** The row says either option "adds `deals.dealer_executed_at`". It does not, and the departure is deliberate: Phase 1 never added that column, having added the STRONGER `deals.dealer_executed_contract_id` — a foreign key to the stored executed copy — instead. A timestamp records THAT something happened; the FK records WHICH artifact it happened to, and §14d's requirement is a stored fully-executed copy with a hash, not a moment. Adding the timestamp beside it would have created a second, weaker source of truth for one fact, against golden rule 1. So execution is recorded on `dealer_executed_contract_id` plus a `DealStatusHistory` row (which carries the time, the actor and the reason already), **no new column is added**, and the release gate is the `SIGNED → DEALER_EXECUTED → FUNDING_PENDING` edge pair with no bypass. **AS BUILT (Phase 8).** |
 | D30 | Co-buyer signer identity | DECISION | Phase 8 | Proposed: invited-signer link on the primary buyer's deal (own consent snapshot, IP/UA, adopted name; no second account), which keeps PII scope inside the deal. Alternative: a separate authenticated user, which needs account linking and widens consent evidence. | BLOCKING A NAMED LATER PHASE (Phase 8) |
 | D31 | `EXTERNAL_UPLOADED` insurance status | DECISION | Phase 8 | Proposed: retire from the satisfied set immediately (Phase 1 adds `UNDER_REVIEW/REJECTED/EXPIRED`, §13-D7); `EXTERNAL_UPLOADED` is treated as `UNDER_REVIEW` by the reader, and deals that already passed release on `EXTERNAL_UPLOADED` are left as history with an admin follow-up queue item, never re-gated retroactively. | BLOCKING A NAMED LATER PHASE (Phase 8) |
-| D32 | "Finance" role for Stage 14 recording | DECISION | Phase 8 | Proposed: no new role; `finance.*` permissions (`lib/auth/permissions.ts`, MONEY tier) already exist — funding-clearance recording joins them (`finance.funding.clear`) and `COMPLIANCE_ADMIN`/`OPERATIONAL_ROLES` are unchanged. Alternative: a new `FINANCE_ADMIN` role (a permissions-model change). | BLOCKING A NAMED LATER PHASE (Phase 8) |
+| D32 | "Finance" role for Stage 14 recording | DECISION | Phase 8 | Proposed: no new role; `finance.*` permissions (`lib/auth/permissions.ts`, MONEY tier) already exist — funding-clearance recording joins them (`finance.funding.clear`) and `COMPLIANCE_ADMIN`/`OPERATIONAL_ROLES` are unchanged. Alternative: a new `FINANCE_ADMIN` role (a permissions-model change). | BLOCKING A NAMED LATER PHASE (Phase 8) **RULED 2026-09-15 — ACCEPT the proposal (MONEY tier, `finance.funding.clear`). THE ROW'S STATED ALTERNATIVE DOES NOT EXIST AND IS CORRECTED HERE.** `FINANCE_ADMIN` is not a role this decision could create: it is already a real member of the `AdminRole` enum and already one of the roles the MONEY tier resolves to, so the "alternative" and the "proposal" were the same thing described twice — a choice with one option. Measured in the code before the ruling was taken, not recalled. `finance.funding.clear` is added to the MONEY tier and nothing about `COMPLIANCE_ADMIN` or `OPERATIONAL_ROLES` changes. **AS BUILT (Phase 8).** |
 | D33 | Contract Shield ledger rows (`20261016`) and the e-sign rows (`20261014/15`) | ACKNOWLEDGEMENT | Phase 1 (D1) | The contract map treats these as "LOCAL/STAGING ONLY"; production was probed on 2026-09-03 and **has** `contract_scans.contract_version_id` and the full e-sign schema (§5.2, §6.1 class (b)). The admin approve path is therefore not dead in production; only the ledger rows are missing and D1 records them. The stale "NOT APPLIED" annotations in the migrations are corrected in Phase 1. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — an ACKNOWLEDGEMENT of a production probe, not a decision |
 | D34 | Dealer upload during review | DECISION | Phase 8 | Spec: reject a new upload while a version is under review. Code: accept it and refuse the stale approval (fail-closed, weaker audit). Proposed: follow the spec (reject with a named reason; the dealer withdraws the version first), keeping the version-bound approval check as the second line. | BLOCKING A NAMED LATER PHASE (Phase 8) |
 | D35 | Sealed-auction semantics | DECISION | Phase 5 | §7 says the auction is sealed; the code offers dealers an anonymised competitiveness read (`app/api/dealer/auctions/[auctionId]/insights/route.ts`) and returns `offerCount` on the auction route. Proposed: keep sealed — no count, no position, no median before close; publish position insight only after close. Alternative: keep the anonymised median as a deliberate, documented exception. | BLOCKING A NAMED LATER PHASE (Phase 5) **RULED 2026-09-11 — KEEP SEALED.** `offerCount` is removed from the active dealer route (`app/api/dealer/auctions/[auctionId]/route.ts` returns `offerCount: null` while the auction is live and publishes it once CLOSED), the quick-offer page's unguarded median is deleted, and position is published only after close. `auction-insights-policy.ts` (`MIN_MEDIAN_SAMPLE = 4`, `mayPublishSegmentMedian`) is imported by BOTH the insights route and the insights page so the two cannot drift. Two defects fixed regardless of the ruling: the quick-offer page crashed on `_count` (now `offerCount: number \| null`, rendering "Sealed bidding"), and `AUCTION_EXTENDED` wrote no `AuctionExtensionLog` row — so an unaudited manual extension was indistinguishable from no extension when someone later asked why a deadline moved. **AS BUILT.** |

@@ -29,7 +29,12 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: { id: true, status: true } });
+  const envelope = await prisma.eSignEnvelope.findUnique({
+    // §13-D30: the admin acts on the PRIMARY signer's envelope. `dealId` alone stopped
+    // being a unique selector when the co-buyer gained one of their own.
+    where: { dealId_signerKind: { dealId, signerKind: "BUYER" } },
+    select: { id: true, status: true },
+  });
   if (!envelope) return adminError("NOT_FOUND", "Envelope not found", 404);
   if (envelope.status === "VOIDED") return adminError("CONFLICT", "Envelope is already voided", 409);
   if (envelope.status === "COMPLETED") return adminError("CONFLICT", "Cannot void a completed envelope", 409);

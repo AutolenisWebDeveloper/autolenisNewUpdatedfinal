@@ -31,14 +31,31 @@ export async function GET(request: NextRequest, { params }: Props) {
   // does not yet have. Only the status is needed here.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    select: { id: true, status: true, eSignEnvelope: { select: { status: true } } },
+    select: {
+      id: true,
+      status: true,
+      eSignEnvelopes: { select: { status: true, signerKind: true } },
+      coBuyer: { select: { isRequiredSigner: true } },
+    },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
-  await expireIfElapsed(dealId);
-  if (deal.eSignEnvelope?.status === "COMPLETED") await ensureDealSigned(dealId, buyer.id);
+  // §13-D30. WHICH ceremony this request is for. The co-buyer reaches the same route
+  // through their invited link with `?signer=co-buyer`; anything else is the buyer's own.
+  // A co-buyer ceremony is refused outright when the deal does not name one as a required
+  // signer, so the query parameter cannot conjure a signer the deal never had.
+  const requestedSigner =
+    new URL(request.url).searchParams.get("signer") === "co-buyer" ? "CO_BUYER" : "BUYER";
+  if (requestedSigner === "CO_BUYER" && !deal.coBuyer?.isRequiredSigner) {
+    return errorResponse("NOT_FOUND", "This deal has no co-buyer signer", 404);
+  }
 
-  const envelope = await readEnvelopeForDeal(dealId);
+  await expireIfElapsed(dealId, requestedSigner);
+  // Advance only when EVERY required signer is done — ensureDealSigned re-derives that
+  // itself, so this is a cheap pre-check rather than the decision.
+  if (deal.eSignEnvelopes.some((e) => e.status === "COMPLETED")) await ensureDealSigned(dealId, buyer.id);
+
+  const envelope = await readEnvelopeForDeal(dealId, requestedSigner);
   let contractViewUrl: string | null = null;
   // recordBuyerSignature fails closed while the schema gate is closed, so a
   // "signable" envelope would render a ceremony whose submit can only 503. Report
@@ -49,10 +66,39 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (signable && envelope?.documentVersionId) {
     // Record first-view evidence (best-effort) and mint a view URL.
     // Narrowed RETURNING — an unprojected update returns every scalar.
-    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() }, select: { id: true } }).catch(() => {});
+    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId_signerKind: { dealId, signerKind: requestedSigner } }, data: { viewedAt: new Date() }, select: { id: true } }).catch(() => {});
     const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
     if (contract) contractViewUrl = await getContractViewUrl(contract.documentUrl);
   }
+
+  // WHAT CONTRACT SHIELD FOUND, so the buyer can see it before signing.
+  //
+  // §14b describes a comparison run on the buyer's behalf, and the buyer had no way to see
+  // its result: the ceremony rendered the contract and asked for a signature with the
+  // review's outcome nowhere on the page. A buyer signing a legally binding contract is
+  // entitled to know what was checked and what came back — that is the entire product
+  // promise, and hiding it makes Contract Shield a thing we say rather than a thing they get.
+  //
+  // Bound to the SCAN THAT JUDGED THE SIGNED VERSION, not the newest scan on the deal. An
+  // earlier revision's findings shown against this document would be actively misleading.
+  const scan = envelope?.documentVersionId
+    ? await prisma.contractScan.findFirst({
+        where: { dealId, contractVersionId: envelope.documentVersionId },
+        orderBy: { scannedAt: "desc" },
+        select: { status: true, score: true, fixList: true, scannedAt: true },
+      })
+    : null;
+  // The fix list is written by AutoLenis's own rules and comparison — no buyer PII, no
+  // dealer identity, no internal ids beyond a rule key. Projected to the three fields the
+  // buyer needs rather than passed through whole, so a future field cannot leak by default.
+  const shieldFindings = Array.isArray(scan?.fixList)
+    ? (scan!.fixList as Array<Record<string, unknown>>).map((f) => ({
+        item: typeof f.item === "string" ? f.item : null,
+        found: typeof f.foundValue === "string" ? f.foundValue : null,
+        expected: typeof f.expectedValue === "string" ? f.expectedValue : null,
+        howToFix: typeof f.howToFix === "string" ? f.howToFix : null,
+      }))
+    : [];
 
   const fresh = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
   // §11: return ONLY a buyer-safe summary — never the raw envelope (which carries
@@ -65,6 +111,26 @@ export async function GET(request: NextRequest, { params }: Props) {
     dealStatus: fresh?.status ?? deal.status,
     contractViewUrl,
     signable: !!signable,
+    shield: scan
+      ? {
+          status: scan.status,
+          score: scan.score,
+          scannedAt: scan.scannedAt,
+          findings: shieldFindings,
+          // The checks Shield runs, stated so an empty findings list reads as "we looked and
+          // found nothing" rather than as "nothing was looked at" — which is the difference
+          // between reassurance and a blank panel.
+          checked: [
+            "Vehicle and VIN, and the odometer reading",
+            "Every out-the-door component against the recap you confirmed",
+            "Documentation fee, taxes, title and registration",
+            "Trade allowance and payoff figures, and your down payment",
+            "Financing terms — APR and length",
+            "Each optional product you accepted or declined, individually",
+            "Junk-fee patterns, fee caps, payment packing and required disclosures",
+          ],
+        }
+      : null,
   });
 }
 

@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { prepareBuyerSigningEnvelope } from "@/lib/services/esign/buyer-signing.service";
+import { openSigningForRequiredSigners } from "@/lib/services/esign/open-signing.service";
 import { approveContractVersionByAdmin } from "@/lib/services/dealer/dealer-contract.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import {
@@ -106,16 +106,27 @@ export async function POST(request: NextRequest, { params }: Props) {
         data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
 
-      // Prepare the in-house signing envelope (buyer signs in-app). Bound to the
-      // approved contract by hash; safe under re-run (dealId-unique upsert).
-      let envelopeId: string | null = null;
-      const prepared = await prepareBuyerSigningEnvelope(deal.id, { signerName: buyerName, signerEmail: buyerEmail })
-        .catch(err => { logger.error("[contract-shield] prepare signing envelope failed:", err); return null; });
-      envelopeId = prepared?.envelopeId ?? null;
-      if (!envelopeId) {
-        // Do not tell the buyer to sign something that has no envelope. Surface it
-        // to the admin instead of silently completing the action.
-        logger.error(`[contract-shield] APPROVE on deal ${deal.id}: signing envelope was not prepared`);
+      // §13-D30. Prepare an envelope for EVERY required signer and ask each of them.
+      // This route prepared exactly one — the buyer's — which was complete while a deal
+      // could hold one envelope and silently incomplete afterwards: a deal naming a
+      // required co-buyer would have advanced to SIGNING_PENDING with that signer never
+      // given an envelope and never told, and would then have waited on them forever.
+      const signing = await openSigningForRequiredSigners({
+        dealId: deal.id,
+        buyerName,
+        buyerEmail: buyerEmail ?? undefined,
+      }).catch((err) => {
+        logger.error("[contract-shield] opening signing failed:", err);
+        return { prepared: [], failed: [{ signerKind: "BUYER", reason: "unexpected failure" }] };
+      });
+      const envelopeId = signing.prepared[0]?.envelopeId ?? null;
+      if (signing.failed.length > 0) {
+        // Do not tell a buyer to sign something that has no envelope, and do not let a
+        // co-buyer's failure disappear into a log the admin never reads. Surfaced on the
+        // action's own response rather than silently completing it.
+        logger.error(`[contract-shield] APPROVE on deal ${deal.id}: signing not fully opened`, {
+          failed: signing.failed,
+        });
       }
 
       await prisma.notification.create({

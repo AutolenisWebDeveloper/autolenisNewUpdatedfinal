@@ -12,7 +12,11 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
 
-let dealStatus = "SIGNED";
+// FUNDING_PENDING, not SIGNED. §13-D29 and §Stage 14 moved the rung a pickup may be
+// proposed and confirmed from: the buyer's signature is no longer the last gate before a
+// vehicle moves, the six-item funding clearance is. Updating the fixture rather than the
+// guard is the point — the guard is the new rule.
+let dealStatus = "FUNDING_PENDING";
 let esignStatus: string | null = "COMPLETED";
 // null models a CONCIERGE (vehicle-request) deal: no Offer, and VehicleRequestOffer
 // carries no dealer identity — so no dealership exists to confirm a proposed time.
@@ -37,7 +41,12 @@ mock.module("@/lib/prisma", {
           id: "deal_1",
           buyerId: "buyer_1",
           status: dealStatus,
-          eSignEnvelope: esignStatus ? { status: esignStatus } : null,
+          // §13-D30: a LIST, one per required signer, plus the co-buyer flag that says who
+          // is required. The route now asks "has EVERY required signer completed?" — which
+          // for a buyer-only deal is the same question it asked before, and for a co-buyer
+          // deal is the one it was getting wrong.
+          eSignEnvelopes: esignStatus ? [{ status: esignStatus, signerKind: "BUYER" }] : [],
+          coBuyer: null,
           offer: dealerId ? { dealerId } : null,
         }),
       },
@@ -86,7 +95,7 @@ function post(body: unknown) {
 const VALID_BODY = { scheduledAt: "2026-02-14T20:00:00Z", location: "123 Dealer Drive, Dallas TX" };
 
 beforeEach(() => {
-  dealStatus = "SIGNED";
+  dealStatus = "FUNDING_PENDING";
   esignStatus = "COMPLETED";
   dealerId = "dealer_1";
   proposeResult = { ok: true, pickup: { id: "pickup_1", status: "PROPOSED" } };

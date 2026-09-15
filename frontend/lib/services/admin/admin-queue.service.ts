@@ -1,4 +1,5 @@
 // lib/services/admin/admin-queue.service.ts
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { listOpen, resolve as resolveException, OPEN_QUEUE_STATUSES } from "@/lib/services/operations/queue-item.service";
@@ -80,8 +81,32 @@ export async function resolveQueueItem(queueType: QueueType, itemId: string, adm
         break;
       }
       case "CONTRACT_FAIL":
-        await prisma.contractScan.update({ where: { id: itemId }, data: { status: "WARNING" } });
-        break;
+        // RETIRED BY PHASE 8 (§8.2 defect 5). This mutated a PRIOR SCAN from FAIL to
+        // WARNING in place. A ContractScan is the record of what Contract Shield found
+        // when it read a specific document — evidence, not a status field. Rewriting it
+        // destroyed the finding: the deal's history then showed a contract that had
+        // always been a warning, and the dealer's violation-pattern record lost the
+        // failure it was built from. It is also the one mutation that made the append-only
+        // scan history untrue, which is the property the whole review trail rests on.
+        //
+        // A FAIL is resolved by the dealership uploading a corrected package, which is
+        // scanned in full and produces a NEW scan row — so the history shows a failure
+        // followed by a pass, which is what actually happened. If the finding was wrong,
+        // the reviewer approves the version through the Contract Shield queue, and that
+        // decision is appended to the scan's changeLog rather than overwriting its verdict.
+        await recordLegacyPathWrite({
+          kind: "LEGACY_CONTRACT_APPROVAL",
+          detail: "admin queue CONTRACT_FAIL resolve — stood down, prior scan verdict left intact",
+          entityType: "ContractScan",
+          entityId: itemId,
+          removalPhase: 10,
+        });
+        throw new Error(
+          "A Contract Shield FAIL cannot be resolved by editing the scan. The scan is the record of " +
+            "what was found in a specific document. Either the dealership uploads a corrected package " +
+            "(which is rescanned and appends a new verdict), or a reviewer approves the version in " +
+            "/admin/contract-shield, where the decision is bound to the document it judged.",
+        );
       case "SYSTEM_ALERT":
         // Marking a mirrored alert read. This is not exception resolution — the
         // §26 register is TRANSACTION_EXCEPTION below.

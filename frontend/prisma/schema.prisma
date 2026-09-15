@@ -770,7 +770,11 @@ model Deal {
   buyer                     Buyer                      @relation(fields: [buyerId], references: [id])
   offer                     Offer?                     @relation(fields: [offerId], references: [id])
   vehicleRequestOffer       VehicleRequestOffer?       @relation(fields: [vehicleRequestOfferId], references: [id])
-  eSignEnvelope             ESignEnvelope?
+  // Phase 8 (§13-D30). Was `eSignEnvelope ESignEnvelope?`. A deal now carries one envelope per
+  // REQUIRED SIGNER, so this is a list — and it is RENAMED deliberately: leaving the old name on a
+  // list would let a consumer keep compiling while its meaning changed underneath it. Every reader
+  // is now a compile error that has to be answered with "whose signature does this mean?".
+  eSignEnvelopes            ESignEnvelope[]
   eSignEnvelopeHistory      ESignEnvelopeHistory[]
   pickup                    Pickup?
   financing                 Financing?
@@ -910,7 +914,13 @@ model ViolationPatternRecord {
 
 model ESignEnvelope {
   id                 String      @id @default(uuid())
-  dealId             String      @unique @map("deal_id")
+  // Phase 8 (§13-D30) CUTOVER. `@unique` was removed here in the SAME change as the migration that
+  // drops `e_sign_envelopes_deal_id_key` — the two are one unit. Dropping the index while leaving
+  // `@unique` here is the SILENT failure: Prisma would keep emitting a to-one join and hand back
+  // whichever of the two rows the planner returned, with no error anywhere. (The reverse is loud:
+  // removing `@unique` alone fails `prisma validate` outright — "A one-to-one relation must use
+  // unique fields on the defining side" — so the schema half can never ship on its own.)
+  dealId             String      @map("deal_id")
   // Historical/deprecated: the external DocuSign envelope id for records signed
   // before AutoLenis moved to in-house signing. Retained for backward
   // compatibility with pre-cutover deals; never written by the in-house flow.
@@ -991,11 +1001,46 @@ model ESignEnvelope {
   // attempt, so terminal signing evidence is never mutated or recycled.
   attemptNumber Int @default(1) @map("attempt_number")
 
+  // ── Phase 8 (§13-D30): the signer axis ────────────────────────────────────
+  // Both columns and the composite unique were created by Phase 1's transaction spine
+  // (20261106000100:408-409, :1114-1115) and deliberately left UNDECLARED here, because the
+  // schema gate below projects an explicit column list and an undeclared column cannot leak into
+  // an ungated read. Phase 8 owns e-sign, so this is where they land.
+  //
+  // `signerKind` is NOT compliance-gated — it is a spine column, present in production since the
+  // Phase 1 wave — so it belongs in LEGACY_ENVELOPE_SELECT, not in GATED_ENVELOPE_DEFAULTS.
+  signerKind ESignSignerKind @default(BUYER) @map("signer_kind")
+
+  // ─── §13-D30's invited-signer link (owner-authorised 2026-09-15) ──────────
+  //
+  // A required co-buyer has NO platform account, by the owner's own ruling, so the LINK is
+  // the credential. Same mechanism as Phase 2's claim tokens and Phase 5's invitation
+  // tokens — hashed at rest, single use, TTL-bounded — at higher stakes, and the
+  // authorisation carries six conditions that are enforced in invited-signer.service.ts
+  // rather than trusted to a caller.
+  //
+  // Only ever set on a CO_BUYER envelope; a BUYER signs through their own session. The row
+  // itself binds deal AND co-buyer (dealId + coBuyerId + the [dealId, signerKind] unique),
+  // and resolveSignerToken re-checks both rather than inferring them from the hash alone.
+  signerAccessTokenHash String? @unique @map("signer_access_token_hash")
+  // Own expiry, capped at the envelope's — a signing token never outlives the version it signs.
+  signerAccessTokenExpiresAt DateTime? @map("signer_access_token_expires_at")
+  // Single use. CAS on NULL at signature; Phase 5's H2 was a token written and never consumed.
+  signerAccessTokenConsumedAt DateTime? @map("signer_access_token_consumed_at")
+  // Set only on the CO_BUYER envelope. §13-D30 ruled the invited-signer model: the co-buyer signs
+  // through a link on the primary buyer's deal with their own consent snapshot, IP, user agent and
+  // adopted name, and never becomes a platform identity with its own login. That keeps the PII
+  // scope inside the deal, which is what §25.1 has been protecting since Phase 5.
+  coBuyerId String? @map("co_buyer_id")
+  coBuyer   CoBuyer? @relation(fields: [coBuyerId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
+  @@unique([dealId, signerKind])
   @@index([documentVersionId])
+  @@index([coBuyerId])
   @@map("e_sign_envelopes")
 }
 
@@ -1040,6 +1085,10 @@ model ESignEnvelopeHistory {
   executedDocumentKey   String?     @map("executed_document_key")
   executedDocumentHash  String?     @map("executed_document_hash")
   executedGeneratedAt   DateTime?   @map("executed_generated_at")
+  // Phase 8 (§13-D30). Whose attempt this was. Without it the archive collapses the buyer's and
+  // co-buyer's terminal attempts into one undifferentiated list, which is precisely the evidence a
+  // signature dispute turns on. Client-side only against the existing column default.
+  signerKind            ESignSignerKind @default(BUYER) @map("signer_kind")
   // When this terminal attempt was archived (superseded by a new attempt).
   supersededAt          DateTime    @default(now()) @map("superseded_at")
   createdAt             DateTime    @default(now()) @map("created_at")
@@ -2506,6 +2555,23 @@ model Financing {
   termsLockedAt        DateTime?             @map("terms_locked_at")
   verifiedAt           DateTime?             @map("verified_at")
   verifiedBy           String?               @map("verified_by")
+  // ── Phase 8 (§Stage 14): three of the six funding-clearance items ─────────
+  // Recorded HERE rather than on a new table because all three are financing facts about
+  // this deal's money, and `Financing` already carries the deal-time down payment, the
+  // verifier and the external reference. A `funding_clearance` table would have been a
+  // second home for the same subject, and the fourth, fifth and sixth items already have
+  // homes (the deposit's own status, the fee's refund marker, and the recap's
+  // payoff_good_through_date) — so a new table would have held half a concept.
+  //
+  // Item 2 — "Every external lender condition and stipulation is satisfied."
+  lenderConditionsClearedAt DateTime?         @map("lender_conditions_cleared_at")
+  // Item 3's second half — "...and its METHOD recorded by the dealership". The amount
+  // alone is a number nobody can reconcile; the method is what makes it an arrangement.
+  downPaymentMethod         String?           @map("down_payment_method")
+  // Item 4 — "The dealership confirms funding or funding authorization."
+  dealerFundingConfirmedAt  DateTime?         @map("dealer_funding_confirmed_at")
+  // Who recorded items 2-4. §12c: every recording names its verifier.
+  fundingRecordedBy         String?           @map("funding_recorded_by")
   // Phase 1 transaction spine (20261106000100) — back-relations.
   financingAuditEvents FinancingAuditEvent[]
 
@@ -3095,6 +3161,10 @@ model ContractVersion {
   documentHash                 String?               @map("document_hash")
   executedAt                   DateTime?             @map("executed_at")
   executedDocumentHash         String?               @map("executed_document_hash")
+  // §14d: "returns the fully executed copy ... STORES IT, records its hash". The hash was
+  // recorded and the artifact's location discarded, so nothing could serve the document the
+  // executed-contract notice tells all three parties they can access.
+  executedDocumentKey          String?               @map("executed_document_key")
   isDealerExecuted             Boolean               @default(false) @map("is_dealer_executed")
   // Phase 1 transaction spine (20261106000100) — back-relations.
   deals_dealerExecutedContract Deal[]                @relation("deals_dealer_executed_contract_idTocontract_versions")
@@ -6479,14 +6549,12 @@ model CoBuyer {
   buyer                Buyer           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   vehicleRequest       VehicleRequest? @relation(fields: [vehicleRequestId], references: [id])
   deals                Deal[]
-  // NOTE: `e_sign_envelopes.co_buyer_id` and its foreign key ARE created by this wave, but the
-  // Prisma relation is deliberately NOT declared and is deferred to Phase 8, which owns e-sign.
-  // `lib/services/esign/esign-schema-gate.ts` projects an explicit list of only the columns
-  // production has today, and its schema-gate test requires every ESignEnvelope scalar to be
-  // classified as either present-in-production or added-by-the-two-unapplied-migrations.
-  // `coBuyerId` is neither - it is added by THIS wave - so declaring it would let an ungated
-  // read expand the full scalar list and ask for a column production does not have until this
-  // wave deploys: a 42703 for the whole window between merge and `prisma migrate deploy`.
+  // Phase 1 created `e_sign_envelopes.co_buyer_id` and its foreign key but deliberately left the
+  // Prisma relation undeclared, because declaring it before the wave deployed would have let an
+  // ungated read ask production for a column it did not yet have (42703). The wave has deployed
+  // and Phase 8 owns e-sign, so the relation lands here — and `esign-schema-gate.ts` now carries
+  // both spine columns in its explicit projection rather than excluding them.
+  eSignEnvelopes       ESignEnvelope[]
 
   @@index([buyerId])
   @@map("co_buyers")

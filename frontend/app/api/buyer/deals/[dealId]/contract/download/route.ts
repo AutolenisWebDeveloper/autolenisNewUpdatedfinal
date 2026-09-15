@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestBuyer, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { allSignedFrom, pickSignerEnvelope, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -16,7 +17,11 @@ export async function GET(request: NextRequest, { params }: Props) {
   // migrations 20261014/20261015 are unapplied.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    select: { id: true, eSignEnvelope: { select: { id: true, status: true, documentKey: true } } },
+    select: {
+      id: true,
+      eSignEnvelopes: { select: { id: true, status: true, documentKey: true, signerKind: true } },
+      coBuyer: { select: { isRequiredSigner: true } },
+    },
   });
 
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
@@ -24,7 +29,11 @@ export async function GET(request: NextRequest, { params }: Props) {
   // ESignEnvelope does not yet store a document URL — it will be populated
   // once the signature completes and the executed record is available.
   // For now, return a clear 404 so the UI can display an appropriate message.
-  if (!deal.eSignEnvelope) {
+  // §13-D30 RE-DERIVED. The downloadable artifact is the DEAL's executed contract, produced
+  // only once every required signer has completed, and bound to the primary envelope.
+  const allSigned = allSignedFrom(deal.eSignEnvelopes, requiredKindsFrom(deal.coBuyer));
+  const primary = pickSignerEnvelope(deal.eSignEnvelopes, "BUYER");
+  if (!primary) {
     return errorResponse(
       "NOT_AVAILABLE",
       "Contract document is not yet available. It will be accessible after signing is complete.",
@@ -32,10 +41,10 @@ export async function GET(request: NextRequest, { params }: Props) {
     );
   }
 
-  if (deal.eSignEnvelope.status !== "COMPLETED") {
+  if (!allSigned) {
     return errorResponse(
       "NOT_AVAILABLE",
-      "Your signed contract isn't available yet. It will be accessible once you've completed signing.",
+      "Your signed contract isn't available yet. It will be accessible once every required signer has completed signing.",
       404
     );
   }
@@ -50,12 +59,12 @@ export async function GET(request: NextRequest, { params }: Props) {
   const executedDocumentKey = isExecutedArtifactEnabled()
     ? (
         await prisma.eSignEnvelope.findUnique({
-          where: { id: deal.eSignEnvelope.id },
+          where: { id: primary.id },
           select: { executedDocumentKey: true },
         })
       )?.executedDocumentKey ?? null
     : null;
-  const executedKey = executedDocumentKey ?? deal.eSignEnvelope.documentKey;
+  const executedKey = executedDocumentKey ?? primary.documentKey;
   if (!executedKey) {
     return errorResponse(
       "NOT_AVAILABLE",

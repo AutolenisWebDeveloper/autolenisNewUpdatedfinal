@@ -13,7 +13,12 @@ export async function POST(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: { id: true, status: true } });
+  const envelope = await prisma.eSignEnvelope.findUnique({
+    // §13-D30: the admin acts on the PRIMARY signer's envelope. `dealId` alone stopped
+    // being a unique selector when the co-buyer gained one of their own.
+    where: { dealId_signerKind: { dealId, signerKind: "BUYER" } },
+    select: { id: true, status: true },
+  });
   if (!envelope) return adminError("NOT_FOUND", "Envelope not found", 404);
   if (envelope.status === "COMPLETED") return adminError("CONFLICT", "Envelope is already completed", 409);
   if (envelope.status === "VOIDED") return adminError("CONFLICT", "Cannot resend a voided envelope", 409);

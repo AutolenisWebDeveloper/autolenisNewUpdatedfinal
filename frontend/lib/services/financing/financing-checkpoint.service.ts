@@ -71,7 +71,20 @@ export const LEGACY_FINANCING_STATUSES: readonly FinancingStatus[] = [
   FinancingStatus.DECLINED,
 ] as const;
 
-/** The states this phase may write. `COMPLETED` is Phase 8's — see the header. */
+/**
+ * The states the CHECKPOINT WRITER may write.
+ *
+ * PHASE 8 ADDED `COMPLETED` (2026-09-15). Phase 7 reserved it deliberately — "checkpoint two,
+ * after signing, before vehicle release (§12a), owned by Phase 8 together with funding
+ * clearance" — and `assertPhase7Writable` refused it by name so the reservation was mechanical
+ * rather than remembered. Phase 8 now owns it, so the gate opens rather than being bypassed:
+ * `recordFinancingCompletion` in funding-clearance.service.ts goes through THIS writer, which
+ * is what keeps the §12b transition map, the ≥10-character reason, the actor requirement and
+ * the tamper-evident audit chain on the second checkpoint as well as the first.
+ *
+ * The name is kept. Renaming it would rewrite the history of why it existed, and the array
+ * says which states the writer accepts, not which phase wrote them.
+ */
 export const PHASE_7_WRITABLE: readonly FinancingStatus[] = [
   FinancingStatus.NOT_STARTED,
   FinancingStatus.IN_PROGRESS,
@@ -79,10 +92,18 @@ export const PHASE_7_WRITABLE: readonly FinancingStatus[] = [
   FinancingStatus.FAILED,
   FinancingStatus.EXPIRED,
   FinancingStatus.NOT_REQUIRED_CASH,
+  // Phase 8 — §Stage 14's "financing.status = COMPLETED".
+  FinancingStatus.COMPLETED,
 ] as const;
 
 /** §12b's legal edges. Read as: from → the states it may reach. */
-const FINANCING_TRANSITIONS: Record<FinancingStatus, FinancingStatus[]> = {
+/**
+ * Exported for the checkpoint tests. Phase 8 opened COMPLETED to this writer, and the
+ * owner's completion rule — "a Deal can never be marked complete unless financing status
+ * is COMPLETED or NOT_REQUIRED_CASH" — now rests entirely on THIS MAP rather than on the
+ * writable set, so the map is what a test has to be able to assert.
+ */
+export const FINANCING_TRANSITIONS_FOR_TEST: Record<FinancingStatus, FinancingStatus[]> = {
   NOT_STARTED: [FinancingStatus.IN_PROGRESS, FinancingStatus.NOT_REQUIRED_CASH],
   IN_PROGRESS: [
     FinancingStatus.TERMS_LOCKED,
@@ -165,9 +186,7 @@ function assertPhase7Writable(status: FinancingStatus): void {
   if (!PHASE_7_WRITABLE.includes(status)) {
     throw new FinancingCheckpointError(
       "NOT_THIS_PHASE",
-      `"${status}" is checkpoint two — "after signing, before vehicle release" (§12a) — and is ` +
-        `owned by Phase 8 (parity row deal-early/D3), together with funding clearance. This ` +
-        `service writes the terms-locked checkpoint only.`,
+      `"${status}" is not a state this writer accepts. Use one of ${PHASE_7_WRITABLE.join(", ")}.`,
     );
   }
 }
@@ -278,7 +297,7 @@ export async function recordFinancingCheckpoint(
 
     const from = existing?.status ?? null;
     if (from && from !== params.status) {
-      const legal = FINANCING_TRANSITIONS[from] ?? [];
+      const legal = FINANCING_TRANSITIONS_FOR_TEST[from] ?? [];
       if (!legal.includes(params.status)) {
         throw new FinancingCheckpointError(
           "INVALID_TRANSITION",

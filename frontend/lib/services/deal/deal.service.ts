@@ -17,13 +17,25 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   ACTIVE: ["FINANCING_PENDING"],
   FINANCING_PENDING: ["FEE_PENDING"],
   FEE_PENDING: ["FEE_PAID"],
-  FEE_PAID: ["INSURANCE_PENDING"],
+  // §13-D28 (ruled 2026-09-15). Insurance is a PARALLEL track, requested AT the
+  // contract request and never a gate on contract preparation — Stage 15: "Insurance
+  // never blocks contract preparation; it blocks the vehicle leaving the lot."
+  // The direct edge is the live path. INSURANCE_PENDING is retained so the deals
+  // that were parked there before this phase are not stranded behind an edge that
+  // vanished, and so a revert leaves every in-flight Deal in a legal state.
+  FEE_PAID: ["CONTRACT_PENDING", "INSURANCE_PENDING"],
   INSURANCE_PENDING: ["CONTRACT_PENDING"],
   CONTRACT_PENDING: ["CONTRACT_REVIEW"],
   CONTRACT_REVIEW: ["CONTRACT_APPROVED", "CONTRACT_PENDING"], // Can re-submit
   CONTRACT_APPROVED: ["SIGNING_PENDING"],
   SIGNING_PENDING: ["SIGNED"],
-  SIGNED: ["PICKUP_SCHEDULED"],
+  // §13-D29 (ruled 2026-09-15). "The transaction is not contract-executed merely
+  // because the buyer signed" (Stage 13/14d). The buyer's signature no longer reaches
+  // pickup: the dealership's fully executed copy must be stored first, which is what
+  // DEALER_EXECUTED records. Closing this edge is the structural half of the
+  // no-conditional-delivery rule — `force: true` still overrides it, and still says so
+  // in DealStatusHistory, which is the difference between an override and a gap.
+  SIGNED: ["DEALER_EXECUTED"],
   // A scheduled pickup may be marked complete directly (dealer QR scan / admin
   // override) or step through the intermediate PICKUP_COMPLETE state.
   PICKUP_SCHEDULED: ["PICKUP_COMPLETE", "COMPLETED"],
@@ -61,8 +73,40 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // in a legal state rather than stranded behind an edge that vanished.
   DEALER_CONFIRMATION: ["RECAP_PENDING"],
   RECAP_PENDING: ["FINANCING_PENDING"],
-  DEALER_EXECUTED: [],
-  FUNDING_PENDING: [],
+  DEALER_EXECUTED: ["FUNDING_PENDING"],
+  // Stage 14's failure path is a FULL SEND-BACK, not a retry: "A financing change that
+  // affects the contract sends the transaction back through recap confirmation, contract
+  // generation, Contract Shield, and signatures. It never proceeds on a stale contract."
+  // RECAP_PENDING is the head of that return path — from there the existing edges carry
+  // the deal through FINANCING_PENDING -> FEE_PENDING -> FEE_PAID -> CONTRACT_PENDING and
+  // the whole gauntlet runs again on the new numbers.
+  //
+  // There is deliberately NO edge to PICKUP_READINESS here. Phase 8 ends at "financing
+  // completed and funding cleared" (Stage 14 Exit), recorded on the Deal as
+  // `financing_completed_at` + `funding_cleared_at` — exactly what Stage 14's "Recorded"
+  // list names. Moving a deal INTO readiness is Phase 9's checklist evaluation, and
+  // Phase 7 already paid for the alternative: Phase 6 opened an edge with no domain
+  // caller, and `POST /api/admin/deals/[dealId]/action` (DEAL_STAGE_ADVANCED) resolves
+  // its target at runtime, so an ops admin could take the edge non-forced and skip the
+  // gate it was waiting on. Phase 9 opens this edge together with the driver that guards it.
+  // FUNDING_PENDING reaches pickup, and this edge is BOTH halves of the rule at once.
+  //
+  // WHAT IT RESTORES. Closing `SIGNED → PICKUP_SCHEDULED` above removed the only inbound
+  // edge PICKUP_SCHEDULED had, so pickup-coordination.service.ts's non-forced advance threw
+  // for every deal and no buyer could ever confirm a pickup. That was a capability REMOVED,
+  // not moved — found by the independent review, and the reason the capability map now names
+  // where pickup moved TO rather than only what it moved from.
+  //
+  // WHAT IT ENFORCES. Pickup is now reachable ONLY from FUNDING_PENDING, which is only
+  // reachable from DEALER_EXECUTED, which is only reachable from SIGNED. The rung before it
+  // is the six-item clearance list. That is strictly STRONGER than what this repository had
+  // before Phase 8 — a buyer's signature reached pickup directly — and it is what makes "no
+  // vehicle is released on the expectation that financing will complete later" a property of
+  // the graph rather than a promise in a comment.
+  //
+  // Phase 9 owns PICKUP_READINESS and will insert it between these two; it is deliberately
+  // still `[]` below, so this phase ships no readiness path it does not own.
+  FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_SCHEDULED"],
   PICKUP_READINESS: [],
   HANDOVER_PENDING: [],
   FROZEN_PENDING_RELEASE: [],
@@ -70,13 +114,37 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
 
 const TERMINAL: DealStatus[] = [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED];
 
-// Insurance proof states that satisfy the final-release gate. Must stay in sync
-// with the UI "satisfied" set (components/.../AdminBuyerCommandCenter.tsx and
-// app/buyer/insurance/page.tsx). EXTERNAL_UPLOADED is the buyer's own-policy fallback.
+// Insurance proof states that satisfy the RELEASE gate — the vehicle leaving the lot.
+// Must stay in sync with the UI "satisfied" set (AdminBuyerCommandCenter.tsx and
+// app/buyer/insurance/page.tsx).
+//
+// §13-D31 (ruled 2026-09-15). EXTERNAL_UPLOADED was in this list, so an upload was
+// treated as approval: it satisfied the gate, advanced the Deal automatically, and
+// passed release. Stage 15 is explicit — "An upload is not approval" — and names the
+// only two states that permit release. An upload now means UNDER_REVIEW and waits for
+// an Operations decision.
+//
+// Deals that already passed release on EXTERNAL_UPLOADED are NOT re-gated: the decision
+// was acted on, and re-gating would mean telling a buyer whose vehicle was released that
+// the release is now under review. They stand as history with an admin follow-up row.
 export const INSURANCE_SATISFIED: InsuranceStatus[] = [
   InsuranceStatus.VERIFIED,
   InsuranceStatus.POLICY_BOUND,
+];
+
+// Insurance states that mean "the buyer has given us something and Operations owes a
+// decision". EXTERNAL_UPLOADED is read as UNDER_REVIEW rather than migrated, so no
+// historical row is rewritten (§13-D31).
+export const INSURANCE_AWAITING_REVIEW: InsuranceStatus[] = [
   InsuranceStatus.EXTERNAL_UPLOADED,
+  InsuranceStatus.UNDER_REVIEW,
+];
+
+// Terminal insurance failures. Either blocks release until corrected (Stage 15 fail path).
+export const INSURANCE_BLOCKED: InsuranceStatus[] = [
+  InsuranceStatus.REJECTED,
+  InsuranceStatus.EXPIRED,
+  InsuranceStatus.FAILED,
 ];
 
 export class DealTransitionError extends Error {
@@ -84,6 +152,21 @@ export class DealTransitionError extends Error {
   constructor(public readonly from: DealStatus, public readonly to: DealStatus) {
     super(`Invalid transition: ${from} → ${to}`);
     this.name = "DealTransitionError";
+  }
+}
+
+/**
+ * A final-release gate other than insurance refused.
+ *
+ * Separate from InsuranceRequiredError because the two are told to different people: an
+ * insurance gap is the buyer's to close, while an uncleared funding or a missing executed
+ * contract is AutoLenis's and the dealership's. A caller that cannot tell them apart cannot
+ * say who has to act, which is the whole complaint §Stage 14 makes about "funding pending".
+ */
+export class ReleaseNotClearedError extends Error {
+  constructor(public readonly detail: string) {
+    super(`This deal is not cleared for release: ${detail}.`);
+    this.name = "ReleaseNotClearedError";
   }
 }
 
@@ -165,10 +248,26 @@ export async function advanceDealStatus(
     throw new DealTransitionError(deal.status, newStatus);
   }
 
-  // Insurance hard-gate: final release requires proof on file (or explicit override).
+  // Final-release hard gates. Insurance was the only one, and that was the defect: the
+  // dealer QR scan advances straight to COMPLETED, so a deal that reached PICKUP_SCHEDULED
+  // by any means could be released with financing still IN_PROGRESS and funding never
+  // cleared. The transition map alone could not stop it, because `force: true` exists and
+  // `schedulePickup` used it. These three run at WRITE time, on the row as read, so they
+  // hold whatever route got the deal here.
   if (newStatus === DealStatus.COMPLETED && !opts.force) {
     if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
       throw new InsuranceRequiredError();
+    }
+    // §14d — the dealership's fully executed copy must exist. A buyer's signature is not
+    // execution, and a vehicle is not released against a contract only one party signed.
+    if (!deal.dealerExecutedContractId) {
+      throw new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
+    }
+    // §Stage 14 — THE HARD RULE. No conditional delivery, no spot delivery. Funding is
+    // cleared against evidence before the vehicle moves, never on the expectation that it
+    // will complete later.
+    if (!deal.fundingClearedAt) {
+      throw new ReleaseNotClearedError("funding has not been cleared for this deal");
     }
   }
 
@@ -252,10 +351,12 @@ export async function advanceDealStatus(
 
 /**
  * Hooks that run when a deal ARRIVES on a stage whose gating fact may already be
- * satisfied. Both are narrow, guarded and idempotent, and the hook graph is acyclic
- * (FEE_PENDING → FEE_PAID → INSURANCE_PENDING → CONTRACT_PENDING), so the cascade
- * terminates. `force` is deliberately NOT propagated: an admin override of one hop
- * must not silently force the rest of the ladder.
+ * satisfied. Each is narrow, guarded and idempotent, and the hook graph is acyclic
+ * (FEE_PENDING → FEE_PAID → CONTRACT_PENDING, and the legacy INSURANCE_PENDING →
+ * CONTRACT_PENDING for deals parked there before §13-D28), so the cascade terminates.
+ * CONTRACT_PENDING drives no further transition — it dispatches requests — so it is the
+ * terminus. `force` is deliberately NOT propagated: an admin override of one hop must
+ * not silently force the rest of the ladder.
  */
 async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: AdvanceOptions): Promise<void> {
   const actor = { actorId: opts.actorId, actorRole: opts.actorRole };
@@ -279,6 +380,53 @@ async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: Adva
   // stage with nothing to confirm. `buildRecap` is idempotent — a deal that already has a live
   // version returns it — so re-arrival is free. Dynamic import keeps the recap service out of the
   // deal service's module graph, which the outbox drain also loads.
+  // Stage 13/14a: the contract request is "dispatched durably from the central transition
+  // into contract-pending — not from an administrator's manual action". This is that
+  // transition. Before this phase the ONLY thing that asked a dealership for a contract was
+  // an admin typing CONTRACT_PENDING into `POST /api/admin/deals/[dealId]/action`, which sent
+  // a deadline-free email; every other route into the stage — the fee ladder, the insurance
+  // driver, the buyer's own upload — told the dealership nothing at all.
+  //
+  // Insurance is requested at the SAME moment (Stage 15 Entry: "Contract requested — insurance
+  // is requested at the same moment so the buyer has time to bind"), which is the whole reason
+  // §13-D28 took insurance off the contract-entry path: asking earlier and waiting later.
+  //
+  // Idempotent on re-arrival: CONTRACT_REVIEW → CONTRACT_PENDING is a legal edge (contract
+  // re-submit), so a deal can arrive here more than once, and openContractRequest is keyed so
+  // the second arrival neither duplicates the request nor restarts the 24-hour clock.
+  if (newStatus === DealStatus.CONTRACT_PENDING) {
+    try {
+      const { openContractRequest } = await import("./contract-request.service");
+      await openContractRequest({ dealId, actorId: opts.actorId, actorRole: opts.actorRole });
+    } catch (err) {
+      // Never throws onward: the transition is committed. A request that failed to dispatch is
+      // repairable and is reported, not swallowed — and the overdue sweep will not invent one,
+      // so this log is the only signal that a dealership was never asked.
+      logger.error("arrival hook: contract request dispatch failed at CONTRACT_PENDING", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  // §27.1 "Buyer signatures completed → Dealership → Dealer execution request". Driven from
+  // the ARRIVAL at SIGNED rather than from the signing route, for the same reason the contract
+  // request is driven from CONTRACT_PENDING: SIGNED is reachable from the buyer's ceremony, the
+  // co-buyer's, an admin correction and a `force` override, and a request sent from only one of
+  // them leaves the other three with a dealership that was never asked to execute.
+  //
+  // After §13-D30, arriving at SIGNED already means EVERY required signer completed —
+  // `ensureDealSigned` will not advance otherwise — so this cannot fire on a half-signed deal.
+  if (newStatus === DealStatus.SIGNED) {
+    try {
+      const { requestDealerExecution } = await import("./dealer-execution.service");
+      await requestDealerExecution(dealId);
+    } catch (err) {
+      logger.error("arrival hook: dealer execution request failed at SIGNED", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   if (newStatus === DealStatus.RECAP_PENDING) {
     try {
       const { buildRecap } = await import("./deal-recap.service");
@@ -296,7 +444,14 @@ async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: Adva
 
 /**
  * Fee-ladder driver: once the concierge fee is recorded as paid, carry the deal
- * from FEE_PENDING through FEE_PAID to INSURANCE_PENDING.
+ * from FEE_PENDING through FEE_PAID to CONTRACT_PENDING.
+ *
+ * §13-D28 changed the ladder's last rung. It used to end at INSURANCE_PENDING, and
+ * insurance then gated entry to CONTRACT_PENDING — which Stage 15 forbids in as many
+ * words: "Insurance never blocks contract preparation; it blocks the vehicle leaving
+ * the lot." Insurance is now REQUESTED at CONTRACT_PENDING, in parallel, so the buyer
+ * has the whole contract-and-signing window to bind coverage instead of the contract
+ * waiting on them.
  *
  * `feePaidAt` is the authoritative "fee received" fact (written by the verified
  * Stripe webhook or by the audited admin override) and doubles as the
@@ -325,11 +480,11 @@ export async function settleFeeLadderIfPaid(
     if (deal.status === DealStatus.FEE_PENDING) {
       moved = await advanceDealStatus(dealId, DealStatus.FEE_PAID, { ...actor, expectedFrom: DealStatus.FEE_PENDING });
       // FEE_PAID re-enters this driver via the seam, which carries it to
-      // INSURANCE_PENDING — so there is nothing further to do here.
+      // CONTRACT_PENDING — so there is nothing further to do here.
       return moved;
     }
     if (deal.status === DealStatus.FEE_PAID) {
-      moved = await advanceDealStatus(dealId, DealStatus.INSURANCE_PENDING, { ...actor, expectedFrom: DealStatus.FEE_PAID });
+      moved = await advanceDealStatus(dealId, DealStatus.CONTRACT_PENDING, { ...actor, expectedFrom: DealStatus.FEE_PAID });
     }
     return moved;
   } catch (err) {
@@ -397,12 +552,12 @@ export async function getDealForBuyer(buyerId: string, dealId?: string) {
     // full forensic record (§11 — see esign-schema-gate.BUYER_SAFE_ENVELOPE_SELECT).
     return prisma.deal.findFirst({
       where: { id: dealId, buyerId },
-      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: { select: buyerEnvelopeSelect() }, pickup: true },
+      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelopes: { select: buyerEnvelopeSelect() }, coBuyer: { select: { isRequiredSigner: true } }, pickup: true },
     });
   }
   return prisma.deal.findFirst({
     where: { buyerId, status: { notIn: [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED] } },
-    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: { select: buyerEnvelopeSelect() }, pickup: true },
+    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelopes: { select: buyerEnvelopeSelect() }, coBuyer: { select: { isRequiredSigner: true } }, pickup: true },
     orderBy: { createdAt: "desc" },
   });
 }

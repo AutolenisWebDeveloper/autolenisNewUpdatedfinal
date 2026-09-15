@@ -69,16 +69,43 @@ export const GATED_ENVELOPE_DEFAULTS = {
   executedGeneratedAt: null,
   confirmationsSentAt: null,
   attemptNumber: 1,
+  // §13-D30's invited-signer link (migration 20261117000300, UNAPPLIED in production).
+  //
+  // These sit here rather than in LEGACY_ENVELOPE_SELECT for the plain reason that the
+  // columns are not physically present until that migration runs — unlike `signerKind` and
+  // `coBuyerId`, which Phase 1's spine created and which production has had all along.
+  //
+  // `null` is the TRUTH while unapplied, not a placeholder: with no column there can be no
+  // token, so no link can be live. The reads that matter fail CLOSED on their own besides —
+  // `resolveSignerToken` does a `findUnique` on `signerAccessTokenHash`, which raises 42703
+  // against a database without it rather than resolving something. That is the correct
+  // ordering: the surface cannot authorise a signature before the migration that makes it
+  // real has been applied.
+  signerAccessTokenHash: null,
+  signerAccessTokenExpiresAt: null,
+  signerAccessTokenConsumedAt: null,
 } as const;
 
 /**
- * Explicit projection of ONLY the 28 columns that exist in production before the
- * migrations are applied. Every gated read uses this instead of letting Prisma
- * expand the model's full scalar list.
+ * Explicit projection of ONLY the columns that exist in production before the two
+ * compliance-gated migrations are applied. Every gated read uses this instead of
+ * letting Prisma expand the model's full scalar list.
+ *
+ * PHASE 8 (§13-D30) ADDED TWO, AND THEY BELONG HERE RATHER THAN IN
+ * GATED_ENVELOPE_DEFAULTS. `signerKind` and `coBuyerId` are SPINE columns: Phase 1's
+ * 20261106000100 created them (`:408-409`) and they have been physically present in
+ * production ever since. They are not part of the executed-artifact/consent surface
+ * this flag gates, so projecting them is safe with the gate closed — and it has to
+ * be, because after the cutover "which signer is this?" is not an optional question.
+ * A closed-gate read that could not tell a buyer envelope from a co-buyer one would
+ * answer the signing gate from whichever row it happened to get, which is exactly
+ * the silent failure the cutover was written to prevent.
  */
 export const LEGACY_ENVELOPE_SELECT = {
   id: true,
   dealId: true,
+  signerKind: true,
+  coBuyerId: true,
   docusignEnvelopeId: true,
   status: true,
   documentKey: true,
@@ -117,6 +144,10 @@ type LegacyEnvelopeRow = Prisma.ESignEnvelopeGetPayload<{ select: typeof LEGACY_
  * the buyer allow-list: exactly what BuyerEnvelopeSummary exposes, and nothing more.
  */
 export const BUYER_SAFE_ENVELOPE_SELECT = {
+  // Phase 8: which signer this envelope is for. Not forensic and not PII — a buyer
+  // looking at their own deal must be able to tell their signature block from the
+  // co-buyer's, and a UI that cannot distinguish them renders two identical rows.
+  signerKind: true,
   status: true,
   documentVersionId: true,
   documentHash: true,

@@ -3,6 +3,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { finalizeBuyerSignatureCertificate } from "@/lib/services/esign/buyer-signing.service";
 import { getBuyerContractCertificateUrl } from "@/lib/services/esign/buyer-contract-certificate.service";
+import { pickSignerEnvelope } from "@/lib/services/esign/required-signers";
 import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -17,13 +18,18 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT } } });
+  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelopes: { select: LEGACY_ENVELOPE_SELECT } } });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
-  if (deal.eSignEnvelope?.status !== "COMPLETED") {
+    // §13-D30. A certificate evidences ONE ceremony, so it is fetched per signer. The
+  // co-buyer's certificate is theirs, not a second copy of the buyer's.
+  const signerKind =
+    new URL(request.url).searchParams.get("signer") === "co-buyer" ? "CO_BUYER" : "BUYER";
+  const envelope = pickSignerEnvelope(deal.eSignEnvelopes, signerKind);
+  if (envelope?.status !== "COMPLETED") {
     return errorResponse("NOT_READY", "Your signature certificate is not available yet.", 202);
   }
 
-  let path = deal.eSignEnvelope.certificatePdfPath;
+  let path = envelope.certificatePdfPath;
   if (!path) path = await finalizeBuyerSignatureCertificate(dealId);
   if (!path) return errorResponse("NOT_READY", "Your signature certificate is being generated. Please try again shortly.", 202);
 

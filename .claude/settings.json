@@ -96,6 +96,7 @@
     "superpowers@superpowers-marketplace": true
   },
   "permissions": {
+    "defaultMode": "acceptEdits",
     "deny": [
       "Bash(git merge:*)",
       "Bash(git mergetool:*)",
@@ -186,7 +187,16 @@
       "Bash(cat:*)",
       "Bash(grep:*)",
       "Bash(rg:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Read(./**)",
+      "Glob(./**)",
+      "Grep(./**)",
+      "Write(./**)",
+      "Edit(./**)",
+      "MultiEdit(./**)",
+      "Bash(pnpm exec playwright:*)",
+      "Bash(pnpm exec tsx:*)",
+      "Bash(bash docs/transaction-flow/phase-8-proof/run-proof.sh:*)"
     ]
   }
 }

@@ -1,3 +1,4 @@
+import { recordLegacyPathWrite } from "@/lib/services/comms/legacy-path-write";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -12,7 +13,6 @@ import {
 } from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
-  sendDealerContractIssuesEmail,
   sendDealCompleteEmail,
 } from "@/lib/services/email/resend.service";
 
@@ -140,33 +140,39 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     case "CONTRACT_SHIELD_OVERRIDDEN": {
-      // Admin can override a failing contract shield scan — requires reason
-      await prisma.contractScan.create({
-        data: {
-          dealId,
-          score: 100,
-          status: "PASS",
-          fixList: [],
-          version: 999, // Admin override version
-        },
+      // RETIRED BY PHASE 8 (§8.2 defect 5). This action created a synthetic ContractScan
+      // — score 100, status PASS, version 999, and NO contract_version_id — then stamped
+      // deal.contractShieldStatus. It never approved a ContractVersion, and because
+      // `approveContractVersionByAdmin` hard-refuses a scan with a null version link
+      // (schema.prisma:869-876), the "override" produced a verdict that could never lead
+      // to a signature. An admin who used it believed they had cleared the contract; the
+      // deal sat exactly where it was.
+      //
+      // Worse than useless: it wrote a PASS into the scan history for a document nobody
+      // had judged, so the dealer's violation record and the buyer's shield score both
+      // reflected an assessment that never happened.
+      //
+      // There is now ONE approval path — POST /api/admin/contract-shield/[reviewId] —
+      // which binds the approval to the exact ContractVersion the reviewed scan judged,
+      // records the decision in that scan's changeLog, advances the deal through the
+      // guarded seam and prepares the signing envelopes. An admin who wants to approve a
+      // held contract uses the Contract Shield queue, where the document they are
+      // approving is in front of them.
+      await recordLegacyPathWrite({
+        kind: "LEGACY_CONTRACT_APPROVAL",
+        detail: "CONTRACT_SHIELD_OVERRIDDEN admin action — stood down, no scan written",
+        entityType: "Deal",
+        entityId: dealId,
+        removalPhase: 10,
       });
-      await prisma.deal.update({ where: { id: dealId }, data: { contractShieldStatus: "PASS", contractShieldScore: 100 } });
-
-      // Notify dealer of contract issues that were overridden — non-blocking.
-      const dealerInfo = await getDealerEmailForDeal(dealId);
-      if (dealerInfo?.email) {
-        await sendDealerContractIssuesEmail({
-          to: dealerInfo.email,
-          contactName: dealerInfo.dealershipName,
-          vehicleRef: `Deal ${dealId.slice(0, 8)}`,
-          fixItems: [reason],
-          contractUrl: `${APP_URL}/dealer/deals/${dealId}`,
-          dealId,
-        }).catch(err => logger.error("[deals/action] contract issues email failed:", err));
-      }
-
-      result = { overridden: true };
-      break;
+      return adminError(
+        "USE_CONTRACT_SHIELD_QUEUE",
+        "Contract Shield decisions are made in the Contract Shield queue, where the approval binds to " +
+          "the exact document that was reviewed. This action wrote a passing verdict for a document it " +
+          "never identified, so it could never release the deal for signature. Open the held contract " +
+          "in /admin/contract-shield and approve it there.",
+        409,
+      );
     }
 
     case "DEAL_CANCELLED": {

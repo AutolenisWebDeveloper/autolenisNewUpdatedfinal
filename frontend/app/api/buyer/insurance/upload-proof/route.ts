@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
+import { recordInsuranceUpload } from "@/lib/services/deal/insurance-review.service";
 import { advanceOnInsuranceSatisfied } from "@/lib/services/deal/deal.service";
 
 const MAX_BYTES     = 10 * 1024 * 1024; // 10 MB
@@ -147,11 +148,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Proof is now on file, so release the insurance gate and move the deal into the
-  // contract stage. Without this the deal stalls at INSURANCE_PENDING forever —
-  // this is the only buyer-facing path that satisfies insurance, and nothing else
-  // drives INSURANCE_PENDING → CONTRACT_PENDING. Idempotent and non-throwing: a
-  // failure here must never fail an upload that already succeeded.
+  // §13-D31: AN UPLOAD IS NOT APPROVAL. This used to call `advanceOnInsuranceSatisfied`,
+  // which released the gate and carried the deal into the contract stage — so an uploaded
+  // PDF nobody had read satisfied the release requirement. Two things changed and both
+  // matter: §13-D28 took insurance off the contract-entry path entirely (the deal is
+  // already past CONTRACT_PENDING by now, so there is nothing to release), and §13-D31
+  // makes an upload open an Operations REVIEW instead.
+  //
+  // The legacy driver is retained for the deals that were parked at INSURANCE_PENDING
+  // before this phase — it advances only from that state and only on a satisfied status,
+  // and with EXTERNAL_UPLOADED out of the satisfied set it is now a no-op for new uploads.
+  await recordInsuranceUpload({ dealId, buyerId: buyer.id });
   await advanceOnInsuranceSatisfied(dealId, { actorId: buyer.id, actorRole: "BUYER" });
 
   // Notify buyer
@@ -160,7 +167,7 @@ export async function POST(request: NextRequest) {
       buyerId: buyer.id,
       type:    "DEAL_STAGE_CHANGED",
       title:   "Insurance proof uploaded",
-      body:    "Your proof of insurance has been submitted and is under review. We'll notify you once it's verified.",
+      body:    "Your proof of insurance has been submitted and is under review. An upload is not approval — we confirm the policy is active, names you, and matches your VIN. We'll tell you either way.",
     },
   }).catch((err: unknown) => {
     logger.error("[upload-proof] buyer notification failed:", err);

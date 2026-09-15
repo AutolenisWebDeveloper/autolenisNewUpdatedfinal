@@ -45,8 +45,15 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
     },
   });
 
-  // Advance deal status (admin-initiated scheduling — authoritative; records history)
-  await advanceDealStatus(dealId, "PICKUP_SCHEDULED", { actorRole: "ADMIN", force: true });
+  // Advance deal status (admin-initiated scheduling — authoritative; records history).
+  //
+  // NO LONGER `force: true`. That override made this route the bypass for the whole release
+  // ladder: an admin could schedule a pickup on a deal in ANY status — unsigned, un-executed,
+  // financing still IN_PROGRESS — and the dealer's QR scan would then complete it, because the
+  // scan's only gate was insurance. That is spot delivery through an admin screen, and it is
+  // exactly what §Stage 14 forbids. The transition guard now decides, so scheduling is legal
+  // only from FUNDING_PENDING — after the six-item clearance list.
+  await advanceDealStatus(dealId, "PICKUP_SCHEDULED", { actorRole: "ADMIN" });
 
   // Notify buyer
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
