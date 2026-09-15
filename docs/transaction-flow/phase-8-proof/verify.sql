@@ -85,6 +85,80 @@ SELECT 'e_sign_envelopes.signer_kind is NOT NULL with a default' AS object,
             THEN 'PRESENT' ELSE 'MISSING' END AS status,
        'a nullable signer_kind lets two rows share (deal_id, NULL) and defeats the composite unique' AS remedy;
 
+-- ── HALF ONE, CONTINUED: THE OBJECTS OF MIGRATIONS 000200 AND 000300 ─────────
+--
+-- ADDED 2026-09-15, AND THE REASON IS THE POINT OF THIS FILE.
+--
+-- The ledger half was corrected earlier today to name all four migrations instead of two.
+-- The PHYSICAL half was not, and nobody checked it: assertions 1-10 above cover only
+-- `e_sign_envelopes`' index cutover and `financing`'s clearance columns — the objects of
+-- migrations 000000 and 000100. `executed_document_key`, the three `signer_access_token_*`
+-- columns and the two token indexes appeared NOWHERE in this file.
+--
+-- So the corrected file still had the property the correction was supposed to remove. Run it
+-- against a database where 000200 and 000300 were recorded with `migrate resolve --applied`
+-- and their SQL never executed, and every row prints PRESENT: the ledger half is satisfied by
+-- the rows, and the physical half never mentions the objects. That is verbatim the failure
+-- this file's own header condemns — "a ledger row with a missing object is a silent lie" —
+-- reached by fixing one half and declaring the file fixed.
+--
+-- The owner verified these seven objects BY HAND at 17:33 UTC on 2026-09-15, which is the
+-- tell: a proof file is wrong when the person running it has to check something it does not.
+
+-- 11. MIGRATION 000200's ONLY OBJECT. `ADD COLUMN IF NOT EXISTS` no-ops silently over a
+--     column added out of band, so the ledger row for 000200 proves nothing about the column.
+SELECT 'contract_versions.executed_document_key' AS object,
+       CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'contract_versions'
+                            AND column_name = 'executed_document_key')
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'the executed artefact has nowhere to be stored; §13-D4 activation writes into this' AS remedy;
+
+-- 12-14. MIGRATION 000300's THREE TOKEN COLUMNS. The invited co-buyer signing surface reads
+--     all three on every request; absent means 42703 on the first co-buyer to click a link.
+SELECT 'e_sign_envelopes.' || expected.name AS object,
+       CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'e_sign_envelopes'
+                            AND column_name = expected.name)
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'resolveSignerToken reads this; absent means every invited-signer request 42703s' AS remedy
+  FROM (VALUES ('signer_access_token_hash'), ('signer_access_token_expires_at'),
+               ('signer_access_token_consumed_at')) AS expected(name);
+
+-- 15. AND THE TWO TIMESTAMPS ARE TIME-ZONE NAIVE. Not cosmetic: the drift gate caught these
+--     as the only tz-AWARE columns on a table of twelve tz-naive ones, and `resolveSignerToken`
+--     compares them directly against the other eleven. A TIMESTAMPTZ here puts the signing
+--     window out by the server's UTC offset — a token that expires early or late, silently,
+--     and only for co-buyers. Asserted because the type is the correctness property, not the
+--     column's mere existence.
+SELECT 'e_sign_envelopes signer token timestamps are tz-naive' AS object,
+       CASE WHEN (SELECT count(*) FROM information_schema.columns
+                   WHERE table_schema = 'public' AND table_name = 'e_sign_envelopes'
+                     AND column_name IN ('signer_access_token_expires_at', 'signer_access_token_consumed_at')
+                     AND data_type = 'timestamp without time zone') = 2
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'a TIMESTAMPTZ here shifts every co-buyer signing window by the UTC offset' AS remedy;
+
+-- 16. THE UNIQUE INDEX ON THE TOKEN HASH, AND IT IS VALID. This is what makes a token
+--     single-use-able at all: without it two envelopes can carry the same hash.
+SELECT 'index e_sign_envelopes_signer_access_token_hash_key is VALID' AS object,
+       CASE WHEN EXISTS (SELECT 1 FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+                          WHERE c.relname = 'e_sign_envelopes_signer_access_token_hash_key'
+                            AND i.indisvalid)
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'without a valid unique index two envelopes can share a token hash' AS remedy;
+
+-- 17. THE PARTIAL LIVE-TOKEN INDEX. Its WHERE clause is the definition of "live", so an index
+--     present with the wrong predicate is worse than one absent — it silently scans the wrong set.
+SELECT 'index e_sign_envelopes_live_signer_token_idx, with its partial predicate' AS object,
+       CASE WHEN EXISTS (SELECT 1 FROM pg_indexes
+                          WHERE schemaname = 'public'
+                            AND indexname = 'e_sign_envelopes_live_signer_token_idx'
+                            AND indexdef LIKE '%signer_access_token_hash IS NOT NULL%'
+                            AND indexdef LIKE '%signer_access_token_consumed_at IS NULL%')
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'the partial predicate IS the definition of a live token; a wrong one scans the wrong set' AS remedy;
+
 -- ── HALF TWO: THE LEDGER ─────────────────────────────────────────────────────
 -- Counted the way migration 110's preflight was rewritten to count: FINISHED and NOT rolled
 -- back. A rolled-back row sitting beside a success is RETRY HISTORY, not a fault, and must
@@ -153,6 +227,17 @@ SELECT 'no stuck migrations in the chain' AS object,
        'a name with no finished, non-rolled-back row means a deploy died mid-chain' AS remedy;
 
 -- TERMINAL ROW. Absent means this file did not run, whatever the exit code said.
+--
+-- THE COUNT WAS WRONG, AND IT WAS WRONG IN THE FIX. It read "16 assertions: 13 physical,
+-- 3 ledger" — a split that never matched the file (11 physical, 4 ledger, 1 terminal even
+-- before today), and whose TOTAL went stale the moment this morning's correction grew the
+-- ledger CTE from two names to four. A file whose entire subject is a typed count drifting
+-- beside a hand-written list shipped a typed count that drifted beside a hand-written list.
+--
+-- It is no longer maintained by hand. `frontend/prisma/__tests__/phase8-proof-sql.test.ts`
+-- parses this file, computes the rows it actually emits — one per assertion, N per VALUES
+-- list, one per name in the phase8_expected CTE — and fails the build when these three
+-- numbers disagree with it. A typed number checked by nothing is the whole subject of §8.1h.
 SELECT 'verify complete — BOTH halves' AS object,
        'PRESENT' AS status,
-       '16 assertions: 13 physical, 3 ledger. A MISSING row is REPORTED, never repaired with DDL.' AS remedy;
+       '25 assertions: 18 physical, 6 ledger. A MISSING row is REPORTED, never repaired with DDL.' AS remedy;

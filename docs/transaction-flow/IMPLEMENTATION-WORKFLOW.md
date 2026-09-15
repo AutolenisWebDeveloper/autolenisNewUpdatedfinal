@@ -1977,9 +1977,28 @@ are covered by the bare `test` script and `test:all` is back to main's 70 segmen
 Implemented on `claude/txflow-08-contract` from base `12e9b29e`. This section records how the phase
 was actually built where that differs from how it was planned, and carries the mandatory
 before → after capability map. **Nothing was applied to production and no migration was run** — the
-two migrations are authored and proved on a throwaway loopback database, and applying them is the
+migrations are authored and proved on a throwaway loopback database, and applying them is the
 owner's under the per-run protocol in CLAUDE.md. This session held **no database credential of any
 kind**, so every statement about production state below is marked NOT VERIFIED and is not asserted.
+
+> **TWO CORRECTIONS TO THAT PARAGRAPH, 2026-09-15 (Phase 9 opening).** Both were found by the
+> Phase 9 investigation reading this section as its entry state, which is what an AS BUILT record
+> is for.
+>
+> 1. **It said "the two migrations". The phase shipped FOUR** — `executed_copy_storage` and
+>    `invited_signer_token` were added after this paragraph was written, and it was not updated.
+>    That is the same drift, in the same phase, on the same day, as the `verify.sql` list the owner
+>    caught at 17:33 UTC and as `preflight.sql`'s list. Three hand-maintained copies of one set,
+>    two of them stale. The count is removed rather than corrected to four: a number here earns
+>    nothing that the migration table below does not already carry.
+> 2. **"Nothing was applied to production" is true of the AUTHORING SESSION and no longer true of
+>    the outcome.** The owner applied all four under the per-run protocol and verified them
+>    independently at 17:33 UTC — ledger **119 rows / 117 distinct / 0 unfinished**, every row
+>    finished with `applied_steps_count` 1, `deal_id_key` gone, the composite unique and both token
+>    indexes present, and all three token columns `timestamp without time zone`. A later reader
+>    taking the sentence as the state of production would be wrong. Following the same correction
+>    made at Phase 6's close rather than editing the original, because what the authoring session
+>    did is still accurately described by it.
 
 #### Core rule 11 IN REVERSE — the named instance, and the front of the migration plan
 
@@ -2327,9 +2346,10 @@ Failing closed was the correct interim.
 
 #### THE DEFECT CLASS THIS PROGRAMME KEEPS PRODUCING — name it, and test for it
 
-**Something reported success while checking nothing.** Six instances, across eight phases, in
+**Something reported success while checking nothing.** Seven instances, across eight phases, in
 three different layers. Naming it here because the sixth was found the same way as the first,
-which means it is a class and not a run of bad luck:
+which means it is a class and not a run of bad luck — and because the seventh is a guard built
+to catch this class that nearly fell to it:
 
 | # | Phase | Where | What reported success | What it had actually checked |
 | --- | --- | --- | --- | --- |
@@ -2339,12 +2359,49 @@ which means it is a class and not a run of bad luck:
 | 4 | 8 | proof harness | *"6 assertions, all rolled back"* | **zero** — the transaction aborted on the first INSERT and every assertion was skipped |
 | 5 | 8 | test | `has("contract_overdue")` passing | `dedupKey`, not the `templateKey` **column** it claimed to read — so the row lookup beside it was silently `undefined` |
 | 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
+| 7 | 8 (#435) | **the guard written for this class** | two passing comparisons in `phase8-proof-sql.test.ts`, the drift guard added *because of* this table | **nothing** — the first draft filtered on `/^2026111700\d{2}_phase8_/`, **ten digits against a fourteen-digit stamp**, so `onDisk` and `named` were both empty and both tests passed by comparing nothing to nothing |
 
-**The three layers matter.** #1 and #2 are runtime; #3, #4 and #5 are the tests and harnesses
-that are supposed to catch runtime; #6 is the *written record* that is supposed to describe
-both. The class reaches all the way up: a verification artefact is just as capable of
+**The three layers matter.** #1 and #2 are runtime; #3, #4, #5 and #7 are the tests and
+harnesses that are supposed to catch runtime; #6 is the *written record* that is supposed to
+describe both. The class reaches all the way up: a verification artefact is just as capable of
 asserting nothing as the code it verifies, and a prose claim is the least checkable artefact
 of all.
+
+**#7 is the most persuasive of the seven, and it is the newest.** The other six were written by
+someone not thinking about this class. #7 was not. It is a guard built *specifically* to catch
+the under-assertion shape, in the file whose entire purpose is that shape, written by an author
+who had just finished documenting the class — and on its first run two of its five assertions
+were vacuous. Being on guard against the failure mode did not prevent the failure mode.
+
+The only reason it was caught is that the same awareness had already produced a *mechanical*
+check three lines above it: `assert.ok(found.length >= 4)`, which goes red when the fixture is
+empty. Delete that one assertion and the guard goes green, stays green forever, and guards
+nothing — while its own header goes on claiming *"add a Phase 8 migration without updating
+verify.sql and the build fails here, naming the file and the missing migration"*
+(`phase8-proof-sql.test.ts:16-17`), and `verify.sql:105-108` cites the test right back as the
+thing that keeps its list honest. Two artefacts vouching for each other, neither checking.
+**Vigilance is not a control. The anti-vacuity assertion
+was.** Every gate in this programme should carry one: an assertion that the fixture it reasons
+over is non-empty, failing loudly when the search finds nothing, because *zero results and
+nothing to check are indistinguishable to every assertion downstream of them.*
+
+**Re-proved against the merged code on 2026-09-15 rather than recalled**, because a claim about a
+gate is exactly the kind this table is about. Reintroducing the ten-digit prefix and running
+`npx tsx --test prisma/__tests__/phase8-proof-sql.test.ts`:
+
+```
+not ok 1 - the migrations exist on disk at all — the fixture is not empty
+ok 2 - verify.sql names every phase 8 migration on disk
+ok 3 - verify.sql names no migration that does not exist
+ok 4 - verify.sql states no hardcoded count of phase 8 migrations
+ok 5 - the proof files the migration package promises are all present
+# tests 5 | # pass 4 | # fail 1
+```
+
+Tests 2 and 3 — the two that exist to compare the list against the disk — report **green while
+comparing an empty set to an empty set**. One assertion out of five stands between that and a
+committed guard that guards nothing. Restoring the fourteen-digit pattern returns 5/5, and the
+file is byte-identical to the committed version.
 
 **The counter-measure, and it is cheap.** *Before trusting any gate, prove it fails on a
 deliberately reintroduced defect.* Break the thing the gate exists to catch, watch it go red,
@@ -2362,6 +2419,149 @@ Three tells, for the next reader:
 - **A claim about a structure, made without querying the structure.** #6's "preserved through
   the correct predecessor" is a statement about a graph; ten lines of code would have
   falsified it, and none were written.
+
+#### What that guard actually covers — asked by the owner, answered 2026-09-15
+
+The owner asked directly whether `phase8-proof-sql.test.ts` covers the *shape* or only Phase 8.
+
+**It covers only Phase 8 — and not even all of Phase 8.** Established by reading the source and
+then by running its own two regexes against candidate directory names, rather than by reasoning
+about them:
+
+| Candidate migration directory | Seen by the guard? |
+| --- | --- |
+| `20261117000300_phase8_invited_signer_token` | yes |
+| `20261120000000_phase8_followup_fix` — a **later Phase 8** migration | **no** |
+| `20261201000000_phase9_pickup_readiness` | **no** |
+
+Three bindings, all literal:
+
+1. `PROOF_DIR` is `docs/transaction-flow/phase-8-proof`. The guard opens no other directory.
+   Seven other proof directories exist — `migration-110`, `phase-1`, `phase-3` through `phase-7` —
+   and it reads none of them.
+2. `phase8MigrationsOnDisk()` filters on `/^20261117\d{6}_phase8_/`. **The wave stamp is part of
+   the pattern**, not merely the `_phase8_` token.
+3. `migrationsNamedIn()` extracts with that same anchored prefix, so a name it cannot generate is
+   also a name it cannot find.
+
+**Answering the question as asked: if a Phase 9 proof file grows the same two-list structure with
+a hardcoded count, nothing in this repository catches it.** Not a near miss — the guard never
+opens the file.
+
+**The second hole is inside Phase 8's own scope, and it is the more interesting one.** A Phase 8
+follow-up migration stamped outside the `20261117` wave is invisible to `phase8MigrationsOnDisk()`,
+and the anti-vacuity assertion does **not** save it: `found.length >= 4` still passes on the four
+original directories. The guard would report a clean verify while silently ignoring the new
+migration — the exact defect it exists to catch, one axis over, in a file written with this defect
+class explicitly in mind. The correction is one character class: `\d{14}_phase8_` in place of
+`20261117\d{6}_phase8_`.
+
+That makes #7 a **two-part** instance. The vacuous-fixture half was caught before commit, by the
+anti-vacuity assertion. The wave-prefix half shipped, was caught by nothing, and is recorded here
+rather than found later — which is the only difference between this paragraph and an eighth row in
+the table above.
+
+**Deliberately not fixed here.** Owner instruction, 2026-09-15: *"do not generalise the guard now.
+Phase 9 can carry it when it has its own proof files."* Both holes are recorded as the first thing
+Phase 9 inherits. When Phase 9 does carry it, the guard should be **parameterised on the phase**
+rather than copied and renumbered — eight proof directories holding eight hand-copied guards is
+eight chances to make the same mistake, which is the shape that produced this table in the first
+place.
+
+#### The fix in #435 was half a fix — found by asking the coverage question
+
+Answering the owner's question meant sweeping every proof directory for the same shape. That sweep
+found it **still live in `phase-8-proof`**, in the two places the correction had not looked.
+
+**1. `verify.sql`'s PHYSICAL half named none of the objects of migrations 000200 and 000300.**
+Assertions 1-10 cover the `e_sign_envelopes` index cutover and the four `financing` clearance
+columns — the objects of 000000 and 000100. Verified by grep: `executed_document_key`,
+`signer_access_token_hash`, `_expires_at`, `_consumed_at` and `contract_versions` each occurred
+**zero** times in the file. Seven objects, unasserted:
+
+| Migration | Object | Was asserted? |
+| --- | --- | --- |
+| 000200 | `contract_versions.executed_document_key` | no |
+| 000300 | `e_sign_envelopes.signer_access_token_hash` | no |
+| 000300 | `e_sign_envelopes.signer_access_token_expires_at` | no |
+| 000300 | `e_sign_envelopes.signer_access_token_consumed_at` | no |
+| 000300 | those two timestamps being **tz-naive** | no |
+| 000300 | `e_sign_envelopes_signer_access_token_hash_key` (unique) | no |
+| 000300 | `e_sign_envelopes_live_signer_token_idx` (partial) | no |
+
+So the *corrected* file still had the property the correction existed to remove. Run it against a
+database where 000200 and 000300 were recorded with `migrate resolve --applied` and their SQL never
+executed, and **every row prints PRESENT**: the ledger half is satisfied by the rows, and the
+physical half never mentions the objects. That is verbatim what the file's own header condemns —
+*"a ledger row with a missing object is a silent lie"* — reached by fixing one half and calling the
+file fixed.
+
+**The tell was in the owner's own message.** They verified those objects **by hand** at 17:33 UTC:
+"deal_id_key gone, composite unique and both token indexes present, and all three token columns
+landed as `timestamp without time zone`." A proof file is wrong when the person running it has to
+check something it does not. Seven assertions added; the tz-naive one asserts the *type*, because
+the drift gate's finding was that a `TIMESTAMPTZ` there puts every co-buyer signing window out by
+the server's UTC offset, silently.
+
+**2. The terminal row's count was wrong, and the correction made it worse.** It read
+*"16 assertions: 13 physical, 3 ledger."* The split never matched the file — 11 physical and 4
+ledger even before today — and the **total** went stale the moment the ledger CTE grew from two
+names to four. A file whose whole subject is a typed count drifting beside a hand-written list
+shipped a typed count drifting beside a hand-written list, *in the commit that fixed the first
+one.* It now reads 25 / 18 / 6 and is no longer maintained by hand: the guard parses the file,
+computes the rows it really emits — one per assertion, N per `VALUES` list, one per name in the
+CTE — and fails the build on disagreement.
+
+Writing that parser produced **the anti-vacuity assertion firing a third time in the same file.**
+The first draft masked string literals before stripping comments, and the apostrophes in the
+comments (`verify.sql's`, `nobody checked it`) desynchronised the quote scan: it found **4
+statements instead of 16**, which would have made every count `0 === 0` and green forever. Caught
+by `assert.ok(stmts.length >= 15)`. Both breaks were then proved: claiming 24 rows instead of 25
+goes red; adding an assertion without touching the count goes red naming 26 against 25; restoring
+returns 6/6.
+
+**3. `preflight.sql` still names two of the four — REPORTED, NOT FIXED.** It is the *blocking*
+gate ("a `BLOCK` row stops the run"), and it carries no precondition for 000200 or 000300 at all.
+Its assertion 7 states the governing rule explicitly — *"`ADD COLUMN IF NOT EXISTS` would silently
+no-op over a column of a DIFFERENT type added out of band"* — and applies it only to the `financing`
+columns, though every column in 000200 and 000300 is `ADD COLUMN IF NOT EXISTS` too.
+
+Not patched here, deliberately, because the naive patch is wrong: **all four migrations are already
+applied in production**, so a precondition asserting those columns do *not* yet exist would now
+BLOCK a correctly-deployed database. What a preflight should assert for an already-applied
+migration is a design question, and it belongs to the owner rather than to this commit.
+
+#### The cross-phase sweep — the shape exists nowhere else
+
+All eight proof directories audited, each by an investigator and then an adversarial refuter that
+re-opened every file rather than trusting the quotes.
+
+| Directory | Migrations owned | Named in proof | The two-list shape? |
+| --- | --- | --- | --- |
+| `migration-110-proof` | 1 | 1 | no |
+| `phase-1-proof` | 2 | 2 | no — **no ledger half at all**; every total derived over 16 CTEs |
+| `phase-3-proof` | 1 | — | no — no `.sql` files |
+| `phase-4-proof` | 1 | — | not applicable — diagnostics only |
+| `phase-5-proof` | 1 | 1 | no |
+| `phase-6-proof` | 1 | 1 | no |
+| `phase-7-proof` | 2 | 2 | no |
+| **`phase-8-proof`** | **4** | **2 in `preflight.sql`** | **yes — the only one** |
+
+**Why Phase 8 and nothing else: it is the only wave that grew after its proof was written.** Every
+other phase owns one or two migrations, fixed before the proof existed. When migration 110 arrived
+after Phase 5's package was written, the repository gave it **its own directory** rather than
+extending a hand-written list — which is why `phase-5-proof` is clean. Phase 8 added two migrations
+into an existing package instead. *The defect is not carelessness in one file; it is what this
+repository does when a wave grows.*
+
+**One unrelated finding, REPORTED not actioned.** `phase-1-proof`'s object census is measurably
+incomplete: the wave adds **281** unique `table.column` pairs and `verify.sql` asserts **142**;
+it creates **48** indexes and asserts **30**. Nothing it asserts is wrong — the refuter confirmed
+every asserted column really is added by the wave — and its totals are derived rather than typed,
+so it is not this defect class. It is a separate coverage gap in the largest proof file in the
+repository, and it is the owner's call whether Phase 1's package is reopened for it. Two other
+directories drew severity labels from the adversarial pass on points outside this class that
+**I have not independently verified**, and I am recording them as leads rather than findings.
 
 #### Two spec defects, fixed before the run could be trusted
 

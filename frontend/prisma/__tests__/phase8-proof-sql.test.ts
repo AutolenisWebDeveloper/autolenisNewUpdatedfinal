@@ -102,4 +102,110 @@ describe("phase 8 proof SQL names every phase 8 migration", () => {
       assert.ok(existsSync(join(PROOF_DIR, f)), `${f} is named in the migration package and must exist`);
     }
   });
+
+  // ── verify.sql's terminal row must state the number of rows it really emits ──────────────
+  //
+  // WHY. The terminal row exists so "this file produced no output" is distinguishable from
+  // "this file passed" — it is the anti-vacuity assertion of the SQL. Its numbers were typed
+  // by hand and went stale twice: the 13/3 split never matched the file, and the 16 total went
+  // stale the moment the ledger CTE grew from two names to four. A typed count drifting beside
+  // a hand-written list, inside the file whose subject is a typed count drifting beside a
+  // hand-written list.
+  //
+  // So it is computed here instead. One row per assertion, N per VALUES list, one per name in
+  // the phase8_expected CTE.
+
+  /** The file with every full-line `--` comment removed. Comments carry apostrophes
+   *  ("verify.sql's", "nobody checked it"), and an apostrophe in a comment desynchronises any
+   *  quote-state scan of the SQL below it. Stripping first is not tidiness, it is correctness:
+   *  the first draft of this parser masked before stripping and found 4 statements instead of
+   *  16 — caught only by the anti-vacuity assertion below, which is #7 happening a third time. */
+  function withoutComments(sql: string): string {
+    return sql
+      .split("\n")
+      .filter((l) => !/^\s*(--|\\pset)/.test(l))
+      .join("\n");
+  }
+
+  /** Blank out SQL string literals, preserving length, so a `;` inside one is not a terminator. */
+  function maskLiterals(sql: string): string {
+    let out = "";
+    let inStr = false;
+    for (const c of sql) {
+      if (c === "'") {
+        inStr = !inStr;
+        out += "'";
+      } else {
+        out += inStr && c !== "\n" ? " " : c;
+      }
+    }
+    return out;
+  }
+
+  /** Top-level statements, as slices of the comment-stripped text. */
+  function statements(sql: string): string[] {
+    const body = withoutComments(sql);
+    const masked = maskLiterals(body);
+    const out: string[] = [];
+    let start = 0;
+    for (let i = 0; i < masked.length; i++) {
+      if (masked[i] === ";") {
+        out.push(body.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    return out.filter((st) => st.startsWith("SELECT") || st.startsWith("WITH"));
+  }
+
+  /** How many rows one statement emits. */
+  function rowsEmitted(stmt: string): number {
+    const fromValues = stmt.match(/FROM \(VALUES([\s\S]*?)\)\s*AS\s+\w+\(/);
+    if (fromValues) return (fromValues[1]!.match(/\('/g) ?? []).length;
+    if (/FROM phase8_expected\s+AS\s+\w+/.test(stmt)) {
+      return (stmt.match(/\('20261117\d{6}_phase8_/g) ?? []).length;
+    }
+    return 1;
+  }
+
+  test("verify.sql's terminal row states the number of rows the file actually emits", () => {
+    const sql = readFileSync(join(PROOF_DIR, "verify.sql"), "utf8");
+    const stmts = statements(sql);
+
+    // ANTI-VACUITY, and it is not decoration — it has now fired twice in this one file, on two
+    // different broken scans (§8.1h #7). A parser that finds no statements makes every count
+    // below 0 === 0, green forever, guarding nothing.
+    assert.ok(
+      stmts.length >= 15,
+      `parsed only ${stmts.length} statements from verify.sql — the parser is broken, not the file`,
+    );
+
+    // The ledger half is the half that reads `_prisma_migrations`. Classifying on that rather
+    // than on a comment banner means a reworded heading cannot silently reclassify an assertion.
+    let physical = 0;
+    let ledger = 0;
+    let terminal = 0;
+    for (const stmt of stmts) {
+      const rows = rowsEmitted(stmt);
+      if (stmt.includes("verify complete")) terminal += rows;
+      else if (stmt.includes("_prisma_migrations")) ledger += rows;
+      else physical += rows;
+    }
+
+    assert.ok(physical > 0, "counted zero physical assertions — the parser is broken");
+    assert.ok(ledger > 0, "counted zero ledger assertions — the parser is broken");
+    assert.equal(terminal, 1, `expected exactly one terminal row, counted ${terminal}`);
+
+    const stated = sql.match(/'(\d+) assertions: (\d+) physical, (\d+) ledger\./);
+    assert.ok(stated, "verify.sql's terminal row no longer states 'N assertions: P physical, L ledger.'");
+
+    const total = physical + ledger + terminal;
+    assert.deepEqual(
+      { total: Number(stated[1]), physical: Number(stated[2]), ledger: Number(stated[3]) },
+      { total, physical, ledger },
+      `verify.sql's terminal row claims ${stated[1]} assertions (${stated[2]} physical, ${stated[3]} ledger) but ` +
+        `the file emits ${total} rows (${physical} physical, ${ledger} ledger, 1 terminal). The terminal row is ` +
+        `what distinguishes a verify that ran from one that produced nothing — a wrong count there is the defect ` +
+        `this whole directory is about.`,
+    );
+  });
 });
