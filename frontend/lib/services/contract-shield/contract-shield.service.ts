@@ -8,7 +8,7 @@ import { logger } from "@/lib/logger";
 import { getContractShieldResult } from "@/lib/constants";
 import { trackViolationPattern } from "./violation-pattern.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
-import { prepareBuyerSigningEnvelope, NoSignableDocumentError } from "@/lib/services/esign/buyer-signing.service";
+import { NoSignableDocumentError } from "@/lib/services/esign/buyer-signing.service";
 import {
   sendContractShieldAlertEmail,
   sendContractApprovedEmail,
@@ -158,9 +158,16 @@ export async function scanContract(dealId: string, contractText: string, dealerI
       }
     }
 
-    // Skip DB FEE_CAP if built-in already flagged this contract's doc fee
-    if (rule.ruleType === "FEE_CAP" && config.maxCents && !seenBuiltinDocFee) {
-      const maxCents = config.maxCents as number;
+    // Skip DB FEE_CAP if built-in already flagged this contract's doc fee.
+    //
+    // `config.threshold` IS READ HERE AND IT IS A BUG FIX, NOT A WIDENING. The scanner read
+    // only `config.maxCents`, while the admin create/PATCH routes write `config.threshold`
+    // — so NO FEE_CAP rule created through the admin UI could ever fire. The rule appeared
+    // in the list, reported itself active, and did nothing. Both keys are accepted so
+    // existing rows keep working and new ones start working.
+    const feeCapCents = (config.maxCents ?? config.threshold) as number | undefined;
+    if (rule.ruleType === "FEE_CAP" && feeCapCents && !seenBuiltinDocFee) {
+      const maxCents = feeCapCents;
       const match = contractText.match(/documentation fee[^\d]*\$?(\d+)/i);
       if (match) {
         const found = parseInt(match[1]) * 100;
@@ -175,6 +182,163 @@ export async function scanContract(dealId: string, contractText: string, dealerI
         }
       }
     }
+
+    // ── THE FOUR THAT WERE LISTED AND NEVER EVALUATED ─────────────────────────
+    // `APR_VALIDATION`, `PAYMENT_PACKING`, `DISCLOSURE_CHECK` and `FINANCE_MARKUP` have
+    // existed in `ContractScanRuleType` and been offered by the admin rules UI since the
+    // enum was written. Nothing evaluated them. A rule row of one of those types was
+    // loaded, iterated, matched neither branch above, and was silently ignored — no log,
+    // no error, no effect on the score. An administrator configuring "APR rates exceeding
+    // 29% are flagged as suspicious" got a row in a table and nothing else.
+
+    // APR_VALIDATION — an APR above the configured ceiling.
+    if (rule.ruleType === "APR_VALIDATION") {
+      const maxApr = (config.maxApr ?? config.threshold) as number | undefined;
+      const aprMatch = contractText.match(
+        /(?:a\.?p\.?r\.?|annual\s*percentage\s*rate)[^\d%]{0,40}(\d{1,2}(?:\.\d{1,4})?)\s*%?/i,
+      );
+      // A threshold stored in basis points (2900) and one stored as a percentage (29) are
+      // both in production-shaped seed data, so normalise rather than pick one and be
+      // wrong half the time.
+      const ceiling = maxApr == null ? null : maxApr > 100 ? maxApr / 100 : maxApr;
+      if (ceiling != null && aprMatch) {
+        const apr = parseFloat(aprMatch[1]);
+        if (Number.isFinite(apr) && apr > ceiling) {
+          score -= rule.severity === "HIGH" ? 20 : rule.severity === "MEDIUM" ? 10 : 5;
+          fixList.push({
+            foundValue: `${apr}% APR`,
+            expectedValue: `≤ ${ceiling}% APR`,
+            howToFix:
+              `The contract's annual percentage rate exceeds the ${ceiling}% threshold AutoLenis flags for review. ` +
+              "Confirm the rate with the lender, or document why it is correct.",
+            ruleId: rule.id,
+          });
+        }
+      }
+    }
+
+    // PAYMENT_PACKING — a monthly payment presented without the total it belongs to.
+    // §14b names payment packing; the practice is quoting a payment that hides what is
+    // being financed. The factual test is presence: a contract that states a monthly
+    // payment must also state the amount financed and the total of payments.
+    if (rule.ruleType === "PAYMENT_PACKING") {
+      const hasMonthly = /monthly\s*payment|payment\s*of\s*\$|per\s*month/i.test(contractText);
+      const hasAmountFinanced = /amount\s*financed/i.test(contractText);
+      const hasTotalOfPayments = /total\s*of\s*payments|total\s*sale\s*price/i.test(contractText);
+      if (hasMonthly && (!hasAmountFinanced || !hasTotalOfPayments)) {
+        const missing = [
+          !hasAmountFinanced ? "amount financed" : null,
+          !hasTotalOfPayments ? "total of payments" : null,
+        ].filter(Boolean).join(" and ");
+        score -= rule.severity === "HIGH" ? 20 : rule.severity === "MEDIUM" ? 10 : 5;
+        fixList.push({
+          foundValue: `a monthly payment is stated without the ${missing}`,
+          expectedValue: "monthly payment shown alongside the amount financed and the total of payments",
+          howToFix:
+            `State the ${missing} on the contract beside the monthly payment. A payment quoted on its own ` +
+            "does not let the buyer see what they are actually paying.",
+          ruleId: rule.id,
+        });
+      }
+    }
+
+    // DISCLOSURE_CHECK — a required term that must be PRESENT. This is the inverse of the
+    // keyword rules above, which flag presence; getting that backwards would flag every
+    // compliant contract and pass every non-compliant one.
+    if (rule.ruleType === "DISCLOSURE_CHECK") {
+      const required = (config.requiredTerms as string[]) ?? [];
+      // A disclosure is only owed when the thing it discloses is actually in the contract.
+      // Demanding a GAP disclosure on a contract with no GAP product would be noise.
+      const anchor = (config.whenPresent as string | undefined) ?? required[0];
+      const anchored = !anchor || lowerText.includes(anchor.toLowerCase());
+      if (anchored && required.length > 0) {
+        const missing = required.filter((term) => !lowerText.includes(term.toLowerCase()));
+        if (missing.length === required.length && required.length > 0) {
+          score -= rule.severity === "HIGH" ? 20 : rule.severity === "MEDIUM" ? 10 : 5;
+          fixList.push({
+            foundValue: `none of: ${required.join(", ")}`,
+            expectedValue: `the contract discloses ${required.join(" or ")}`,
+            howToFix:
+              `${rule.name} requires this to be disclosed and itemised on the contract. Add the disclosure.`,
+            ruleId: rule.id,
+          });
+        }
+      }
+    }
+
+    // FINANCE_MARKUP — the dealer reserve: the spread between the lender's buy rate and
+    // the rate the buyer is charged. Evaluated ONLY when the contract states both, which
+    // most do not; a contract that states neither is not evidence of no markup, so it
+    // produces nothing rather than a false clear.
+    if (rule.ruleType === "FINANCE_MARKUP") {
+      const maxBps = (config.maxMarkupBps ?? config.threshold) as number | undefined;
+      const buy = contractText.match(/buy\s*rate[^\d%]{0,40}(\d{1,2}(?:\.\d{1,4})?)/i);
+      const sell = contractText.match(
+        /(?:contract\s*rate|a\.?p\.?r\.?|annual\s*percentage\s*rate)[^\d%]{0,40}(\d{1,2}(?:\.\d{1,4})?)/i,
+      );
+      if (maxBps != null && buy && sell) {
+        const markupBps = Math.round((parseFloat(sell[1]) - parseFloat(buy[1])) * 100);
+        if (markupBps > maxBps) {
+          score -= rule.severity === "HIGH" ? 20 : rule.severity === "MEDIUM" ? 10 : 5;
+          fixList.push({
+            foundValue: `${(markupBps / 100).toFixed(2)}% over the buy rate`,
+            expectedValue: `≤ ${(maxBps / 100).toFixed(2)}% over the buy rate`,
+            howToFix:
+              "The dealer reserve on this contract exceeds the configured ceiling. Reduce the contract rate " +
+              "or document the lender's own pricing.",
+            ruleId: rule.id,
+          });
+        }
+      }
+    }
+  }
+
+  // ── §14b's FACTUAL COMPARISON — the thing Contract Shield is actually for ──
+  // Everything above judges the contract on its own. This judges it against what was
+  // AGREED: the winning offer, the dealership's reaffirmation and the recap both parties
+  // confirmed — including EACH accepted optional product individually.
+  //
+  // It is weighted heavily and deliberately. A junk-fee keyword is a warning about a
+  // practice; a contract whose out-the-door total is $600 higher than the recap the buyer
+  // confirmed is a different document from the one they agreed to, and §14b says the
+  // response is to HOLD it: "Any unexplained increase, any addition, any inconsistent
+  // total, a changed VIN, a changed financing term, or a changed trade figure is held for
+  // correction or documented review."
+  //
+  // Never throws onward: a comparison that fails is itself a finding (fail-closed), never
+  // a silent pass. The scan must produce a verdict even when a record is unreadable.
+  try {
+    const { compareContractAgainstAgreedTerms } = await import("@/lib/services/contract/contract-comparison.service");
+    const discrepancies = await compareContractAgainstAgreedTerms({ dealId, contractText });
+    for (const d of discrepancies) {
+      // A changed VIN or a product that first appears in the contract is disqualifying on
+      // its own — 40 points takes any contract below the FAIL threshold from a perfect
+      // score, so one of these can never be outvoted by an otherwise clean document.
+      const severe = d.key === "vin" || d.kind === "ADDITION";
+      score -= severe ? 40 : 15;
+      fixList.push({
+        foundValue: d.foundValue,
+        expectedValue: d.expectedValue,
+        howToFix: d.howToFix,
+        ruleId: `COMPARISON_${d.key.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`,
+        item: d.label,
+        reason: `${d.kind} against the ${d.source}`,
+      });
+    }
+  } catch (err) {
+    logger.error("[contract-shield] agreed-terms comparison failed — holding the contract", {
+      dealId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    score -= 40;
+    fixList.push({
+      foundValue: "the comparison against the agreed terms could not be completed",
+      expectedValue: "the contract compared against the offer, reaffirmation and confirmed recap",
+      howToFix:
+        "Operations must re-run the scan. A contract that could not be compared is HELD, never approved — " +
+        "the same rule §14b applies to extraction failure.",
+      ruleId: "COMPARISON_UNAVAILABLE",
+    });
   }
 
   score = Math.max(0, score);
@@ -277,11 +441,13 @@ export async function autoAdvanceContractOnPass(dealId: string, scanStatus: stri
       // upsert). This runs before the ContractVersion row is flipped to APPROVED,
       // so a NoSignableDocumentError here is EXPECTED and benign — the envelope is
       // prepared for real when the buyer opens /buyer/esign (or an admin sends it).
-      await prepareBuyerSigningEnvelope(dealId, { signerName: buyerName, signerEmail: buyerEmail }).catch((err) => {
+      // §13-D30: EVERY required signer, not just the buyer.
+      const { openSigningForRequiredSigners } = await import("@/lib/services/esign/open-signing.service");
+      await openSigningForRequiredSigners({ dealId, buyerName, buyerEmail }).catch((err) => {
         if (err instanceof NoSignableDocumentError) {
-          logger.info(`[contract-shield] signing envelope deferred to buyer-initiated prep for deal ${dealId}`);
+          logger.info(`[contract-shield] signing deferred to buyer-initiated prep for deal ${dealId}`);
         } else {
-          logger.error("[contract-shield] auto prepare signing envelope failed:", err);
+          logger.error("[contract-shield] auto open signing failed:", err);
         }
       });
 

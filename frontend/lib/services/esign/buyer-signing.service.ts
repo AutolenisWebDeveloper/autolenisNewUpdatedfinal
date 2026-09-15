@@ -233,6 +233,30 @@ export async function prepareBuyerSigningEnvelope(
   if (!contract) throw new NoSignableDocumentError();
 
   const documentHash = await computeDocumentHash(contract.documentUrl);
+
+  // §14b's `document_hash`, now LOAD-BEARING rather than recorded. Contract Shield hashes
+  // the bytes it scanned (dealer-contract.service.ts) and the value is written to the
+  // ContractVersion. This re-hashes the stored object at signing time and refuses if the
+  // two differ.
+  //
+  // What that closes: the approval binds to a ContractVersion ROW, and the row points at a
+  // storage key. Nothing stopped the object behind that key from being replaced between
+  // the scan and the signature — same row, same "APPROVED" status, different bytes. The
+  // buyer's binding signature would have attached to a document Contract Shield never
+  // read. The version-bound approval check could not see it, because the version was
+  // exactly the right one.
+  //
+  // Fail-closed, and loud: a mismatch throws rather than re-scanning silently, because a
+  // document that changed after approval is an incident, not a retry.
+  if (contract.documentHash && contract.documentHash !== documentHash) {
+    logger.error("[buyer-signing] approved contract bytes changed since the scan — refusing to prepare", {
+      dealId,
+      contractVersionId: contract.id,
+      scannedHash: contract.documentHash,
+      currentHash: documentHash,
+    });
+    throw new DocumentChangedError();
+  }
   const expiresAt = new Date(Date.now() + SIGNING_TTL_MS);
 
   // Fresh-attempt state: bind the current approved document and CLEAR every field

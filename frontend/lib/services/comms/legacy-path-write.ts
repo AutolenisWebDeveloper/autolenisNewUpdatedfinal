@@ -61,7 +61,25 @@ export type LegacyPathKind =
    * EXPECTED TO BE ZERO from the day Phase 3 ships — unlike SETTLEMENT_AUCTION_LAUNCH,
    * there is no flag keeping this path alive. A non-zero count names a caller to fix.
    */
-  | "LEGACY_LIFECYCLE_ENROLLMENT";
+  | "LEGACY_LIFECYCLE_ENROLLMENT"
+  /**
+   * A caller reaching one of the three contract-approval paths Phase 8 retired behind
+   * the single version-bound approval (§8.2 Phase 8, defect 5):
+   *
+   *   - the admin CONTRACT_SHIELD_OVERRIDDEN action, which wrote a synthetic PASS scan
+   *     with no contract_version_id and never approved a version — a dead end, because
+   *     approveContractVersionByAdmin hard-refuses a null link;
+   *   - the admin queue's CONTRACT_FAIL resolve, which MUTATED a prior scan FAIL →
+   *     WARNING, violating the append-only rule that makes a scan history evidence;
+   *   - contract-upload.service.ts::uploadContract, a second ContractVersion writer with
+   *     no scan, no supersede and no hash.
+   *
+   * Each now STANDS DOWN and records this instead of acting. EXPECTED TO BE ZERO from
+   * the day Phase 8 ships — there is no flag keeping any of them alive, so a non-zero
+   * count names a surface still trying to approve a contract outside the one path that
+   * binds an approval to the exact reviewed version.
+   */
+  | "LEGACY_CONTRACT_APPROVAL";
 
 export interface LegacyPathWriteInput {
   kind: LegacyPathKind;

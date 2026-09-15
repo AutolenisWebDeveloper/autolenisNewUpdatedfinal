@@ -15,7 +15,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const version = await prisma.contractVersion.findUnique({ where: { id: versionId } });
   if (!version) return adminError("NOT_FOUND", "Contract version not found", 404);
 
-  const signedUrl = await createSignedDocumentUrl("contracts", version.documentUrl);
+  // C-57: "Admin can open the held contract under review." It could not. This route signed
+  // against a bucket called "contracts"; every ContractVersion.documentUrl is a key in
+  // "dealer-contracts" (buyer-signing.service.ts:42, contract-shield/extract-text.ts:13), so
+  // the signed URL resolved to nothing and the admin hub's View button returned a storage
+  // error on every contract that has ever existed. A reviewer who cannot open the document
+  // cannot review it, and Contract Shield's whole hold-for-review path terminates here.
+  const signedUrl = await createSignedDocumentUrl("dealer-contracts", version.documentUrl);
   if (!signedUrl) return adminError("STORAGE_ERROR", "Unable to generate contract link", 500);
 
   return adminSuccess({ signedUrl });

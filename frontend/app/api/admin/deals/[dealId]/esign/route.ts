@@ -4,7 +4,8 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { prepareBuyerSigningEnvelope, NoSignableDocumentError, ESignSchemaUnavailableError } from "@/lib/services/esign/buyer-signing.service";
+import { NoSignableDocumentError, ESignSchemaUnavailableError } from "@/lib/services/esign/buyer-signing.service";
+import { openSigningForRequiredSigners } from "@/lib/services/esign/open-signing.service";
 import { sendDealerEsignInitiatedEmail } from "@/lib/services/email/resend.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -43,7 +44,15 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   let envelopeId: string;
   try {
-    const prepared = await prepareBuyerSigningEnvelope(dealId, { signerName, signerEmail: signerEmail ?? undefined });
+    // §13-D30: an admin opening signing opens it for every required signer. Preparing
+    // only the buyer's here is how a co-buyer deal reaches SIGNING_PENDING half-asked.
+    const opened = await openSigningForRequiredSigners({
+      dealId,
+      buyerName: signerName,
+      buyerEmail: signerEmail ?? undefined,
+    });
+    const prepared = opened.prepared[0] ? { envelopeId: opened.prepared[0].envelopeId } : null;
+    if (!prepared) throw new NoSignableDocumentError();
     envelopeId = prepared.envelopeId;
   } catch (err) {
     if (err instanceof ESignSchemaUnavailableError) {
