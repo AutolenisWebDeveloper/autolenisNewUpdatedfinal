@@ -111,6 +111,44 @@ async function dealershipWasBlocked(dealId: string, isOutsideWinner: boolean): P
   }
 }
 
+/**
+ * §Stage 10 — WHO IS RECORDED AS HAVING STOOD THE DEAL DOWN.
+ *
+ * This was `params.actorId === "system" ? "SYSTEM" : "DEALER"`, inline in the history write. The
+ * five causes arrive from five places and only three of them are a dealership: a BUYER rejecting a
+ * proposed material change — the one decision §10a gives them unconditionally — was written into
+ * `deal_status_history` as the DEALERSHIP cancelling. The stand-down was right and its audit row
+ * named the wrong party, which is the half nobody notices until somebody reads the history to
+ * settle a dispute.
+ *
+ * The derivation is the same test `DEALER_FAULT` already makes, so the two cannot disagree; an
+ * explicit `actorRole` wins where a caller knows something the cause does not say, such as an
+ * administrator acting on a dealership's behalf.
+ */
+export function standDownActorRole(params: {
+  cause: ReturnCause;
+  actorId: string;
+  actorRole?: string | null;
+}): string {
+  if (params.actorRole) return params.actorRole;
+  if (params.actorId === "system") return "SYSTEM";
+  return DEALER_FAULT.includes(params.cause) ? "DEALER" : "BUYER";
+}
+
+/**
+ * Deals that have already ended. A stand-down against one of these is a duplicate call, not a
+ * second cancellation — see the early return in `returnToRemainingOffers`.
+ */
+const ALREADY_STOOD_DOWN: DealStatus[] = [DealStatus.CANCELLED, DealStatus.REFUNDED, DealStatus.COMPLETED];
+
+/** The compare-and-swap's own signal, so a lost race is not confused with a failed write. */
+class StaleStatusError extends Error {
+  constructor() {
+    super("deal status moved between the read and the stand-down");
+    this.name = "StaleStatusError";
+  }
+}
+
 export interface ReturnToOffersResult {
   returned: boolean;
   remainingOfferCount: number;
@@ -123,6 +161,8 @@ export async function returnToRemainingOffers(params: {
   reason: string;
   cause: ReturnCause;
   actorId: string;
+  /** Optional. Omitted, it is derived from the cause and the actor — see `standDownActorRole`. */
+  actorRole?: string | null;
   now?: Date;
 }): Promise<ReturnToOffersResult> {
   const now = params.now ?? new Date();
@@ -151,6 +191,21 @@ export async function returnToRemainingOffers(params: {
   });
   if (!deal) {
     logger.error("return-to-offers: deal not found", { dealId: params.dealId });
+    return { returned: false, remainingOfferCount: 0, scorecardRecorded: false, slaViolation: false };
+  }
+
+  // A DEAL THAT HAS ALREADY ENDED IS NOT STOOD DOWN TWICE, and this is checked before the
+  // revocation below rather than after it: a duplicate call — the sweep and a dealer release in
+  // the same minute, or a retry — would otherwise revoke a release, write a second history row
+  // claiming a `fromStatus` the deal left long ago, raise a second exception and re-decline an
+  // already-declined offer. The narrow race that survives this read is caught by the
+  // compare-and-swap on the cancellation itself.
+  if (ALREADY_STOOD_DOWN.includes(deal.status)) {
+    logger.info("return-to-offers: deal has already ended — nothing to stand down", {
+      dealId: params.dealId,
+      status: deal.status,
+      cause: params.cause,
+    });
     return { returned: false, remainingOfferCount: 0, scorecardRecorded: false, slaViolation: false };
   }
 
@@ -199,20 +254,31 @@ export async function returnToRemainingOffers(params: {
       })
     : 0;
 
+  let stoodDown = true;
   await prisma.$transaction(async (tx) => {
-    // The deal stands down. CANCELLED is reachable from any non-terminal state, and the reason is
-    // on the history row rather than only in a log.
-    await tx.deal.update({
-      where: { id: params.dealId },
+    // THE DEAL STANDS DOWN UNDER A COMPARE-AND-SWAP. CANCELLED is reachable from any non-terminal
+    // state, but `deal.status` was read before this transaction opened and the history row is
+    // about to CLAIM the deal moved from it. An unconditional `update` let a second caller write a
+    // `fromStatus` the deal had already left, and let both callers' side effects run — two history
+    // rows, two exceptions, two scorecard marks against the rooftop for one failure.
+    //
+    // Zero rows means somebody moved it in between. The transaction is abandoned rather than
+    // forced: whoever won has already done all four things this function owes the buyer.
+    const claimed = await tx.deal.updateMany({
+      where: { id: params.dealId, status: deal.status },
       data: { status: DealStatus.CANCELLED, holdReason: params.cause },
     });
+    if (claimed.count === 0) {
+      stoodDown = false;
+      throw new StaleStatusError();
+    }
     await tx.dealStatusHistory.create({
       data: {
         dealId: params.dealId,
         fromStatus: deal.status,
         toStatus: DealStatus.CANCELLED,
         actorId: params.actorId,
-        actorRole: params.actorId === "system" ? "SYSTEM" : "DEALER",
+        actorRole: standDownActorRole(params),
         reason: `${params.cause}: ${params.reason}`,
       },
     });
@@ -223,7 +289,20 @@ export async function returnToRemainingOffers(params: {
         data: { status: "DECLINED" },
       });
     }
+  }).catch((err) => {
+    // The one throw this transaction raises on purpose. Anything else is a real failure and keeps
+    // propagating — a stand-down that could not commit must not report that it did.
+    if (!(err instanceof StaleStatusError)) throw err;
+    logger.info("return-to-offers: another caller stood this deal down first", {
+      dealId: params.dealId,
+      readStatus: deal.status,
+      cause: params.cause,
+    });
   });
+
+  if (!stoodDown) {
+    return { returned: false, remainingOfferCount, scorecardRecorded: false, slaViolation: false };
+  }
 
   await raiseException({
     code: EXCEPTION_CODE[params.cause],

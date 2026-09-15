@@ -48,7 +48,7 @@
 // to do so.
 
 import { prisma } from "@/lib/prisma";
-import { FinancingPath, FinancingStatus, Prisma } from "@prisma/client";
+import { DealStatus, FinancingPath, FinancingStatus, Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { appendFinancingAuditEvent } from "./financing-audit.service";
 import { enqueueOrRaise } from "@/lib/services/comms/transactional-dispatcher.service";
@@ -127,6 +127,39 @@ function assertNotLegacy(status: FinancingStatus): void {
   }
 }
 
+/**
+ * §Stage 12 — THE DEAL STATES THAT TAKE NO FINANCING CHECKPOINT.
+ *
+ * This did not exist. `recordFinancingCheckpoint` SELECTED `deal.status` and never consulted it,
+ * and `recordBuyerFinancingPath` did the same, so a cancelled deal — one already stood down by
+ * `returnToRemainingOffers`, with its firewall revoked and its buyer emailed — still accepted a
+ * recorded lender approval, a `financing_terms_locked_at` on the Deal and an entry in the
+ * tamper-evident chain. The money was real and the deal was dead.
+ *
+ * A DENYLIST, DELIBERATELY, and not an allowlist pinned to `FINANCING_PENDING`. §12a has TWO
+ * checkpoints and `deal-early/D3` gives the second to Phase 8 — "after signing, before vehicle
+ * release" — which happens at SIGNED or FUNDING_PENDING. An allowlist would refuse it, and a guard
+ * that blocks a later phase's legitimate write is the same class of defect as one that allows a
+ * dead deal's. §12b's own transition map is what constrains the FINANCING state; this constrains
+ * only the DEAL, and only at its three end states.
+ */
+export const FINANCING_CLOSED_DEAL_STATUSES: readonly DealStatus[] = [
+  DealStatus.CANCELLED,
+  DealStatus.REFUNDED,
+  DealStatus.COMPLETED,
+] as const;
+
+export function assertDealAcceptsFinancing(status: DealStatus): void {
+  if (FINANCING_CLOSED_DEAL_STATUSES.includes(status)) {
+    throw new FinancingCheckpointError(
+      "DEAL_CLOSED",
+      `This deal is ${status}. §Stage 12's checkpoint records money against a live deal; a ` +
+        `recording here would put a lender approval, a terms-locked timestamp and an audit-chain ` +
+        `entry on one that has already ended.`,
+    );
+  }
+}
+
 function assertPhase7Writable(status: FinancingStatus): void {
   assertNotLegacy(status);
   if (!PHASE_7_WRITABLE.includes(status)) {
@@ -181,7 +214,12 @@ export interface RecordCheckpointParams {
  */
 export async function recordFinancingCheckpoint(
   params: RecordCheckpointParams,
-): Promise<{ status: FinancingStatus; from: FinancingStatus | null }> {
+): Promise<{
+  status: FinancingStatus;
+  from: FinancingStatus | null;
+  /** §13-D19 — false when the AUTHORITATIVE chain entry could not be written. See the catch below. */
+  auditRecorded: boolean;
+}> {
   const now = params.now ?? new Date();
   assertPhase7Writable(params.status);
 
@@ -215,55 +253,98 @@ export async function recordFinancingCheckpoint(
     select: { id: true, status: true, financingPath: true, buyerId: true, vin: true },
   });
   if (!deal) throw new FinancingCheckpointError("NOT_FOUND", "Deal not found.");
-
-  const existing = await prisma.financing.findUnique({
-    where: { dealId: params.dealId },
-    select: { id: true, status: true, path: true },
-  });
-
-  const from = existing?.status ?? null;
-  if (from && from !== params.status) {
-    const legal = FINANCING_TRANSITIONS[from] ?? [];
-    if (!legal.includes(params.status)) {
-      throw new FinancingCheckpointError(
-        "INVALID_TRANSITION",
-        `§12b does not allow ${from} → ${params.status}. Legal from ${from}: ${legal.join(", ") || "none"}.`,
-      );
-    }
-  }
-
-  const path =
-    params.path ??
-    existing?.path ??
-    (deal.financingPath as FinancingPath | null) ??
-    (params.status === FinancingStatus.NOT_REQUIRED_CASH ? FinancingPath.CASH : FinancingPath.EXTERNAL);
+  // The status was SELECTED above and never read. See `assertDealAcceptsFinancing`.
+  assertDealAcceptsFinancing(deal.status);
 
   const e = params.evidence;
-  const financingWrite = {
-    path,
-    status: params.status,
-    lenderName: e?.source ?? undefined,
-    externalReference: e?.externalReference ?? undefined,
-    approvedAmountCents: e?.approvedAmountCents ?? undefined,
-    downPaymentCents: e?.downPaymentCents ?? undefined,
-    aprRate: e?.aprRate ?? undefined,
-    termMonths: e?.termMonths ?? undefined,
-    monthlyPaymentCents: e?.monthlyPaymentCents ?? undefined,
-    expiresAt: e?.expiresAt ?? undefined,
-    evidenceDocumentId: e?.evidenceDocumentId ?? undefined,
-    failureReason: params.failureReason ?? undefined,
-    verifiedBy: params.actorId,
-    verifiedAt: now,
-    ...(params.status === FinancingStatus.TERMS_LOCKED ? { termsLockedAt: now } : {}),
-  };
 
-  const financingId = await prisma.$transaction(async (tx) => {
-    const row = await tx.financing.upsert({
+  // EVERYTHING FROM THE READ TO THE WRITE IS ONE TRANSACTION, and it was not.
+  //
+  // The §12b transition was validated against a `findUnique` taken out here and then applied with
+  // a blind `upsert` inside. Two Finance admins recording different lender terms in the same
+  // second both read IN_PROGRESS, both found IN_PROGRESS → TERMS_LOCKED legal, and both wrote —
+  // the later one silently replacing the other's APR, term and approved amount on a row whose
+  // audit chain then carried two TERMS_LOCKED entries disagreeing about the same loan.
+  //
+  // So the status is re-read inside, the transition is checked against THAT read, and the write
+  // pins it: `updateMany ... where status = existing.status` applies to zero rows if anyone moved
+  // it in between, and zero rows is refused rather than retried — a second admin's terms are not
+  // this caller's to overwrite.
+  const { financingId, from, path } = await prisma.$transaction(async (tx) => {
+    const existing = await tx.financing.findUnique({
       where: { dealId: params.dealId },
-      create: { dealId: params.dealId, ...financingWrite },
-      update: financingWrite,
-      select: { id: true },
+      select: { id: true, status: true, path: true },
     });
+
+    const from = existing?.status ?? null;
+    if (from && from !== params.status) {
+      const legal = FINANCING_TRANSITIONS[from] ?? [];
+      if (!legal.includes(params.status)) {
+        throw new FinancingCheckpointError(
+          "INVALID_TRANSITION",
+          `§12b does not allow ${from} → ${params.status}. Legal from ${from}: ${legal.join(", ") || "none"}.`,
+        );
+      }
+    }
+
+    const path =
+      params.path ??
+      existing?.path ??
+      (deal.financingPath as FinancingPath | null) ??
+      (params.status === FinancingStatus.NOT_REQUIRED_CASH ? FinancingPath.CASH : FinancingPath.EXTERNAL);
+
+    const financingWrite = {
+      path,
+      status: params.status,
+      lenderName: e?.source ?? undefined,
+      externalReference: e?.externalReference ?? undefined,
+      approvedAmountCents: e?.approvedAmountCents ?? undefined,
+      downPaymentCents: e?.downPaymentCents ?? undefined,
+      aprRate: e?.aprRate ?? undefined,
+      termMonths: e?.termMonths ?? undefined,
+      monthlyPaymentCents: e?.monthlyPaymentCents ?? undefined,
+      expiresAt: e?.expiresAt ?? undefined,
+      evidenceDocumentId: e?.evidenceDocumentId ?? undefined,
+      failureReason: params.failureReason ?? undefined,
+      verifiedBy: params.actorId,
+      verifiedAt: now,
+      ...(params.status === FinancingStatus.TERMS_LOCKED ? { termsLockedAt: now } : {}),
+    };
+
+    let financingId: string;
+    if (existing) {
+      const claimed = await tx.financing.updateMany({
+        where: { dealId: params.dealId, status: existing.status },
+        data: financingWrite,
+      });
+      if (claimed.count !== 1) {
+        throw new FinancingCheckpointError(
+          "CONCURRENT_MODIFICATION",
+          "Another financing recording for this deal committed while this one was being prepared. " +
+            "Re-read the current terms before recording again — replacing them blind would lose a " +
+            "verifier's evidence.",
+        );
+      }
+      financingId = existing.id;
+    } else {
+      try {
+        const row = await tx.financing.create({
+          data: { dealId: params.dealId, ...financingWrite },
+          select: { id: true },
+        });
+        financingId = row.id;
+      } catch (err) {
+        // `financing.deal_id` is @unique, so a concurrent first recording lands here rather than
+        // creating a second row. Same answer as a lost compare-and-swap.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          throw new FinancingCheckpointError(
+            "CONCURRENT_MODIFICATION",
+            "Another financing recording for this deal committed first. Re-read it before recording again.",
+          );
+        }
+        throw err;
+      }
+    }
 
     // The Deal's own checkpoint timestamps. `financing_completed_at` is Phase 8's and is NOT
     // written here — see the header.
@@ -278,14 +359,32 @@ export async function recordFinancingCheckpoint(
 
     // §12c — the evidence record attaches to the DEAL. `external_pre_approvals.deal_id` exists
     // (Phase 1 wave) and this is its writer.
+    //
+    // SCOPED TO THIS DEAL'S BUYER, AND THE COUNT IS READ. It was `{ id, dealId: null }` with the
+    // result discarded: naming ANOTHER buyer's unattached pre-approval attached their lender
+    // evidence — name, approved amount, APR, term — to this deal, and naming one that did not
+    // exist, or was already attached elsewhere, updated nothing while the checkpoint still
+    // reported §12c evidence recorded. `dealId: params.dealId` is in the OR so a re-record of the
+    // same checkpoint is idempotent rather than a spurious refusal.
     if (e?.externalPreApprovalId) {
-      await tx.externalPreApproval.updateMany({
-        where: { id: e.externalPreApprovalId, dealId: null },
+      const attached = await tx.externalPreApproval.updateMany({
+        where: {
+          id: e.externalPreApprovalId,
+          buyerId: deal.buyerId,
+          OR: [{ dealId: null }, { dealId: params.dealId }],
+        },
         data: { dealId: params.dealId },
       });
+      if (attached.count !== 1) {
+        throw new FinancingCheckpointError(
+          "EVIDENCE_NOT_ATTACHABLE",
+          "That external pre-approval does not belong to this buyer, or is already attached to a " +
+            "different deal. §12c records evidence against the deal it was verified for.",
+        );
+      }
     }
 
-    return row.id;
+    return { financingId, from, path };
   });
 
   // §13-D19 — the tamper-evident chain, written OUTSIDE the transaction deliberately. The chain
@@ -293,7 +392,7 @@ export async function recordFinancingCheckpoint(
   // and nesting it inside this one would make an audit-write conflict roll back a committed
   // financing decision. The chain is authoritative for what was recorded; the financing row is the
   // state. A chain write that fails is a reportable defect, not a reason to unwind the checkpoint.
-  await appendFinancingAuditEvent({
+  const auditRecorded = await appendFinancingAuditEvent({
     eventType: AUDIT_EVENT[params.status],
     actorType: params.actorType === "ADMIN" ? "ADMIN" : "SYSTEM",
     actorId: params.actorId,
@@ -321,13 +420,52 @@ export async function recordFinancingCheckpoint(
       reason: params.reason,
       failureReason: params.failureReason ?? null,
     },
-  }).catch((err) => {
-    logger.error("financing checkpoint: audit chain append failed — the checkpoint is committed", {
-      dealId: params.dealId,
-      status: params.status,
-      error: err instanceof Error ? err.message : String(err),
+  })
+    .then(() => true)
+    .catch(async (err) => {
+      // A LOST CHAIN APPEND IS NOT A SUCCESSFUL CHECKPOINT, and this used to read as one: the
+      // caller got the same `{ status, from }` whether or not §13-D19's AUTHORITATIVE record was
+      // written, with a log line the only trace. The checkpoint still stands — unwinding a
+      // committed financing decision because its record failed is the header's ruling and it holds
+      // — but it stops being indistinguishable from one that was recorded properly.
+      //
+      // The durable half goes to `AdminAuditLog`, which this function already writes and an
+      // Operations surface already reads. §26's register has NO code for a broken audit chain; one
+      // is not invented here, because adding a row to that register is an owner decision and a
+      // fabricated code would be a queue item nobody's runbook describes. Reported instead.
+      logger.error("financing checkpoint: audit chain append failed — the checkpoint is committed", {
+        dealId: params.dealId,
+        status: params.status,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await prisma.adminAuditLog
+        .create({
+          data: {
+            adminId: params.actorId,
+            adminEmail: params.actorEmail ?? "",
+            action: "FINANCING_AUDIT_APPEND_FAILED",
+            entityType: "Deal",
+            entityId: params.dealId,
+            reason:
+              `The §13-D19 chain entry for ${params.status} could not be written. The checkpoint is ` +
+              `committed and the chain does not record it.`,
+            metadata: {
+              status: params.status,
+              financingId,
+              error: err instanceof Error ? err.message : String(err),
+            } as Prisma.InputJsonValue,
+          },
+        })
+        .catch((mirrorErr) => {
+          // The last durable writer available here. It must not throw — the checkpoint is
+          // committed — and it must not be silent either.
+          logger.error("financing checkpoint: the audit-failure record itself could not be written", {
+            dealId: params.dealId,
+            error: mirrorErr instanceof Error ? mirrorErr.message : String(mirrorErr),
+          });
+        });
+      return false;
     });
-  });
 
   // §13-D19 — "Both written, the chain authoritative." The AdminAuditLog mirror is for the admin
   // surfaces that already read it; it is never consulted to establish what happened.
@@ -369,10 +507,19 @@ export async function recordFinancingCheckpoint(
         `Return the buyer to another external path — a different lender, a different structure, a ` +
         `larger down payment, or cash. Do NOT cancel the deal. Re-evaluate the vehicle hold and ` +
         `have it extended or released.`,
-    }).catch(() => undefined);
+    }).catch((err) => {
+      // The queue writer is the last resort; if it fails there is nothing further to escalate to,
+      // so this must not throw. It must not be SILENT either — `.catch(() => undefined)` left a
+      // buyer whose financing had just failed with no exception raised and no line saying so.
+      logger.error("financing checkpoint: the §26 exception could not be raised", {
+        dealId: params.dealId,
+        status: params.status,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
-  return { status: params.status, from };
+  return { status: params.status, from, auditRecorded };
 }
 
 /** §13-D19's extended event enum, mapped one-to-one so no status writes an unrelated event. */
@@ -414,6 +561,10 @@ export async function recordBuyerFinancingPath(params: {
     select: { id: true, status: true },
   });
   if (!deal) throw new FinancingCheckpointError("NOT_FOUND", "Deal not found.");
+  // Selected here and ignored, exactly as in the writer below it. The delegation would now refuse
+  // a closed deal anyway; checking here refuses it BEFORE the cash branch decides a status, so the
+  // buyer is told their deal has ended rather than told an election was recorded on it.
+  assertDealAcceptsFinancing(deal.status);
 
   // Cash is the one path the buyer's own election settles: §12d says a cash purchase "sets
   // NOT_REQUIRED_CASH at this stage and is confirmed as received by the dealership at funding

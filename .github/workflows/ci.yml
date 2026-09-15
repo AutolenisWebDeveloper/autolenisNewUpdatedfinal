@@ -503,6 +503,22 @@ jobs:
           NODE_OPTIONS: --conditions=react-server
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase6-offer-journeys.spec.ts
 
+      # The Phase 7 reaffirmation journeys (§12.4): Stage 10 confirm/reject/timeout, the vehicle
+      # hold and its release, the seven §10a material-change rules, the outside-winner gate, the
+      # Stage 11 recap with its dispute and freeze, and the Stage 12 financing checkpoints.
+      #
+      # ADDED AFTER PHASE 7 MERGED, and that is the finding rather than the fix: the spec shipped
+      # with PR #432 and was never named here, so fourteen journeys covering every Stage 10-12
+      # transition had run only by hand. This step is the reason the comment above it exists —
+      # `tests/e2e/` is not globbed, so a spec nobody adds is a spec CI never runs.
+      #
+      # Same `--conditions=react-server` requirement as the two steps above: this spec also calls
+      # services in-process, and `server-only` throws without it.
+      - name: E2E — Phase 7 reaffirmation journeys
+        env:
+          NODE_OPTIONS: --conditions=react-server
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase7-reaffirmation-journeys.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

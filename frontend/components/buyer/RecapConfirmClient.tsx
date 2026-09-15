@@ -20,13 +20,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, AlertCircle } from "lucide-react";
+import { recapTotals, type RecapProduct } from "@/lib/services/deal/recap-totals";
 
-export interface RecapProduct {
-  key: string;
-  label: string;
-  amountCents: number;
-  accepted: boolean | null;
-}
+export type { RecapProduct };
 
 function money(cents: number | null | undefined): string {
   if (cents == null) return "—";
@@ -53,12 +49,8 @@ export function RecapConfirmClient({
   const [error, setError] = useState<string | null>(null);
 
   const undecided = products.filter((p) => p.accepted === null);
-  const acceptedTotal = products
-    .filter((p) => p.accepted === true)
-    .reduce((s, p) => s + p.amountCents, 0);
-  const declinedTotal = products
-    .filter((p) => p.accepted === false)
-    .reduce((s, p) => s + p.amountCents, 0);
+  const { vehicleAndFeesCents, acceptedTotal, declinedTotal, undecidedTotal, runningTotalCents } =
+    recapTotals(baseOtdCents, products);
 
   async function post(body: unknown): Promise<Response> {
     const res = await fetch(`/api/buyer/deal/${dealId}/recap`, {
@@ -193,13 +185,30 @@ export function RecapConfirmClient({
           <div className="border-t border-al-border bg-al-bg px-5 py-4 text-[14px] sm:px-6">
             <dl className="grid grid-cols-[1fr_auto] gap-y-1">
               <dt className="text-al-text-muted">Vehicle and fees</dt>
-              <dd className="tabular-nums text-al-text">{money(baseOtdCents - acceptedTotal)}</dd>
+              <dd className="tabular-nums text-al-text" data-testid="recap-vehicle-and-fees">
+                {money(vehicleAndFeesCents)}
+              </dd>
               <dt className="text-al-text-muted">Optional products you accepted</dt>
-              <dd className="tabular-nums text-al-text">{money(acceptedTotal)}</dd>
+              <dd className="tabular-nums text-al-text" data-testid="recap-accepted-total">
+                {money(acceptedTotal)}
+              </dd>
               {declinedTotal > 0 && (
                 <>
                   <dt className="text-al-text-subtle">Declined (not in your total)</dt>
-                  <dd className="tabular-nums text-al-text-subtle line-through">{money(declinedTotal)}</dd>
+                  <dd
+                    className="tabular-nums text-al-text-subtle line-through"
+                    data-testid="recap-declined-total"
+                  >
+                    {money(declinedTotal)}
+                  </dd>
+                </>
+              )}
+              {undecidedTotal > 0 && (
+                <>
+                  <dt className="text-al-text-subtle">Still to decide (not in your total yet)</dt>
+                  <dd className="tabular-nums text-al-text-subtle" data-testid="recap-undecided-total">
+                    {money(undecidedTotal)}
+                  </dd>
                 </>
               )}
               <dt className="mt-1 border-t border-al-border pt-1 font-semibold text-al-text">
@@ -209,7 +218,7 @@ export function RecapConfirmClient({
                 className="mt-1 border-t border-al-border pt-1 text-right font-bold tabular-nums text-al-text"
                 data-testid="recap-running-total"
               >
-                {money(baseOtdCents)}
+                {money(runningTotalCents)}
               </dd>
             </dl>
           </div>

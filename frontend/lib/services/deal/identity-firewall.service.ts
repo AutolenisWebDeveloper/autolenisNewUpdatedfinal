@@ -284,9 +284,41 @@ export async function liftIdentityFirewall(
         "Buyer and co-buyer identity and the trade packet released to this rooftop at Stage 10 " +
         "reaffirmation (§25.1). Append-only: an ended release is revoked, never re-withheld.",
     },
-    // `liftedAt` is NOT in the update: the first release is the fact worth keeping.
-    update: { state: FIREWALL_LIFTED, revokedAt: null, revokedBy: null },
+    // NEITHER `liftedAt` NOR THE REVOCATION IS IN THE UPDATE, and the second half of that is a
+    // correction. This read `revokedAt: null, revokedBy: null`, so every re-lift ERASED the record
+    // of an ended release — the exact loss §13-D38 chose option C over option B to avoid, arriving
+    // silently through the one table that exists to hold §25.2 evidence. `liftedAt` stays out for
+    // the original reason: the first release is the fact worth keeping.
+    update: { state: FIREWALL_LIFTED },
   });
+
+  // A RE-LIFT ON A ROW WHOSE PREVIOUS RELEASE WAS REVOKED. The live revocation pointer has to
+  // clear or `dealerIdentityVisible` keeps answering REVOKED to a rooftop that has just reaffirmed
+  // again. So the ended release is ARCHIVED onto the row's own `description` — a `TEXT NOT NULL`,
+  // and the only field on this table able to carry more than one fact — before the pointer moves.
+  //
+  // Conditional, so an idempotent re-confirm does not grow the description on every press; and
+  // compare-and-swapped on the timestamp just read, so a revocation landing between the read and
+  // the write is not swallowed by it.
+  const current = await db.identityFirewallEntry.findUnique({
+    where: { auctionId_rooftopId: { auctionId: deal.auctionId, rooftopId: deal.rooftopId } },
+    select: { description: true, revokedAt: true, revokedBy: true },
+  });
+  if (current?.revokedAt) {
+    await db.identityFirewallEntry.updateMany({
+      where: { auctionId: deal.auctionId, rooftopId: deal.rooftopId, revokedAt: current.revokedAt },
+      data: {
+        description:
+          `${current.description}\n` +
+          `[${now.toISOString()}] Released again to this rooftop by ${input.actorId}. The previous ` +
+          `release ended at ${current.revokedAt.toISOString()}` +
+          `${current.revokedBy ? ` by ${current.revokedBy}` : ""}. Recorded here because the row ` +
+          `carries ONE live revocation pointer and §13-D38 option C keeps what was released and when.`,
+        revokedAt: null,
+        revokedBy: null,
+      },
+    });
+  }
   return { lifted: true, reason: "LIFTED" };
 }
 
@@ -446,22 +478,32 @@ export async function secureHandoffPacket(
             isRequiredSigner: deal.coBuyer.isRequiredSigner,
           }
         : null,
-    trade: trade
-      ? {
-          year: trade.year,
-          make: trade.make,
-          model: trade.model,
-          trim: trade.trim,
-          mileage: trade.mileage,
-          vin: trade.vin,
-          lienholderName: trade.lienholderName,
-          payoffGoodThroughDate: trade.payoffGoodThroughDate,
-          verifiedPayoffCents: trade.verifiedPayoffCents,
-          titleInHand: trade.titleInHand,
-          titleState: trade.titleState,
-          hasSecondKey: trade.hasSecondKey,
-          photoUrls: trade.photoUrls,
-        }
-      : null,
+    // §4b AGAIN, and the same rule as the co-buyer four lines above — which was gated while this
+    // was not. `shareConsentAt` was SELECTED at the query above and never read, which is worse
+    // than having no consent field at all: the query reads as though consent were checked.
+    //
+    // `share_consent_at` is written on every submission that persists (`trade-in.service.ts:292`,
+    // after a refusal at `:261` when `shareConsent` is not true), so this withholds only a packet
+    // carrying no recorded consent — a legacy row predating the Phase 1 column, or one written by
+    // a future path that forgot. The buyer's own identity is unaffected: one missing consent is
+    // not a closed firewall.
+    trade:
+      trade && trade.shareConsentAt
+        ? {
+            year: trade.year,
+            make: trade.make,
+            model: trade.model,
+            trim: trade.trim,
+            mileage: trade.mileage,
+            vin: trade.vin,
+            lienholderName: trade.lienholderName,
+            payoffGoodThroughDate: trade.payoffGoodThroughDate,
+            verifiedPayoffCents: trade.verifiedPayoffCents,
+            titleInHand: trade.titleInHand,
+            titleState: trade.titleState,
+            hasSecondKey: trade.hasSecondKey,
+            photoUrls: trade.photoUrls,
+          }
+        : null,
   };
 }

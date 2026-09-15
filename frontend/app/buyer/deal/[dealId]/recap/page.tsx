@@ -258,7 +258,7 @@ export default async function RecapPage({ params }: Props) {
             is prepared once the terms are locked.
           </p>
           <Link
-            href={`/buyer/deal/${deal.id}/financing`}
+            href="/buyer/deal/financing"
             className="mt-4 inline-flex min-h-[48px] items-center rounded-al-md bg-al-primary px-5 py-3 text-[15px] font-semibold text-al-primary-fg hover:bg-al-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             data-testid="recap-to-financing"
           >
