@@ -83,13 +83,30 @@ function findMoneyNear(text: string, patterns: RegExp[]): number | null {
     const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
     let match: RegExpExecArray | null;
     while ((match = re.exec(text)) !== null) {
-      const window = text.slice(match.index + match[0].length, match.index + match[0].length + 80);
-      const amount = window.match(/\$?\s*([\d,]{1,12})(?:\.(\d{2}))?/);
+      // The window STOPS AT THE END OF THE LABEL'S OWN LINE. A line item on real paperwork
+      // carries its amount beside its label; letting the window run past the newline is how
+      // "GAP Protection included" borrowed the out-the-door total two lines down and reported
+      // a $32,450 GAP product. Bounded to the line, an unpriced label finds nothing — which
+      // is the truth, and which the caller turns into NOT_FOUND.
+      const rest = text.slice(match.index + match[0].length, match.index + match[0].length + 80);
+      const newline = rest.indexOf("\n");
+      const window = newline === -1 ? rest : rest.slice(0, newline);
+      // A CURRENCY-SHAPED token, not "the next digits". The old pattern made the `$` and the
+      // cents both optional, so any number within 80 characters read as the amount: in
+      // "Sales Tax Rate 8.25% … Sales Tax $2,400.00" the rate matched first and 825 cents was
+      // compared against 240,000, holding a correct contract on a false mismatch. Worse in the
+      // other direction — a label with no price at all silently borrowed the next line's
+      // figure and reported a PASS. Requiring either a `$` or two decimal places makes
+      // "no readable amount here" return null, which the caller turns into NOT_FOUND.
+      const amount = window.match(/\$\s*([\d,]{1,12})(?:\.(\d{2}))?|([\d,]{1,12})\.(\d{2})/);
       if (!amount) continue;
-      const dollars = parseInt(amount[1].replace(/,/g, ""), 10);
+      // Alternation: groups 1/2 are the `$`-prefixed form, 3/4 the bare two-decimal form.
+      const whole = amount[1] ?? amount[3];
+      const frac = amount[2] ?? amount[4];
+      if (whole === undefined) continue;
+      const dollars = parseInt(whole.replace(/,/g, ""), 10);
       if (!Number.isFinite(dollars)) continue;
-      const cents = dollars * 100 + (amount[2] ? parseInt(amount[2], 10) : 0);
-      return cents;
+      return dollars * 100 + (frac ? parseInt(frac, 10) : 0);
     }
   }
   return null;
@@ -375,6 +392,41 @@ export async function compareContractAgainstAgreedTerms(params: {
     for (const product of products) {
       if (!product?.label) continue;
       const present = textHas(text, product.label);
+      // THE AMOUNT, not just the name. Presence alone was the whole check, so a recap line
+      // reading "GAP Protection, $1,200, accepted" was satisfied by a contract charging
+      // "GAP Protection $4,995.00" — the product is exactly where packing happens, and the
+      // price is the only part of it that moves. §14b asks for each accepted optional product
+      // compared against the confirmed recap; a label match is not a comparison.
+      if (product.accepted === true && present && Number.isFinite(product.amountCents)) {
+        const escaped = product.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const charged = findMoneyNear(text, [new RegExp(escaped, "i")]);
+        if (charged === null) {
+          findings.push({
+            key: `product:${product.key}:amount`,
+            label: `Optional product — ${product.label} (amount)`,
+            kind: "NOT_FOUND",
+            expectedValue: money(product.amountCents),
+            foundValue: "the product is named but no amount could be read beside it",
+            source: recapSource ?? "confirmed recap",
+            howToFix:
+              `${product.label} appears on the contract with no readable price. State the amount ` +
+              `the buyer accepted, ${money(product.amountCents)}, beside it.`,
+          });
+        } else if (Math.abs(charged - product.amountCents) > TOLERANCE_CENTS) {
+          findings.push({
+            key: `product:${product.key}:amount`,
+            label: `Optional product — ${product.label} (amount)`,
+            kind: charged > product.amountCents ? "ADDITION" : "MISMATCH",
+            expectedValue: money(product.amountCents),
+            foundValue: money(charged),
+            source: recapSource ?? "confirmed recap",
+            howToFix:
+              `The buyer accepted ${product.label} at ${money(product.amountCents)}; the contract ` +
+              `charges ${money(charged)}. Correct the contract to the agreed figure, or the buyer ` +
+              "must re-confirm a recap that carries the new one.",
+          });
+        }
+      }
       if (product.accepted === true && !present) {
         findings.push({
           key: `product:${product.key}`,

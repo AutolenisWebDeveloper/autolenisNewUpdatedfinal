@@ -307,9 +307,14 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   //
   // Never throws onward: a comparison that fails is itself a finding (fail-closed), never
   // a silent pass. The scan must produce a verdict even when a record is unreadable.
+  // Set by ANY comparison discrepancy, and by a comparison that could not run. It forces the
+  // verdict out of PASS below, independently of the score.
+  let comparisonHeld = false;
+
   try {
     const { compareContractAgainstAgreedTerms } = await import("@/lib/services/contract/contract-comparison.service");
     const discrepancies = await compareContractAgainstAgreedTerms({ dealId, contractText });
+    if (discrepancies.length > 0) comparisonHeld = true;
     for (const d of discrepancies) {
       // A changed VIN or a product that first appears in the contract is disqualifying on
       // its own — 40 points takes any contract below the FAIL threshold from a perfect
@@ -331,6 +336,7 @@ export async function scanContract(dealId: string, contractText: string, dealerI
       error: err instanceof Error ? err.message : String(err),
     });
     score -= 40;
+    comparisonHeld = true;
     fixList.push({
       foundValue: "the comparison against the agreed terms could not be completed",
       expectedValue: "the contract compared against the offer, reaffirmation and confirmed recap",
@@ -342,7 +348,23 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   }
 
   score = Math.max(0, score);
-  const status = getContractShieldResult(score);
+
+  // THE VERDICT, and why a comparison discrepancy is not left to arithmetic.
+  //
+  // One non-severe discrepancy deducts 15 from a base of 100. The PASS threshold is 85. So a
+  // single changed trade figure, a single altered financing term, or an odometer the contract
+  // never states scored EXACTLY 85 — PASS — and `autoAdvanceContractOnPass` walked the deal to
+  // CONTRACT_APPROVED and opened signing on a document that did not match the recap the buyer
+  // confirmed. §14b, quoted verbatim thirty lines above, says precisely those things are
+  // "held for correction". The rule was in the comment and not in the code.
+  //
+  // Fixed structurally rather than by moving the deduction to 16: a rule that holds only
+  // because two constants happen to sit one apart is a rule that breaks the next time either
+  // is tuned, and nothing would go red when it did. A discrepancy against the agreed terms
+  // now caps the verdict at WARNING no matter what the score is — the score still ranks HOW
+  // bad, it no longer decides WHETHER to hold.
+  const scored = getContractShieldResult(score);
+  const status = comparisonHeld && scored === "PASS" ? "WARNING" : scored;
 
   // Save scan result
   const existingScans = await prisma.contractScan.findMany({ where: { dealId }, orderBy: { version: "desc" }, take: 1 });

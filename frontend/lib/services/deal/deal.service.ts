@@ -89,7 +89,24 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // caller, and `POST /api/admin/deals/[dealId]/action` (DEAL_STAGE_ADVANCED) resolves
   // its target at runtime, so an ops admin could take the edge non-forced and skip the
   // gate it was waiting on. Phase 9 opens this edge together with the driver that guards it.
-  FUNDING_PENDING: ["RECAP_PENDING"],
+  // FUNDING_PENDING reaches pickup, and this edge is BOTH halves of the rule at once.
+  //
+  // WHAT IT RESTORES. Closing `SIGNED → PICKUP_SCHEDULED` above removed the only inbound
+  // edge PICKUP_SCHEDULED had, so pickup-coordination.service.ts's non-forced advance threw
+  // for every deal and no buyer could ever confirm a pickup. That was a capability REMOVED,
+  // not moved — found by the independent review, and the reason the capability map now names
+  // where pickup moved TO rather than only what it moved from.
+  //
+  // WHAT IT ENFORCES. Pickup is now reachable ONLY from FUNDING_PENDING, which is only
+  // reachable from DEALER_EXECUTED, which is only reachable from SIGNED. The rung before it
+  // is the six-item clearance list. That is strictly STRONGER than what this repository had
+  // before Phase 8 — a buyer's signature reached pickup directly — and it is what makes "no
+  // vehicle is released on the expectation that financing will complete later" a property of
+  // the graph rather than a promise in a comment.
+  //
+  // Phase 9 owns PICKUP_READINESS and will insert it between these two; it is deliberately
+  // still `[]` below, so this phase ships no readiness path it does not own.
+  FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_SCHEDULED"],
   PICKUP_READINESS: [],
   HANDOVER_PENDING: [],
   FROZEN_PENDING_RELEASE: [],
@@ -135,6 +152,21 @@ export class DealTransitionError extends Error {
   constructor(public readonly from: DealStatus, public readonly to: DealStatus) {
     super(`Invalid transition: ${from} → ${to}`);
     this.name = "DealTransitionError";
+  }
+}
+
+/**
+ * A final-release gate other than insurance refused.
+ *
+ * Separate from InsuranceRequiredError because the two are told to different people: an
+ * insurance gap is the buyer's to close, while an uncleared funding or a missing executed
+ * contract is AutoLenis's and the dealership's. A caller that cannot tell them apart cannot
+ * say who has to act, which is the whole complaint §Stage 14 makes about "funding pending".
+ */
+export class ReleaseNotClearedError extends Error {
+  constructor(public readonly detail: string) {
+    super(`This deal is not cleared for release: ${detail}.`);
+    this.name = "ReleaseNotClearedError";
   }
 }
 
@@ -216,10 +248,26 @@ export async function advanceDealStatus(
     throw new DealTransitionError(deal.status, newStatus);
   }
 
-  // Insurance hard-gate: final release requires proof on file (or explicit override).
+  // Final-release hard gates. Insurance was the only one, and that was the defect: the
+  // dealer QR scan advances straight to COMPLETED, so a deal that reached PICKUP_SCHEDULED
+  // by any means could be released with financing still IN_PROGRESS and funding never
+  // cleared. The transition map alone could not stop it, because `force: true` exists and
+  // `schedulePickup` used it. These three run at WRITE time, on the row as read, so they
+  // hold whatever route got the deal here.
   if (newStatus === DealStatus.COMPLETED && !opts.force) {
     if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
       throw new InsuranceRequiredError();
+    }
+    // §14d — the dealership's fully executed copy must exist. A buyer's signature is not
+    // execution, and a vehicle is not released against a contract only one party signed.
+    if (!deal.dealerExecutedContractId) {
+      throw new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
+    }
+    // §Stage 14 — THE HARD RULE. No conditional delivery, no spot delivery. Funding is
+    // cleared against evidence before the vehicle moves, never on the expectation that it
+    // will complete later.
+    if (!deal.fundingClearedAt) {
+      throw new ReleaseNotClearedError("funding has not been cleared for this deal");
     }
   }
 

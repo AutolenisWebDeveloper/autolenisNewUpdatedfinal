@@ -202,3 +202,47 @@ test("a zero-value component is not demanded, but a charge in its place IS an AD
   assert.equal(delivery.kind, "ADDITION");
   assert.match(delivery.foundValue, /499/);
 });
+
+// ── DEFECT 10 — found by the independent adversarial review ─────────────────
+//
+// Accepted optional products were compared by LABEL PRESENCE only. The amount — the one part
+// of a product line that moves, and the exact place payment packing happens — was never read.
+// §14b asks for each accepted optional product compared against the confirmed recap; a name
+// match is not a comparison, and this was the only §14b fact with no money check at all.
+test("DEFECT 10: an accepted product charged at the wrong price is a finding", async () => {
+  dealRow = agreedDeal();
+  const { compareContractAgainstAgreedTerms } = await mod();
+
+  // The recap says GAP Protection at $1,200, accepted. The contract charges $4,995 for it.
+  // Before the fix this produced NOTHING: the label was present and accepted, so both
+  // existing branches were satisfied and the contract passed.
+  const packed = await compareContractAgainstAgreedTerms({
+    dealId: "d1",
+    contractText: MATCHING_CONTRACT.replace("GAP Protection $1,200.00", "GAP Protection $4,995.00"),
+  });
+  const finding = packed.find((f) => f.key === "product:product-0:amount");
+  assert.ok(finding, `the overcharge must be flagged; got ${JSON.stringify(packed.map((f) => f.key))}`);
+  assert.equal(finding.kind, "ADDITION", "charging MORE than agreed is an addition, not a mismatch");
+  assert.match(finding.foundValue, /4,?995/);
+  assert.match(finding.expectedValue, /1,?200/);
+
+  // And the matching contract still produces no amount finding — the check must not be noisy.
+  const clean = await compareContractAgainstAgreedTerms({ dealId: "d1", contractText: MATCHING_CONTRACT });
+  assert.equal(
+    clean.filter((f) => f.key.startsWith("product:product-0")).length,
+    0,
+    "a correctly priced accepted product must produce nothing",
+  );
+});
+
+test("DEFECT 10: an accepted product named with no readable price is NOT_FOUND, never a pass", async () => {
+  dealRow = agreedDeal();
+  const { compareContractAgainstAgreedTerms } = await mod();
+  const noPrice = await compareContractAgainstAgreedTerms({
+    dealId: "d1",
+    contractText: MATCHING_CONTRACT.replace("GAP Protection $1,200.00", "GAP Protection included"),
+  });
+  const finding = noPrice.find((f) => f.key === "product:product-0:amount");
+  assert.ok(finding, "a product with no price is unreadable, and unreadable is a finding");
+  assert.equal(finding.kind, "NOT_FOUND");
+});

@@ -37,10 +37,15 @@ const DEAL_STAGES = [
   "PENDING", "ACTIVE", "DEALER_CONFIRMATION", "RECAP_PENDING", "FINANCING_PENDING", "FEE_PENDING", "FEE_PAID",
   "INSURANCE_PENDING", "CONTRACT_PENDING", "CONTRACT_REVIEW",
   "CONTRACT_APPROVED", "SIGNING_PENDING", "SIGNED",
+  // §13-D29 / §Stage 14. Both were missing, and the omission had teeth: a deal stuck at
+  // SIGNED offered only PICKUP_SCHEDULED, which the server now refuses without `force` —
+  // so the dropdown's only option 409'd and there was no admin route back onto the ladder
+  // at all. The warning above this list exists because Phase 7 learned the same lesson.
+  "DEALER_EXECUTED", "FUNDING_PENDING",
   "PICKUP_SCHEDULED", "PICKUP_COMPLETE", "COMPLETED",
 ];
 
-interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null } | null; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelope: { status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null } | null; pickup: { status: string; scheduledAt: string | null; location: string | null; qrCodeImage: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }
+interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null } | null; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelopes: Array<{ status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null; signerKind?: string | null }>; pickup: { status: string; scheduledAt: string | null; location: string | null; qrCodeImage: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }
 interface TimelineItem { stage: string; timestamp: string; description: string }
 interface AuditLogItem { id: string; action: string; adminEmail: string; reason: string | null; createdAt: string }
 
@@ -291,13 +296,25 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
 
         {activeTab === "E-Sign" && (
           <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="tab-esign">
-            <h3 className="font-semibold text-slate-800 text-sm mb-4">E-Sign Envelope</h3>
-            {deal.eSignEnvelope ? (
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-slate-500">Status</span><Badge variant={deal.eSignEnvelope.status === "COMPLETED" ? "green" : "amber"}>{deal.eSignEnvelope.status}</Badge></div>
-                <div className="flex justify-between"><span className="text-slate-500">Legacy E-Sign ID</span><code className="text-xs font-mono text-slate-600">{deal.eSignEnvelope.docusignEnvelopeId ?? "—"}</code></div>
-                {deal.eSignEnvelope.sentAt && <div className="flex justify-between"><span className="text-slate-500">Sent</span><span>{new Date(deal.eSignEnvelope.sentAt).toLocaleDateString()}</span></div>}
-                {deal.eSignEnvelope.completedAt && <div className="flex justify-between"><span className="text-slate-500">Completed</span><span>{new Date(deal.eSignEnvelope.completedAt).toLocaleDateString()}</span></div>}
+            <h3 className="font-semibold text-slate-800 text-sm mb-4">E-Sign Envelopes</h3>
+            {/* ONE BLOCK PER SIGNER. This read `deal.eSignEnvelope` — the to-one relation
+                §13-D30 replaced — while the server had already switched to sending
+                `eSignEnvelopes`. `tsc` could not see it because the page serialises with
+                JSON.parse(JSON.stringify(deal)) through an `any`, so the tab rendered
+                "No envelope created yet" for every deal that had one: a confident empty
+                shown to the admin investigating a stalled signature. It is the silent half
+                of core rule 11 in reverse, in the surface that exists to diagnose it. */}
+            {deal.eSignEnvelopes.length > 0 ? (
+              <div className="space-y-4">
+                {deal.eSignEnvelopes.map((env, i) => (
+                  <div key={`${env.signerKind ?? "BUYER"}-${i}`} className="space-y-2 text-sm border-t border-slate-100 first:border-t-0 first:pt-0 pt-3">
+                    <div className="flex justify-between"><span className="text-slate-500">Signer</span><span className="font-medium text-slate-800">{env.signerKind === "CO_BUYER" ? "Co-buyer" : "Buyer"}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Status</span><Badge variant={env.status === "COMPLETED" ? "green" : "amber"}>{env.status}</Badge></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Legacy E-Sign ID</span><code className="text-xs font-mono text-slate-600">{env.docusignEnvelopeId ?? "—"}</code></div>
+                    {env.sentAt && <div className="flex justify-between"><span className="text-slate-500">Sent</span><span>{new Date(env.sentAt).toLocaleDateString()}</span></div>}
+                    {env.completedAt && <div className="flex justify-between"><span className="text-slate-500">Completed</span><span>{new Date(env.completedAt).toLocaleDateString()}</span></div>}
+                  </div>
+                ))}
               </div>
             ) : (
               <p className="text-sm text-slate-400">No envelope created yet</p>

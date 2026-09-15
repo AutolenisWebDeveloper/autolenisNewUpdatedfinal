@@ -423,3 +423,39 @@ test("the buyer's signing page renders behind a real buyer session", async ({ pa
   );
   expect(overflows, "the signing page must not scroll horizontally at 390px").toBe(false);
 });
+
+// ── 8. DEFECTS 8 and 9 — found by the independent adversarial review ────────
+//
+// Both are the same mistake in two directions: this phase CLOSED the old path to pickup and
+// did not open the new one, then claimed the rule was "structural".
+
+test("DEFECT 8: pickup is still REACHABLE — closing SIGNED → PICKUP_SCHEDULED removed a capability", () => {
+  // THE DEFECT. `SIGNED: ["DEALER_EXECUTED"]` correctly closed the spot-delivery edge, but
+  // nothing was opened in its place: PICKUP_SCHEDULED had ZERO inbound edges, so
+  // pickup-coordination.service.ts's non-forced advance threw DealTransitionError for every
+  // deal, forever, and the buyer saw "We couldn't confirm the pickup right now."
+  //
+  // Nothing went red: pickup-coordination.test.ts mocks advanceDealStatus, and this suite
+  // asserted only the REMOVAL. A capability-preservation map that says "MOVED" has to be able
+  // to name where it moved TO.
+  expect(canTransition("SIGNED", "PICKUP_SCHEDULED"), "the spot-delivery edge stays closed").toBe(false);
+  expect(canTransition("FUNDING_PENDING", "PICKUP_SCHEDULED"), "and pickup is reachable again, AFTER clearance").toBe(true);
+  expect(canTransition("PICKUP_SCHEDULED", "COMPLETED")).toBe(true);
+});
+
+test("DEFECT 9: the full ladder from signature to completion is walkable, edge by edge", () => {
+  // The property the map must satisfy: every state on the release path has an inbound edge
+  // from its predecessor. Asserted as a WALK rather than as individual edges, because the
+  // defect above was precisely a gap between two edges that were each individually correct.
+  const ladder: DealStatus[] = [
+    DealStatus.SIGNED, DealStatus.DEALER_EXECUTED, DealStatus.FUNDING_PENDING,
+    DealStatus.PICKUP_SCHEDULED, DealStatus.COMPLETED,
+  ];
+  for (let i = 0; i < ladder.length - 1; i += 1) {
+    expect(canTransition(ladder[i], ladder[i + 1]), `${ladder[i]} → ${ladder[i + 1]} must be legal`).toBe(true);
+  }
+  // And the rule this ladder exists to enforce: no rung may be skipped to reach release.
+  expect(canTransition("SIGNED", "COMPLETED")).toBe(false);
+  expect(canTransition("DEALER_EXECUTED", "PICKUP_SCHEDULED")).toBe(false);
+  expect(canTransition("FUNDING_PENDING", "COMPLETED")).toBe(false);
+});

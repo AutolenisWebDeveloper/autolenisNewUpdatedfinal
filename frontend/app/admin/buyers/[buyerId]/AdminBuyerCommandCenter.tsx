@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { PrequalAdminPanel } from "./PrequalAdminPanel";
 import BuyerJourneyTab from "./BuyerJourneyTab";
 import LaunchAuctionPanel from "@/components/admin/LaunchAuctionPanel";
+import { allSignedFrom } from "@/lib/services/esign/signer-kinds";
+import type { ESignSignerKind } from "@prisma/client";
 import {
   User, Mail, Phone, Calendar, Clock, Edit2,
   Bell, UserCheck, PlayCircle, Flag, CheckCircle2,
@@ -63,10 +65,17 @@ type BuyerData = {
       dealerName: string; dealerCity: string | null; dealerState: string | null;
     } | null;
     // §13-D30: one envelope per required signer.
+    //
+    // `signerKind` is typed as the ENUM, not `string`. Widening it to string is what let the
+    // earlier "every present envelope is COMPLETED" check compile — a string signerKind can
+    // never be compared against the required-kind list, so the type had to be narrowed before
+    // the fail-closed helper could be used at all.
     eSignEnvelopes: {
-      status: string; signerKind: string; docusignEnvelopeId: string | null;
+      status: string; signerKind: ESignSignerKind; docusignEnvelopeId: string | null;
       sentAt: string | null; completedAt: string | null;
     }[];
+    /** §13-D30 — the boolean only; the co-buyer's identity never reaches this screen. */
+    coBuyerIsRequiredSigner: boolean;
     pickup: {
       status: string; scheduledAt: string | null; completedAt: string | null;
       location: string | null; qrCodeImage: string | null;
@@ -797,13 +806,19 @@ function AdminDangerZone({
 
 // ─── Journey Stage Progress ───────────────────────────────────────────────────
 
-function JourneyStage({ label, done, active }: { label: string; done: boolean; active: boolean }) {
+// `note` is the THIRD state. Two states could only say done or not-done, and §13-D31 needs a
+// step that is neither: an insurance document that has been uploaded and not yet read is not
+// complete, but it is also not waiting on the buyer. Rendering it as "not done" sends Ops to
+// chase a buyer who has already acted; rendering it as done was the defect.
+function JourneyStage({ label, done, active, note }: { label: string; done: boolean; active: boolean; note?: string }) {
+  const pending = !done && !!note;
   return (
-    <div className={"flex flex-col items-center gap-1 " + (active ? "opacity-100" : done ? "opacity-80" : "opacity-40")}>
-      <div className={"w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold " + (done ? "bg-green-500 text-white" : active ? "bg-purple-600 text-white" : "bg-slate-200 text-slate-500")}>
-        {done ? "✓" : "·"}
+    <div className={"flex flex-col items-center gap-1 " + (active || pending ? "opacity-100" : done ? "opacity-80" : "opacity-40")}>
+      <div className={"w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold " + (done ? "bg-green-500 text-white" : pending ? "bg-amber-500 text-white" : active ? "bg-purple-600 text-white" : "bg-slate-200 text-slate-500")}>
+        {done ? "✓" : pending ? "…" : "·"}
       </div>
-      <span className={"text-[9px] font-medium text-center leading-none max-w-[48px] " + (active ? "text-purple-700" : done ? "text-green-700" : "text-slate-400")}>{label}</span>
+      <span className={"text-[9px] font-medium text-center leading-none max-w-[48px] " + (active ? "text-purple-700" : done ? "text-green-700" : pending ? "text-amber-700" : "text-slate-400")}>{label}</span>
+      {note && <span className="text-[8px] text-amber-600 text-center leading-none max-w-[48px]">{note}</span>}
     </div>
   );
 }
@@ -944,18 +959,29 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
     { key: "deal", label: "Deal", done: !!activeDeal },
     { key: "financing", label: "Financing", done: !!activeDeal?.financing },
     { key: "fee", label: "Fee", done: !!(activeDeal?.feePaidAt) },
-    { key: "insurance", label: "Insurance", done: ["VERIFIED", "POLICY_BOUND", "EXTERNAL_UPLOADED"].includes(activeDeal?.insuranceStatus ?? "") },
+    // §13-D31: an upload is NOT approval. EXTERNAL_UPLOADED was still counted "done" here
+    // while every server-side release gate had already stopped accepting it — so Ops saw a
+    // green tick on a PDF nobody had read and stopped chasing it, and the deal blocked at
+    // release for a reason the screen denied. UNDER_REVIEW is shown as its own state rather
+    // than folded into either, because "waiting on us" and "not done" are different jobs.
+    { key: "insurance", label: "Insurance", done: ["VERIFIED", "POLICY_BOUND"].includes(activeDeal?.insuranceStatus ?? ""), note: ["EXTERNAL_UPLOADED", "UNDER_REVIEW"].includes(activeDeal?.insuranceStatus ?? "") ? "Under review" : undefined },
     { key: "contract", label: "Contract", done: !!(activeDeal?.latestContractVersion) },
-    // §13-D30: the step is done when EVERY required signer is done. `eSignEnvelopes`
-    // holds exactly the required signers (the service selects them for this deal), so
-    // "every envelope COMPLETED" is the same question — and a non-empty guard keeps it
-    // fail-closed, since an empty list is a deal whose signers could not be read.
+    // §13-D30: the step is done when EVERY REQUIRED SIGNER is done.
+    //
+    // The earlier form asked "is every envelope PRESENT completed?" and claimed in a comment
+    // that the two questions were the same. They are not, and the difference fails OPEN:
+    // openSigningForRequiredSigners can partially fail, leaving only the BUYER envelope, and
+    // "every present envelope is COMPLETED" then reports the step DONE on a deal that will
+    // never advance because the co-buyer's envelope was never created. `allSignedFrom` is the
+    // shared helper written for this — it is fail-closed on an empty envelope list AND on an
+    // empty required-kinds list, so it cannot be satisfied by the absence of evidence.
     {
       key: "esign",
       label: "E-Sign",
-      done:
-        (activeDeal?.eSignEnvelopes?.length ?? 0) > 0 &&
-        (activeDeal?.eSignEnvelopes ?? []).every((e) => e.status === "COMPLETED"),
+      done: allSignedFrom(
+        activeDeal?.eSignEnvelopes ?? [],
+        activeDeal?.coBuyerIsRequiredSigner ? ["BUYER", "CO_BUYER"] : ["BUYER"],
+      ),
     },
     { key: "pickup", label: "Pickup", done: activeDeal?.pickup?.status === "COMPLETED" },
     { key: "complete", label: "Complete", done: deals.some((d) => d.status === "COMPLETED") },
@@ -1263,7 +1289,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           <div className="flex items-start gap-1 overflow-x-auto pb-1">
             {journeyStages.map((s, i) => (
               <div key={s.key} className="flex items-center gap-1">
-                <JourneyStage label={s.label} done={s.done} active={s.key === activeJourneyKey} />
+                <JourneyStage label={s.label} done={s.done} active={s.key === activeJourneyKey} note={"note" in s ? s.note : undefined} />
                 {i < journeyStages.length - 1 && (
                   <div className={"h-0.5 w-3 mt-3 flex-shrink-0 " + (s.done ? "bg-green-400" : "bg-slate-200")} />
                 )}

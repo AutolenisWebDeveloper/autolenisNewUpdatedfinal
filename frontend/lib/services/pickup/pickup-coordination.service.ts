@@ -72,10 +72,15 @@ type LoadedDeal = {
 };
 
 // A confirm/accept advances the deal to PICKUP_SCHEDULED, which is legal only
-// from SIGNED (or idempotently from PICKUP_SCHEDULED). Confirming against any
+// from FUNDING_PENDING (or idempotently from PICKUP_SCHEDULED). Confirming against any
 // other deal status would throw inside advanceDealStatus AFTER the pickup CAS
 // committed — so we pre-check and reject cleanly instead of stranding state.
-const CONFIRMABLE_DEAL_STATUSES: ReadonlySet<string> = new Set(["SIGNED", "PICKUP_SCHEDULED"]);
+//
+// FUNDING_PENDING, not SIGNED. §13-D29 and §Stage 14 moved the rung a pickup may be confirmed
+// from: the buyer's signature is no longer the last gate, the six-item funding clearance is.
+// PICKUP_SCHEDULED stays in the set so a re-confirm of an already-scheduled pickup is still
+// idempotent rather than a state error.
+const CONFIRMABLE_DEAL_STATUSES: ReadonlySet<string> = new Set(["FUNDING_PENDING", "PICKUP_SCHEDULED"]);
 
 async function loadDeal(dealId: string): Promise<LoadedDeal | null> {
   const deal = await prisma.deal.findUnique({
@@ -117,7 +122,7 @@ async function runConfirmSideEffects(
     where: { dealId },
     data: { qrCodeData: qrData, qrCodeImage: qrImage, qrExpiresAt: new Date(scheduledAt.getTime() + QR_TTL_MS) },
   });
-  // Deal advances only here (confirm/accept). Non-forced: SIGNED→PICKUP_SCHEDULED
+  // Deal advances only here (confirm/accept). Non-forced: FUNDING_PENDING→PICKUP_SCHEDULED
   // is legal, and advanceDealStatus is idempotent if already advanced.
   await advanceDealStatus(dealId, "PICKUP_SCHEDULED", {
     actorId: actorId ?? undefined,

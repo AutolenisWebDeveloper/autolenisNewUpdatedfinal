@@ -150,35 +150,8 @@ export async function allRequiredSignaturesComplete(dealId: string, db: Db = pri
 // rendered surface and a server-side gate cannot drift apart.
 
 /** One signer's envelope out of a loaded list, or null. */
-export function pickSignerEnvelope<T extends { signerKind: ESignSignerKind }>(
-  envelopes: T[] | null | undefined,
-  signerKind: ESignSignerKind = "BUYER",
-): T | null {
-  return envelopes?.find((e) => e.signerKind === signerKind) ?? null;
-}
 
-/**
- * Whether every signer in `requiredKinds` has a COMPLETED envelope in the loaded list.
- *
- * Fail-closed on an empty `requiredKinds`, for the same reason `allSigned` is: a caller
- * that could not resolve who was required must never be told the contract is signed.
- */
-export function allSignedFrom<T extends { signerKind: ESignSignerKind; status: string }>(
-  envelopes: T[] | null | undefined,
-  requiredKinds: ESignSignerKind[],
-): boolean {
-  if (!requiredKinds.length) return false;
-  return requiredKinds.every(
-    (kind) => envelopes?.some((e) => e.signerKind === kind && e.status === "COMPLETED") ?? false,
-  );
-}
-
-/**
- * The signer kinds a loaded deal requires, from the co-buyer record the surface already
- * selected. Mirrors `requiredSignersForDeal` for the no-extra-query case.
- */
-export function requiredKindsFrom(
-  coBuyer: { isRequiredSigner: boolean } | null | undefined,
-): ESignSignerKind[] {
-  return coBuyer?.isRequiredSigner ? ["BUYER", "CO_BUYER"] : ["BUYER"];
-}
+// The pure helpers live in ./signer-kinds so a client component can import them without
+// pulling `@/lib/prisma` into the browser bundle. Re-exported here so every existing import
+// of this module keeps working and there remains exactly ONE implementation of each.
+export { pickSignerEnvelope, allSignedFrom, requiredKindsFrom } from "./signer-kinds";

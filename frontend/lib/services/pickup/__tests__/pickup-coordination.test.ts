@@ -31,7 +31,11 @@ type Row = {
 };
 
 let row: Row;
-let dealStatus = "SIGNED";
+// FUNDING_PENDING, not SIGNED. §13-D29 and §Stage 14 moved the rung a pickup may be
+// proposed and confirmed from: the buyer's signature is no longer the last gate before a
+// vehicle moves, the six-item funding clearance is. Updating the fixture rather than the
+// guard is the point — the guard is the new rule.
+let dealStatus = "FUNDING_PENDING";
 let advanceShouldThrow = false;
 const spies = {
   advance: [] as Array<{ to: string; actorRole?: string }>,
@@ -148,7 +152,7 @@ function resetRow(over: Partial<Row> = {}) {
     qrCodeData: null,
     ...over,
   };
-  dealStatus = "SIGNED";
+  dealStatus = "FUNDING_PENDING";
   advanceShouldThrow = false;
   spies.advance = [];
   spies.qr = 0;

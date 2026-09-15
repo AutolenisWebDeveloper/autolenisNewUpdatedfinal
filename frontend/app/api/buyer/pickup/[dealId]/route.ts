@@ -73,9 +73,12 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   // The buyer PROPOSES a pickup time (D2). The deal does NOT advance here — it
   // reaches PICKUP_SCHEDULED only when the dealer confirms (or the buyer accepts
-  // a dealer counter). Initial proposal is only valid from a SIGNED deal with no
-  // pending pickup; the accept/counter round-trip has its own routes.
-  if (deal.status !== "SIGNED") {
+  // a dealer counter). Initial proposal is only valid from a deal whose funding has
+  // CLEARED and that has no pending pickup; the accept/counter round-trip has its own routes.
+  // FUNDING_PENDING, not SIGNED — see pickup-coordination.service.ts. Proposing a time on a
+  // deal whose funding has not cleared invites the buyer to plan around a date the vehicle
+  // cannot legally be released on.
+  if (deal.status !== "FUNDING_PENDING") {
     return errorResponse(
       "INVALID_STATE",
       "This deal isn't ready for pickup scheduling.",

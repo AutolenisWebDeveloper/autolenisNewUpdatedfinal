@@ -348,6 +348,16 @@ export async function getAdminBuyerDetailData(buyerId: string) {
             select: { status: true, signerKind: true, docusignEnvelopeId: true, sentAt: true, completedAt: true },
             orderBy: { signerKind: "asc" },
           },
+          // WHO IS REQUIRED TO SIGN — the boolean only, never the co-buyer's identity.
+          //
+          // Without it the screen could only ask "is every envelope PRESENT completed?",
+          // which fails OPEN in exactly the case §13-D30 exists for: when
+          // openSigningForRequiredSigners partially fails (it explicitly can), only the
+          // BUYER envelope exists, it completes, and "every present envelope is COMPLETED"
+          // is TRUE — so the admin screen reports E-Sign done on a deal that can never
+          // advance because the co-buyer's envelope was never created. The question the
+          // screen must ask is "is every REQUIRED signer done?", and that needs this flag.
+          coBuyer: { select: { isRequiredSigner: true } },
           pickup: true,
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },
@@ -508,6 +518,7 @@ export async function getAdminBuyerDetailData(buyerId: string) {
             dealerState: d.offer.dealer.state,
           }
         : null,
+      coBuyerIsRequiredSigner: d.coBuyer?.isRequiredSigner ?? false,
       eSignEnvelopes: d.eSignEnvelopes.map((e) => ({
         status: e.status,
         signerKind: e.signerKind,

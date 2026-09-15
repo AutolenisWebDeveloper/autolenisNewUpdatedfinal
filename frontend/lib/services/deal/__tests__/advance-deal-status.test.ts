@@ -18,6 +18,12 @@ interface DealRow {
   insuranceStatus: InsuranceStatus;
   feePaidAt: Date | null;
   feeRefundedAt: Date | null;
+  // §Stage 14 / §13-D29. Insurance used to be the only final-release gate; it is now one of
+  // three, and the other two are these. The default fixture satisfies all three because these
+  // tests are about the CAS mechanics and the completion event, not about release
+  // eligibility — the gates themselves are exercised by their own cases below.
+  dealerExecutedContractId: string | null;
+  fundingClearedAt: Date | null;
 }
 
 interface Ctrl {
@@ -82,7 +88,11 @@ async function load() { return import("../deal.service"); }
 
 beforeEach(() => {
   ctrl = {
-    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null, feeRefundedAt: null },
+    deal: {
+      id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1",
+      insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null, feeRefundedAt: null,
+      dealerExecutedContractId: "cv_executed_1", fundingClearedAt: new Date("2026-09-15T10:00:00Z"),
+    },
     raceTo: null,
     throwOnFind: false,
     updateManyCalls: [],
@@ -391,4 +401,44 @@ test("§13-D28: the fee ladder reaches CONTRACT_PENDING with insurance NOT_START
     false,
     "the live path does not pass through INSURANCE_PENDING at all",
   );
+});
+
+
+// ── The other two final-release gates (§13-D29, §Stage 14) ─────────────────
+//
+// Insurance was the only gate, and that was the defect the independent review found: the
+// dealer QR scan advances straight to COMPLETED, so a deal that reached PICKUP_SCHEDULED by
+// any route — including an admin `force: true` schedule — was released with financing still
+// in progress. These two gates run at WRITE time on the row as read, so they hold whatever
+// route got the deal here.
+
+test("COMPLETED is refused when the dealership's executed contract is not on file", async () => {
+  ctrl.deal.dealerExecutedContractId = null;
+  const { advanceDealStatus, ReleaseNotClearedError } = await load();
+  await assert.rejects(
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER" }),
+    (err: unknown) => err instanceof ReleaseNotClearedError && /executed contract/.test((err as Error).message),
+    "a buyer's signature is not execution — a vehicle is not released against a half-signed contract",
+  );
+});
+
+test("COMPLETED is refused when funding has not cleared — THE hard rule", async () => {
+  ctrl.deal.fundingClearedAt = null;
+  const { advanceDealStatus, ReleaseNotClearedError } = await load();
+  await assert.rejects(
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER" }),
+    (err: unknown) => err instanceof ReleaseNotClearedError && /funding has not been cleared/.test((err as Error).message),
+    "no conditional delivery, no spot delivery — never on the expectation that financing completes later",
+  );
+});
+
+test("both new gates are overridable only by an audited force, like the insurance gate", async () => {
+  ctrl.deal.dealerExecutedContractId = null;
+  ctrl.deal.fundingClearedAt = null;
+  const { advanceDealStatus } = await load();
+  // `force` is the documented admin override and is recorded in DealStatusHistory. It is the
+  // difference between an override and a gap, and it must still work — a release that can
+  // never be unblocked by a human is its own failure mode.
+  await advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "ADMIN", force: true });
+  assert.equal(ctrl.deal.status, DealStatus.COMPLETED);
 });
