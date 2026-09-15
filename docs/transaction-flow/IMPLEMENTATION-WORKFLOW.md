@@ -2132,7 +2132,7 @@ Every route, control, action and workflow this phase touched, with a disposition
 | 3 | Insurance as a gate on entry to `CONTRACT_PENDING` | **MOVED** | §13-D28: requested at contract request, enforced at RELEASE. Not removed — relocated to the stage that owns it |
 | 4 | `Deal.eSignEnvelope` (to-one) | **RENAMED + REGROUPED** | `Deal.eSignEnvelopes` (to-many) keyed `[dealId, signerKind]`; 32 sites re-derived |
 | 5 | Buyer signing ceremony | **PROGRESSIVE** | now shows the Shield verdict bound to the scan that judged the signed version |
-| 6 | Co-buyer signing | **NEW — PARTIAL, and the map must say so** | The derivation, the envelope, the gating and the messages are built and fail CLOSED; the co-buyer's own signing SURFACE is **not**, so a deal with `isRequiredSigner` set deadlocks. Withheld deliberately as a server-authorization change — see *NOT COMPLETE* below. This row is a capability that does not yet work end to end, and recording it as delivered would be the same error row 7 made |
+| 6 | Co-buyer signing | **NEW — complete, under a separate conditional authorization** | Required only when `CoBuyer.isRequiredSigner`. The tokenised invited-signer link (`/esign/invited/[token]`) is the co-buyer's route to the ceremony, with no second account, per §13-D30. *This row read **NEW — PARTIAL** while the surface was withheld, and the withholding is recorded below rather than erased — the sequence is the point* |
 | 7 | `SIGNED → PICKUP_*` edges | **MOVED** — *this row said REMOVED and said the capability was preserved; both halves were wrong. See the correction below* | The edge now runs `FUNDING_PENDING → PICKUP_SCHEDULED`: pickup is reachable only AFTER the six-item clearance list, where before Phase 8 a buyer's signature reached it directly |
 | 8 | Contract Shield scan | **PROGRESSIVE** | gained `APR_VALIDATION`, `PAYMENT_PACKING`, `DISCLOSURE_CHECK`, `FINANCE_MARKUP`, and the comparison against the confirmed recap |
 | 9 | Three ad-hoc `contractVersion` writers | **REGROUPED** | one canonical service; the three are neutralised, reported, not deleted |
@@ -2142,7 +2142,17 @@ Every route, control, action and workflow this phase touched, with a disposition
 | 13 | Financing change after execution | **NEW** | a FULL return path — envelopes voided, contract versions and recap superseded, both confirmations cleared — never a status flip |
 
 **Reconciliation: 13 capabilities · KEPT 2 · MOVED 3 · REGROUPED 2 (one shared with RENAMED) ·
-PROGRESSIVE 4 · RENAMED 1 (shared) · NEW 4 · REMOVED 0.**
+PROGRESSIVE 4 · RENAMED 1 (shared) · NEW 4 · REMOVED 0.** One capability (row 6) required a
+separate authorization beyond the phase's own scope and is recorded with both its withholding
+and its authorization; one (row 7) was mis-recorded as REMOVED and is corrected below.
+
+**Out of scope, and named so a future reader does not mistake it for Phase 8's.** Commit
+`5df4e44` widens `.claude/settings.json` — `defaultMode: acceptEdits` plus repo-scoped file
+tools — so the phase would not stall on permission prompts. It is a **control-plane change,
+unrelated to Stages 13–15**, requested by the owner and kept on this branch by the owner's
+ruling rather than split into its own PR (splitting it would cost a full CI cycle for two
+lines that revert independently). It is not part of the capability map and implements no
+requirement row.
 
 #### The capability map was WRONG, and the invariant caught nothing
 
@@ -2272,31 +2282,86 @@ permits (`offer_id IS NULL` when `vehicle_request_offer_id IS NOT NULL`) — `de
 construction, so that was **every such deal**. It is the same shape as the cutover above: correct
 for the common case, wrong for the case nobody had a fixture for.
 
-#### NOT COMPLETE — a required co-buyer still cannot sign
+#### §13-D30's invited-signer link — WITHHELD, THEN AUTHORISED
 
-Stated plainly because it is the one place this phase does not deliver §13-D30, and because the
-reason it stopped is a rule rather than a difficulty.
+Recorded in two halves because the sequence is the point.
 
-**The defect.** `openSigningForRequiredSigners` creates a `CO_BUYER` envelope and emails a link to
-`/buyer/esign`. That page calls `requireBuyer()`, which is Supabase authentication — and §13-D30's
-own ruling is that the co-buyer has **no second account**. So the link redirects them to a sign-in
-they cannot complete; the primary buyer cannot sign on their behalf either, because the sign
-endpoint takes no signer and always resolves the BUYER envelope. `signatureProgress.allSigned`
-never becomes true, the deal never reaches `SIGNED`, and the co-buyer's envelope expires at 14
-days. **Every deal with `CoBuyer.isRequiredSigner` set deadlocks.**
+**Withheld (2026-09-15, first wave).** `openSigningForRequiredSigners` created a `CO_BUYER`
+envelope and emailed a link to `/buyer/esign`, which calls `requireBuyer()` — Supabase auth —
+while §13-D30's own ruling is that the co-buyer has **no second account**. So the envelope was
+reachable by nobody, `signatureProgress.allSigned` never became true, `ensureDealSigned` never
+advanced, and **every deal with `co_buyers.is_required_signer` set deadlocked** until the
+envelope expired at 14 days. The fix needs a tokenised, unauthenticated route and a column to
+hash the token into. Both were written and withdrawn: a route that lets a party with no
+platform account legally execute a contract is a **server-authorization change**, and
+CLAUDE.md puts those behind separate explicit authorization. **The §13-D30 ruling settled the
+DESIGN. It was not the authorization for the surface.** Shipping the column alone would have
+been worse than shipping neither — a column with no writer reads as a capability that exists.
 
-**What it needs, and why it is not here.** A tokenised, unauthenticated signing route with its own
-consent snapshot, plus a column to hash the token into. Both were written and **withdrawn**. A
-route that lets a party with no platform account legally execute a contract is a
-**server-authorization change**, and CLAUDE.md puts those behind separate explicit authorization —
-*"No merging, deploying, production changes, or server-authorization changes without separate
-explicit authorization."* The owner's §13-D30 ruling settles the **design**; it is not the
-authorization for the surface.
+**Authorised (2026-09-15, owner, with conditions).** The owner's reasoning is worth keeping:
+a design ruled and an authorization withheld is *a deadlock by construction*, and the
+precedent already exists in this codebase — Phase 2's claim tokens and Phase 5's invitation
+tokens are both tokenised, expiring, subject-bound and reachable without an account. **This is
+the same mechanism at higher stakes**, which is why it reuses `account-claim.service.ts`'s
+hashing and result shape rather than inventing a second token scheme.
 
-Shipping the column alone would have been worse than shipping neither: a column with no writer
-reads as a capability that exists, which is precisely the failure mode this document spends two
-sections on. **Reported, not half-built.** The safe consequence to note meanwhile: the gating is
-fail-CLOSED, so the deadlock is visible and no deal advances incorrectly.
+The six conditions **are** the authorization, so each is enforced in
+`lib/services/esign/invited-signer.service.ts` and pinned by its own test:
+
+| # | Condition | Enforced by |
+| --- | --- | --- |
+| 1 | **Single use** — consumed on signature, never replayable | `consumeSignerToken`, a CAS on `consumedAt: null`. Phase 5's **H2** was a token written and never consumed; that is the named mistake it exists not to repeat |
+| 2 | Bound to **both** the deal and the specific `co_buyers` row | `signerKind`, `coBuyerId` and `CoBuyer.buyerId === deal.buyerId` all re-checked, never inferred from the hash |
+| 3 | Short expiry, **ceilinged** by the 14-day contract expiry | 72-hour TTL, `min()`'d against `envelope.expiresAt`; both checked independently at resolve |
+| 4 | That surface and **nothing else** | `InvitedSignerView` asserted as an exact key set — a widening of what a bearer token discloses fails the test rather than shipping. First name only of the primary buyer |
+| 5 | Own consent snapshot, IP, user agent, adopted name | taken server-side from the request; the client cannot author its own audit trail |
+| 6 | Spent or expired renders a **named state**, not an error | six reasons, each its own sentence. Clicking twice reads *"You've already signed"* |
+
+**The deadlock is now unrepresentable rather than merely fixed.** `SignatureRequiredParams` is
+a union — `{ isCoBuyer: true; signerToken: string } | { isCoBuyer: false; signerToken?: never }`
+— so a co-buyer render without a token does not compile. A future caller cannot forget it.
+
+**Production was clear when the authorization was given** (owner-verified 13:43 UTC): zero
+`co_buyers` rows with `is_required_signer` set, so nothing was stuck while it was withheld.
+Failing closed was the correct interim.
+
+#### THE DEFECT CLASS THIS PROGRAMME KEEPS PRODUCING — name it, and test for it
+
+**Something reported success while checking nothing.** Six instances, across eight phases, in
+three different layers. Naming it here because the sixth was found the same way as the first,
+which means it is a class and not a run of bad luck:
+
+| # | Phase | Where | What reported success | What it had actually checked |
+| --- | --- | --- | --- | --- |
+| 1 | — | cron | a `COMPLETED` cron run | a sweep that had **failed** |
+| 2 | — | admin UI | a page showing **0** | a query that should have returned **17** |
+| 3 | 7 (#433) | test | a passing `buyerId` scanner assertion | **nothing** — the assertion was vacuous |
+| 4 | 8 | proof harness | *"6 assertions, all rolled back"* | **zero** — the transaction aborted on the first INSERT and every assertion was skipped |
+| 5 | 8 | test | `has("contract_overdue")` passing | `dedupKey`, not the `templateKey` **column** it claimed to read — so the row lookup beside it was silently `undefined` |
+| 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
+
+**The three layers matter.** #1 and #2 are runtime; #3, #4 and #5 are the tests and harnesses
+that are supposed to catch runtime; #6 is the *written record* that is supposed to describe
+both. The class reaches all the way up: a verification artefact is just as capable of
+asserting nothing as the code it verifies, and a prose claim is the least checkable artefact
+of all.
+
+**The counter-measure, and it is cheap.** *Before trusting any gate, prove it fails on a
+deliberately reintroduced defect.* Break the thing the gate exists to catch, watch it go red,
+restore, watch it go green. It costs one minute per gate and it is the only evidence that
+distinguishes a guard from a decoration. Phase 8's proof harness now counts assertions that
+actually ran and was re-broken to prove the counter works; each of the six invited-signer
+conditions was re-broken and its test observed to fail. **This is the opening instruction of
+the Phase 9 prompt.**
+
+Three tells, for the next reader:
+
+- **An assertion that cannot fail.** If no input makes it red, it is documentation.
+- **A test that reads the constant it validates.** `esign-schema-gate.test.ts` keeps its own
+  `GATED` list precisely so it is a second opinion rather than a mirror.
+- **A claim about a structure, made without querying the structure.** #6's "preserved through
+  the correct predecessor" is a statement about a graph; ten lines of code would have
+  falsified it, and none were written.
 
 #### Two spec defects, fixed before the run could be trusted
 
