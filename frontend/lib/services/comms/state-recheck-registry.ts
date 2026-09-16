@@ -1186,3 +1186,47 @@ registerStateRecheck(
   PHASE_8_TEMPLATES.PREMIUM_ELECTION_REVERTED,
   alwaysSend("A plan changed and money stopped being due. §23.5 requires the buyer be told, and a reversion cannot become un-reverted."),
 );
+
+// ── PHASE 9 — §27.1's pickup, handover and completion rows ──────────────────────────────────
+//
+// Only the three the handover/completion path actually sends are declared here. The remaining
+// §27.1 Phase 9 rows (readiness blocked, proposal/counter, confirmed, 24h/2h approaching,
+// rescheduled, handover blocked, obligation follow-up) are declared as their senders land — a
+// template constant with no sender is a §27.1 row that LOOKS wired and is not, which is the
+// completeness claim Phase 10 has to audit.
+export const PHASE_9_TEMPLATES = {
+  /** §27.1 "Dealer releases vehicle → Buyer → Possession-confirmation request". */
+  VEHICLE_RELEASED: "pickup_vehicle_released",
+  /** §27.1 "Buyer confirms possession → Buyer + dealership → Completion confirmation". */
+  POSSESSION_CONFIRMED: "pickup_possession_confirmed",
+  /** §27.1 "Deal completed → Buyer, dealership, AutoLenis → Executed contract, receipt, support information". */
+  DEAL_COMPLETED: "deal_completed",
+} as const;
+
+/**
+ * The release notice chases a possession confirmation. Once the Deal is COMPLETED the buyer has
+ * confirmed, and asking again is asking for something already done — the exact class of stale
+ * message §27's recheck exists to stop.
+ */
+const skipIfPossessionConfirmed: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: true };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, possessionConfirmedAt: true },
+  });
+  if (!deal) return { proceed: false, reason: "deal no longer exists" };
+  if (deal.possessionConfirmedAt || deal.status === "COMPLETED") {
+    return { proceed: false, reason: "the buyer has already confirmed possession" };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_9_TEMPLATES.VEHICLE_RELEASED, skipIfPossessionConfirmed);
+registerStateRecheck(
+  PHASE_9_TEMPLATES.POSSESSION_CONFIRMED,
+  alwaysSend("The buyer took possession. §Stage 20 makes completion terminal and corrections append-only, so the fact this reports cannot become untrue."),
+);
+registerStateRecheck(
+  PHASE_9_TEMPLATES.DEAL_COMPLETED,
+  alwaysSend("This carries the executed contract, the receipt and the support route. It is the buyer's record of the transaction; a completed deal cannot un-complete."),
+);

@@ -119,6 +119,26 @@ mock.module("@/lib/services/deal/deal.service", {
   },
 });
 
+// PHASE 9. Readiness is §Stage 16's own concern and has its own suite; this one is about
+// turn-taking, so the gate is mocked OPEN here and every test below exercises the turn-taking
+// with readiness satisfied.
+//
+// THE CLOSED CASE IS NOT SKIPPED, IT IS IN ITS OWN FILE. A mock that is always open is
+// indistinguishable from an absent gate, so `pickup-readiness-gate.test.ts` mocks it closed and
+// asserts `confirmPickup` refuses and names the outstanding item. It lives separately because
+// node:test module mocks do not observe later mutations of a flag in the test module — a shared
+// `let` read `true` inside the service while the test had already set it `false`, which would
+// have made a flag-driven version of that assertion pass while proving nothing.
+mock.module("@/lib/services/pickup/pickup-readiness.service", {
+  namedExports: {
+    enterPickupReadiness: async () => ({
+      evaluation: { items: [], outstanding: [], ready: true },
+      entered: false,
+      schedulable: true,
+    }),
+  },
+});
+
 mock.module("@/lib/services/pickup/availability.service", {
   namedExports: {
     // Availability is validated at propose/counter; keep it OK to isolate the CAS.

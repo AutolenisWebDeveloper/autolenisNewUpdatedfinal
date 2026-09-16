@@ -89,7 +89,10 @@ async function load() { return import("../deal.service"); }
 beforeEach(() => {
   ctrl = {
     deal: {
-      id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1",
+      // PHASE 9: the predecessor of COMPLETED is HANDOVER_PENDING now — §8.2 defect (8)
+      // closed `PICKUP_SCHEDULED → COMPLETED`. The subject of these tests is the CAS, the
+      // completion event and the release gates, none of which changed; only the rung did.
+      id: "d1", status: "HANDOVER_PENDING", buyerId: "b1",
       insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null, feeRefundedAt: null,
       dealerExecutedContractId: "cv_executed_1", fundingClearedAt: new Date("2026-09-15T10:00:00Z"),
     },
@@ -109,7 +112,7 @@ test("status write is a compare-and-swap guarded on the observed status", async 
   assert.equal(ctrl.updateManyCalls.length >= 1, true, "must use updateMany (CAS), not an unconditional update");
   const first = ctrl.updateManyCalls[0]!;
   assert.equal(first.where.id, "d1");
-  assert.equal(first.where.status, "PICKUP_SCHEDULED", "CAS must guard on the status observed at read time");
+  assert.equal(first.where.status, "HANDOVER_PENDING", "CAS must guard on the status observed at read time");
   assert.equal(first.data.status, "COMPLETED");
 });
 
@@ -136,7 +139,7 @@ test("a non-COMPLETED transition does not emit the completion event", async () =
 });
 
 test("lost CAS race that lands on the target state re-resolves to a no-op (body runs once)", async () => {
-  // Another writer advances PICKUP_SCHEDULED → COMPLETED between our read and swap.
+  // Another writer advances HANDOVER_PENDING → COMPLETED between our read and swap.
   ctrl.raceTo = "COMPLETED";
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "COMPLETED");

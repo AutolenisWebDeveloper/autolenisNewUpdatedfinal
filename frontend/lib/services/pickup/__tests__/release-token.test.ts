@@ -393,20 +393,36 @@ test("the consume is bound to the code that was PRESENTED, not just to the picku
 // false — but a dealership doing a gate-side visual check would see a valid code on a dead deal,
 // and "no code that opens a car with no appointment behind it" would be false.
 
-test("the mintable DEAL statuses are exactly those that can still reach COMPLETED", async () => {
+test("the mintable DEAL statuses are exactly those that can still reach HANDOVER", async () => {
   // Pinned against the REAL transition table rather than restated, so the allowlist cannot drift
   // away from the rule it was derived from. A copied constant that silently disagrees with its
   // source is the §13-D31 defect — a stale copy of a constant the original had already narrowed.
+  //
+  // THE DERIVATION MOVED IN PHASE 9, and this test is how that was caught rather than missed.
+  // It was "can still reach COMPLETED", which matched the statuses holding a live appointment
+  // only while `PICKUP_SCHEDULED → COMPLETED` was one edge. Closing that edge (§8.2 defect 8)
+  // made the old derivation yield HANDOVER_PENDING — the state reached by CONSUMING a code —
+  // and this assertion went red on the transition-map change, exactly as a pin should.
   const { TOKEN_MINTABLE_DEAL_STATUSES } = await svc();
   const { canTransition } = await import("@/lib/services/deal/deal.service");
   const { DealStatus } = await import("@prisma/client");
 
-  const canReachCompleted = Object.values(DealStatus).filter(
-    (from) => from !== DealStatus.COMPLETED && canTransition(from, DealStatus.COMPLETED),
+  const canReachHandover = Object.values(DealStatus).filter(
+    (from) => from !== DealStatus.HANDOVER_PENDING && canTransition(from, DealStatus.HANDOVER_PENDING),
   );
   // ANTI-VACUITY: an empty derivation would make the comparison below pass against anything.
-  assert.ok(canReachCompleted.length > 0, "no status can reach COMPLETED — the derivation is broken");
-  assert.deepEqual([...TOKEN_MINTABLE_DEAL_STATUSES].sort(), [...canReachCompleted].sort());
+  assert.ok(canReachHandover.length > 0, "no status can reach HANDOVER_PENDING — the derivation is broken");
+  assert.deepEqual([...TOKEN_MINTABLE_DEAL_STATUSES].sort(), [...canReachHandover].sort());
+});
+
+test("a code is NOT mintable once the vehicle has been released", async () => {
+  // The rung the old derivation would have allowed. At HANDOVER_PENDING the code has already
+  // been scanned and consumed; minting a fresh one there would hand out a second credential for
+  // a car that has already changed hands.
+  const { issueReleaseToken } = await svc();
+  rows = [pickup({ dealStatus: "HANDOVER_PENDING" })];
+  assert.equal(await issueReleaseToken({ dealId: "deal_1", now: NOW }), null);
+  assert.equal(rows[0]!.tokenHash, null);
 });
 
 test("minting REFUSES on a deal that can no longer be completed", async () => {
@@ -422,7 +438,7 @@ test("minting REFUSES on a deal that can no longer be completed", async () => {
   }
 });
 
-test("minting succeeds on both statuses that can still reach COMPLETED", async () => {
+test("minting succeeds on every status in the allowlist", async () => {
   // The other direction — a test that only proves refusal cannot tell a correct allowlist from
   // an empty one.
   const { issueReleaseToken, TOKEN_MINTABLE_DEAL_STATUSES } = await svc();

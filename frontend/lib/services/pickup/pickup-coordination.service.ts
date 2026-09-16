@@ -17,6 +17,7 @@
 // EXCEPTION for an admin to resolve (via the existing admin schedule route).
 
 import { prisma } from "@/lib/prisma";
+import { enterPickupReadiness } from "@/lib/services/pickup/pickup-readiness.service";
 import { PickupStatus } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { checkPickupTime } from "./availability.service";
@@ -129,7 +130,7 @@ async function runConfirmSideEffects(
   // has nobody to hand it to: the buyer reveals theirs from the pickup page, which mints at that
   // moment. Minting here would spend a token nobody ever sees and immediately retire it again on
   // the first reveal.
-  // Deal advances only here (confirm/accept). Non-forced: FUNDING_PENDING→PICKUP_SCHEDULED
+  // Deal advances only here (confirm/accept). Non-forced: PICKUP_READINESS→PICKUP_SCHEDULED
   // is legal, and advanceDealStatus is idempotent if already advanced.
   await advanceDealStatus(dealId, "PICKUP_SCHEDULED", {
     actorId: actorId ?? undefined,
@@ -240,6 +241,34 @@ export async function proposePickup(
 }
 
 /** Dealer confirms the buyer's pending proposal: PROPOSED → SCHEDULED (CAS). */
+
+/**
+ * §Stage 16's exit condition, enforced where scheduling actually begins.
+ *
+ * "All items true; Deal moves to scheduling" … "Nothing is scheduled while any item is unmet."
+ *
+ * IT RUNS BEFORE THE PICKUP COMPARE-AND-SWAP, not after. Placed in the confirmation side effects
+ * it would refuse a deal whose pickup row had already been moved to SCHEDULED — and, worse, its
+ * return value is discarded there, so the refusal never reached the caller at all. Nothing may
+ * move until the thirteen hold.
+ */
+async function readinessGate(
+  dealId: string,
+  actorId: string | null,
+  actorRole: string,
+): Promise<CoordResult | null> {
+  const readiness = await enterPickupReadiness(dealId, { actorId, actorRole });
+  if (readiness.schedulable) return null;
+  const first = readiness.evaluation.outstanding[0];
+  return {
+    ok: false,
+    code: "STATE",
+    reason: first
+      ? `Pickup cannot be scheduled yet: ${first.detail}`
+      : "This deal is not ready for pickup scheduling yet.",
+  };
+}
+
 export async function confirmPickup(
   dealId: string,
   dealerId: string,
@@ -251,6 +280,8 @@ export async function confirmPickup(
   if (!CONFIRMABLE_DEAL_STATUSES.has(loaded.dealStatus)) {
     return { ok: false, code: "STATE", reason: "This deal is no longer ready for pickup scheduling." };
   }
+  const blocked = await readinessGate(dealId, dealerId, "DEALER");
+  if (blocked) return blocked;
 
   const scheduledAt = loaded.pickup.proposedTime;
   if (!scheduledAt) return CONFLICT;
@@ -319,6 +350,8 @@ export async function acceptCounter(
   if (!CONFIRMABLE_DEAL_STATUSES.has(loaded.dealStatus)) {
     return { ok: false, code: "STATE", reason: "This deal is no longer ready for pickup scheduling." };
   }
+  const blocked = await readinessGate(dealId, buyerId, "BUYER");
+  if (blocked) return blocked;
 
   const scheduledAt = loaded.pickup.proposedTime;
   if (!scheduledAt) return CONFLICT;

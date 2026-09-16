@@ -106,7 +106,6 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/api/dealer/invite/claim/route.ts", reasons: ["direct-sender"], senders: ["sendDealerWelcomeEmail"], removalPhase: 10 },
   { file: "app/api/dealer/offers/[offerId]/revise/route.ts", reasons: ["direct-sender"], senders: ["sendDealerOfferSubmittedEmail"], removalPhase: 10 },
   { file: "app/api/dealer/offers/route.ts", reasons: ["direct-sender"], senders: ["sendDealerOfferSubmittedEmail"], removalPhase: 10 },
-  { file: "app/api/dealer/pickup/scan/route.ts", reasons: ["resend-sdk"], senders: [], removalPhase: 10 },
   { file: "app/api/leads/lead-magnet/route.ts", reasons: ["direct-sender"], senders: ["sendLeadMagnetDeliveryEmail"], removalPhase: 10 },
   { file: "app/api/public/contact/route.ts", reasons: ["resend-sdk"], senders: [], removalPhase: 10 },
   { file: "app/api/public/dealer-application/route.ts", reasons: ["direct-sender"], senders: ["sendDealerApplicationAdminNotification", "sendDealerApplicationReceived", "sendDealerApplicationReceivedEmail"], removalPhase: 10 },

@@ -1,7 +1,9 @@
-// POST /api/dealer/pickup/scan — dealer scans the buyer's release code to mark the deal COMPLETED.
-// Body: { qrToken: string }  — the RAW release token, exactly as scanned.
-// On success: the token is consumed, pickup.status=COMPLETED, deal.status=COMPLETED,
-// BuyerActivityEvent emitted, Resend completion email fired (best-effort).
+// POST /api/dealer/pickup/scan — the dealership scans the buyer's release code to record HANDOVER.
+// Body: { qrToken: string, identityVerified: boolean, odometerAtRelease?, conditionAtRelease?,
+//          fundsCollectedMethod?, tradeReceived? } — qrToken is the RAW release token as scanned.
+// On success: the token is consumed, pickup.status=RELEASED, deal.status=HANDOVER_PENDING, the
+// §Stage 18 release evidence is recorded, and the buyer's possession-confirmation request is
+// queued in comms_outbox inside the same transaction. THE DEAL IS NOT COMPLETED HERE.
 //
 // WHAT CHANGED, 2026-09-16. This route used to resolve the scanned string by equality against
 // `pickups.qr_code_data` — a plaintext credential, seeded from `Math.random()`, that a database
@@ -17,27 +19,14 @@ import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dea
 import { prisma } from "@/lib/prisma";
 import {
   INSURANCE_SATISFIED,
-  advanceDealStatus,
-  DealTransitionError,
   InsuranceRequiredError,
   ReleaseNotClearedError,
 } from "@/lib/services/deal/deal.service";
+import { recordDealerRelease } from "@/lib/services/pickup/pickup-completion.service";
 import {
   resolveReleaseToken,
-  consumeReleaseToken,
   type ReleaseTokenReason,
 } from "@/lib/services/pickup/release-token.service";
-import { Resend } from "resend";
-
-// Lazy Resend client — constructed on first use. Prevents Next.js build-time
-// page data collection from throwing when RESEND_API_KEY isn't set.
-let resendInstance: Resend | null = null;
-function getResend(): Resend | null {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey || apiKey.includes("placeholder")) return null;
-  if (!resendInstance) resendInstance = new Resend(apiKey);
-  return resendInstance;
-}
 
 /**
  * What a scanner is told about a code that resolved to nothing usable.
@@ -76,8 +65,15 @@ export async function POST(request: NextRequest) {
   const dealer = await getRequestDealer(request);
   if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const body = await request.json().catch(() => ({}));
-  const qrToken = (body as { qrToken?: string }).qrToken?.trim();
+  const body = (await request.json().catch(() => ({}))) as {
+    qrToken?: string;
+    identityVerified?: boolean;
+    odometerAtRelease?: number;
+    conditionAtRelease?: string;
+    fundsCollectedMethod?: string;
+    tradeReceived?: boolean;
+  };
+  const qrToken = body.qrToken?.trim();
   if (!qrToken) return errorResponse("VALIDATION_ERROR", "qrToken is required", 400);
 
   // READ-ONLY. A scanner that reads a code twice must not spend it by looking; the consume is a
@@ -144,112 +140,83 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const completedAt = new Date();
+  const releasedAt = new Date();
 
-  // Route the lifecycle transition through the guarded seam (enforces canTransition
-  // + the insurance gate; records DealStatusHistory). The pickup record + completion
-  // activity event are written after the deal has advanced.
+  // THE CODE IS SPENT INSIDE THE RELEASE TRANSACTION, not here.
+  //
+  // Consuming before the gates run burns the buyer's credential on a handover that is still
+  // blocked — funding not cleared, executed contract missing, insurance withdrawn are all
+  // conditions the DEALERSHIP or AutoLenis has to fix while the buyer stands there. Consuming
+  // after would let a second scan record a second release before the first spent the code.
+  // `recordDealerRelease` takes the raw token and spends it in the same transaction that writes
+  // the handover, so a refused release rolls the spend back and a concurrent scan loses cleanly.
+
+  // RECORD THE HANDOVER. NOT THE COMPLETION.
+  //
+  // §8.2 defect (3): this route used to advance the Deal straight to COMPLETED as a `DEALER`
+  // actor. §Stage 19 forbids it in as many words — "the Deal never completes automatically on
+  // the dealer's word alone" — so the scan records the release and the BUYER's possession
+  // confirmation completes. The transition map no longer offers the old edge either, so this is
+  // closed structurally and not only by this route's good behaviour.
+  let outcome;
   try {
-    await advanceDealStatus(pickup.dealId, "COMPLETED", { actorRole: "DEALER", reason: "Dealer QR pickup scan" });
+    outcome = await recordDealerRelease({
+      dealId: pickup.dealId,
+      dealerId: dealer.id,
+      pickupId: pickup.id,
+      rawToken: qrToken,
+      identityVerified: body.identityVerified === true,
+      odometerAtRelease: typeof body.odometerAtRelease === "number" ? body.odometerAtRelease : null,
+      conditionAtRelease: typeof body.conditionAtRelease === "string" ? body.conditionAtRelease : null,
+      fundsCollectedMethod: typeof body.fundsCollectedMethod === "string" ? body.fundsCollectedMethod : null,
+      tradeReceived: body.tradeReceived === true,
+      now: releasedAt,
+    });
   } catch (err) {
-    if (err instanceof DealTransitionError) {
-      return errorResponse("NOT_READY_FOR_PICKUP", "This deal is not ready for pickup completion.", 409);
-    }
-    // The seam re-checks the insurance hard gate at write time. Proof can be
-    // withdrawn between our pre-check above and the advance, so map that rejection
-    // to the same truthful 409 rather than letting it surface as a 500.
+    // The three release gates run again INSIDE the release transaction, against the row as read.
+    // Proof can be withdrawn between the pre-check above and the write.
     if (err instanceof InsuranceRequiredError) {
-      return errorResponse(
-        "INSURANCE_REQUIRED",
-        "Insurance proof is required before this pickup can be completed.",
-        409,
-      );
+      return errorResponse("INSURANCE_REQUIRED", "Insurance proof is required before this vehicle can be released.", 409);
     }
-    // Phase 8's release gate — the dealership's executed contract, and funding clearance.
-    // Unmapped until 2026-09-15, so it fell through to the rethrow below and reached a dealer
-    // standing at the vehicle as an unhandled 500. Its own code rather than INSURANCE_REQUIRED
-    // because the two are owed by different people: an insurance gap is the buyer's to close,
-    // this one is AutoLenis's and the dealership's. `err.message` carries which of the two.
     if (err instanceof ReleaseNotClearedError) {
       return errorResponse("RELEASE_NOT_CLEARED", err.message, 409);
     }
     throw err;
   }
 
-  // SPEND THE CODE — and only now.
-  //
-  // Consuming BEFORE the advance would be the tidier concurrency story and the wrong one for the
-  // people involved: every rejection above (funding not cleared, executed contract missing,
-  // insurance withdrawn) is a condition the DEALERSHIP or AutoLenis has to fix while the buyer
-  // stands there, and burning their code on the way past would leave them re-revealing one for a
-  // handover that is still blocked. `funding_cleared_at` makes RELEASE_NOT_CLEARED the common
-  // answer today, not a rare one.
-  const consumed = await consumeReleaseToken({ pickupId: pickup.id, rawToken: qrToken, now: completedAt });
-  if (!consumed) {
-    // NOT A REJECTION, and this is the part that is easy to get wrong. By the time we are here
-    // `advanceDealStatus` has COMMITTED: the deal is COMPLETED, DealStatusHistory is written and
-    // the exactly-once `purchase_completed` event has fired. Returning 409 on a lost token swap
-    // would strand the deal COMPLETED with a pickup that is not — no completedAt, no activity
-    // event, no email — recoverable only through the admin completion route.
-    //
-    // A lost swap here means one of two things and neither is "this scan did nothing": another
-    // scan spent the code first (the pickup write below will tell us, truthfully), or the code
-    // was revoked between the resolve and now by a concurrent reschedule. The handover still
-    // happened; what follows records it.
-    logger.warn(
-      `[pickup/scan] pickup ${pickup.id}: the release token could not be spent (already consumed, ` +
-        `or revoked between the resolve and the swap). The deal has already advanced to COMPLETED; ` +
-        `the pickup write decides the outcome.`,
-    );
+  if (!outcome.ok) {
+    if (outcome.reason === "identity_unverified") {
+      // §Stage 18's first named failure. The exception is already raised with an owner; the
+      // dealer is told plainly rather than being handed a generic refusal.
+      return errorResponse(
+        "IDENTITY_NOT_VERIFIED",
+        "Confirm the buyer's identity against the contract before releasing the vehicle. Operations has been notified.",
+        409,
+      );
+    }
+    if (outcome.reason === "not_scheduled") {
+      return errorResponse("NOT_READY_FOR_PICKUP", "This deal is not ready for handover.", 409);
+    }
+    if (outcome.reason === "code_already_spent") {
+      // Another scan won the compare-and-swap inside the transaction. Nothing was written by
+      // this request — the rollback is the whole point of spending the code in there.
+      return errorResponse("ALREADY_SCANNED", "This pickup code has already been used.", 409);
+    }
+    return errorResponse("INVALID_TOKEN", "This pickup code is not valid.", 422);
   }
 
-  // THE PICKUP WRITE IS WHAT DECIDES THE WINNER, and it is a compare-and-swap for that reason.
-  // Two simultaneous scans both advance the deal (idempotently — the seam's own CAS makes the
-  // second a no-op that emits nothing), and exactly one of them moves the pickup out of its
-  // pre-COMPLETED status. That one owns the activity event and the email; the other is told the
-  // truth. Doing this as an interactive transaction keeps the row and its event atomic, which the
-  // previous array form could not do while also reporting who won.
-  const recorded = await prisma.$transaction(async (tx) => {
-    const res = await tx.pickup.updateMany({
-      where: { id: pickup.id, status: { not: "COMPLETED" } },
-      data: { status: "COMPLETED", completedAt },
-    });
-    if (res.count !== 1) return false;
-    await tx.buyerActivityEvent.create({
-      data: {
-        buyerId: pickup.deal.buyerId,
-        eventType: "DEAL_COMPLETED",
-        title: "Pickup confirmed — your deal is complete",
-        metadata: { dealId: pickup.dealId, completedAt: completedAt.toISOString() },
-      },
-    });
-    return true;
-  });
-  if (!recorded) {
-    return errorResponse("ALREADY_SCANNED", "This QR code has already been scanned.", 409);
-  }
-
-  // Best-effort completion email via Resend
-  const buyerEmail = pickup.deal.buyer.user.email;
-  const resend = getResend();
-  resend?.emails.send({
-    from: `${process.env.FROM_NAME ?? "AutoLenis"} <noreply@autolenis.com>`,
-    to: buyerEmail,
-    subject: "Congratulations — your AutoLenis deal is complete",
-    html: `<p>Hi ${pickup.deal.buyer.firstName},</p>
-           <p>Your vehicle pickup has been confirmed by the dealer. The deal is now marked as <strong>COMPLETED</strong> in your AutoLenis account.</p>
-           <p>You can view your final receipt and contract at <a href="${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deal/${pickup.dealId}/receipt">your dashboard</a>.</p>
-           <p>Thank you for choosing AutoLenis.</p>`,
-  }).catch(() => { /* non-fatal */ });
-
-  // The canonical `purchase_completed` domain event is emitted EXACTLY ONCE by
-  // the deal state-machine seam (advanceDealStatus → COMPLETED, above), so this
-  // route no longer emits it — that keeps the completion signal single-sourced
-  // and replay-safe regardless of which path completes the deal.
+  // NO EMAIL IS SENT FROM HERE — §8.2 defect (7). The completion mail used to go out inline
+  // through Resend with no idempotency key and, worse, un-awaited: `resend?.emails.send(...)`
+  // without `await` can be dropped entirely when the serverless function returns. The buyer's
+  // possession-confirmation request is queued in `comms_outbox` inside the release transaction,
+  // so it survives a crash and retries on its own.
 
   return successResponse({
     success: true,
     dealId: pickup.dealId,
-    completedAt: completedAt.toISOString(),
+    status: "HANDOVER_PENDING",
+    releasedAt: outcome.releasedAt.toISOString(),
+    alreadyReleased: outcome.alreadyReleased,
+    awaitingBuyerConfirmation: true,
   });
 }

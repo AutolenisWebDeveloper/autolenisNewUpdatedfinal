@@ -12,6 +12,20 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { PickupStatus } from "@prisma/client";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
+import { enterPickupReadiness } from "@/lib/services/pickup/pickup-readiness.service";
+
+/**
+ * The admin scheduling path refused because §Stage 16's checklist is incomplete.
+ *
+ * Its own error type so the route can map it to a 409 naming the outstanding item, rather than
+ * letting a DealTransitionError reach an operator as a 500 that says only "invalid transition".
+ */
+export class PickupNotReadyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PickupNotReadyError";
+  }
+}
 import { issueReleaseToken, revokeReleaseToken } from "./release-token.service";
 import { renderReleaseQr } from "./qr.service";
 
@@ -53,6 +67,21 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
   // scan's only gate was insurance. That is spot delivery through an admin screen, and it is
   // exactly what §Stage 14 forbids. The transition guard now decides, so scheduling is legal
   // only from FUNDING_PENDING — after the six-item clearance list.
+  // PHASE 9. `FUNDING_PENDING → PICKUP_SCHEDULED` is no longer an edge — §Stage 16's readiness
+  // evaluation sits between them, and "nothing is scheduled while any item is unmet". This is the
+  // Operations path §Stage 17 describes ("After two unsuccessful counter rounds, Operations
+  // schedules directly"), so it evaluates the same thirteen rather than getting its own rule:
+  // an admin scheduling around the checklist is the bypass the checklist exists to prevent.
+  const readiness = await enterPickupReadiness(dealId, { actorRole: "ADMIN" });
+  if (!readiness.schedulable) {
+    const first = readiness.evaluation.outstanding[0];
+    throw new PickupNotReadyError(
+      first
+        ? `Pickup readiness is incomplete: ${first.detail} (owner: ${first.owner})`
+        : "This deal is not ready for pickup scheduling.",
+    );
+  }
+
   await advanceDealStatus(dealId, "PICKUP_SCHEDULED", { actorRole: "ADMIN" });
 
   // Notify buyer

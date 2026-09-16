@@ -29,6 +29,7 @@
 // their first one; migration 20261201000000 adds the two indexes they need.
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { hashToken, generateRawToken } from "@/lib/services/dealer-recruitment/account-claim.service";
 import { TOKEN_MINTABLE_STATUSES } from "./pickup-statuses";
 
@@ -51,11 +52,19 @@ export { TOKEN_MINTABLE_STATUSES } from "./pickup-statuses";
  * on a dead deal. The whole point of this service is that no code exists without an appointment
  * behind it; a cancelled deal has no appointment.
  *
- * The set is derived from `canTransition`, not chosen: these are exactly the statuses from which
- * a deal can still reach COMPLETED, which is exactly what presenting a code does.
- * `release-token.test.ts` pins it against the real transition table so the two cannot drift.
+ * THE DERIVATION CHANGED IN PHASE 9, AND THE OLD ONE WAS RIGHT ONLY BY COINCIDENCE. This set
+ * was "the statuses from which a deal can still reach COMPLETED", which matched the statuses
+ * with a live appointment only because the ladder was flat: `PICKUP_SCHEDULED → COMPLETED` was a
+ * single edge. §8.2 defect (8) closed it and inserted `HANDOVER_PENDING`, and the two
+ * definitions came apart — "can reach COMPLETED" now yields HANDOVER_PENDING, which is the state
+ * AFTER the code has been scanned and consumed.
+ *
+ * So it is derived from what the code is FOR. A release code opens a handover; it is mintable
+ * exactly while the deal can still REACH handover. That is `canTransition(from,
+ * HANDOVER_PENDING)` — PICKUP_SCHEDULED, and nothing else. `release-token.test.ts` pins it
+ * against the real transition table so the two cannot drift.
  */
-export const TOKEN_MINTABLE_DEAL_STATUSES = ["PICKUP_SCHEDULED", "PICKUP_COMPLETE"] as const;
+export const TOKEN_MINTABLE_DEAL_STATUSES = ["PICKUP_SCHEDULED"] as const;
 
 /**
  * How long a token outlives the appointment it belongs to.
@@ -234,12 +243,27 @@ export async function resolveReleaseToken(
  * that a handover happened on a credential nobody ever presented. Adding the hash makes the
  * swap refuse instead, which is the truthful answer.
  */
-export async function consumeReleaseToken(params: {
-  pickupId: string;
-  rawToken: string;
-  now?: Date;
-}): Promise<boolean> {
-  const res = await prisma.pickup.updateMany({
+export async function consumeReleaseToken(
+  params: {
+    pickupId: string;
+    rawToken: string;
+    now?: Date;
+  },
+  /**
+   * PHASE 9 ADDED THE TRANSACTION HANDLE, and the ordering problem it solves is worth naming.
+   *
+   * Consuming outside the release transaction forces a choice between two wrong orderings.
+   * Consume first and a gate that fails inside the transaction (funding withdrawn between the
+   * pre-check and the write) has already burned the buyer's code, leaving them re-revealing one
+   * for a handover that is still blocked. Record first and a second scan can record a second
+   * release before the first has spent the code.
+   *
+   * Passing the handle removes the choice: the consume and the handover commit together, or
+   * neither does. Same idiom as `raiseException(input, tx)` and `enqueueTransactional(input, tx)`.
+   */
+  db: Pick<typeof prisma, "pickup"> | Prisma.TransactionClient = prisma,
+): Promise<boolean> {
+  const res = await db.pickup.updateMany({
     where: {
       id: params.pickupId,
       tokenHash: hashToken(params.rawToken),

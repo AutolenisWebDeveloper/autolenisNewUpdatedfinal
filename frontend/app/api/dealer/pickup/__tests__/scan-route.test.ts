@@ -58,9 +58,9 @@ let authedDealer: { id: string } | null = { id: "dealer_1" };
 let pickupRow: PickupRow | null = null;
 let resolveReason: Reason | null = null;
 let consumeSucceeds = true;
-let advanceCalls: Array<{ dealId: string; to: string }> = [];
-let advanceThrows: Error | null = null;
-let txCalls = 0;
+let releaseCalls: Array<Record<string, unknown>> = [];
+let releaseThrows: Error | null = null;
+let releaseOutcome: Record<string, unknown> = { ok: true, alreadyReleased: false, releasedAt: new Date("2026-09-22T15:30:00.000Z") };
 let consumeCalls: Array<{ pickupId: string; rawToken: string }> = [];
 let pickupCasWheres: Array<Record<string, unknown>> = [];
 let activityEvents = 0;
@@ -95,7 +95,6 @@ mock.module("@/lib/prisma", {
       // Interactive form — the route needs to know WHO WON the pickup compare-and-swap, which the
       // array form cannot report while staying atomic with the activity event.
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-        txCalls += 1;
         return fn({
           pickup: {
             updateMany: async ({ where }: { where: Record<string, unknown> }) => {
@@ -140,13 +139,21 @@ mock.module("@/lib/services/deal/deal.service", {
     // decision" (INSURANCE_AWAITING_REVIEW), not "released". A mock that grants the gate the
     // real code refuses is a test asserting against a world that does not exist.
     INSURANCE_SATISFIED: ["VERIFIED", "POLICY_BOUND"],
-    advanceDealStatus: async (dealId: string, to: string) => {
-      if (advanceThrows) throw advanceThrows;
-      advanceCalls.push({ dealId, to });
-    },
     DealTransitionError,
     InsuranceRequiredError,
     ReleaseNotClearedError,
+  },
+});
+
+// PHASE 9. The route no longer completes anything — it records a HANDOVER through the one
+// completion service, which owns the transaction, the gates and the token spend together.
+mock.module("@/lib/services/pickup/pickup-completion.service", {
+  namedExports: {
+    recordDealerRelease: async (input: Record<string, unknown>) => {
+      releaseCalls.push(input);
+      if (releaseThrows) throw releaseThrows;
+      return releaseOutcome;
+    },
   },
 });
 
@@ -184,9 +191,8 @@ beforeEach(() => {
   pickupRow = dealerPickup();
   resolveReason = null;
   consumeSucceeds = true;
-  advanceCalls = [];
-  advanceThrows = null;
-  txCalls = 0;
+  releaseCalls = [];
+  releaseThrows = null;
   consumeCalls = [];
   pickupWheres = [];
   pickupCasWheres = [];
@@ -203,19 +209,34 @@ test("requires authentication (401)", async () => {
   authedDealer = null;
   const res = await scan();
   assert.equal(res.status, 401);
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0);
 });
 
-test("the owning dealer completes the deal on a valid scan, and the code is SPENT", async () => {
+test("a valid scan records HANDOVER — it does NOT complete the deal", async () => {
+  // §8.2 defect (3). This route used to advance the Deal to COMPLETED as a DEALER actor.
+  // §Stage 19: "the Deal never completes automatically on the dealer's word alone."
   const res = await scan();
   assert.equal(res.status, 200);
-  assert.deepEqual(advanceCalls, [{ dealId: "deal_1", to: "COMPLETED" }]);
-  assert.deepEqual(
-    consumeCalls,
-    [{ pickupId: "pickup_1", rawToken: "a".repeat(64) }],
-    "a completed handover must burn the code that was PRESENTED, not just the pickup's current one",
+  const body = await res.json();
+  assert.equal(body.data.status, "HANDOVER_PENDING", "the scan records a release, not a completion");
+  assert.equal(body.data.awaitingBuyerConfirmation, true);
+  assert.equal(releaseCalls.length, 1);
+  assert.equal(
+    "to" in releaseCalls[0]! && releaseCalls[0]!.to === "COMPLETED",
+    false,
+    "nothing on this path may ask for COMPLETED",
   );
-  assert.equal(activityEvents, 1, "and record the completion exactly once");
+});
+
+test("the PRESENTED code is handed to the release service to be spent in its transaction", async () => {
+  // The code that was scanned, not whatever the pickup row happens to hold now — a buyer who
+  // re-revealed between the resolve and the write has replaced it. Spending it inside the
+  // release transaction is what makes a refused release leave the code usable, so the route
+  // must pass it rather than spending it itself.
+  await scan();
+  assert.equal(releaseCalls[0]!.pickupId, "pickup_1");
+  assert.equal(releaseCalls[0]!.rawToken, "a".repeat(64));
+  assert.deepEqual(consumeCalls, [], "the route must never spend the code outside that transaction");
 });
 
 test("the scanned string is NEVER used as a database predicate", async () => {
@@ -236,16 +257,15 @@ test("another dealer's code is rejected and completes nothing (IDOR blocked)", a
   assert.equal(res.status, 422);
   const body = await res.json();
   assert.equal(body.error.code, "INVALID_TOKEN");
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0, "the route refuses before the release service is reached");
   assert.deepEqual(consumeCalls, [], "a rejected scan must not spend someone else's code");
-  assert.equal(txCalls, 0);
 });
 
 test("CONCIERGE deal (no dealer on the deal) can never be completed by a dealer scan", async () => {
   pickupRow = conciergePickup();
   const res = await scan();
-  assert.equal(advanceCalls.length, 0, "a dealer must never complete a deal that has no dealer");
-  assert.equal(txCalls, 0, "and must never mark the pickup row complete");
+  assert.equal(releaseCalls.length, 0, "a dealer must never complete a deal that has no dealer");
+  assert.equal(releaseCalls.length, 0, "and must never reach the release service");
   assert.equal(res.status, 422);
   const body = await res.json();
   // Deliberately the SAME response as a wrong-dealer token. The original reason (a guessable
@@ -271,18 +291,18 @@ test("insurance proof missing → 409, deal not completed, code not spent", asyn
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error.code, "INSURANCE_REQUIRED");
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0);
   assert.deepEqual(consumeCalls, []);
 });
 
 test("insurance revoked between the pre-check and the advance → 409, not a 500", async () => {
   // TOCTOU: the pre-check passed, then the seam's hard gate rejected.
-  advanceThrows = new InsuranceRequiredError();
+  releaseThrows = new InsuranceRequiredError();
   const res = await scan();
   assert.equal(res.status, 409, "the seam's insurance rejection must be mapped, not thrown as a 500");
   const body = await res.json();
   assert.equal(body.error.code, "INSURANCE_REQUIRED");
-  assert.equal(txCalls, 0, "pickup must not be marked complete when the deal did not advance");
+  assert.equal(releaseCalls.length, 1, "the release service is reached, and its rejection is mapped rather than thrown");
 });
 
 // ── The release gate Phase 8 added ───────────────────────────────────────────────────────
@@ -297,12 +317,12 @@ test("insurance revoked between the pre-check and the advance → 409, not a 500
 // Which is also why the code is not spent on the way past it: see the next test.
 
 test("funding not cleared → 409, not a 500", async () => {
-  advanceThrows = new ReleaseNotClearedError("funding has not been cleared for this deal");
+  releaseThrows = new ReleaseNotClearedError("funding has not been cleared for this deal");
   const res = await scan();
   assert.equal(res.status, 409, "the seam's release rejection must be mapped, not thrown as a 500");
   const body = await res.json();
   assert.equal(body.error.code, "RELEASE_NOT_CLEARED");
-  assert.equal(txCalls, 0, "pickup must not be marked complete when the deal did not advance");
+  assert.equal(releaseCalls.length, 1, "the release service is reached, and its rejection is mapped rather than thrown");
   assert.equal(
     body.error.message.includes("funding has not been cleared"),
     true,
@@ -311,37 +331,56 @@ test("funding not cleared → 409, not a 500", async () => {
 });
 
 test("a REFUSED release does not burn the buyer's code", async () => {
-  // The ordering decision, pinned. Consuming before the advance would be the tidier concurrency
-  // story and the wrong one for the people involved: every rejection here is something the
-  // DEALERSHIP or AutoLenis has to fix while the buyer stands there, and a spent code would
-  // leave them revealing a new one for a handover that is still blocked.
+  // The ordering decision, and in Phase 9 it is STRUCTURAL rather than a matter of where the
+  // route puts the call. Every rejection here is something the DEALERSHIP or AutoLenis has to
+  // fix while the buyer stands there, and a spent code would leave them revealing a new one for
+  // a handover that is still blocked. The spend now happens INSIDE the release transaction, so
+  // a throw rolls it back; this route cannot burn a code even by accident, because it never
+  // spends one.
   for (const err of [
     new ReleaseNotClearedError("funding has not been cleared for this deal"),
     new ReleaseNotClearedError("the dealership's fully executed contract is not on file"),
     new InsuranceRequiredError(),
-    new DealTransitionError(),
   ]) {
     consumeCalls = [];
-    advanceThrows = err;
+    releaseThrows = err;
     await scan();
     assert.deepEqual(consumeCalls, [], `${err.name} must leave the code usable`);
   }
+  // ANTI-VACUITY: the loop above proves nothing if the route never spends a code on ANY path.
+  // It does not — which is the point — so the guarantee is pinned in the release service's own
+  // suite instead: `pickup-completion.test.ts` asserts a thrown gate leaves token_consumed_at
+  // null after the rollback. This assertion records that the route's half is "never directly".
+  releaseThrows = null;
+  consumeCalls = [];
+  await scan();
+  assert.deepEqual(consumeCalls, [], "not even on the success path");
 });
 
 test("the dealership's executed contract not on file → 409, not a 500", async () => {
-  advanceThrows = new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
+  releaseThrows = new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
   const res = await scan();
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error.code, "RELEASE_NOT_CLEARED");
-  assert.equal(txCalls, 0);
+  assert.equal(releaseCalls.length, 1);
 });
 
-test("an illegal deal transition → 409 and the pickup row is not marked complete", async () => {
-  advanceThrows = new DealTransitionError();
+test("a deal that is not scheduled → 409 NOT_READY_FOR_PICKUP, nothing recorded", async () => {
+  releaseOutcome = { ok: false, reason: "not_scheduled" };
   const res = await scan();
   assert.equal(res.status, 409);
-  assert.equal(txCalls, 0);
+  assert.equal((await res.json()).error.code, "NOT_READY_FOR_PICKUP");
+});
+
+test("an unverified identity BLOCKS the handover — §Stage 18's first named failure", async () => {
+  // "An identity mismatch ... blocks handover and creates an urgent exception with an owner and
+  // an immediate buyer and dealership notification." The exception is raised by the service; the
+  // dealer is told plainly rather than handed a generic refusal they cannot act on.
+  releaseOutcome = { ok: false, reason: "identity_unverified" };
+  const res = await scan();
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "IDENTITY_NOT_VERIFIED");
 });
 
 test("a deal already completed elsewhere is rejected (no double completion)", async () => {
@@ -356,7 +395,7 @@ test("a deal already completed elsewhere is rejected (no double completion)", as
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error.code, "ALREADY_SCANNED");
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0);
   assert.deepEqual(consumeCalls, [], "and the code is not burned on the way past");
 });
 
@@ -369,7 +408,7 @@ test("an expired code is rejected, and says so", async () => {
   const body = await res.json();
   assert.equal(body.error.code, "INVALID_TOKEN");
   assert.match(body.error.message, /expired/i);
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0);
 });
 
 test("a code already spent reads as ALREADY_SCANNED, not as an invalid one", async () => {
@@ -380,7 +419,7 @@ test("a code already spent reads as ALREADY_SCANNED, not as an invalid one", asy
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error.code, "ALREADY_SCANNED");
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0);
 });
 
 test("a revoked code says it was cancelled and points at the remedy", async () => {
@@ -398,7 +437,7 @@ test("a code whose pickup is no longer releasable → NOT_READY_FOR_PICKUP", asy
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error.code, "NOT_READY_FOR_PICKUP");
-  assert.equal(advanceCalls.length, 0);
+  assert.equal(releaseCalls.length, 0);
 });
 
 test("an unknown code is rejected without touching the pickup table", async () => {
@@ -415,39 +454,30 @@ test("a missing qrToken is a 400 before anything is resolved", async () => {
   assert.deepEqual(pickupWheres, []);
 });
 
-test("losing the PICKUP swap → ALREADY_SCANNED, and the completion is not recorded twice", async () => {
-  // Two simultaneous scans both resolve (resolution is a read) and both advance the deal — the
-  // seam's own CAS makes the second a silent no-op. The PICKUP write is what picks the winner,
-  // so the loser must be told the truth rather than double-writing the completion.
-  pickupAlreadyCompleted = true;
+test("a code already spent → ALREADY_SCANNED, and nothing is recorded", async () => {
+  // Two simultaneous scans both resolve (resolution is a read) and both reach the release
+  // service; exactly one wins the consume compare-and-swap inside the transaction. The loser is
+  // told the truth, and — unlike the pre-Phase-9 ordering — has written nothing to undo.
+  releaseOutcome = { ok: false, reason: "code_already_spent" };
   const res = await scan();
   assert.equal(res.status, 409);
-  const body = await res.json();
-  assert.equal(body.error.code, "ALREADY_SCANNED");
-  assert.equal(activityEvents, 0, "the loser must not emit a second DEAL_COMPLETED event");
+  assert.equal((await res.json()).error.code, "ALREADY_SCANNED");
 });
 
-test("the pickup write is a COMPARE-AND-SWAP, not a blind update", async () => {
-  // A blind `update` would report success for the loser of a double scan and write the row twice.
-  await scan();
-  assert.deepEqual(pickupCasWheres, [{ id: "pickup_1", status: { not: "COMPLETED" } }]);
-});
-
-test("A LOST TOKEN SWAP MUST NOT STRAND THE DEAL — the handover is still recorded", async () => {
-  // THE HALF-WRITE THIS ROUTE USED TO PRODUCE. By the time the token swap runs,
-  // `advanceDealStatus` has COMMITTED: the deal is COMPLETED, DealStatusHistory is written and
-  // the exactly-once purchase_completed event has fired. Returning 409 there — which the first
-  // draft did — left the deal COMPLETED with a pickup that was not: no completedAt, no activity
-  // event, no email, recoverable only through the admin completion route.
+test("THE HALF-WRITE IS NOW STRUCTURALLY IMPOSSIBLE, not handled", async () => {
+  // WHAT THIS REPLACES. Until Phase 9 the token swap ran AFTER `advanceDealStatus` had
+  // committed: the deal was COMPLETED, DealStatusHistory written, the exactly-once
+  // purchase_completed event fired. A lost swap there left the deal COMPLETED with a pickup that
+  // was not — no completedAt, no activity event, no email — recoverable only through the admin
+  // route. #440 handled that case carefully and correctly.
   //
-  // The swap can lose without another scan having won: a concurrent reschedule revokes the code
-  // between the resolve and the swap (schedulePickup and reschedulePickup both revoke now). The
-  // vehicle still changed hands. What follows must record that.
-  consumeSucceeds = false;
+  // It cannot arise any more. The consume, the gates, the status change, the pickup evidence and
+  // the outbox rows are one transaction, so a lost swap rolls back everything rather than
+  // stranding half of it. The route's whole contribution is a refusal, and the loser of a race
+  // leaves no state behind to reconcile.
+  releaseOutcome = { ok: false, reason: "code_already_spent" };
   const res = await scan();
-
-  assert.equal(res.status, 200, "a spent-or-revoked token after a committed advance is not a rejection");
-  assert.deepEqual(advanceCalls, [{ dealId: "deal_1", to: "COMPLETED" }]);
-  assert.equal(txCalls, 1, "the pickup row must still be completed");
-  assert.equal(activityEvents, 1, "and the buyer must still get their completion event");
+  assert.equal(res.status, 409, "the loser is refused");
+  assert.equal(activityEvents, 0, "and writes nothing — there is no partial completion to repair");
+  assert.deepEqual(consumeCalls, [], "the route never spent the code, so it has none to unspend");
 });

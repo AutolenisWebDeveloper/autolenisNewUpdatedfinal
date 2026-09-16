@@ -43,7 +43,38 @@ mock.module("@/lib/prisma", {
         findUnique: async () => ctrl.pickupRow,
       },
       deal: {
-        findUnique: async () => ({ id: "deal_1", buyerId: "buyer_1", offer: { dealerId: "dlr_1" }, pickup: ctrl.pickupRow }),
+        // PHASE 9: `schedulePickup` now evaluates §Stage 16's thirteen readiness items before it
+        // advances, so this fixture carries the facts they read. Twelve come from earlier phases
+        // (vin, executed contract, financing, funding, insurance, down payment); the four the
+        // dealership attests sit on the pickup row. All satisfied — this file's subject is the
+        // TOKEN wiring, and the unready case is proven in `pickup-readiness-gate.test.ts`.
+        findUnique: async () => ({
+          id: "deal_1",
+          buyerId: "buyer_1",
+          status: "FUNDING_PENDING",
+          offer: { dealerId: "dlr_1" },
+          vin: "1HGCM82633A004352",
+          vehicleYear: 2021,
+          vehicleMake: "Honda",
+          vehicleModel: "Accord",
+          vehicleHoldUntil: new Date("2126-01-01T00:00:00Z"),
+          dealerExecutedContractId: "cv_1",
+          financingCompletedAt: new Date("2026-02-01T00:00:00Z"),
+          fundingClearedAt: new Date("2026-02-01T00:00:00Z"),
+          insuranceStatus: "VERIFIED",
+          downPaymentCents: 200000,
+          holdReason: null,
+          frozenAt: null,
+          financing: { downPaymentMethod: "CASHIERS_CHECK" },
+          tradeInSubmissions: [],
+          queueItems: [],
+          pickup: {
+            ...ctrl.pickupRow,
+            vehiclePreparedAt: new Date("2026-02-01T00:00:00Z"),
+            dealerReadinessChecklist: { accessoriesPresent: true, deliveryDocumentsReady: true },
+            dueBillItems: [],
+          },
+        }),
       },
       notification: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.notifications.push(data); return {}; } },
       buyerActivityEvent: { create: async () => ({}) },
@@ -54,6 +85,10 @@ mock.module("@/lib/prisma", {
 mock.module("@/lib/services/deal/deal.service", {
   namedExports: {
     advanceDealStatus: async (dealId: string, status: string) => { ctrl.advances.push({ dealId, status }); return true; },
+    // MUST MATCH lib/services/deal/deal.service.ts. The readiness evaluator reads this list for
+    // item 7, and a mock that omits it makes `INSURANCE_SATISFIED.includes(...)` throw inside a
+    // service this file is not testing — a failure with nothing to do with the token wiring.
+    INSURANCE_SATISFIED: ["VERIFIED", "POLICY_BOUND"],
   },
 });
 
@@ -136,10 +171,20 @@ test("the buyer's scheduling notice does not promise a code that is ready and wa
   assert.match(body, /pickup code/i, "it must still tell the buyer where their code comes from");
 });
 
-test("schedulePickup still advances the deal — the release wiring changed nothing about that", async () => {
+test("schedulePickup advances THROUGH readiness — in that order, never straight to scheduled", async () => {
+  // The release wiring changed nothing about the fact that this path advances the deal; PHASE 9
+  // changed the RUNG IT PASSES THROUGH. §Stage 16's exit is "all items true; Deal moves to
+  // scheduling", so readiness is a state the deal occupies, not a check it passes on the way.
+  //
+  // THE ORDER IS THE ASSERTION. A deep-equal on the set alone would pass if the two advances came
+  // out backwards — scheduling first and readiness after is exactly the bypass the checklist
+  // exists to prevent, and it would look identical to a sorted comparison.
   const { schedulePickup } = await import("../pickup.service");
   await schedulePickup("deal_1", APPT, "123 Dealer Dr, Dallas TX");
-  assert.deepEqual(ctrl.advances, [{ dealId: "deal_1", status: "PICKUP_SCHEDULED" }]);
+  assert.deepEqual(ctrl.advances, [
+    { dealId: "deal_1", status: "PICKUP_READINESS" },
+    { dealId: "deal_1", status: "PICKUP_SCHEDULED" },
+  ]);
 });
 
 // ── 2. reissueReleaseCode ────────────────────────────────────────────────────────────────

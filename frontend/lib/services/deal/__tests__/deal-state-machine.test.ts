@@ -32,7 +32,16 @@ test("happy-path forward transitions are legal", () => {
   // required predecessor, and this is the structural half of the no-spot-delivery rule.
   assert.equal(canTransition("SIGNED", "DEALER_EXECUTED"), true);
   assert.equal(canTransition("DEALER_EXECUTED", "FUNDING_PENDING"), true);
-  assert.equal(canTransition("PICKUP_SCHEDULED", "PICKUP_COMPLETE"), true);
+  // PHASE 9 (§8.2 defect 8). The release ladder gained two rungs. Readiness is §Stage 16's
+  // thirteen-item evaluation; HANDOVER_PENDING is the dealer's release, which §Stage 19 makes a
+  // required predecessor of completion: "the Deal never completes automatically on the dealer's
+  // word alone."
+  assert.equal(canTransition("FUNDING_PENDING", "PICKUP_READINESS"), true);
+  assert.equal(canTransition("PICKUP_READINESS", "PICKUP_SCHEDULED"), true);
+  assert.equal(canTransition("PICKUP_SCHEDULED", "HANDOVER_PENDING"), true);
+  assert.equal(canTransition("HANDOVER_PENDING", "COMPLETED"), true);
+  // RETAINED AND UNREACHABLE. §28.1 L1405 retires PICKUP_COMPLETE to a supporting-record fact.
+  // Its exit stays open so a historical row is not stranded; nothing can enter it.
   assert.equal(canTransition("PICKUP_COMPLETE", "COMPLETED"), true);
 });
 
@@ -54,9 +63,44 @@ test("arbitrary forward jumps are rejected", () => {
   assert.equal(canTransition("FEE_PENDING", "INSURANCE_PENDING"), false); // must pass FEE_PAID
 });
 
-test("a scheduled pickup may be completed directly or via PICKUP_COMPLETE", () => {
-  assert.equal(canTransition("PICKUP_SCHEDULED", "COMPLETED"), true);
-  assert.equal(canTransition("PICKUP_SCHEDULED", "PICKUP_COMPLETE"), true);
+test("a scheduled pickup can NOT be completed directly — handover is required", () => {
+  // THIS TEST USED TO ASSERT THE DEFECT. It read "a scheduled pickup may be completed directly
+  // or via PICKUP_COMPLETE" and passed, which is how §8.2 defect (8) survived: the direct edge
+  // was not an oversight in the map, it was pinned by a test that described it as intended.
+  //
+  // §Stage 19: "A dealer release with no buyer confirmation reminds the buyer — the Deal never
+  // completes automatically on the dealer's word alone." Both direct routes are closed.
+  assert.equal(canTransition("PICKUP_SCHEDULED", "COMPLETED"), false);
+  // Closed for the reason Phase 7 established: an edge with no domain caller is NOT unreachable
+  // while DEAL_STAGE_ADVANCED resolves its target at runtime. Left open this was a two-hop path
+  // from a scheduled pickup to COMPLETED that skipped handover entirely.
+  assert.equal(canTransition("PICKUP_SCHEDULED", "PICKUP_COMPLETE"), false);
+  // And nothing may enter the retired state at all.
+  for (const from of [
+    "FUNDING_PENDING", "PICKUP_READINESS", "HANDOVER_PENDING", "SIGNED", "DEALER_EXECUTED",
+  ] as DealStatus[]) {
+    assert.equal(canTransition(from, "PICKUP_COMPLETE"), false, `${from} → PICKUP_COMPLETE must be illegal`);
+  }
+});
+
+test("completion is reachable ONLY from HANDOVER_PENDING (and the retired legacy state)", () => {
+  // The inverse of the ladder assertion, stated as an exhaustive sweep so a future edge added
+  // to COMPLETED from anywhere else fails here rather than being noticed in production.
+  const legal: DealStatus[] = ["HANDOVER_PENDING", "PICKUP_COMPLETE"];
+  const all: DealStatus[] = [
+    "PENDING", "ACTIVE", "FINANCING_PENDING", "FEE_PENDING", "FEE_PAID", "INSURANCE_PENDING",
+    "CONTRACT_PENDING", "CONTRACT_REVIEW", "CONTRACT_APPROVED", "SIGNING_PENDING", "SIGNED",
+    "DEALER_CONFIRMATION", "RECAP_PENDING", "DEALER_EXECUTED", "FUNDING_PENDING",
+    "PICKUP_READINESS", "PICKUP_SCHEDULED", "HANDOVER_PENDING", "PICKUP_COMPLETE",
+    "FROZEN_PENDING_RELEASE", "COMPLETED", "CANCELLED", "REFUNDED",
+  ];
+  for (const from of all) {
+    assert.equal(
+      canTransition(from, "COMPLETED"),
+      legal.includes(from),
+      `${from} → COMPLETED should be ${legal.includes(from)}`,
+    );
+  }
 });
 
 test("cancellation is reachable from any non-terminal state, never from terminal", () => {
@@ -129,10 +173,13 @@ test("Stage 14 send-back: FUNDING_PENDING returns to RECAP_PENDING, and to nothi
   // "A financing change ... sends the transaction back through recap confirmation, contract
   // generation, Contract Shield, AND signatures." RECAP_PENDING is the head of that path.
   assert.equal(canTransition("FUNDING_PENDING", "RECAP_PENDING"), true);
-  // Phase 9 owns the move INTO readiness, together with the checklist that guards it.
-  // Opening it here with no driver is the trap Phase 7 found: the admin action route
-  // resolves its target at runtime, so an ops admin could take an undriven edge non-forced.
-  assert.equal(canTransition("FUNDING_PENDING", "PICKUP_READINESS"), false);
+  // PHASE 9 OPENED READINESS, together with the checklist that guards it — which is the
+  // condition Phase 8 set for opening it at all.
+  assert.equal(canTransition("FUNDING_PENDING", "PICKUP_READINESS"), true);
+  // AND CLOSED THE DIRECT ROUTE TO SCHEDULING. §Stage 16: "Nothing is scheduled while any item
+  // is unmet." A second edge that reached scheduling without evaluating the thirteen would be
+  // that rule with a hole in it. The capability MOVED one rung, it was not removed.
+  assert.equal(canTransition("FUNDING_PENDING", "PICKUP_SCHEDULED"), false);
   assert.equal(canTransition("FUNDING_PENDING", "COMPLETED"), false);
 });
 

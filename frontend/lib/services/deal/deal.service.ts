@@ -37,9 +37,21 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // no-conditional-delivery rule — `force: true` still overrides it, and still says so
   // in DealStatusHistory, which is the difference between an override and a gap.
   SIGNED: ["DEALER_EXECUTED"],
-  // A scheduled pickup may be marked complete directly (dealer QR scan / admin
-  // override) or step through the intermediate PICKUP_COMPLETE state.
-  PICKUP_SCHEDULED: ["PICKUP_COMPLETE", "COMPLETED"],
+  // PHASE 9 CLOSED THE DIRECT EDGE — §8.2 defect (8). `PICKUP_SCHEDULED → COMPLETED` let a
+  // dealer's scan complete a Deal on the dealership's word alone, which §Stage 19 forbids in
+  // as many words: "the Deal never completes automatically on the dealer's word alone." The
+  // scan now records HANDOVER, and the buyer's possession confirmation completes.
+  //
+  // `PICKUP_SCHEDULED → PICKUP_COMPLETE` went with it, and that one is worth naming because it
+  // had no writer and looked harmless. Phase 7 paid for exactly that reasoning: an edge with no
+  // domain caller is NOT unreachable while `POST /api/admin/deals/[dealId]/action`
+  // (DEAL_STAGE_ADVANCED) resolves its target at runtime. Left open, it was a two-hop route
+  // from a scheduled pickup to COMPLETED that skipped handover entirely.
+  PICKUP_SCHEDULED: ["HANDOVER_PENDING"],
+  // RETAINED, DELIBERATELY UNREACHABLE. §28.1 L1405 retires PICKUP_COMPLETE to "a
+  // supporting-record fact rather than a primary state", so Phase 9 gives it no writer and no
+  // inbound edge. The exit stays open so any historical row parked here can still reach
+  // COMPLETED rather than being stranded by an edge that vanished. Phase 10 owns its removal.
   PICKUP_COMPLETE: ["COMPLETED"],
   COMPLETED: [],
   CANCELLED: ["REFUNDED"],
@@ -107,9 +119,15 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   //
   // Phase 9 owns PICKUP_READINESS and will insert it between these two; it is deliberately
   // still `[]` below, so this phase ships no readiness path it does not own.
-  FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_SCHEDULED"],
-  PICKUP_READINESS: [],
-  HANDOVER_PENDING: [],
+  // PHASE 9 INSERTED PICKUP_READINESS BETWEEN THESE TWO, which is what the comment above
+  // anticipated. `FUNDING_PENDING → PICKUP_SCHEDULED` is REPLACED rather than kept alongside:
+  // §Stage 16's exit is "all items true; Deal moves to scheduling" and its failure clause is
+  // "nothing is scheduled while any item is unmet", so a second edge that reaches scheduling
+  // without evaluating the thirteen is the rule with a hole in it. The capability MOVED — every
+  // deal still reaches PICKUP_SCHEDULED, one rung later.
+  FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_READINESS"],
+  PICKUP_READINESS: ["PICKUP_SCHEDULED"],
+  HANDOVER_PENDING: ["COMPLETED"],
   FROZEN_PENDING_RELEASE: [],
 };
 
@@ -220,6 +238,59 @@ interface AdvanceOptions {
  * no-op path (already in the target state, or `expectedFrom` did not match). Most
  * callers can ignore it; drivers that report whether they advanced must not.
  */
+/**
+ * The statuses a Deal may not ENTER without all three release facts.
+ *
+ * PHASE 8 GATED ONLY `COMPLETED`, AND THAT WAS ONE OF THREE. Parity row C-40 specified the
+ * preconditions belong "inside `advanceDealStatus` for PICKUP_READINESS/PICKUP_SCHEDULED/
+ * COMPLETED"; Phase 8 implemented `COMPLETED` alone and its §8.1h record called the rule
+ * structural. It was structural at the last rung only. Nothing read `funding_cleared_at` when a
+ * deal LEFT `FUNDING_PENDING`, so a deal whose funding had never cleared could legally reach
+ * `PICKUP_SCHEDULED` — the state whose entire meaning is that a vehicle is about to be handed
+ * over — and be stopped only at the final write.
+ *
+ * `HANDOVER_PENDING` is added to C-40's three because Phase 9 created it, and it is the rung
+ * where the vehicle PHYSICALLY MOVES. Gating completion but not handover would gate the
+ * paperwork and not the car.
+ *
+ * §Stage 16's entry condition is these three facts verbatim — "contract executed, financing
+ * completed, funding cleared, insurance verified" — so gating `PICKUP_READINESS` on them is not
+ * an extra rule, it is Stage 16's own entry, enforced where it cannot be skipped.
+ */
+export const RELEASE_GATED_STATUSES: DealStatus[] = [
+  DealStatus.PICKUP_READINESS,
+  DealStatus.PICKUP_SCHEDULED,
+  DealStatus.HANDOVER_PENDING,
+  DealStatus.COMPLETED,
+];
+
+/**
+ * The three hard release gates, checked against the row AS READ.
+ *
+ * Exported so the one completion writer enforces the SAME check inside its transaction rather
+ * than a second copy that can drift. Throws; never returns false.
+ */
+export function assertReleaseGates(deal: {
+  insuranceStatus: InsuranceStatus;
+  dealerExecutedContractId: string | null;
+  fundingClearedAt: Date | null;
+}): void {
+  if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
+    throw new InsuranceRequiredError();
+  }
+  // §14d — the dealership's fully executed copy must exist. A buyer's signature is not
+  // execution, and a vehicle is not released against a contract only one party signed.
+  if (!deal.dealerExecutedContractId) {
+    throw new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
+  }
+  // §Stage 14 — THE HARD RULE. No conditional delivery, no spot delivery. Funding is cleared
+  // against evidence before the vehicle moves, never on the expectation that it will complete
+  // later.
+  if (!deal.fundingClearedAt) {
+    throw new ReleaseNotClearedError("funding has not been cleared for this deal");
+  }
+}
+
 export async function advanceDealStatus(
   dealId: string,
   newStatus: DealStatus,
@@ -255,21 +326,8 @@ export async function advanceDealStatus(
   // cleared. The transition map alone could not stop it, because `force: true` exists and
   // `schedulePickup` used it. These three run at WRITE time, on the row as read, so they
   // hold whatever route got the deal here.
-  if (newStatus === DealStatus.COMPLETED && !opts.force) {
-    if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
-      throw new InsuranceRequiredError();
-    }
-    // §14d — the dealership's fully executed copy must exist. A buyer's signature is not
-    // execution, and a vehicle is not released against a contract only one party signed.
-    if (!deal.dealerExecutedContractId) {
-      throw new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
-    }
-    // §Stage 14 — THE HARD RULE. No conditional delivery, no spot delivery. Funding is
-    // cleared against evidence before the vehicle moves, never on the expectation that it
-    // will complete later.
-    if (!deal.fundingClearedAt) {
-      throw new ReleaseNotClearedError("funding has not been cleared for this deal");
-    }
+  if (RELEASE_GATED_STATUSES.includes(newStatus) && !opts.force) {
+    assertReleaseGates(deal);
   }
 
   // Compare-and-swap: advance ONLY while the deal is still in the state we read

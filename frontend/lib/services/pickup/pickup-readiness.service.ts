@@ -266,3 +266,47 @@ export async function evaluatePickupReadiness(dealId: string): Promise<Readiness
 /** Stage 16's count, asserted rather than trusted — a checklist that silently loses an item
  *  is a checklist that passes more deals than it should. */
 export const STAGE_16_ITEM_COUNT = 13;
+
+
+/**
+ * Move a deal into §Stage 16's readiness state when, and only when, all thirteen hold.
+ *
+ * THIS IS THE DRIVER PHASE 8 REQUIRED BEFORE THE EDGE COULD OPEN. Its comment on
+ * `FUNDING_PENDING` said so: "Phase 9 opens this edge together with the driver that guards it",
+ * because Phase 7 had already paid for the alternative — Phase 6 opened an edge with no domain
+ * caller, and `POST /api/admin/deals/[dealId]/action` (DEAL_STAGE_ADVANCED) resolves its target
+ * at runtime, so an ops admin could take it non-forced and skip the gate it was waiting on.
+ *
+ * IDEMPOTENT AND NON-THROWING ON THE COMMON PATHS. A deal already at PICKUP_READINESS or beyond
+ * is reported ready-to-schedule without a write; a deal that is not yet at FUNDING_PENDING is
+ * simply not there yet, which is not an error.
+ */
+export async function enterPickupReadiness(
+  dealId: string,
+  actor: { actorId?: string | null; actorRole?: string } = {},
+): Promise<{ evaluation: ReadinessEvaluation; entered: boolean; schedulable: boolean }> {
+  const evaluation = await evaluatePickupReadiness(dealId);
+
+  const deal = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
+  if (!deal) return { evaluation, entered: false, schedulable: false };
+
+  // Already past the gate: readiness was evaluated when it was entered, and re-evaluating is a
+  // read for display, not a reason to move anything.
+  if (deal.status === "PICKUP_READINESS") return { evaluation, entered: false, schedulable: true };
+  if (deal.status === "PICKUP_SCHEDULED" || deal.status === "HANDOVER_PENDING" || deal.status === "COMPLETED") {
+    return { evaluation, entered: false, schedulable: true };
+  }
+  if (deal.status !== "FUNDING_PENDING") return { evaluation, entered: false, schedulable: false };
+
+  // §Stage 16 exit: "All items true; Deal moves to scheduling." Nothing moves while one is unmet.
+  if (!evaluation.ready) return { evaluation, entered: false, schedulable: false };
+
+  const { advanceDealStatus } = await import("@/lib/services/deal/deal.service");
+  const moved = await advanceDealStatus(dealId, "PICKUP_READINESS", {
+    actorId: actor.actorId ?? undefined,
+    actorRole: actor.actorRole ?? "SYSTEM",
+    reason: "All thirteen §Stage 16 readiness items satisfied",
+    data: { pickupReadyAt: new Date() },
+  });
+  return { evaluation, entered: moved, schedulable: true };
+}
