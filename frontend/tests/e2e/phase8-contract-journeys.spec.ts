@@ -444,17 +444,33 @@ test("DEFECT 8: pickup is still REACHABLE — closing SIGNED → PICKUP_SCHEDULE
   // asserted only the REMOVAL. A capability-preservation map that says "MOVED" has to be able
   // to name where it moved TO.
   expect(canTransition("SIGNED", "PICKUP_SCHEDULED"), "the spot-delivery edge stays closed").toBe(false);
-  expect(canTransition("FUNDING_PENDING", "PICKUP_SCHEDULED"), "and pickup is reachable again, AFTER clearance").toBe(true);
-  expect(canTransition("PICKUP_SCHEDULED", "COMPLETED")).toBe(true);
+  // PHASE 9 MOVED THE INBOUND EDGE ONE RUNG, and this assertion moved with it rather than being
+  // deleted. §Stage 16's readiness evaluation now sits between clearance and scheduling
+  // ("nothing is scheduled while any item is unmet"), so pickup is reachable after clearance
+  // THROUGH readiness. The property this test defends — that closing an edge did not strip a
+  // capability — is unchanged and is checked here on the current ladder.
+  expect(canTransition("FUNDING_PENDING", "PICKUP_READINESS"), "clearance reaches readiness").toBe(true);
+  expect(canTransition("PICKUP_READINESS", "PICKUP_SCHEDULED"), "and readiness reaches scheduling").toBe(true);
+  expect(canTransition("FUNDING_PENDING", "PICKUP_SCHEDULED"), "but never skipping the checklist").toBe(false);
+  // And completion is no longer the next rung after scheduling — §Stage 19: "the Deal never
+  // completes automatically on the dealer's word alone."
+  expect(canTransition("PICKUP_SCHEDULED", "HANDOVER_PENDING")).toBe(true);
+  expect(canTransition("PICKUP_SCHEDULED", "COMPLETED")).toBe(false);
 });
 
 test("DEFECT 9: the full ladder from signature to completion is walkable, edge by edge", () => {
   // The property the map must satisfy: every state on the release path has an inbound edge
   // from its predecessor. Asserted as a WALK rather than as individual edges, because the
   // defect above was precisely a gap between two edges that were each individually correct.
+  //
+  // PHASE 9 ADDED TWO RUNGS — PICKUP_READINESS and HANDOVER_PENDING — so the walk is longer and
+  // this test matters MORE, not less: a longer ladder has more places to leave a gap. The
+  // assertion is not weakened to accommodate the change; it is re-run over the ladder that now
+  // exists, which is exactly what it was written to do.
   const ladder: DealStatus[] = [
     DealStatus.SIGNED, DealStatus.DEALER_EXECUTED, DealStatus.FUNDING_PENDING,
-    DealStatus.PICKUP_SCHEDULED, DealStatus.COMPLETED,
+    DealStatus.PICKUP_READINESS, DealStatus.PICKUP_SCHEDULED,
+    DealStatus.HANDOVER_PENDING, DealStatus.COMPLETED,
   ];
   for (let i = 0; i < ladder.length - 1; i += 1) {
     expect(canTransition(ladder[i], ladder[i + 1]), `${ladder[i]} → ${ladder[i + 1]} must be legal`).toBe(true);
@@ -463,6 +479,9 @@ test("DEFECT 9: the full ladder from signature to completion is walkable, edge b
   expect(canTransition("SIGNED", "COMPLETED")).toBe(false);
   expect(canTransition("DEALER_EXECUTED", "PICKUP_SCHEDULED")).toBe(false);
   expect(canTransition("FUNDING_PENDING", "COMPLETED")).toBe(false);
+  // The two Phase 9 added, in the same shape: neither new rung may be jumped.
+  expect(canTransition("FUNDING_PENDING", "PICKUP_SCHEDULED")).toBe(false);
+  expect(canTransition("PICKUP_SCHEDULED", "COMPLETED")).toBe(false);
 });
 
 // ── 9. §13-D30's invited-signer link, against a REAL database ───────────────
