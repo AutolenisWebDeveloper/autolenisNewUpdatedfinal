@@ -2346,10 +2346,12 @@ Failing closed was the correct interim.
 
 #### THE DEFECT CLASS THIS PROGRAMME KEEPS PRODUCING — name it, and test for it
 
-**Something reported success while checking nothing.** Seven instances, across eight phases, in
-three different layers. Naming it here because the sixth was found the same way as the first,
-which means it is a class and not a run of bad luck — and because the seventh is a guard built
-to catch this class that nearly fell to it:
+**Something reported success while checking nothing.** Eight instances, across nine phases, in
+four different layers. Naming it here because the sixth was found the same way as the first,
+which means it is a class and not a run of bad luck; because the seventh is a guard built to
+catch this class that nearly fell to it; and because the eighth moved the class into a layer the
+first seven never touched — the *investigation* that establishes what is true before any code is
+written:
 
 | # | Phase | Where | What reported success | What it had actually checked |
 | --- | --- | --- | --- | --- |
@@ -2360,14 +2362,17 @@ to catch this class that nearly fell to it:
 | 5 | 8 | test | `has("contract_overdue")` passing | `dedupKey`, not the `templateKey` **column** it claimed to read — so the row lookup beside it was silently `undefined` |
 | 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
 | 7 | 8 (#435) | **the guard written for this class** | two passing comparisons in `phase8-proof-sql.test.ts`, the drift guard added *because of* this table | **nothing** — the first draft filtered on `/^2026111700\d{2}_phase8_/`, **ten digits against a fourteen-digit stamp**, so `onDisk` and `named` were both empty and both tests passed by comparing nothing to nothing |
+| 8 | 9 (#440) | **the investigation**, and then the record built on it | three `git log` searches returning no commits, reported to the owner as *"that path never existed in this repository"* — in the PR body, in a test comment, and in a capability map the owner was asked to sign | **nothing** — `[dealId]` is a **glob** in a git pathspec, matching one character from `{d,e,a,l,I}`, so every search silently addressed a path no file has ever had. `:(literal)` returns the route's whole history: added `f9ee800`, removed `89abb18`, both 2026-09-01 |
 
-**The three layers matter.** #1 and #2 are runtime; #3, #4, #5 and #7 are the tests and
+**The four layers matter.** #1 and #2 are runtime; #3, #4, #5 and #7 are the tests and
 harnesses that are supposed to catch runtime; #6 is the *written record* that is supposed to
-describe both. The class reaches all the way up: a verification artefact is just as capable of
-asserting nothing as the code it verifies, and a prose claim is the least checkable artefact
-of all.
+describe both; #8 is the **investigation that the record is built from**, which sits under all
+three. The class reaches all the way up and all the way down: a verification artefact is just as
+capable of asserting nothing as the code it verifies, a prose claim is the least checkable
+artefact of all, and a *search* is the least checkable of any — it produces no artefact at all,
+only a belief.
 
-**#7 is the most persuasive of the seven, and it is the newest.** The other six were written by
+**#7 is the most persuasive of the first seven.** The other six were written by
 someone not thinking about this class. #7 was not. It is a guard built *specifically* to catch
 the under-assertion shape, in the file whose entire purpose is that shape, written by an author
 who had just finished documenting the class — and on its first run two of its five assertions
@@ -2419,6 +2424,58 @@ Three tells, for the next reader:
 - **A claim about a structure, made without querying the structure.** #6's "preserved through
   the correct predecessor" is a statement about a graph; ten lines of code would have
   falsified it, and none were written.
+- **A search that returned nothing, believed.** #8. An empty result is two different facts
+  wearing the same face: *it is not there*, and *I did not ask about it*. Nothing in the output
+  distinguishes them.
+
+#### #8 — the search that addressed a path no file has ever had (Phase 9, #440)
+
+The owner asked a question that had exactly one honest answer and one comfortable one: *"Reversed
+from what, and what was the original reasoning?"* — about the invariant *"a buyer cannot mint
+their own pickup QR"*. Three `git log` searches for
+`frontend/app/api/buyer/pickup/[dealId]/qr/route.ts` came back with no commits, and the
+conclusion drawn from them — **that path never existed in this repository** — reached the PR body,
+a test comment, and a capability map the owner was being asked to sign off.
+
+**The searches were never about that path.** In a git pathspec, `[dealId]` is a character-class
+glob: it matches a single character from `{d,e,a,l,I}`. Every one of those commands asked about
+paths like `frontend/app/api/buyer/pickup/d/qr/route.ts`. No such file has ever existed, so git
+answered truthfully and the answer meant nothing. Prefixing the pathspec with `:(literal)`
+returns the real history immediately:
+
+```
+f9ee800  2026-09-01  A  frontend/app/api/buyer/pickup/[dealId]/qr/route.ts
+89abb18  2026-09-01  D  frontend/app/api/buyer/pickup/[dealId]/qr/route.ts
+```
+
+Added on a feature branch alongside `POST /api/buyer/contract-shield/[dealId]` — the two
+endpoints the E2E spec's *"removed escalation paths"* header names — and removed the same day in
+a merge. **The route was real, and so was the reason for removing it:** its `upsert` set
+`status: "SCHEDULED"` in *both* the create and the update branch, so a buyer who asked for a code
+thereby scheduled their own pickup, and the response returned the raw token in JSON. That is the
+capability the invariant protects, and it is recoverable in about ninety seconds — but only by
+someone who does not believe the first empty answer.
+
+**What makes this the same class rather than a git trivia note.** The line this section already
+carried, written for #7, states the rule exactly: *zero results and nothing to check are
+indistinguishable to every assertion downstream of them.* #8 is that sentence applied one level
+earlier — not to a fixture an assertion reasons over, but to a **query whose emptiness became a
+claim**. And it failed in the direction that matters: a false *negative* is invisible. Had the
+glob matched too much, the noise would have been obvious; matching nothing looked exactly like
+the truth.
+
+**The counter-measure, as cheap as the last one.** A search that returns nothing is not evidence
+until it has been shown capable of returning something. Run it against a case you know exists;
+if that comes back empty too, the search is broken, not the world. For git specifically:
+`:(literal)` for any path containing `[`, `]`, `*` or `?` — which in this repository is **every
+App Router dynamic segment**, so the hazard is not exotic, it is the default shape of our routes.
+The general form belongs beside the anti-vacuity assertion: **prove the instrument responds
+before trusting its silence.**
+
+**Caught by the owner, not by the pipeline**, and that is the part worth keeping. Two independent
+reviews, thirty-four mutation proofs and a full green matrix all passed over this claim without
+touching it, because none of them examine prose. The question *"reversed from what?"* did in one
+sentence what no gate in the programme is built to do.
 
 #### What that guard actually covers — asked by the owner, answered 2026-09-15
 
