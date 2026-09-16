@@ -24,6 +24,7 @@ import { checkPickupTime } from "./availability.service";
 import { PICKUP_SAFE_SELECT, type SafePickup } from "./pickup-select";
 import { advanceDealStatus } from "../deal/deal.service";
 import {
+  createNotificationOnce,
   notifyDealerProposed,
   notifyBuyerCountered,
   notifyDealerConfirmed,
@@ -123,6 +124,13 @@ async function runConfirmSideEffects(
   actor: Proposer,
   actorId: string | null,
   buyerId: string | null,
+  /**
+   * The `proposedAt` the confirming actor observed — the round token, passed in rather than
+   * re-read. A second `findUnique` here would also have been an AD-HOC select, which
+   * `pickup-select`'s guard refuses on principle: every read of this row in this service goes
+   * through PICKUP_SAFE_SELECT. The value is already in the caller's hand.
+   */
+  roundAt: Date,
 ) {
   // NO CREDENTIAL IS MINTED HERE. This block used to generate a QR payload and store it, plus
   // its rendered PNG, on the pickup row — which is the plaintext-at-rest defect Phase 9 exists
@@ -140,17 +148,18 @@ async function runConfirmSideEffects(
   // Buyer in-app PICKUP_SCHEDULED notification is caller-owned (advanceDealStatus
   // emits only the SMS for this transition — see acquisition-comms).
   if (buyerId) {
-    await prisma.notification
-      .create({
-        data: {
-          buyerId,
-          type: "PICKUP_SCHEDULED",
-          title: "Pickup confirmed",
-          body: "Your vehicle pickup is confirmed. Open the pickup page to see the details and show your pickup code when you arrive.",
-          actionUrl: "/buyer/pickup",
-        },
-      })
-      .catch(() => {});
+    // §8.2 defect (6), second half. This was a bare create with no key, so a retried
+    // confirmation — the compensating path re-running after a transient failure — left the buyer
+    // with the same notice twice. Keyed per ROUND, like the five emails beside it: a second
+    // proposal round after a missed pickup is a new confirmation and SHOULD notify again.
+    await createNotificationOnce({
+      buyerId,
+      type: "PICKUP_SCHEDULED",
+      title: "Pickup confirmed",
+      body: "Your vehicle pickup is confirmed. Open the pickup page to see the details and show your pickup code when you arrive.",
+      actionUrl: "/buyer/pickup",
+      idempotencyKey: `pickup-confirmed:${dealId}:${roundAt.toISOString()}`,
+    });
   }
 }
 
@@ -168,7 +177,7 @@ async function settleConfirmation(
   revertProposedAt: Date,
 ): Promise<{ ok: true } | CoordFail> {
   try {
-    await runConfirmSideEffects(dealId, actor, actorId, buyerId);
+    await runConfirmSideEffects(dealId, actor, actorId, buyerId, revertProposedAt);
     return { ok: true };
   } catch (e) {
     logger.error("[pickup-coord] confirmation side effects failed — compensating:", e);

@@ -8,6 +8,7 @@
 // city/state ONLY — never buyer name, email, phone, or address.
 
 import { prisma } from "@/lib/prisma";
+import type { NotificationType } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { enqueueTransactionalEmail } from "../email/transactional-dispatch";
 import {
@@ -186,7 +187,18 @@ export async function notifyDealerConfirmed(dealId: string): Promise<void> {
         pickupWindow: formatWindow(p.proposedTime),
         dealUrl: `${APP_URL}/dealer/deals/${dealId}`,
       }),
-      idempotencyKey: `dealer-pickup-scheduled-${dealId}`,
+      // §8.2 defect (6). This key was per-DEAL while the other four in this file append
+      // `roundKey(p)`. The outbox dedup is `ON CONFLICT (dedup_key) DO NOTHING`, so once a deal
+      // had been confirmed ONCE the dealership could never receive a second "pickup confirmed"
+      // email — and §Stage 17 requires exactly that after a missed pickup returns the deal to a
+      // new proposal round (L920). §29 lists "pickup emails dispatch durably with round-specific
+      // idempotency keys" as a safeguard that already held; of five sends this was the one where
+      // it did not.
+      //
+      // `roundKey` reads `proposedAt`, and the confirm CAS sets only `status` and `scheduledAt`
+      // (pickup-coordination.service.ts) — so the round token is still on the row at this moment
+      // rather than having been cleared by the confirmation it describes.
+      idempotencyKey: `dealer-pickup-scheduled-${dealId}-${roundKey(p)}`,
     }).catch((e: unknown) => logger.error("[pickup-notif] dealer email (confirmed):", e));
   }
 }
@@ -277,4 +289,57 @@ export async function notifyPickupEscalated(dealId: string): Promise<void> {
     })
     .catch((e: unknown) => logger.error("[pickup-notif] escalation alert:", e));
   logger.warn(`[pickup-coord] deal=${dealId} escalated to admin — counter cap reached`);
+}
+
+
+/**
+ * Create an in-app notification at most once per (recipient, event, round).
+ *
+ * §8.2 defect (6)'s second half. The buyer's confirmation notice was a bare
+ * `prisma.notification.create(...).catch(() => {})` with no key at all, so a retried
+ * confirmation — the compensating path re-running after a transient failure — left the buyer
+ * with the same notice twice.
+ *
+ * READ-THEN-WRITE, AND DELIBERATELY SO. `notifications` carries no unique constraint to conflict
+ * on, and adding one is a migration this phase does not need: the key goes in `metadata`, which
+ * already exists. That makes this guard RETRY-safe but not RACE-safe, which is the right
+ * trade here and not an oversight — every caller sits downstream of the pickup compare-and-swap,
+ * so only one writer ever reaches it for a given round. A guard that claimed race-safety it does
+ * not have would be worse than one that names its limit.
+ */
+export async function createNotificationOnce(input: {
+  buyerId?: string | null;
+  dealerId?: string | null;
+  type: NotificationType;
+  title: string;
+  body: string;
+  actionUrl?: string | null;
+  /** Stable per (recipient, event, round) — e.g. `pickup-confirmed:<dealId>:<roundKey>`. */
+  idempotencyKey: string;
+}): Promise<boolean> {
+  const existing = await prisma.notification.findFirst({
+    where: {
+      ...(input.buyerId ? { buyerId: input.buyerId } : {}),
+      ...(input.dealerId ? { dealerId: input.dealerId } : {}),
+      type: input.type,
+      metadata: { path: ["idempotencyKey"], equals: input.idempotencyKey },
+    },
+    select: { id: true },
+  });
+  if (existing) return false;
+
+  await prisma.notification
+    .create({
+      data: {
+        buyerId: input.buyerId ?? null,
+        dealerId: input.dealerId ?? null,
+        type: input.type,
+        title: input.title,
+        body: input.body,
+        actionUrl: input.actionUrl ?? null,
+        metadata: { idempotencyKey: input.idempotencyKey },
+      },
+    })
+    .catch((e: unknown) => logger.error("[pickup-notif] in-app create failed:", e));
+  return true;
 }

@@ -43,6 +43,8 @@ const spies = {
   /** Every `select` the service reads the returned row with — six routes ship that row. */
   reads: [] as Array<Record<string, boolean> | undefined>,
   notifs: [] as string[],
+  /** In-app rows actually created, so §8.2 defect (6)'s retry guard is asserted, not assumed. */
+  inApp: [] as Array<Record<string, unknown>>,
   updateManyCount: 0,
 };
 
@@ -104,7 +106,14 @@ mock.module("@/lib/prisma", {
           return out;
         },
       },
-      notification: { create: async () => ({}) },
+      // PHASE 9 (§8.2 defect 6). The buyer's confirmation notice is now written through
+      // `createNotificationOnce`, which reads before it writes. `findFirst` returning null means
+      // "not yet sent", which is the state every test here starts from; `spies.inApp` records the
+      // creates so the retry guard can be asserted rather than assumed.
+      notification: {
+        findFirst: async () => null,
+        create: async ({ data }: { data: Record<string, unknown> }) => { spies.inApp.push(data); return {}; },
+      },
       buyerActivityEvent: { create: async () => ({}) },
     },
   },
@@ -152,6 +161,17 @@ mock.module("@/lib/services/pickup/pickup-notifications.service", {
     notifyBuyerCountered: async () => { spies.notifs.push("buyer-countered"); },
     notifyDealerConfirmed: async () => { spies.notifs.push("dealer-confirmed"); },
     notifyPickupEscalated: async () => { spies.notifs.push("escalated"); },
+    // PHASE 9 (§8.2 defect 6). The buyer's confirmation notice goes through this guarded create
+    // now. Recording the key lets the retry guard be asserted rather than assumed — and omitting
+    // it from this mock made `createNotificationOnce` undefined, which threw inside the
+    // confirmation side effects and compensated the whole confirm away. Four "exactly one wins"
+    // tests went red for a reason that had nothing to do with turn-taking.
+    createNotificationOnce: async (input: Record<string, unknown>) => {
+      const key = String(input.idempotencyKey);
+      if (spies.inApp.some((n) => n.idempotencyKey === key)) return false;
+      spies.inApp.push(input);
+      return true;
+    },
   },
 });
 
@@ -180,6 +200,7 @@ function resetRow(over: Partial<Row> = {}) {
   spies.writes = [];
   spies.reads = [];
   spies.notifs = [];
+  spies.inApp = [];
   spies.updateManyCount = 0;
 }
 
