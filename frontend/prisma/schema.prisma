@@ -1145,7 +1145,7 @@ model Pickup {
   reminder2hSentAt         DateTime?    @map("reminder_2h_sent_at")
   tokenConsumedAt          DateTime?    @map("token_consumed_at")
   tokenExpiresAt           DateTime?    @map("token_expires_at")
-  tokenHash                String?      @map("token_hash")
+  tokenHash                String?      @unique @map("token_hash")
   tokenRevokedAt           DateTime?    @map("token_revoked_at")
   tradeReceivedAt          DateTime?    @map("trade_received_at")
   vehiclePreparedAt        DateTime?    @map("vehicle_prepared_at")

@@ -78,7 +78,7 @@ type BuyerData = {
     coBuyerIsRequiredSigner: boolean;
     pickup: {
       status: string; scheduledAt: string | null; completedAt: string | null;
-      location: string | null; qrCodeImage: string | null;
+      location: string | null;
     } | null;
     financing: {
       path: string; lenderName: string | null; approvedAmountCents: number | null;

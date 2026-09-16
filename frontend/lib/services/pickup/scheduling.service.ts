@@ -1,7 +1,10 @@
 // lib/services/pickup/scheduling.service.ts
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import { PickupStatus } from "@prisma/client";
 import { checkPickupTime } from "./availability.service";
+import { PICKUP_SAFE_SELECT, type SafePickup } from "./pickup-select";
+import { revokeReleaseToken } from "./release-token.service";
 
 // A reschedule (D1) applies only to a pickup that is ALREADY a confirmed booking.
 // It must never touch the D2 coordination round-trip (PROPOSED / DEALER_COUNTERED
@@ -21,8 +24,10 @@ export interface RescheduleOptions {
   now?: Date;
 }
 
+// `pickup` is PROJECTED: `app/api/buyer/pickup/[dealId]/route.ts:162` returns it straight to
+// the browser, and the raw model now carries `token_hash` (see `pickup-select.ts`).
 export type RescheduleResult =
-  | { ok: true; pickup: Awaited<ReturnType<typeof prisma.pickup.update>> }
+  | { ok: true; pickup: SafePickup }
   | { ok: false; reason: string };
 
 /**
@@ -71,7 +76,22 @@ export async function reschedulePickup(
       status: PickupStatus.RESCHEDULED,
       ...(opts.location ? { location: opts.location } : {}),
     },
+    select: PICKUP_SAFE_SELECT,
   });
+
+  // THE OLD CREDENTIAL DIES WITH THE OLD APPOINTMENT. A release token's expiry is bound to
+  // `scheduledAt` (release-token.service.ts), so a reschedule leaves a token that is wrong in
+  // one of two directions: minted for Tuesday and still live on a handover moved to Friday, or
+  // already expired on one moved earlier. Neither is a code the buyer should be carrying, and
+  // "two live codes for one vehicle" is the case revoke-and-reissue exists to prevent. Revoked
+  // rather than re-minted: nobody is holding the raw value of a token minted here, so a fresh
+  // one would be spent on no one. The buyer reveals the new code from the pickup page.
+  // Non-fatal — a reschedule that already committed must not fail on this — but never silent:
+  // a revocation that did not happen leaves a live code dated to an appointment that no longer
+  // exists, and that is exactly the thing somebody has to be told about.
+  await revokeReleaseToken(dealId).catch((e: unknown) =>
+    logger.error(`[pickup] failed to revoke the release token on reschedule of deal ${dealId}:`, e),
+  );
 
   await prisma.buyerActivityEvent
     .create({

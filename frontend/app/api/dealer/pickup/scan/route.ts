@@ -1,7 +1,15 @@
-// POST /api/dealer/pickup/scan — dealer scans buyer's pickup QR code to mark deal COMPLETED.
-// Body: { qrToken: string }
-// On success: pickup.status=COMPLETED, deal.status=COMPLETED, completedAt timestamps,
+// POST /api/dealer/pickup/scan — dealer scans the buyer's release code to mark the deal COMPLETED.
+// Body: { qrToken: string }  — the RAW release token, exactly as scanned.
+// On success: the token is consumed, pickup.status=COMPLETED, deal.status=COMPLETED,
 // BuyerActivityEvent emitted, Resend completion email fired (best-effort).
+//
+// WHAT CHANGED, 2026-09-16. This route used to resolve the scanned string by equality against
+// `pickups.qr_code_data` — a plaintext credential, seeded from `Math.random()`, that a database
+// read handed straight back. It now resolves through `release-token.service.resolveReleaseToken`:
+// SHA-256 lookup, expiry bound to the appointment rather than to the minting moment, and a
+// compare-and-swap consume that makes the code single-use under genuine concurrency rather than
+// only in sequence. `pickups.qr_expires_at` is no longer consulted — the token carries its own
+// expiry and two expiries that can disagree is one too many.
 
 import { NextRequest } from "next/server";
 import { logger } from "@/lib/logger";
@@ -14,6 +22,11 @@ import {
   InsuranceRequiredError,
   ReleaseNotClearedError,
 } from "@/lib/services/deal/deal.service";
+import {
+  resolveReleaseToken,
+  consumeReleaseToken,
+  type ReleaseTokenReason,
+} from "@/lib/services/pickup/release-token.service";
 import { Resend } from "resend";
 
 // Lazy Resend client — constructed on first use. Prevents Next.js build-time
@@ -26,6 +39,39 @@ function getResend(): Resend | null {
   return resendInstance;
 }
 
+/**
+ * What a scanner is told about a code that resolved to nothing usable.
+ *
+ * These answers are given BEFORE ownership is known, so each one has to be safe in the hands of
+ * whoever presented the token. They are, because a release token is now 256 bits of CSPRNG
+ * output: reaching any of these branches is proof the caller HOLDS a real credential, and telling
+ * the holder of a credential about that credential discloses nothing they did not already have.
+ * That was not true of the Math.random payload this replaces, which is exactly why the old code
+ * collapsed everything into one opaque answer.
+ *
+ * The concierge / wrong-dealer collapse below is a DIFFERENT question and is untouched: it is
+ * about a deal the caller does not own, and no token grants that.
+ */
+const TOKEN_REJECTIONS: Record<ReleaseTokenReason, { code: string; message: string; status: number }> = {
+  not_found: { code: "INVALID_TOKEN", message: "This pickup code is not valid.", status: 422 },
+  consumed: { code: "ALREADY_SCANNED", message: "This pickup code has already been scanned.", status: 409 },
+  revoked: {
+    code: "INVALID_TOKEN",
+    message: "This pickup code was cancelled — the buyer can show a new one from their pickup page.",
+    status: 422,
+  },
+  expired: {
+    code: "INVALID_TOKEN",
+    message: "This pickup code has expired — the buyer can show a new one from their pickup page.",
+    status: 422,
+  },
+  pickup_not_releasable: {
+    code: "NOT_READY_FOR_PICKUP",
+    message: "This pickup is not in a state where the vehicle can be released.",
+    status: 409,
+  },
+};
+
 export async function POST(request: NextRequest) {
   const dealer = await getRequestDealer(request);
   if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
@@ -34,24 +80,45 @@ export async function POST(request: NextRequest) {
   const qrToken = (body as { qrToken?: string }).qrToken?.trim();
   if (!qrToken) return errorResponse("VALIDATION_ERROR", "qrToken is required", 400);
 
-  const pickup = await prisma.pickup.findFirst({
-    where: { qrCodeData: qrToken },
-    include: { deal: { include: { offer: true, buyer: { include: { user: true } } } } },
-  });
-  if (!pickup) {
-    return errorResponse("INVALID_TOKEN", "QR code not found or invalid.", 422);
+  // READ-ONLY. A scanner that reads a code twice must not spend it by looking; the consume is a
+  // separate compare-and-swap, below, after the deal has actually advanced.
+  const resolved = await resolveReleaseToken(qrToken);
+  if (!resolved.ok) {
+    const r = TOKEN_REJECTIONS[resolved.reason];
+    return errorResponse(r.code, r.message, r.status);
   }
+
+  const pickup = await prisma.pickup.findUnique({
+    where: { id: resolved.view.pickupId },
+    select: {
+      id: true,
+      dealId: true,
+      status: true,
+      deal: {
+        select: {
+          status: true,
+          buyerId: true,
+          insuranceStatus: true,
+          offer: { select: { dealerId: true } },
+          buyer: { select: { firstName: true, user: { select: { email: true } } } },
+        },
+      },
+    },
+  });
+  // The token resolved a moment ago, so this is a row deleted mid-request rather than a bad code.
+  if (!pickup) return errorResponse("INVALID_TOKEN", "This pickup code is not valid.", 422);
 
   // Authorization: the token must belong to THIS dealer's deal. A concierge
   // (vehicle-request) deal has no Offer, and VehicleRequestOffer carries no dealer
   // identity — so it has no dealer at all and can never be scanned by anyone; it is
   // completed by AutoLenis staff via the admin pickup-completion route.
   //
-  // Both cases return the SAME response on purpose. Answering "this deal has no
-  // dealer" distinctly would make the scan endpoint a state oracle for anyone
-  // holding a token, ahead of the ownership check — and the QR nonce is not
-  // cryptographically strong (Math.random + a timestamp). The distinction is
-  // logged server-side instead, where support can actually use it.
+  // Both cases still return the SAME response, and the reason has outlived the one the original
+  // comment gave (that the QR nonce was guessable). Possession of a token proves possession of a
+  // token; it proves nothing about entitlement to the DEAL behind it. A dealer holding a code
+  // that is not theirs — photographed at another lot, forwarded, mis-scanned — must not learn
+  // from us whether the deal it belongs to has a dealership at all. The distinction is logged
+  // server-side instead, where support can actually use it.
   const dealDealerId = pickup.deal.offer?.dealerId ?? null;
   if (dealDealerId !== dealer.id) {
     if (dealDealerId === null) {
@@ -60,11 +127,6 @@ export async function POST(request: NextRequest) {
       );
     }
     return errorResponse("INVALID_TOKEN", "QR code is not valid for this dealer.", 422);
-  }
-
-  // Expiry check
-  if (pickup.qrExpiresAt && pickup.qrExpiresAt <= new Date()) {
-    return errorResponse("INVALID_TOKEN", "QR code has expired.", 422);
   }
 
   if (pickup.status === "COMPLETED" || pickup.deal.status === "COMPLETED") {
@@ -112,6 +174,23 @@ export async function POST(request: NextRequest) {
       return errorResponse("RELEASE_NOT_CLEARED", err.message, 409);
     }
     throw err;
+  }
+
+  // SPEND THE CODE — and only now.
+  //
+  // Consuming BEFORE the advance would be the tidier concurrency story and the wrong one for the
+  // people involved: every rejection above (funding not cleared, executed contract missing,
+  // insurance withdrawn) is a condition the DEALERSHIP or AutoLenis has to fix while the buyer
+  // stands there, and burning their code on the way past would leave them re-revealing one for a
+  // handover that is still blocked. `funding_cleared_at` makes RELEASE_NOT_CLEARED the common
+  // answer today, not a rare one.
+  //
+  // Consuming after keeps single use intact: the CAS picks exactly one winner among simultaneous
+  // scans, and the loser is told the truth. Its advance was idempotent — the deal was already
+  // COMPLETED by the winner — so nothing is double-applied.
+  const consumed = await consumeReleaseToken(pickup.id, completedAt);
+  if (!consumed) {
+    return errorResponse("ALREADY_SCANNED", "This QR code has already been scanned.", 409);
   }
 
   await prisma.$transaction([

@@ -1,29 +1,26 @@
 // lib/services/pickup/pickup.service.ts
-// System 10 — QR code generation, scheduling, check-in
-// QR uses qrcode npm package — never an external API (D7)
+// System 10 — pickup scheduling, check-in, completion.
+//
+// QR CODES ARE NO LONGER GENERATED OR STORED HERE. Until 2026-09-16 this file built a release
+// credential from `Math.random()`, wrote it to `pickups.qr_code_data` in plaintext and its
+// rendered PNG to `pickups.qr_code_image`. Both columns are cleared by migration
+// 20261201000000 and neither is written any more. The credential is minted by
+// `release-token.service.ts` (CSPRNG, SHA-256 at rest, single-use, expiry bound to the
+// appointment) and rendered on demand — see `reissueReleaseCode` below.
 
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import { PickupStatus } from "@prisma/client";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
-import QRCode from "qrcode";
-
-// Generate QR payload for vehicle pickup
-function generateQrPayload(dealId: string, pickupId: string): string {
-  return JSON.stringify({
-    type: "autolenis_pickup",
-    dealId,
-    pickupId,
-    nonce: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    issuedAt: new Date().toISOString(),
-  });
-}
+import { issueReleaseToken, revokeReleaseToken } from "./release-token.service";
+import { renderReleaseQr } from "./qr.service";
 
 export async function schedulePickup(dealId: string, scheduledAt: Date, location: string) {
-  const qrPayload = generateQrPayload(dealId, "pending");
-
-  // Generate QR code image using local qrcode library (D7 — no external API)
-  const qrCodeImage = await QRCode.toDataURL(qrPayload, { width: 300 });
-
+  // No credential is minted here, deliberately. A token is only useful to whoever HOLDS the raw
+  // value, and a scheduling call has nobody to hand it to — the buyer reveals theirs from the
+  // pickup page, and an administrator reissues one through the reissue route. Minting on a
+  // schedule would burn a token nobody ever sees and, worse, would make a reschedule look like
+  // it had refreshed a code the buyer is still carrying.
   const pickup = await prisma.pickup.upsert({
     where: { dealId },
     create: {
@@ -31,19 +28,22 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
       status: PickupStatus.SCHEDULED,
       scheduledAt,
       location,
-      qrCodeData: qrPayload,
-      qrCodeImage,
-      qrExpiresAt: new Date(scheduledAt.getTime() + 48 * 3600000),
     },
     update: {
       scheduledAt,
       location,
       status: PickupStatus.SCHEDULED,
-      qrCodeData: qrPayload,
-      qrCodeImage,
-      qrExpiresAt: new Date(scheduledAt.getTime() + 48 * 3600000),
     },
   });
+
+  // Any credential minted for the PREVIOUS time is retired here, for the same reason
+  // `reschedulePickup` retires one: a token's expiry is bound to `scheduledAt`, so re-scheduling
+  // through this upsert would otherwise leave a live code dated to an appointment that no longer
+  // exists. A no-op on a first schedule (nothing minted yet) and non-fatal by design — failing to
+  // revoke must not strand an otherwise-valid scheduling call.
+  await revokeReleaseToken(dealId).catch((e: unknown) =>
+    logger.error(`[pickup] failed to revoke the release token while scheduling deal ${dealId}:`, e),
+  );
 
   // Advance deal status (admin-initiated scheduling — authoritative; records history).
   //
@@ -62,7 +62,9 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
       data: {
         buyerId: deal.buyerId,
         title: "Vehicle pickup scheduled",
-        body: `Your pickup is scheduled for ${scheduledAt.toLocaleDateString()}. Your QR code is ready.`,
+        // Says where the code comes from rather than that one is "ready": there is no stored
+        // code to be ready any more, and telling a buyer otherwise sends them looking for it.
+        body: `Your pickup is scheduled for ${scheduledAt.toLocaleDateString()}. Show your pickup code from the pickup page when you arrive.`,
         type: "PICKUP_SCHEDULED",
       },
     }).catch(() => {});
@@ -71,23 +73,29 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
   return pickup;
 }
 
-export async function regenerateQr(dealId: string): Promise<string> {
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
-  if (!pickup) throw new Error("Pickup not found");
+export interface ReissuedReleaseCode {
+  /** Data-URL PNG of the raw token. Return it to the caller; never write it anywhere. */
+  image: string;
+  expiresAt: Date;
+}
 
-  const qrPayload = generateQrPayload(dealId, pickup.id);
-  const qrCodeImage = await QRCode.toDataURL(qrPayload, { width: 300 });
-
-  await prisma.pickup.update({
-    where: { dealId },
-    data: {
-      qrCodeData: qrPayload,
-      qrCodeImage,
-      qrExpiresAt: new Date(Date.now() + 48 * 3600000),
-    },
-  });
-
-  return qrCodeImage;
+/**
+ * Mint a fresh release credential and return its rendered QR — the successor to `regenerateQr`.
+ *
+ * RENAMED, because the contract changed in two ways a caller must see. It can now REFUSE
+ * (`null`) — `regenerateQr` minted a live 48-hour code for a pickup in any state, including one
+ * never scheduled, so an administrator could produce a code that opens a car with no appointment
+ * behind it. And it REVOKES: writing a new hash retires the previous credential, so a reissue is
+ * not an extra code, it is a replacement. A signature change alone would have made both callers
+ * recompile; the name makes the next reader stop.
+ *
+ * Returns null when the pickup does not exist or is not in a releasable state. The caller decides
+ * what to say about that — both current callers answer 409 with the reason.
+ */
+export async function reissueReleaseCode(dealId: string): Promise<ReissuedReleaseCode | null> {
+  const issued = await issueReleaseToken({ dealId });
+  if (!issued) return null;
+  return { image: await renderReleaseQr(issued.rawToken), expiresAt: issued.expiresAt };
 }
 
 export async function checkInPickup(dealId: string): Promise<void> {
