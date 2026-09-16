@@ -71,7 +71,11 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/api/admin/dealers/invite/route.ts", reasons: ["direct-sender"], senders: ["sendDealerInvitationEmail"], removalPhase: 10 },
   { file: "app/api/admin/deals/[dealId]/action/route.ts", reasons: ["direct-sender"], senders: ["sendDealCompleteEmail", "sendDealerContractIssuesEmail", "sendDealerContractPendingEmail"], removalPhase: 10 },
   { file: "app/api/admin/deals/[dealId]/esign/route.ts", reasons: ["direct-sender"], senders: ["sendDealerEsignInitiatedEmail"], removalPhase: 10 },
-  { file: "app/api/admin/deals/[dealId]/pickup/complete/route.ts", reasons: ["direct-sender"], senders: ["sendDealCompleteEmail", "sendDealerPayoutInitiatedEmail", "sendDealerPickupCompletedEmail"], removalPhase: 10 },
+  // Phase 9 (§8.2 defects 4 and 7): `sendDealCompleteEmail` and `sendDealerPickupCompletedEmail`
+  // left this route — both are §27.1 completion rows and `confirmPossession` now queues them
+  // through the dispatcher inside the completion transaction. The payout notice is a different
+  // message and still sends directly, so the entry stays with the one sender it really has.
+  { file: "app/api/admin/deals/[dealId]/pickup/complete/route.ts", reasons: ["direct-sender"], senders: ["sendDealerPayoutInitiatedEmail"], removalPhase: 10 },
   { file: "app/api/admin/deals/[dealId]/pickup/schedule/route.ts", reasons: ["direct-sender"], senders: ["sendDealerPickupScheduledEmail", "sendPickupReadyEmail"], removalPhase: 10 },
   { file: "app/api/admin/external-preapprovals/[id]/approve/route.ts", reasons: ["direct-sender"], senders: ["sendPrequalApprovedEmail"], removalPhase: 10 },
   { file: "app/api/admin/payments/concierge-fee/send-link/route.ts", reasons: ["direct-sender"], senders: ["sendConciergeFeePaymentLinkEmail"], removalPhase: 10 },

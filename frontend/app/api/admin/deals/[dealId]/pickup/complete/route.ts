@@ -8,11 +8,10 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
-import { advanceDealStatus } from "@/lib/services/deal/deal.service";
+import { InsuranceRequiredError, ReleaseNotClearedError } from "@/lib/services/deal/deal.service";
+import { recordDealerRelease, confirmPossession } from "@/lib/services/pickup/pickup-completion.service";
 import { z } from "zod";
 import {
-  sendDealCompleteEmail,
-  sendDealerPickupCompletedEmail,
   sendDealerPayoutInitiatedEmail,
 } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
@@ -51,28 +50,71 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  // Upsert pickup record as COMPLETED
-  const pickup = await prisma.pickup.upsert({
-    where: { dealId },
-    create: {
-      dealId,
-      status: "COMPLETED",
-      completedAt: new Date(),
-    },
-    update: {
-      status: "COMPLETED",
-      completedAt: new Date(),
-    },
-  });
+  // §8.2 defect (4) — THIS ROUTE NO LONGER COMPLETES ANYTHING ITSELF.
+  //
+  // It used to upsert the Pickup to COMPLETED and then advance the Deal with `force: true`,
+  // which made it one of five writers of the same irreversible act, each with its own
+  // preconditions. It now goes through the ONE completion writer, which owns the transaction,
+  // the release gates, the history row and both parties' outbox messages.
+  //
+  // THE `force` IS GONE, AND THAT IS THE POINT. The comment it replaced said the insurance gate
+  // was "intentionally bypassed" — an admin screen that releases a vehicle without insurance,
+  // without the dealership's executed contract and without funding clearance is conditional
+  // delivery, which §Stage 14 forbids in as many words and Phase 8 closed everywhere else. An
+  // Operations admin can still complete a deal; they cannot complete one that is not releasable.
+  //
+  // WHY IT RECORDS BOTH HALVES. A concierge (vehicle-request) deal has no dealership, so no scan
+  // can ever record its release — §Stage 18's evidence has to come from somewhere, and for that
+  // deal AutoLenis IS the coordinator. Both halves are attributed to ADMIN in DealStatusHistory
+  // rather than dressed up as the dealer's and the buyer's own acts.
+  const releaseOutcome = await recordDealerRelease({
+    dealId,
+    dealerId: deal.offer?.dealerId ?? admin.adminId,
+    pickupId: deal.pickup?.id ?? "",
+    rawToken: "",
+    identityVerified: true,
+    actor: { role: "ADMIN", id: admin.adminId },
+  }).catch((err: unknown) => err);
 
-  // Advance deal to COMPLETED. This is an explicit admin override (reason required),
-  // so the insurance gate is intentionally bypassed via force; recorded in history.
-  await advanceDealStatus(dealId, "COMPLETED", {
-    actorId: admin.adminId,
-    actorRole: "ADMIN",
-    reason,
-    force: true,
-  });
+  if (releaseOutcome instanceof InsuranceRequiredError) {
+    return adminError("INSURANCE_REQUIRED", "Insurance proof is required before this vehicle can be released.", 409);
+  }
+  if (releaseOutcome instanceof ReleaseNotClearedError) {
+    return adminError("RELEASE_NOT_CLEARED", releaseOutcome.message, 409);
+  }
+  if (releaseOutcome instanceof Error) throw releaseOutcome;
+
+  let outcome;
+  try {
+    outcome = await confirmPossession({
+      dealId,
+      buyerId: deal.buyerId,
+      vehicleReceived: true,
+      vinMatch: true,
+      keysAndAccessoriesReceived: true,
+      actor: { role: "ADMIN", id: admin.adminId },
+    });
+  } catch (err) {
+    if (err instanceof InsuranceRequiredError) {
+      return adminError("INSURANCE_REQUIRED", "Insurance proof is required before this deal can complete.", 409);
+    }
+    if (err instanceof ReleaseNotClearedError) {
+      return adminError("RELEASE_NOT_CLEARED", err.message, 409);
+    }
+    throw err;
+  }
+
+  if (!outcome.ok) {
+    return adminError(
+      "NOT_COMPLETABLE",
+      outcome.reason === "not_in_handover"
+        ? "This deal is not at a stage where a pickup can be completed."
+        : "This deal could not be completed.",
+      409,
+    );
+  }
+
+  const pickup = deal.pickup ?? { id: "" };
 
   // Notify buyer
   await prisma.notification.create({
@@ -93,15 +135,9 @@ export async function POST(request: NextRequest, { params }: Props) {
     metadata: { pickupId: pickup.id, previousStatus: deal.pickup?.status ?? "NONE", newStatus: "COMPLETED" },
   });
 
-  // Send deal complete email — non-blocking
-  try {
-    const buyerEmail = deal.buyer?.user?.email;
-    if (buyerEmail) {
-      await sendDealCompleteEmail(buyerEmail, deal.buyer.firstName, dealId);
-    }
-  } catch (e) {
-    logger.error("[pickup/complete] deal complete email failed:", e);
-  }
+  // NO COMPLETION MAIL FROM HERE — §8.2 defect (7). `confirmPossession` queues the buyer's
+  // receipt and the dealership's confirmation to `comms_outbox` inside the completion
+  // transaction, so they commit with the status rather than after it and retry on their own.
   syncGhlTag(deal.buyer?.user?.email, "purchase-complete");
 
   // Lifecycle — congratulations + review-request sequence (the review touch, on
@@ -123,14 +159,10 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (dealerEmail) {
     const vehicleRef = `Deal ${dealId.slice(0, 8)}`;
     const dealershipName = deal.offer?.dealer?.dealershipName ?? "";
-    await sendDealerPickupCompletedEmail({
-      to: dealerEmail,
-      contactName: dealershipName,
-      vehicleRef,
-      payoutSchedule: "3-5 business days",
-      dealId,
-    }).catch(err => logger.error("[pickup/complete] dealer pickup completed email failed:", err));
-
+    // The dealership's "pickup completed" confirmation is §27.1's "Buyer confirms possession →
+    // Buyer + dealership" row, and `confirmPossession` queues it through the dispatcher inside
+    // the completion transaction. Sending it here too would deliver it twice on this path and
+    // not at all on the dealer-scan path, which is how it behaved before Phase 9.
     const offerPriceCents = deal.offer?.otdPriceCents ?? 0;
     await sendDealerPayoutInitiatedEmail({
       to: dealerEmail,
@@ -139,18 +171,19 @@ export async function POST(request: NextRequest, { params }: Props) {
       amountCents: offerPriceCents,
       estimatedArrival: "3-5 business days",
       payoutId: dealId,
-    }).catch(err => logger.error("[pickup/complete] dealer payout initiated email failed:", err));
+    }).catch((err: unknown) => logger.error("[pickup/complete] dealer payout initiated email failed:", err));
   }
 
-  // The canonical `purchase_completed` domain event is emitted EXACTLY ONCE by
-  // the deal state-machine seam (advanceDealStatus → COMPLETED, above), so this
-  // admin-override route no longer emits it directly.
+  // The canonical `purchase_completed` domain event is emitted EXACTLY ONCE by the completion
+  // service, after its transaction commits and only for the call that actually completed the
+  // deal, so this route does not emit it.
 
   return adminSuccess({
     dealId,
     dealStatus: "COMPLETED",
     pickupId: pickup.id,
     pickupStatus: "COMPLETED",
-    completedAt: pickup.completedAt,
+    completedAt: outcome.completedAt.toISOString(),
+    alreadyComplete: outcome.alreadyComplete,
   });
 }

@@ -59,6 +59,8 @@ export interface DealerReleaseInput {
   dealId: string;
   /** The dealership recording the release — already authorised by the caller. */
   dealerId: string;
+  /** Who recorded it. DEALER by default; ADMIN for a concierge deal with no dealership. */
+  actor?: { role: "DEALER" | "ADMIN"; id: string };
   /** The pickup whose code was scanned, and the RAW token, so the spend joins this transaction. */
   pickupId: string;
   rawToken: string;
@@ -82,6 +84,17 @@ export interface PossessionInput {
   dealId: string;
   /** The buyer confirming — already authorised by the caller. */
   buyerId: string;
+  /**
+   * WHO is recording it. §Stage 19 puts this in the buyer's own authenticated session, and that
+   * is the default. ADMIN exists for the one case the document itself carves out: a concierge
+   * (vehicle-request) deal has no dealership, so AutoLenis staff coordinate the handover — and
+   * for an Operations correction on a dealer deal.
+   *
+   * It is a RECORD of who acted, not a permission: the release gates run identically either
+   * way. An admin-recorded possession that reads as the buyer's would make the history lie about
+   * who was standing at the car, which is the one thing §Stage 19 is protecting.
+   */
+  actor?: { role: "BUYER" | "ADMIN"; id: string };
   vehicleReceived: boolean;
   vinMatch: boolean;
   odometerAtPossession?: number | null;
@@ -182,9 +195,12 @@ export async function recordDealerRelease(input: DealerReleaseInput): Promise<De
         dealId: input.dealId,
         fromStatus: "PICKUP_SCHEDULED",
         toStatus: "HANDOVER_PENDING",
-        actorId: input.dealerId,
-        actorRole: "DEALER",
-        reason: "Dealer recorded vehicle release at handover",
+        actorId: input.actor?.id ?? input.dealerId,
+        actorRole: input.actor?.role ?? "DEALER",
+        reason:
+          (input.actor?.role ?? "DEALER") === "ADMIN"
+            ? "Vehicle release recorded by AutoLenis Operations"
+            : "Dealer recorded vehicle release at handover",
       },
     });
 
@@ -324,9 +340,12 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
         dealId: input.dealId,
         fromStatus: "HANDOVER_PENDING",
         toStatus: "COMPLETED",
-        actorId: input.buyerId,
-        actorRole: "BUYER",
-        reason: "Buyer confirmed possession",
+        actorId: input.actor?.id ?? input.buyerId,
+        actorRole: input.actor?.role ?? "BUYER",
+        reason:
+          (input.actor?.role ?? "BUYER") === "ADMIN"
+            ? "Possession recorded by AutoLenis Operations"
+            : "Buyer confirmed possession",
       },
     });
 

@@ -99,11 +99,22 @@ test("exactly three AutoLenis-actored paths can complete a pickup, and no more",
   const files = sourceFiles(ROOT, ["app/api/admin"]);
   assertScanned(files, 100, "role-boundary release scan");
 
-  // A path "completes a pickup" when it writes Pickup COMPLETED. That write is the
-  // structural signature; the route's name is not.
+  // A path "completes a pickup" when it writes Pickup COMPLETED — OR, since Phase 9, when it
+  // calls the one completion writer that does.
+  //
+  // THE SECOND SIGNATURE WAS ADDED BECAUSE THE FIRST STOPPED SEEING A PINNED ROUTE. §8.2 defect
+  // (4) collapsed five Deal-completion writers into `pickup-completion.service.ts`, and
+  // `admin/deals/[dealId]/pickup/complete` consequently stopped upserting the Pickup itself. It
+  // still completes pickups — it just asks the service to. Detecting only the direct write would
+  // have quietly dropped it from this scan, and every FUTURE admin route that completes through
+  // the service would have been invisible to the boundary this test exists to hold. Narrowing
+  // the pinned list to match the weaker detector would have been the easy fix and the wrong one.
   const candidates = files.filter((f) => {
     const src = read(ROOT, f);
-    return /\bpickup\.(?:update|upsert|updateMany|create)\s*\(/.test(src) && /"COMPLETED"|'COMPLETED'/.test(src);
+    const writesPickupComplete =
+      /\bpickup\.(?:update|upsert|updateMany|create)\s*\(/.test(src) && /"COMPLETED"|'COMPLETED'/.test(src);
+    const callsTheCompletionWriter = /\bconfirmPossession\s*\(/.test(src);
+    return writesPickupComplete || callsTheCompletionWriter;
   });
 
   assert.deepEqual(
