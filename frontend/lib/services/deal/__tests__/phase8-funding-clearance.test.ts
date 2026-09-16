@@ -24,6 +24,19 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       deal: { findUnique: async () => dealRow, updateMany: async () => ({ count: 1 }) },
+      // P9-00. `financing.updateMany` MUTATES the fixture rather than returning a count, so a
+      // test can prove a deal moves from blocked to clear through the writer instead of being
+      // handed a fixture that already looks cleared. The distinction is the whole point of
+      // P9-00: the pre-existing "all six pass" test below is green only because its fixture
+      // hand-sets three columns that no production code could write.
+      financing: {
+        updateMany: async ({ where, data }: { where: { dealId: string }; data: Record<string, unknown> }) => {
+          const fin = (dealRow as { financing?: Record<string, unknown> } | null)?.financing;
+          if (!fin || where.dealId !== (dealRow as { id: string }).id) return { count: 0 };
+          Object.assign(fin, data);
+          return { count: 1 };
+        },
+      },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({}),
     },
   },
@@ -33,6 +46,10 @@ mock.module("@/lib/services/financing/financing-checkpoint.service", {
   namedExports: { recordFinancingCheckpoint: async () => ({}) },
 });
 mock.module("@/lib/services/operations/queue-item.service", { namedExports: { raiseException: async () => ({}) } });
+const audits: Array<Record<string, unknown>> = [];
+mock.module("@/lib/services/admin/admin-audit.service", {
+  namedExports: { writeAdminAuditLog: async (entry: Record<string, unknown>) => { audits.push(entry); } },
+});
 mock.module("@/lib/services/comms/transactional-dispatcher.service", {
   namedExports: { enqueueTransactional: async () => ({}) },
 });
@@ -210,4 +227,163 @@ test("every item names an OWNER — Stage 14's buyer copy needs one", async () =
     assert.ok(["FINANCE", "DEALERSHIP", "BUYER", "OPERATIONS"].includes(i.owner), `${i.key} must name an owner`);
     assert.ok(i.detail.length > 0, `${i.key} must say WHY, not just whether`);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// P9-00 — THE WRITER GAP. Phase 8 built the gate; nothing could satisfy it.
+//
+// `clearFunding` refuses unless every item passes, and three of the facts its items read had
+// NO PRODUCTION WRITER: `financing.lenderConditionsClearedAt` (item 2, FINANCE),
+// `financing.downPaymentMethod` (item 3, DEALERSHIP) and `financing.dealerFundingConfirmedAt`
+// (item 4, DEALERSHIP). Every reference to each was a read. So `deals.funding_cleared_at`
+// could never be stamped, and every non-forced completion hit the release gate.
+//
+// THE TEST ABOVE IS THE EVIDENCE. "clearFunding succeeds only when all six pass" is green,
+// and has always been green, because `clearDeal()` hand-sets those three columns. A fixture
+// that writes what production cannot is a gate passing because it was never exercised — the
+// architecture-scale form of the §8.1h defect class. These tests close that by driving the
+// same state through the writer instead of asserting it into the fixture.
+
+/** The realistic starting point: financing complete, but the three facts unrecorded. */
+function unrecordedDeal() {
+  return clearDeal({
+    financing: {
+      ...clearDeal().financing,
+      lenderConditionsClearedAt: null,
+      downPaymentMethod: null,
+      dealerFundingConfirmedAt: null,
+    },
+  });
+}
+
+test("P9-00 BASELINE: with the three facts unrecorded, clearance is blocked on exactly items 2-4", async () => {
+  dealRow = unrecordedDeal();
+  const { evaluateFundingClearance } = await mod();
+  const evaluation = await evaluateFundingClearance("d1");
+
+  assert.equal(evaluation.clear, false);
+  assert.deepEqual(
+    evaluation.outstanding.map((i) => i.key).sort(),
+    ["dealer_funding", "down_payment", "lender_conditions"],
+    "the ONLY things blocking a fully-financed deal are the three facts nothing could write",
+  );
+});
+
+test("P9-00: the writer records all three facts and the deal becomes clearable", async () => {
+  dealRow = unrecordedDeal();
+  const { recordClearanceFacts, clearFunding } = await mod();
+
+  await recordClearanceFacts({
+    dealId: "d1",
+    actorId: "admin_1",
+    actorEmail: "finance@autolenis.com",
+    reason: "Lender stips cleared, cashier's cheque seen, dealership confirmed funding",
+    facts: {
+      lenderConditionsCleared: true,
+      downPaymentMethod: "cashier's cheque",
+      dealerFundingConfirmed: true,
+    },
+  });
+
+  // THE PROOF: the same deal, driven through the writer, now clears. Nothing was asserted
+  // into the fixture between these two lines.
+  const result = await clearFunding({ dealId: "d1", actorId: "admin_1", reason: "All six confirmed against evidence" });
+  assert.equal(result.cleared, true, "the gate must be satisfiable through the writer, not only through a fixture");
+  assert.deepEqual(result.outstanding, []);
+});
+
+test("P9-00: a partial recording moves only the items it names", async () => {
+  dealRow = unrecordedDeal();
+  const { recordClearanceFacts, evaluateFundingClearance } = await mod();
+
+  await recordClearanceFacts({
+    dealId: "d1",
+    actorId: "admin_1",
+    reason: "Only the lender stipulations are cleared so far",
+    facts: { lenderConditionsCleared: true },
+  });
+
+  const evaluation = await evaluateFundingClearance("d1");
+  assert.deepEqual(
+    evaluation.outstanding.map((i) => i.key).sort(),
+    ["dealer_funding", "down_payment"],
+    "recording one fact must not imply the other two",
+  );
+});
+
+test("P9-00: a fact recorded in error can be withdrawn", async () => {
+  // Reversibility is deliberate. The alternative to withdrawing a mis-recorded fact is a
+  // hand-written database update, which is exactly what the per-run protocol forbids — and a
+  // wrongly-recorded fact otherwise unblocks a vehicle release permanently.
+  dealRow = unrecordedDeal();
+  const { recordClearanceFacts, evaluateFundingClearance } = await mod();
+
+  await recordClearanceFacts({
+    dealId: "d1", actorId: "admin_1", reason: "Dealership confirmed funding by telephone",
+    facts: { dealerFundingConfirmed: true },
+  });
+  await recordClearanceFacts({
+    dealId: "d1", actorId: "admin_1", reason: "Withdrawn — the confirmation was for a different deal",
+    facts: { dealerFundingConfirmed: false },
+  });
+
+  const evaluation = await evaluateFundingClearance("d1");
+  assert.equal(item(evaluation, "dealer_funding").satisfied, false, "a withdrawn fact must stop satisfying its item");
+});
+
+test("P9-00: the writer REFUSES once funding has already cleared", async () => {
+  // After the stamp the facts are history. Editing them afterwards makes the record disagree
+  // with the release that was already granted on the strength of it.
+  dealRow = clearDeal({ fundingClearedAt: new Date() });
+  const { recordClearanceFacts, FundingClearanceError } = await mod();
+
+  await assert.rejects(
+    () => recordClearanceFacts({
+      dealId: "d1", actorId: "admin_1", reason: "Trying to amend a cleared deal",
+      facts: { dealerFundingConfirmed: false },
+    }),
+    (err: unknown) => err instanceof FundingClearanceError,
+  );
+});
+
+test("P9-00: the writer REFUSES when the deal has no financing record", async () => {
+  dealRow = clearDeal({ financing: null });
+  const { recordClearanceFacts, FundingClearanceError } = await mod();
+
+  await assert.rejects(
+    () => recordClearanceFacts({
+      dealId: "d1", actorId: "admin_1", reason: "No financing row exists for this deal",
+      facts: { lenderConditionsCleared: true },
+    }),
+    (err: unknown) => err instanceof FundingClearanceError,
+    "fail closed rather than creating a financing record as a side effect of recording a fact",
+  );
+});
+
+test("P9-00: recording nothing is refused rather than treated as a no-op success", async () => {
+  // A call that names no fact and returns success is a screen that shows a green tick for a
+  // recording that never happened — §8.1h's defect class, in the smallest possible form.
+  dealRow = unrecordedDeal();
+  const { recordClearanceFacts, FundingClearanceError } = await mod();
+
+  await assert.rejects(
+    () => recordClearanceFacts({ dealId: "d1", actorId: "admin_1", reason: "Recording nothing at all", facts: {} }),
+    (err: unknown) => err instanceof FundingClearanceError,
+  );
+});
+
+test("P9-00: every recording is audited with its actor and reason", async () => {
+  dealRow = unrecordedDeal();
+  audits.length = 0;
+  const { recordClearanceFacts } = await mod();
+
+  await recordClearanceFacts({
+    dealId: "d1", actorId: "admin_7", actorEmail: "finance@autolenis.com",
+    reason: "Dealership confirmed funding authorization in writing",
+    facts: { dealerFundingConfirmed: true },
+  });
+
+  assert.equal(audits.length, 1, "a MONEY-tier recording that is not audited did not happen");
+  assert.equal(audits[0]!.adminId, "admin_7");
+  assert.match(String(audits[0]!.reason), /Dealership confirmed funding/);
 });

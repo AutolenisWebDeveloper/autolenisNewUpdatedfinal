@@ -33,6 +33,7 @@ import { DealStatus, FinancingStatus } from "@prisma/client";
 import { advanceDealStatus } from "./deal.service";
 import { recordFinancingCheckpoint } from "@/lib/services/financing/financing-checkpoint.service";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { writeAdminAuditLog } from "@/lib/services/admin/admin-audit.service";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_8_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import {
@@ -299,6 +300,129 @@ export async function recordFinancingCompletion(params: {
       idempotencyKey: `${PHASE_8_TEMPLATES.FINANCING_COMPLETED}:${params.dealId}`,
     });
   }
+}
+
+/**
+ * §Stage 14 checkpoint two — RECORD THE FACTS the clearance items read.
+ *
+ * P9-00, and it closes a gap Phase 8 opened. Phase 8 built `evaluateFundingClearance` and
+ * `clearFunding`, and `clearFunding` refuses unless every item passes — but three of the
+ * facts its items read had NO PRODUCTION WRITER. Every reference to
+ * `financing.lenderConditionsClearedAt`, `financing.downPaymentMethod` and
+ * `financing.dealerFundingConfirmedAt` was a read. `deals.funding_cleared_at` could
+ * therefore never be stamped, so every non-forced completion hit the release gate — which
+ * until #437 surfaced as an unhandled 500 at the kerb.
+ *
+ * The gate was correct and unsatisfiable. This is its writer.
+ *
+ * FACTS, NOT TIMESTAMPS. The caller states WHETHER a fact holds; the service stamps WHEN.
+ * An administrator cannot backdate a clearance fact, which is what makes the stamp evidence
+ * of when it was recorded rather than a field someone typed.
+ *
+ * REVERSIBLE, DELIBERATELY. Passing `false` withdraws a fact. The alternative to withdrawing
+ * a mis-recorded fact is a hand-written database update — exactly what CLAUDE.md's per-run
+ * protocol forbids — and a wrongly-recorded fact otherwise unblocks a vehicle release
+ * permanently. Every recording and withdrawal is audited with its actor and reason.
+ *
+ * REFUSED AFTER CLEARANCE. Once `funding_cleared_at` is stamped the facts are history, and a
+ * release has already been granted on the strength of them. Editing them afterwards makes the
+ * record disagree with what was done.
+ *
+ * NO OVERRIDE, AND THIS IS NOT ONE. It records what an authorized administrator has seen; it
+ * cannot mark an item satisfied that its own evidence does not support, and it never touches
+ * `clearFunding`'s refusal. Items 1, 5 and 6 are derived from other records and are not
+ * writable here at all.
+ */
+export async function recordClearanceFacts(params: {
+  dealId: string;
+  actorId: string;
+  actorEmail?: string | null;
+  reason: string;
+  facts: {
+    /** Item 2, FINANCE. `false` withdraws a previous recording. */
+    lenderConditionsCleared?: boolean;
+    /** Item 3, DEALERSHIP. The method the dealership recorded; `null` withdraws it. */
+    downPaymentMethod?: string | null;
+    /** Item 4, DEALERSHIP. `false` withdraws a previous confirmation. */
+    dealerFundingConfirmed?: boolean;
+  };
+  now?: Date;
+}): Promise<{ recorded: string[] }> {
+  const now = params.now ?? new Date();
+  const { facts } = params;
+
+  const data: Record<string, unknown> = {};
+  const recorded: string[] = [];
+
+  if (facts.lenderConditionsCleared !== undefined) {
+    data.lenderConditionsClearedAt = facts.lenderConditionsCleared ? now : null;
+    recorded.push("lender_conditions");
+  }
+  if (facts.downPaymentMethod !== undefined) {
+    data.downPaymentMethod = facts.downPaymentMethod?.trim() || null;
+    recorded.push("down_payment");
+  }
+  if (facts.dealerFundingConfirmed !== undefined) {
+    data.dealerFundingConfirmedAt = facts.dealerFundingConfirmed ? now : null;
+    recorded.push("dealer_funding");
+  }
+
+  // A call that names no fact and returns success is a screen showing a green tick for a
+  // recording that never happened. Refused rather than treated as a no-op.
+  if (recorded.length === 0) {
+    throw new FundingClearanceError(
+      "NO_FACTS_SUPPLIED",
+      "Name at least one clearance fact to record.",
+    );
+  }
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: params.dealId },
+    select: { id: true, fundingClearedAt: true, financing: { select: { id: true } } },
+  });
+  if (!deal) {
+    throw new FundingClearanceError("DEAL_NOT_FOUND", "This deal could not be read.");
+  }
+  if (deal.fundingClearedAt) {
+    throw new FundingClearanceError(
+      "ALREADY_CLEARED",
+      "Funding has already cleared for this deal. The clearance facts are now part of the " +
+        "record of a release that was granted, and are not editable.",
+    );
+  }
+  if (!deal.financing) {
+    // Fail closed rather than creating a financing record as a side effect of recording a
+    // fact about one. A deal with no financing row cannot satisfy item 1 either, so the
+    // honest answer is that this deal is not at Stage 14 yet.
+    throw new FundingClearanceError(
+      "NO_FINANCING_RECORD",
+      "This deal has no financing record, so there is nothing to record a clearance fact against.",
+    );
+  }
+
+  // `funding_recorded_by` exists for exactly this: who put the facts on the record.
+  data.fundingRecordedBy = params.actorId;
+
+  const updated = await prisma.financing.updateMany({ where: { dealId: params.dealId }, data });
+  if (updated.count === 0) {
+    throw new FundingClearanceError(
+      "NO_FINANCING_RECORD",
+      "This deal has no financing record, so there is nothing to record a clearance fact against.",
+    );
+  }
+
+  // A MONEY-tier recording that is not audited did not happen.
+  await writeAdminAuditLog({
+    adminId: params.actorId,
+    adminEmail: params.actorEmail ?? "",
+    action: "FUNDING_CLEARANCE_FACT_RECORDED",
+    entityType: "Deal",
+    entityId: params.dealId,
+    reason: params.reason,
+    metadata: { recorded, facts },
+  });
+
+  return { recorded };
 }
 
 /**
