@@ -229,21 +229,27 @@ test.describe("removed escalation endpoints", () => {
     expect(res.status(), "POST must no longer be routable").toBeGreaterThanOrEqual(400);
   });
 
-  // THIS INVARIANT WAS SUPERSEDED ON 2026-09-16, and saying so is the point.
+  // THIS INVARIANT WAS SUPERSEDED ON 2026-09-16. What it guarded against is now structurally
+  // impossible; what it forbade in words is now the only way the feature works.
   //
-  // The test here used to read "a buyer cannot mint their own pickup QR" and probed
-  // `POST /api/buyer/pickup/{dealId}/qr`. That path never existed in this repository, so the
-  // assertion passed on a 404 and would have kept passing however the policy changed — an
-  // assertion that cannot fail against the thing it claims to protect. Phase 9's release token
-  // then made buyer self-issue the ONLY way a code can exist: the credential is hashed at rest,
-  // so there is nothing left to re-render and it has to be minted at the moment it is shown.
+  // WHAT THE ROUTE ACTUALLY WAS. `POST /api/buyer/pickup/[dealId]/qr` existed: added in f9ee800
+  // (2026-09-01) on `claude/deal-completion-autopilot-heb5lg`, removed in the merge 89abb18 the
+  // same day, alongside its sibling `POST /api/buyer/contract-shield/[dealId]` — the two
+  // endpoints this section's header names. It authenticated the buyer and checked ownership, and
+  // its token was `randomBytes(24)`, so neither auth nor weak randomness was the problem. The
+  // escalation was one line: it `upsert`ed the Pickup with `status: "SCHEDULED"` in BOTH the
+  // create and the update branch. A buyer who asked for a code thereby SCHEDULED THEIR OWN
+  // PICKUP — no dealer confirmation, no coordination round-trip — and the response handed back
+  // the raw token in JSON. That is "a buyer deciding something only the system may decide": not
+  // holding a code, but creating the appointment by asking for one.
   //
-  // The old blanket prohibition belonged to a world where the system minted the code once and
-  // stored it, and a buyer minting one was an escalation. What replaces it is not "buyers may
-  // mint freely" — `POST /api/buyer/pickup/[dealId]/release-code` refuses unless the caller owns
-  // the deal, the deal has a dealership, the pickup is SCHEDULED / RESCHEDULED / CHECKED_IN and
-  // the deal can still reach COMPLETED. Those are the gates worth pinning, so they are what this
-  // pins. The owner's sign-off on the policy change is tracked on the Phase 9 step-3 PR.
+  // WHY THE REPLACEMENT IS NOT THE SAME THING. `POST /api/buyer/pickup/[dealId]/release-code`
+  // writes no status at all. It refuses unless the pickup is ALREADY SCHEDULED / RESCHEDULED /
+  // CHECKED_IN — a state only the dealer's confirmation can produce — and unless the deal can
+  // still reach COMPLETED. It returns the rendered image and an expiry, never the raw token. The
+  // buyer can obtain a code for an appointment the system already granted; they cannot grant
+  // themselves the appointment. Owner sign-off for this reversal is tracked on the Phase 9
+  // step-3 PR.
   test("the retired QR self-issue path is still gone", async ({ request }) => {
     authOnly();
     test.skip(!process.env.E2E_DEAL_ID, "E2E_DEAL_ID not set — needs a deal owned by the test buyer");
