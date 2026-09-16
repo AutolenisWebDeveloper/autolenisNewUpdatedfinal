@@ -1,0 +1,116 @@
+Phase 9 proof run — preflight.sql and verify.sql exercised in BOTH directions
+=============================================================================
+
+WHEN      2026-09-16, this session.
+WHERE     A throwaway loopback PostgreSQL cluster, 127.0.0.1:55439, database `phase9proof`.
+          Created for this run, stopped at the end of it. No production credential was present
+          in the environment (DATABASE_URL, DIRECT_URL and PROD_READONLY_URL all absent —
+          checked before the cluster was started), so this was a development session, not a
+          deploy session.
+
+VERSION   PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1).
+          *** DEGRADED. *** Production runs 17.6 and the phase prompt asks for 17.6. Only the
+          PG16 server binaries are installed in this environment and the Docker daemon is not
+          running, so 17.6 was unreachable. 16.13 is the same version phase 8's proof harness
+          ran on (see prisma/drift-baseline.json, 2026-09-15). The objects exercised here —
+          a btree unique index, a partial btree index, and an UPDATE — behave identically
+          across 16 and 17, but that is a claim about Postgres, not something this run proved.
+          CI's `migrations` job asserts its own major version and remains the authority.
+
+NOTHING WAS RUN AGAINST PRODUCTION. The migration is AUTHORED, NOT APPLIED. Applying it is the
+owner's, per run, under CLAUDE.md's production-database protocol.
+
+
+THE FOUR RUNS
+-------------
+
+Chain built with `prisma migrate deploy` against the empty database: all 118 migration
+directories applied, ending at 20261201000000_phase9_pickup_release_token.
+
+PRE-STATE constructed to match the production pre-state the owner verified at 20:45 UTC:
+  - the 20261201 ledger row deleted          -> 117 distinct applied names (production: 117)
+  - pickups_token_hash_key dropped
+  - pickups_live_release_token_idx dropped
+  - ONE pickup seeded carrying plaintext in BOTH qr_code_data and qr_code_image
+    (FK triggers disabled for the insert; a throwaway database, never production)
+
+The seeded row is the point. `pickups` holds zero rows in production, and an assertion that
+"no plaintext survives" is trivially true on an empty table — it passes while checking nothing,
+which is the defect class this whole directory exists for. The row makes the assertion falsifiable.
+
+  RUN 1  preflight.sql  on the PRE-state   -> 17 rows, ALL CHECKED, zero BLOCK.
+                                              Terminal row: "17 assertions: 13 block-capable,
+                                              3 reported" — matches the 17 rows emitted.
+                                              Assertion 8 read "117 distinct / 117 rows /
+                                              0 rolled back": the owner's pre-state, asserted
+                                              rather than taken.
+                                              Assertion 9 read "1 of 1 pickups" carrying
+                                              plaintext — the scale of the irreversible UPDATE,
+                                              known before it ran.
+
+  RUN 2  verify.sql     on the PRE-state   -> 8 MISSING, 7 PRESENT, 1 terminal.
+                                              MISSING: both indexes; the VALID+UNIQUE check;
+                                              the partial index's VALID, predicate and key
+                                              checks; "no plaintext release credential
+                                              survives"; and both ledger rows.
+                                              This is the run that proves verify.sql CAN fail.
+                                              A verify that has only ever been run after a
+                                              successful deploy has never been tested.
+
+  -- `prisma migrate deploy` applied 20261201000000 --
+
+  RUN 3  preflight.sql  on the POST-state  -> 4 BLOCK rows, correctly:
+                                              both indexes ALREADY PRESENT;
+                                              ledger ALREADY APPLIED;
+                                              chain moved to 118 distinct, no longer the
+                                              verified pre-state.
+                                              This is the run that proves preflight.sql CAN
+                                              stop a run.
+
+  RUN 4  verify.sql     on the POST-state  -> 0 MISSING, 15 PRESENT, 1 terminal = 16 rows.
+                                              Terminal row: "16 assertions: 12 physical,
+                                              3 ledger." — matches the 16 rows emitted.
+
+BACKFILL EVIDENCE (the reason run 2 seeded a row):
+
+  before:  pf-1 | qr_code_data={"type":"autolenis_pickup","nonce":"k3j4h"} | qr_code_image=data:image/png;base64,AAAA
+  after:   pf-1 | qr_code_data=NULL                                        | qr_code_image=NULL
+
+  The row still exists; both credential columns are NULL. The UPDATE cleared real data rather
+  than matching zero rows.
+
+INDEXES AS ACTUALLY BUILT (read back from pg_indexes, not from the migration text):
+
+  CREATE UNIQUE INDEX pickups_token_hash_key ON public.pickups USING btree (token_hash)
+  CREATE INDEX pickups_live_release_token_idx ON public.pickups USING btree (token_expires_at)
+    WHERE ((token_hash IS NOT NULL) AND (token_consumed_at IS NULL) AND (token_revoked_at IS NULL))
+
+  The partial predicate is the resolver's WHERE clause in release-token.service.ts, which is
+  what verify.sql assertion 5 checks clause by clause.
+
+
+THE DRIFT GUARD — prisma/__tests__/phase9-proof-sql.test.ts
+------------------------------------------------------------
+
+10 tests, all passing. Exercised in both directions by temporary mutation, each reverted and
+the restore confirmed clean (`git diff` = 0 lines):
+
+  MUTATION                                              RESULT
+  drop the migration from verify.sql's expected list -> 2 failures: "verify.sql does not name
+                                                        20261201000000_..." and the phantom-name
+                                                        check on the placeholder that replaced it
+  shorten the prefix to 202612010\d{2} (phase 8's     -> 3 failures, caught by the anti-vacuity
+    exact bug: two digits short of the 14-digit stamp)  assertion: "expected at least 1 phase 9
+                                                        migration, found 0"
+  make verify.sql's terminal row claim 11 physical    -> 1 failure: "terminal row claims 16
+                                                        assertions (11 physical, 3 ledger) but
+                                                        the file emits 16 rows (12 physical,
+                                                        3 ledger, 1 terminal)"
+  all reverted                                        -> 10 pass / 0 fail, git diff clean
+
+ONE GUARD BUG FOUND AND FIXED BY THIS EXERCISE. The first draft refused the phrase
+`/(one|two|three|four|five)\s+applied\s+rows?/` and fired on three CORRECT lines in verify.sql:
+"one applied row PER phase 9 migration" is the per-migration idiom — it stays true at one
+migration and at five, and the total beside it is derived from the CTE. Phase 8's guard
+deliberately matched only the plural. The guard was wrong, not the file; the pattern now refuses
+a plural total ("two applied rows") and permits the singular per-migration phrasing.
