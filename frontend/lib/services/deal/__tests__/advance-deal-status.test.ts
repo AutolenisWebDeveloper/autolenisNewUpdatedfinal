@@ -445,3 +445,45 @@ test("both new gates are overridable only by an audited force, like the insuranc
   await advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "ADMIN", force: true });
   assert.equal(ctrl.deal.status, DealStatus.COMPLETED);
 });
+
+
+// ── §Stage 20: COMPLETED is terminal, and `force` does not override that ────────────────────
+//
+// OWNER RULING Q4, 2026-09-16 — recorded as a REMOVED capability. `force: true` used to carry a
+// completed deal back to PICKUP_SCHEDULED through the admin journey-reopen screen, which is why
+// "terminal" was a property of the transition map and not of the product.
+
+test("a COMPLETED deal cannot be moved, even with force — §Stage 20", async () => {
+  // Reintroduced defect: placing the terminal check AFTER the force-aware canTransition guard.
+  // Red — `force: true` sails past exactly as it used to, which is the whole defect.
+  const { advanceDealStatus, TerminalDealError } = await import("../deal.service");
+  ctrl.deal.status = "COMPLETED";
+
+  await assert.rejects(
+    () => advanceDealStatus("d1", "PICKUP_SCHEDULED", { actorRole: "ADMIN", reason: "reopen", force: true }),
+    TerminalDealError,
+    "force must not reopen a completed deal",
+  );
+  assert.equal(ctrl.updateCalls.length, 0, "and nothing may be written on the way to refusing");
+});
+
+test("force still overrides the map and the gates for every NON-terminal deal", async () => {
+  // The asymmetry is the point, and it has to be proven in both directions — a guard that
+  // refused everything would also pass the test above while breaking every audited override.
+  const { advanceDealStatus } = await import("../deal.service");
+  ctrl.deal.status = "SIGNED";
+  ctrl.deal.fundingClearedAt = null;
+  ctrl.deal.dealerExecutedContractId = null;
+
+  const moved = await advanceDealStatus("d1", "PICKUP_SCHEDULED", { actorRole: "ADMIN", reason: "audited override", force: true });
+  assert.equal(moved, true, "an audited override of a non-terminal deal still works");
+});
+
+test("a COMPLETED deal may be re-advanced to COMPLETED — replay is not a move", async () => {
+  // Idempotent replay reaches advanceDealStatus with the deal already at the target. Refusing it
+  // would turn a harmless retry into an error, so the guard is "may not LEAVE", not "may not be
+  // called".
+  const { advanceDealStatus } = await import("../deal.service");
+  ctrl.deal.status = "COMPLETED";
+  await assert.doesNotReject(() => advanceDealStatus("d1", "COMPLETED", { actorRole: "SYSTEM" }));
+});

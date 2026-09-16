@@ -246,7 +246,11 @@ test.describe("removed escalation endpoints", () => {
   // WHY THE REPLACEMENT IS NOT THE SAME THING. `POST /api/buyer/pickup/[dealId]/release-code`
   // writes no status at all. It refuses unless the pickup is ALREADY SCHEDULED / RESCHEDULED /
   // CHECKED_IN — a state only the dealer's confirmation can produce — and unless the deal can
-  // still reach COMPLETED. It returns the rendered image and an expiry, never the raw token. The
+  // still reach HANDOVER. (That second condition read "can still reach COMPLETED" until Phase 9
+  // closed `PICKUP_SCHEDULED → COMPLETED`: the two phrasings picked out the same statuses only
+  // while the ladder was flat, and afterwards "can reach COMPLETED" meant HANDOVER_PENDING —
+  // the state reached by CONSUMING a code.) It returns the rendered image and an expiry, never
+  // the raw token. The
   // buyer can obtain a code for an appointment the system already granted; they cannot grant
   // themselves the appointment. Owner sign-off for this reversal is tracked on the Phase 9
   // step-3 PR.

@@ -3,6 +3,7 @@
 // Contract Shield IS a workflow gate:
 // CONTRACT_PENDING → CONTRACT_REVIEW → CONTRACT_APPROVED → SIGNING_PENDING
 
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
@@ -182,6 +183,29 @@ export class DealTransitionError extends Error {
  * contract is AutoLenis's and the dealership's. A caller that cannot tell them apart cannot
  * say who has to act, which is the whole complaint §Stage 14 makes about "funding pending".
  */
+/**
+ * A COMPLETED Deal was asked to move. §Stage 20: "Completed is terminal. Corrections are
+ * append-only and never rewrite completed history."
+ *
+ * OWNER RULING Q4, 2026-09-16 — a REMOVED capability, recorded as one. `force: true` used to
+ * carry a completed deal back to PICKUP_SCHEDULED through the admin journey-reopen screen, which
+ * is why "terminal" was true of the transition map and false of the product. The replacement is
+ * an append-only `DealCorrection`: the history a correction describes stays exactly as it was.
+ *
+ * `force` overrides the transition map and the release gates. It does not override this, and
+ * that asymmetry is the whole point — an override is a judgement about a rule, and this is not a
+ * rule about what may happen next. It is a statement that the transaction is over.
+ */
+export class TerminalDealError extends Error {
+  constructor(public readonly status: DealStatus) {
+    super(
+      `Deal is ${status} and terminal — §Stage 20 makes completion final. Record an append-only ` +
+        `DealCorrection instead of moving it.`,
+    );
+    this.name = "TerminalDealError";
+  }
+}
+
 export class ReleaseNotClearedError extends Error {
   constructor(public readonly detail: string) {
     super(`This deal is not cleared for release: ${detail}.`);
@@ -238,6 +262,42 @@ interface AdvanceOptions {
  * no-op path (already in the target state, or `expectedFrom` did not match). Most
  * callers can ignore it; drivers that report whether they advanced must not.
  */
+/**
+ * §Stage 20's append-only correction — the replacement for moving a completed Deal.
+ *
+ * "Completed is terminal. Corrections are append-only and never rewrite completed history."
+ *
+ * `deal_corrections` arrived with the Phase 1 wave and had no writer until now. It records what
+ * was believed BEFORE and what is true AFTER without touching the Deal's status, its history, or
+ * the completion event — so a correction is legible as a correction rather than as a transaction
+ * that seems to have happened twice.
+ *
+ * `id` has no database default on this model, so it is supplied here rather than discovered as a
+ * constraint violation at the call site.
+ */
+export async function recordDealCorrection(input: {
+  dealId: string;
+  kind: string;
+  before?: Prisma.InputJsonValue | null;
+  after?: Prisma.InputJsonValue | null;
+  reason?: string | null;
+  actor?: string | null;
+}): Promise<string> {
+  const id = randomUUID();
+  await prisma.dealCorrection.create({
+    data: {
+      id,
+      dealId: input.dealId,
+      kind: input.kind,
+      ...(input.before != null ? { before: input.before } : {}),
+      ...(input.after != null ? { after: input.after } : {}),
+      reason: input.reason ?? null,
+      actor: input.actor ?? null,
+    },
+  });
+  return id;
+}
+
 /**
  * The statuses a Deal may not ENTER without all three release facts.
  *
@@ -315,6 +375,20 @@ export async function advanceDealStatus(
   // state. Checked here AND on the post-race re-resolve below, so a deal that moved
   // on under us is never dragged backwards into `newStatus`.
   if (opts.expectedFrom && deal.status !== opts.expectedFrom) return false;
+
+  // NOT CONDITIONED ON `!opts.force`, AND THAT — not its position — is what makes it terminal.
+  //
+  // The first draft of this comment claimed the guard had to come BEFORE the force-aware check
+  // below or `force: true` would sail past it. Mutation-testing that claim showed it was false:
+  // the check below only SKIPS a throw when force is set, it does not return, so the guard
+  // catches a forced call from either position. Moving it changed nothing and the suite stayed
+  // green — a comment asserting a safety property the code did not have.
+  //
+  // What the suite DOES catch is the real defect shape: adding `!opts.force` here, or deleting
+  // the guard. Both turn it red.
+  if (deal.status === DealStatus.COMPLETED && newStatus !== DealStatus.COMPLETED) {
+    throw new TerminalDealError(deal.status);
+  }
 
   if (!opts.force && !canTransition(deal.status, newStatus)) {
     throw new DealTransitionError(deal.status, newStatus);
