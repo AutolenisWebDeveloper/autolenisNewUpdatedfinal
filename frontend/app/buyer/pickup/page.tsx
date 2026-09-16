@@ -13,6 +13,7 @@ import PickupReleaseCode from "@/components/buyer/PickupReleaseCode";
 import { resolveDealerAvailability } from "@/lib/services/pickup/availability.service";
 import { allSignedFrom, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export default async function PickupPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { pickup: true, eSignEnvelopes: { select: BUYER_SAFE_ENVELOPE_SELECT }, coBuyer: { select: { isRequiredSigner: true } }, offer: { select: { dealerId: true } } },
+    include: { pickup: { select: PICKUP_SAFE_SELECT }, eSignEnvelopes: { select: BUYER_SAFE_ENVELOPE_SELECT }, coBuyer: { select: { isRequiredSigner: true } }, offer: { select: { dealerId: true } } },
     orderBy: { createdAt: "desc" },
   });
 

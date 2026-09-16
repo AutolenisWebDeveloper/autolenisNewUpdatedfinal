@@ -61,7 +61,11 @@ let consumeSucceeds = true;
 let advanceCalls: Array<{ dealId: string; to: string }> = [];
 let advanceThrows: Error | null = null;
 let txCalls = 0;
-let consumeCalls: string[] = [];
+let consumeCalls: Array<{ pickupId: string; rawToken: string }> = [];
+let pickupCasWheres: Array<Record<string, unknown>> = [];
+let activityEvents = 0;
+/** Simulates another scan (or an admin) having already completed the pickup row. */
+let pickupAlreadyCompleted = false;
 let pickupWheres: Array<Record<string, unknown>> = [];
 
 mock.module("@/lib/auth/dealer-api", {
@@ -87,8 +91,21 @@ mock.module("@/lib/prisma", {
         },
         update: async () => ({}),
       },
-      buyerActivityEvent: { create: async () => ({}) },
-      $transaction: async (ops: unknown[]) => { txCalls += 1; return ops; },
+      buyerActivityEvent: { create: async () => { activityEvents += 1; return {}; } },
+      // Interactive form — the route needs to know WHO WON the pickup compare-and-swap, which the
+      // array form cannot report while staying atomic with the activity event.
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        txCalls += 1;
+        return fn({
+          pickup: {
+            updateMany: async ({ where }: { where: Record<string, unknown> }) => {
+              pickupCasWheres.push(where);
+              return { count: pickupAlreadyCompleted ? 0 : 1 };
+            },
+          },
+          buyerActivityEvent: { create: async () => { activityEvents += 1; return {}; } },
+        });
+      },
     },
   },
 });
@@ -108,7 +125,10 @@ mock.module("@/lib/services/pickup/release-token.service", {
               expiresAt: new Date("2026-09-23T03:00:00.000Z"),
             },
           },
-    consumeReleaseToken: async (pickupId: string) => { consumeCalls.push(pickupId); return consumeSucceeds; },
+    consumeReleaseToken: async ({ pickupId, rawToken }: { pickupId: string; rawToken: string }) => {
+      consumeCalls.push({ pickupId, rawToken });
+      return consumeSucceeds;
+    },
   },
 });
 
@@ -169,6 +189,9 @@ beforeEach(() => {
   txCalls = 0;
   consumeCalls = [];
   pickupWheres = [];
+  pickupCasWheres = [];
+  activityEvents = 0;
+  pickupAlreadyCompleted = false;
 });
 
 async function scan(token = "a".repeat(64)) {
@@ -187,7 +210,12 @@ test("the owning dealer completes the deal on a valid scan, and the code is SPEN
   const res = await scan();
   assert.equal(res.status, 200);
   assert.deepEqual(advanceCalls, [{ dealId: "deal_1", to: "COMPLETED" }]);
-  assert.deepEqual(consumeCalls, ["pickup_1"], "a completed handover must burn the code");
+  assert.deepEqual(
+    consumeCalls,
+    [{ pickupId: "pickup_1", rawToken: "a".repeat(64) }],
+    "a completed handover must burn the code that was PRESENTED, not just the pickup's current one",
+  );
+  assert.equal(activityEvents, 1, "and record the completion exactly once");
 });
 
 test("the scanned string is NEVER used as a database predicate", async () => {
@@ -210,6 +238,7 @@ test("another dealer's code is rejected and completes nothing (IDOR blocked)", a
   assert.equal(body.error.code, "INVALID_TOKEN");
   assert.equal(advanceCalls.length, 0);
   assert.deepEqual(consumeCalls, [], "a rejected scan must not spend someone else's code");
+  assert.equal(txCalls, 0);
 });
 
 test("CONCIERGE deal (no dealer on the deal) can never be completed by a dealer scan", async () => {
@@ -386,14 +415,39 @@ test("a missing qrToken is a 400 before anything is resolved", async () => {
   assert.deepEqual(pickupWheres, []);
 });
 
-test("losing the consume race → ALREADY_SCANNED, and the pickup row is not written twice", async () => {
-  // Two simultaneous scans of the same code both resolve (resolution is a read) and both reach
-  // the compare-and-swap. Exactly one wins; the loser must be told the truth rather than
-  // double-writing the completion.
-  consumeSucceeds = false;
+test("losing the PICKUP swap → ALREADY_SCANNED, and the completion is not recorded twice", async () => {
+  // Two simultaneous scans both resolve (resolution is a read) and both advance the deal — the
+  // seam's own CAS makes the second a silent no-op. The PICKUP write is what picks the winner,
+  // so the loser must be told the truth rather than double-writing the completion.
+  pickupAlreadyCompleted = true;
   const res = await scan();
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error.code, "ALREADY_SCANNED");
-  assert.equal(txCalls, 0, "the loser must not mark the pickup complete a second time");
+  assert.equal(activityEvents, 0, "the loser must not emit a second DEAL_COMPLETED event");
+});
+
+test("the pickup write is a COMPARE-AND-SWAP, not a blind update", async () => {
+  // A blind `update` would report success for the loser of a double scan and write the row twice.
+  await scan();
+  assert.deepEqual(pickupCasWheres, [{ id: "pickup_1", status: { not: "COMPLETED" } }]);
+});
+
+test("A LOST TOKEN SWAP MUST NOT STRAND THE DEAL — the handover is still recorded", async () => {
+  // THE HALF-WRITE THIS ROUTE USED TO PRODUCE. By the time the token swap runs,
+  // `advanceDealStatus` has COMMITTED: the deal is COMPLETED, DealStatusHistory is written and
+  // the exactly-once purchase_completed event has fired. Returning 409 there — which the first
+  // draft did — left the deal COMPLETED with a pickup that was not: no completedAt, no activity
+  // event, no email, recoverable only through the admin completion route.
+  //
+  // The swap can lose without another scan having won: a concurrent reschedule revokes the code
+  // between the resolve and the swap (schedulePickup and reschedulePickup both revoke now). The
+  // vehicle still changed hands. What follows must record that.
+  consumeSucceeds = false;
+  const res = await scan();
+
+  assert.equal(res.status, 200, "a spent-or-revoked token after a committed advance is not a rejection");
+  assert.deepEqual(advanceCalls, [{ dealId: "deal_1", to: "COMPLETED" }]);
+  assert.equal(txCalls, 1, "the pickup row must still be completed");
+  assert.equal(activityEvents, 1, "and the buyer must still get their completion event");
 });

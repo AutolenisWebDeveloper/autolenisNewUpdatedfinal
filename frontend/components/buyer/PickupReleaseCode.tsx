@@ -100,9 +100,25 @@ export default function PickupReleaseCode({ dealId }: Props) {
       )}
 
       {error && (
-        <p className="text-xs font-medium text-al-danger mt-3" data-testid="pickup-release-code-error">
-          {error}
-        </p>
+        <div className="mt-3" data-testid="pickup-release-code-error">
+          <p className="text-xs font-medium text-al-danger">{error}</p>
+          {/* THE FALLBACK MATTERS MORE THAN IT DID. The code used to be rendered into the page
+              server-side, so a buyer standing on a dealership lot with one bar of signal still
+              had it. It now needs a live round trip, which makes exactly that person more likely
+              to be stuck — so the escape hatch that came off the stored image belongs here, where
+              the failure actually happens. */}
+          <p className="text-xs text-al-text-muted mt-2">
+            You don&apos;t need this code to collect your vehicle — the dealership can complete the
+            handover with our team directly.
+          </p>
+          <a
+            href="/buyer/messages"
+            data-testid="pickup-release-code-support"
+            className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-al-primary hover:text-al-primary-hover transition-colors"
+          >
+            Message support →
+          </a>
+        </div>
       )}
     </div>
   );

@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import AdminContractUpload from "@/components/admin/AdminContractUpload";
 import { Badge } from "@/components/ui/badge";
+import { isReleaseCodeIssuable } from "@/lib/services/pickup/pickup-statuses";
 import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/kit";
@@ -333,7 +334,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
                 {/* The stored QR image is gone — it decoded back to the buyer's release credential,
                     so keeping it readable here defeated hashing it (migration 20261201000000).
                     Codes are issued on demand and shown once; this links to where. */}
-                {deal.pickup.status !== "COMPLETED" && (
+                {isReleaseCodeIssuable(deal.pickup.status) && (
                   <div className="mt-4">
                     <p className="text-xs text-slate-400 mb-2">Pickup code</p>
                     <a href={`/admin/deals/${deal.id}/pickup`} data-testid="pickup-code-link"

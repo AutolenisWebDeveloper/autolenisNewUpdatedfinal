@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
+import { isReleaseCodeIssuable } from "@/lib/services/pickup/pickup-statuses";
 
 interface Props {
   dealId: string;
@@ -196,7 +197,10 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
             )}
             {pickupStatus && pickupStatus !== "COMPLETED" && (
               <>
+                {/* Gated on the same list the server gates on — see AdminPickupListActions. */}
                 <Button size="sm" variant="secondary" data-testid="regenerate-qr-admin-btn"
+                  disabled={!isReleaseCodeIssuable(pickupStatus)}
+                  title={isReleaseCodeIssuable(pickupStatus) ? undefined : `A pickup code needs a confirmed time — this pickup is ${pickupStatus?.replace(/_/g, " ").toLowerCase()}.`}
                   onClick={() => { setError(null); setConfirmReason(""); setConfirmModal({ action: "regenerate-qr", label: "Issue New Code" }); }}>
                   Issue New Pickup Code
                 </Button>

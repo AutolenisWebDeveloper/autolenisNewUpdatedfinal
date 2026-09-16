@@ -5,9 +5,9 @@
 //  1. TWO generators seeded their nonce from `Math.random()` — `qr.service.ts:5` and
 //     `pickup.service.ts:16`. `Math.random` is not a CSPRNG; its output is predictable from
 //     observed values. A release credential for a vehicle is exactly the wrong place for it.
-//  2. The token was stored in PLAINTEXT in `pickups.qr_code_data` and resolved by equality
-//     (`scan/route.ts:38`, `where: { qrCodeData: qrToken }`), so a database read yielded a
-//     working credential.
+//  2. The token was stored in PLAINTEXT in `pickups.qr_code_data` and the dealer scan resolved
+//     it by equality (`where: { qrCodeData: qrToken }`), so a database read yielded a working
+//     credential.
 //  3. `pickups.qr_code_image` stored `QRCode.toDataURL(rawPayload)` — the PNG decodes back to
 //     the same raw token. Hashing the token while keeping that column would have passed every
 //     test this change names and left the credential readable anyway. Owner ruling,
@@ -30,17 +30,32 @@
 
 import { prisma } from "@/lib/prisma";
 import { hashToken, generateRawToken } from "@/lib/services/dealer-recruitment/account-claim.service";
+import { TOKEN_MINTABLE_STATUSES } from "./pickup-statuses";
 
 /**
- * Pickup statuses a release token may be minted for.
- *
- * This is defect (2) of §8.2's Phase 9 list, as a constant. `regenerateQr` had no status guard
- * at all, so an administrator could mint a live credential for a pickup that was never
- * scheduled — a code that opens a car with no appointment behind it. NOT_SCHEDULED, PROPOSED
- * and DEALER_COUNTERED are all "no agreed time yet"; COMPLETED, RELEASED, NO_SHOW and
- * EXCEPTION are all "not happening on this token".
+ * Pickup statuses a release token may be minted for — defect (2) of §8.2's Phase 9 list, as a
+ * constant. Declared in `pickup-statuses.ts` (zero dependencies) and re-exported here, because
+ * the admin screens need the same list and must not pull `@/lib/prisma` into a client bundle to
+ * get it. One list, read by both sides, rather than two kept in step by memory.
  */
-export const TOKEN_MINTABLE_STATUSES = ["SCHEDULED", "RESCHEDULED", "CHECKED_IN"] as const;
+export { TOKEN_MINTABLE_STATUSES } from "./pickup-statuses";
+
+/**
+ * Deal statuses a release token may exist for.
+ *
+ * THE PICKUP'S STATUS IS NOT ENOUGH, and the gap is reachable. `cancelDeal` never touches the
+ * Pickup row, so a deal cancelled at PICKUP_SCHEDULED leaves `pickups.status` reading SCHEDULED
+ * forever. Without this the buyer of a cancelled deal could mint an unlimited stream of live,
+ * scannable codes — the platform would refuse them at the scan (`canTransition(CANCELLED,
+ * COMPLETED)` is false), but a dealership doing a gate-side visual check would see a valid code
+ * on a dead deal. The whole point of this service is that no code exists without an appointment
+ * behind it; a cancelled deal has no appointment.
+ *
+ * The set is derived from `canTransition`, not chosen: these are exactly the statuses from which
+ * a deal can still reach COMPLETED, which is exactly what presenting a code does.
+ * `release-token.test.ts` pins it against the real transition table so the two cannot drift.
+ */
+export const TOKEN_MINTABLE_DEAL_STATUSES = ["PICKUP_SCHEDULED", "PICKUP_COMPLETE"] as const;
 
 /**
  * How long a token outlives the appointment it belongs to.
@@ -57,6 +72,9 @@ export const TOKEN_GRACE_AFTER_APPOINTMENT_MS = 12 * 60 * 60 * 1000;
  * kerb, which is the common case for a phone that lost the email.
  */
 export const TOKEN_MIN_TTL_MS = 2 * 60 * 60 * 1000;
+
+/** `generateRawToken()` is `crypto.randomBytes(32).toString("hex")` — 64 lowercase hex chars. */
+const RAW_TOKEN_SHAPE = /^[0-9a-f]{64}$/;
 
 export interface IssuedReleaseToken {
   /** Raw token — put it in the link or the rendered QR ONLY. Never stored, never logged. */
@@ -122,10 +140,11 @@ export async function issueReleaseToken(params: {
 
   const pickup = await prisma.pickup.findUnique({
     where: { dealId: params.dealId },
-    select: { id: true, status: true, scheduledAt: true },
+    select: { id: true, status: true, scheduledAt: true, deal: { select: { status: true } } },
   });
   if (!pickup) return null;
   if (!(TOKEN_MINTABLE_STATUSES as readonly string[]).includes(pickup.status)) return null;
+  if (!(TOKEN_MINTABLE_DEAL_STATUSES as readonly string[]).includes(pickup.deal.status)) return null;
 
   const rawToken = generateRawToken();
   const expiresAt = releaseTokenExpiry(pickup.scheduledAt, now);
@@ -151,15 +170,18 @@ export async function resolveReleaseToken(
   rawToken: string,
   now: Date = new Date(),
 ): Promise<ReleaseTokenResolution> {
-  // A token shorter than the minted length cannot be one of ours; refusing early keeps a
-  // trivially malformed input from becoming a database round trip.
-  if (!rawToken || rawToken.length < 32) return { ok: false, reason: "not_found" };
+  // Anything that is not 64 lowercase hex characters cannot be one of ours — `generateRawToken`
+  // emits exactly 32 bytes, hex-encoded — so refusing here keeps a malformed input from becoming
+  // a hash plus a database round trip. A loose `length < 32` guard let a 40-character string
+  // through to both.
+  if (!RAW_TOKEN_SHAPE.test(rawToken)) return { ok: false, reason: "not_found" };
 
   const pickup = await prisma.pickup.findUnique({
     where: { tokenHash: hashToken(rawToken) },
     select: {
       id: true, dealId: true, status: true, scheduledAt: true,
       tokenExpiresAt: true, tokenConsumedAt: true, tokenRevokedAt: true,
+      deal: { select: { status: true } },
     },
   });
   if (!pickup) return { ok: false, reason: "not_found" };
@@ -178,6 +200,14 @@ export async function resolveReleaseToken(
     return { ok: false, reason: "pickup_not_releasable" };
   }
 
+  // And the DEAL's state, for the same reason and one the pickup's status cannot speak for:
+  // `cancelDeal` leaves the Pickup row untouched, so a cancelled deal still reads SCHEDULED here.
+  // Minting already refuses on this; resolving must too, or a code minted a minute before the
+  // cancellation outlives it.
+  if (!(TOKEN_MINTABLE_DEAL_STATUSES as readonly string[]).includes(pickup.deal.status)) {
+    return { ok: false, reason: "pickup_not_releasable" };
+  }
+
   return {
     ok: true,
     view: {
@@ -191,16 +221,32 @@ export async function resolveReleaseToken(
 }
 
 /**
- * Spend the token, as a compare-and-swap. Returns true only if THIS call spent it.
+ * Spend the token that was presented, as a compare-and-swap. Returns true only if THIS call
+ * spent THAT token.
  *
  * Two simultaneous scans of the same code both resolve — resolution is a read — and both reach
  * here; exactly one gets `true`. That is what makes the credential single-use under genuine
  * concurrency rather than only in sequence.
+ *
+ * KEYED ON THE HASH, not just the pickup. Keying on `pickupId` alone means a scan that resolved
+ * code C1 stamps `token_consumed_at` on whatever code the row holds when it lands — and a buyer
+ * who reveals again between those two moments has replaced C1 with C2. The row would then record
+ * that a handover happened on a credential nobody ever presented. Adding the hash makes the
+ * swap refuse instead, which is the truthful answer.
  */
-export async function consumeReleaseToken(pickupId: string, now: Date = new Date()): Promise<boolean> {
+export async function consumeReleaseToken(params: {
+  pickupId: string;
+  rawToken: string;
+  now?: Date;
+}): Promise<boolean> {
   const res = await prisma.pickup.updateMany({
-    where: { id: pickupId, tokenConsumedAt: null, tokenRevokedAt: null },
-    data: { tokenConsumedAt: now },
+    where: {
+      id: params.pickupId,
+      tokenHash: hashToken(params.rawToken),
+      tokenConsumedAt: null,
+      tokenRevokedAt: null,
+    },
+    data: { tokenConsumedAt: params.now ?? new Date() },
   });
   return res.count === 1;
 }

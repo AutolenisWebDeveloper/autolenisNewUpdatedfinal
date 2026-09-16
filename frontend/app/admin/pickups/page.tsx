@@ -5,17 +5,22 @@ import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
 import { MapPin, AlertTriangle } from "lucide-react";
 import { AdminPickupListActions } from "@/components/admin/AdminPickupListActions";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 export const dynamic = "force-dynamic";
 export default async function AdminPickupsPage() {
   await requireAdmin();
 
-  let pickups: Awaited<ReturnType<typeof prisma.pickup.findMany<{ include: { deal: { include: { buyer: true } } } }>>> = [];
+  const listSelect = { ...PICKUP_SAFE_SELECT, deal: { include: { buyer: true } } } as const;
+  let pickups: Awaited<ReturnType<typeof prisma.pickup.findMany<{ select: typeof listSelect }>>> = [];
   let loadError: string | null = null;
 
   try {
     pickups = await prisma.pickup.findMany({
-      include: { deal: { include: { buyer: true } } },
+      // PROJECTED even though this page renders only scalars: `token_hash` has no business in
+      // a list query's result set, and the next person to pass a row into a client component
+      // should not have to notice that it was there. See pickup-select.ts.
+      select: listSelect,
       orderBy: { createdAt: "desc" }, take: 50,
     });
   } catch (err) {

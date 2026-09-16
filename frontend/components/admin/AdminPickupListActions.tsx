@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { isReleaseCodeIssuable } from "@/lib/services/pickup/pickup-statuses";
 
 interface Props {
   pickupId: string;
@@ -88,9 +89,13 @@ export function AdminPickupListActions({ pickupId, pickupStatus }: Props) {
         </div>
       )}
 
+      {/* The server refuses a code outside SCHEDULED / RESCHEDULED / CHECKED_IN. Offering the
+          button anyway turned a correct refusal into a red toast the admin had to learn by
+          pressing; the same list decides both sides now. */}
       <Button size="sm" variant="ghost" data-testid={`regenerate-qr-${pickupId}`}
         onClick={() => { setError(null); setConfirmModal({ action: "regenerate-qr", label: "Issue New Code" }); }}
-        disabled={loading !== null}>
+        disabled={loading !== null || !isReleaseCodeIssuable(pickupStatus)}
+        title={isReleaseCodeIssuable(pickupStatus) ? undefined : `A pickup code needs a confirmed time — this pickup is ${pickupStatus.replace(/_/g, " ").toLowerCase()}.`}>
         {loading === "regenerate-qr" ? "…" : "New Code"}
       </Button>
       <Button size="sm" variant="ghost" data-testid={`mark-arrived-${pickupId}`}

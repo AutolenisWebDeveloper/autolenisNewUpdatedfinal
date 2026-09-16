@@ -184,29 +184,50 @@ export async function POST(request: NextRequest) {
   // stands there, and burning their code on the way past would leave them re-revealing one for a
   // handover that is still blocked. `funding_cleared_at` makes RELEASE_NOT_CLEARED the common
   // answer today, not a rare one.
-  //
-  // Consuming after keeps single use intact: the CAS picks exactly one winner among simultaneous
-  // scans, and the loser is told the truth. Its advance was idempotent — the deal was already
-  // COMPLETED by the winner — so nothing is double-applied.
-  const consumed = await consumeReleaseToken(pickup.id, completedAt);
+  const consumed = await consumeReleaseToken({ pickupId: pickup.id, rawToken: qrToken, now: completedAt });
   if (!consumed) {
-    return errorResponse("ALREADY_SCANNED", "This QR code has already been scanned.", 409);
+    // NOT A REJECTION, and this is the part that is easy to get wrong. By the time we are here
+    // `advanceDealStatus` has COMMITTED: the deal is COMPLETED, DealStatusHistory is written and
+    // the exactly-once `purchase_completed` event has fired. Returning 409 on a lost token swap
+    // would strand the deal COMPLETED with a pickup that is not — no completedAt, no activity
+    // event, no email — recoverable only through the admin completion route.
+    //
+    // A lost swap here means one of two things and neither is "this scan did nothing": another
+    // scan spent the code first (the pickup write below will tell us, truthfully), or the code
+    // was revoked between the resolve and now by a concurrent reschedule. The handover still
+    // happened; what follows records it.
+    logger.warn(
+      `[pickup/scan] pickup ${pickup.id}: the release token could not be spent (already consumed, ` +
+        `or revoked between the resolve and the swap). The deal has already advanced to COMPLETED; ` +
+        `the pickup write decides the outcome.`,
+    );
   }
 
-  await prisma.$transaction([
-    prisma.pickup.update({
-      where: { id: pickup.id },
+  // THE PICKUP WRITE IS WHAT DECIDES THE WINNER, and it is a compare-and-swap for that reason.
+  // Two simultaneous scans both advance the deal (idempotently — the seam's own CAS makes the
+  // second a no-op that emits nothing), and exactly one of them moves the pickup out of its
+  // pre-COMPLETED status. That one owns the activity event and the email; the other is told the
+  // truth. Doing this as an interactive transaction keeps the row and its event atomic, which the
+  // previous array form could not do while also reporting who won.
+  const recorded = await prisma.$transaction(async (tx) => {
+    const res = await tx.pickup.updateMany({
+      where: { id: pickup.id, status: { not: "COMPLETED" } },
       data: { status: "COMPLETED", completedAt },
-    }),
-    prisma.buyerActivityEvent.create({
+    });
+    if (res.count !== 1) return false;
+    await tx.buyerActivityEvent.create({
       data: {
         buyerId: pickup.deal.buyerId,
         eventType: "DEAL_COMPLETED",
         title: "Pickup confirmed — your deal is complete",
         metadata: { dealId: pickup.dealId, completedAt: completedAt.toISOString() },
       },
-    }),
-  ]);
+    });
+    return true;
+  });
+  if (!recorded) {
+    return errorResponse("ALREADY_SCANNED", "This QR code has already been scanned.", 409);
+  }
 
   // Best-effort completion email via Resend
   const buyerEmail = pickup.deal.buyer.user.email;

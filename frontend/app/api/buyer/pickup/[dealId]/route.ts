@@ -127,7 +127,7 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
   const deal = await prisma.deal.findFirst({
     where:   { id: dealId, buyerId: buyer.id },
-    include: { pickup: true },
+    include: { pickup: { select: PICKUP_SAFE_SELECT } },
   });
   if (!deal)        return errorResponse("NOT_FOUND", "Deal not found", 404);
   if (!deal.pickup) return errorResponse("NOT_FOUND", "No pickup scheduled", 404);

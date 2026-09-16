@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { z } from "zod";
 import {
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: {
-      pickup: true,
+      pickup: { select: PICKUP_SAFE_SELECT },
       buyer: { include: { user: { select: { email: true } } } },
       offer: { include: { dealer: { include: { user: { select: { email: true } } } } } },
     },

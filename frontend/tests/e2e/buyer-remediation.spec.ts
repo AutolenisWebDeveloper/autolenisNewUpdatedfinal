@@ -229,11 +229,44 @@ test.describe("removed escalation endpoints", () => {
     expect(res.status(), "POST must no longer be routable").toBeGreaterThanOrEqual(400);
   });
 
-  test("a buyer cannot mint their own pickup QR", async ({ request }) => {
+  // THIS INVARIANT WAS SUPERSEDED ON 2026-09-16, and saying so is the point.
+  //
+  // The test here used to read "a buyer cannot mint their own pickup QR" and probed
+  // `POST /api/buyer/pickup/{dealId}/qr`. That path never existed in this repository, so the
+  // assertion passed on a 404 and would have kept passing however the policy changed — an
+  // assertion that cannot fail against the thing it claims to protect. Phase 9's release token
+  // then made buyer self-issue the ONLY way a code can exist: the credential is hashed at rest,
+  // so there is nothing left to re-render and it has to be minted at the moment it is shown.
+  //
+  // The old blanket prohibition belonged to a world where the system minted the code once and
+  // stored it, and a buyer minting one was an escalation. What replaces it is not "buyers may
+  // mint freely" — `POST /api/buyer/pickup/[dealId]/release-code` refuses unless the caller owns
+  // the deal, the deal has a dealership, the pickup is SCHEDULED / RESCHEDULED / CHECKED_IN and
+  // the deal can still reach COMPLETED. Those are the gates worth pinning, so they are what this
+  // pins. The owner's sign-off on the policy change is tracked on the Phase 9 step-3 PR.
+  test("the retired QR self-issue path is still gone", async ({ request }) => {
     authOnly();
     test.skip(!process.env.E2E_DEAL_ID, "E2E_DEAL_ID not set — needs a deal owned by the test buyer");
     const res = await request.post(`/api/buyer/pickup/${process.env.E2E_DEAL_ID}/qr`);
-    expect(res.status(), "the QR self-issue route must be gone").toBeGreaterThanOrEqual(400);
+    expect(res.status(), "the old QR self-issue route must not come back").toBeGreaterThanOrEqual(400);
+  });
+
+  test("the release-code route refuses an unauthenticated caller", async ({ request }) => {
+    test.skip(!process.env.E2E_DEAL_ID, "E2E_DEAL_ID not set — needs a deal id to address");
+    // Deliberately WITHOUT the buyer storage state: this is the one gate that can be proven
+    // without a session, and it is the one that matters most — minting is a write.
+    const res = await request.post(`/api/buyer/pickup/${process.env.E2E_DEAL_ID}/release-code`, {
+      headers: { cookie: "" },
+    });
+    expect([401, 403], "an anonymous caller must never mint a release credential").toContain(res.status());
+  });
+
+  test("the release-code route refuses a deal the buyer does not own", async ({ request }) => {
+    authOnly();
+    // A deal id that cannot belong to this buyer. Ownership is scoped in the WHERE, so a foreign
+    // deal is indistinguishable from one that does not exist — both 404, neither mints.
+    const res = await request.post("/api/buyer/pickup/00000000-0000-0000-0000-000000000000/release-code");
+    expect(res.status(), "another buyer's deal must not yield a code").toBe(404);
   });
 });
 

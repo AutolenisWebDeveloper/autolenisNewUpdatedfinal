@@ -6,11 +6,17 @@
 // Every test below fails against that implementation.
 //
 // THE §8.1h DISCIPLINE APPLIES TO THIS FILE TOO: before trusting a gate, prove it fails on a
-// deliberately reintroduced defect. Eleven mutations were applied to `release-token.service.ts`
-// one at a time, the suite run against each, and the service restored byte-identical afterwards.
+// deliberately reintroduced defect. Fifteen mutations were applied to `release-token.service.ts`
+// one at a time, this suite run against each, and the service restored byte-identical afterwards.
 // Every one went RED; the mutation is named in the comment of the test that catches it. A test
 // that cannot be made to fail is reporting success while checking nothing, which is the class
 // this phase opened with — and the seventh instance of it was a guard written FOR this class.
+//
+// ONE OF THEM DID NOT GO RED THE FIRST TIME, and that is worth recording rather than quietly
+// fixing. The shape guard's test asserted only the REASON a malformed token is refused — and a
+// malformed token is refused for that same reason under the loose `length < 32` guard too, just
+// after a hash and a database round trip. The assertion was passing for the wrong cause. It now
+// counts the round trips, which is the only thing that distinguishes the two implementations.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
@@ -24,6 +30,8 @@ interface Row {
   id: string;
   dealId: string;
   status: string;
+  /** The DEAL's status. `cancelDeal` never touches the Pickup row, so these two diverge. */
+  dealStatus: string;
   scheduledAt: Date | null;
   tokenHash: string | null;
   tokenExpiresAt: Date | null;
@@ -32,6 +40,8 @@ interface Row {
 }
 
 let rows: Row[] = [];
+/** Counts database round trips, so "refused on shape alone" can be PROVEN rather than implied. */
+let findUniqueCalls = 0;
 
 function match(where: Record<string, unknown>, r: Row): boolean {
   return Object.entries(where).every(([k, v]) => {
@@ -43,10 +53,14 @@ function match(where: Record<string, unknown>, r: Row): boolean {
   });
 }
 
-function project<T extends Row>(r: T, select?: Record<string, boolean>) {
+function project<T extends Row>(r: T, select?: Record<string, unknown>) {
   if (!select) return { ...r };
   const out: Record<string, unknown> = {};
-  for (const k of Object.keys(select)) out[k] = (r as unknown as Record<string, unknown>)[k];
+  for (const k of Object.keys(select)) {
+    // The service reads the deal's status through the relation; model that rather than
+    // flattening it, so a test cannot pass against a shape the service never sees.
+    out[k] = k === "deal" ? { status: r.dealStatus } : (r as unknown as Record<string, unknown>)[k];
+  }
   return out;
 }
 
@@ -54,7 +68,8 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       pickup: {
-        findUnique: async ({ where, select }: { where: Record<string, unknown>; select?: Record<string, boolean> }) => {
+        findUnique: async ({ where, select }: { where: Record<string, unknown>; select?: Record<string, unknown> }) => {
+          findUniqueCalls += 1;
           const r = rows.find((row) => match(where, row));
           return r ? project(r, select) : null;
         },
@@ -84,6 +99,7 @@ function pickup(overrides: Partial<Row> = {}): Row {
     id: "pu_1",
     dealId: "deal_1",
     status: "SCHEDULED",
+    dealStatus: "PICKUP_SCHEDULED",
     scheduledAt: APPT,
     tokenHash: null,
     tokenExpiresAt: null,
@@ -93,7 +109,7 @@ function pickup(overrides: Partial<Row> = {}): Row {
   };
 }
 
-beforeEach(() => { rows = [pickup()]; });
+beforeEach(() => { rows = [pickup()]; findUniqueCalls = 0; });
 
 // ── Minting ──────────────────────────────────────────────────────────────────────────────
 
@@ -294,17 +310,29 @@ test("reasons are ordered so the holder is told the truest thing", async () => {
   const { issueReleaseToken, resolveReleaseToken, consumeReleaseToken } = await svc();
   const issued = await issueReleaseToken({ dealId: "deal_1", now: NOW });
   assert.ok(issued);
-  await consumeReleaseToken("pu_1", NOW);
+  await consumeReleaseToken({ pickupId: "pu_1", rawToken: issued.rawToken, now: NOW });
   const wayLater = new Date(issued.expiresAt.getTime() + 60_000);
   assert.deepEqual(await resolveReleaseToken(issued.rawToken, wayLater), { ok: false, reason: "consumed" });
 });
 
-test("an unknown, empty or truncated token is refused without a database round trip", async () => {
+test("anything that is not 64 lowercase hex characters is refused ON SHAPE — with no query", async () => {
+  // THE OUTCOME IS NOT THE ASSERTION. Every input below resolves to `not_found` under a loose
+  // guard too — it just reaches the database first and returns nothing. Asserting only the reason
+  // is a test that passes for the wrong cause, which is the class this phase is named after. What
+  // distinguishes the guards is whether a malformed string costs a hash and a round trip, so THAT
+  // is what is counted.
   const { resolveReleaseToken } = await svc();
-  for (const bad of ["", "   ", "abc", "x".repeat(31)]) {
-    assert.deepEqual(await resolveReleaseToken(bad, NOW), { ok: false, reason: "not_found" }, `rejected: ${bad}`);
+  for (const bad of ["", "   ", "abc", "x".repeat(31), "a".repeat(40), "A".repeat(64), "g".repeat(64), "a".repeat(65)]) {
+    findUniqueCalls = 0;
+    assert.deepEqual(await resolveReleaseToken(bad, NOW), { ok: false, reason: "not_found" }, `rejected: ${JSON.stringify(bad)}`);
+    assert.equal(findUniqueCalls, 0, `${JSON.stringify(bad)} must be refused on shape, not by asking the database`);
   }
+
+  // Correctly shaped but unknown DOES cost a query — there is no way to know without asking.
+  // This half is what keeps the assertion above from passing on a guard that rejects everything.
+  findUniqueCalls = 0;
   assert.deepEqual(await resolveReleaseToken("f".repeat(64), NOW), { ok: false, reason: "not_found" });
+  assert.equal(findUniqueCalls, 1, "a well-formed unknown token must still be looked up");
 });
 
 // ── Single use ───────────────────────────────────────────────────────────────────────────
@@ -318,9 +346,9 @@ test("consume is a compare-and-swap: simultaneous scans produce exactly ONE winn
   assert.ok(issued);
 
   const results = await Promise.all([
-    consumeReleaseToken("pu_1", NOW),
-    consumeReleaseToken("pu_1", NOW),
-    consumeReleaseToken("pu_1", NOW),
+    consumeReleaseToken({ pickupId: "pu_1", rawToken: issued.rawToken, now: NOW }),
+    consumeReleaseToken({ pickupId: "pu_1", rawToken: issued.rawToken, now: NOW }),
+    consumeReleaseToken({ pickupId: "pu_1", rawToken: issued.rawToken, now: NOW }),
   ]);
   assert.equal(results.filter(Boolean).length, 1, "exactly one scan may spend the code");
   assert.equal(rows[0]!.tokenConsumedAt?.getTime(), NOW.getTime());
@@ -328,9 +356,94 @@ test("consume is a compare-and-swap: simultaneous scans produce exactly ONE winn
 
 test("a revoked code cannot be consumed", async () => {
   const { issueReleaseToken, revokeReleaseToken, consumeReleaseToken } = await svc();
-  await issueReleaseToken({ dealId: "deal_1", now: NOW });
+  const issued = await issueReleaseToken({ dealId: "deal_1", now: NOW });
+  assert.ok(issued);
   await revokeReleaseToken("deal_1", NOW);
-  assert.equal(await consumeReleaseToken("pu_1", NOW), false);
+  assert.equal(await consumeReleaseToken({ pickupId: "pu_1", rawToken: issued.rawToken, now: NOW }), false);
   assert.equal(rows[0]!.tokenConsumedAt, null);
 });
 
+test("the consume is bound to the code that was PRESENTED, not just to the pickup", async () => {
+  // A scan resolves C1; the buyer reveals C2 on their phone before the scan's swap lands. Keyed
+  // on `pickupId` alone the swap would stamp `token_consumed_at` on C2 — recording that a
+  // handover happened on a credential nobody ever presented.
+  const { issueReleaseToken, consumeReleaseToken } = await svc();
+  const first = await issueReleaseToken({ dealId: "deal_1", now: NOW });
+  assert.ok(first);
+  const second = await issueReleaseToken({ dealId: "deal_1", now: NOW });
+  assert.ok(second);
+
+  assert.equal(
+    await consumeReleaseToken({ pickupId: "pu_1", rawToken: first.rawToken, now: NOW }),
+    false,
+    "the superseded code must not be spendable",
+  );
+  assert.equal(rows[0]!.tokenConsumedAt, null, "and must not mark the CURRENT code as spent");
+  assert.equal(await consumeReleaseToken({ pickupId: "pu_1", rawToken: second.rawToken, now: NOW }), true);
+});
+
+
+// ── The DEAL's state, which the pickup's status cannot speak for ─────────────────────────────
+//
+// `cancelDeal` (deal.service.ts) never touches the Pickup row — verified by reading it: it
+// updates the Deal and writes a BuyerActivityEvent, and that is all. So a deal cancelled at
+// PICKUP_SCHEDULED leaves `pickups.status` reading SCHEDULED forever. Without a deal-status
+// precondition the buyer of a cancelled deal could mint an unlimited stream of live, scannable
+// codes. The platform would refuse them at the scan — `canTransition(CANCELLED, COMPLETED)` is
+// false — but a dealership doing a gate-side visual check would see a valid code on a dead deal,
+// and "no code that opens a car with no appointment behind it" would be false.
+
+test("the mintable DEAL statuses are exactly those that can still reach COMPLETED", async () => {
+  // Pinned against the REAL transition table rather than restated, so the allowlist cannot drift
+  // away from the rule it was derived from. A copied constant that silently disagrees with its
+  // source is the §13-D31 defect — a stale copy of a constant the original had already narrowed.
+  const { TOKEN_MINTABLE_DEAL_STATUSES } = await svc();
+  const { canTransition } = await import("@/lib/services/deal/deal.service");
+  const { DealStatus } = await import("@prisma/client");
+
+  const canReachCompleted = Object.values(DealStatus).filter(
+    (from) => from !== DealStatus.COMPLETED && canTransition(from, DealStatus.COMPLETED),
+  );
+  // ANTI-VACUITY: an empty derivation would make the comparison below pass against anything.
+  assert.ok(canReachCompleted.length > 0, "no status can reach COMPLETED — the derivation is broken");
+  assert.deepEqual([...TOKEN_MINTABLE_DEAL_STATUSES].sort(), [...canReachCompleted].sort());
+});
+
+test("minting REFUSES on a deal that can no longer be completed", async () => {
+  const { issueReleaseToken } = await svc();
+  for (const dealStatus of ["CANCELLED", "REFUNDED", "COMPLETED", "SIGNED", "FUNDING_PENDING"]) {
+    rows = [pickup({ dealStatus })];
+    assert.equal(
+      await issueReleaseToken({ dealId: "deal_1", now: NOW }),
+      null,
+      `a deal at ${dealStatus} must not yield a release code`,
+    );
+    assert.equal(rows[0]!.tokenHash, null);
+  }
+});
+
+test("minting succeeds on both statuses that can still reach COMPLETED", async () => {
+  // The other direction — a test that only proves refusal cannot tell a correct allowlist from
+  // an empty one.
+  const { issueReleaseToken, TOKEN_MINTABLE_DEAL_STATUSES } = await svc();
+  for (const dealStatus of TOKEN_MINTABLE_DEAL_STATUSES) {
+    rows = [pickup({ dealStatus })];
+    assert.ok(await issueReleaseToken({ dealId: "deal_1", now: NOW }), `${dealStatus} must be mintable`);
+  }
+});
+
+test("a code minted before the deal was cancelled stops resolving", async () => {
+  // Minting refusing is not enough on its own: the buyer may already hold a code from a minute
+  // before the cancellation.
+  const { issueReleaseToken, resolveReleaseToken } = await svc();
+  const issued = await issueReleaseToken({ dealId: "deal_1", now: NOW });
+  assert.ok(issued);
+  assert.equal((await resolveReleaseToken(issued.rawToken, NOW)).ok, true);
+
+  rows[0]!.dealStatus = "CANCELLED";
+  assert.deepEqual(
+    await resolveReleaseToken(issued.rawToken, NOW),
+    { ok: false, reason: "pickup_not_releasable" },
+    "the pickup row still reads SCHEDULED — only the deal's status can refuse this",
+  );
+});

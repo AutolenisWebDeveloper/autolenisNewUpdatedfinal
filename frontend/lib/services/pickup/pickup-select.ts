@@ -18,6 +18,13 @@
 // solved "this row has fields that must not leave the server" for eSign envelopes, and one
 // idiom for that problem is worth more than a second, cleverer one.
 //
+// EVERY Pickup READ IN THE REPOSITORY GOES THROUGH IT — verified by grep, not assumed. That is
+// the difference between a constant and a control: a projection applied at the sites somebody
+// remembered still leaves the ones they did not. `pickup-select.test.ts` proves the three sets
+// partition the model exactly, so a new column fails the suite until it is classified; nothing
+// mechanical stops a future `pickup: true`, which is why this paragraph is a claim about today
+// rather than a guarantee about tomorrow.
+//
 // A LEAF ON PURPOSE. `pickup-coordination.service.ts` would be the natural home, but it imports
 // `deal.service.ts`, which itself needs this projection — so living there would close an import
 // cycle. Nothing is imported here at all.
@@ -35,6 +42,21 @@ import { Prisma } from "@prisma/client";
 export const PICKUP_SECRET_FIELDS = ["tokenHash", "qrCodeData", "qrCodeImage"] as const;
 
 /**
+ * Columns withheld because they have no WRITER any more, not because they are secret.
+ *
+ * `qr_expires_at` was the stored QR's companion. The dealer scan reads `token_expires_at` now and
+ * the buyer's screen reads the expiry off the mint response, so nothing writes this column and
+ * nothing reads it. Publishing it anyway would put a value on the wire that is `null` on every
+ * new row and a STALE expiry — disagreeing with `token_expires_at` — on any row that predates the
+ * change. A field whose only possible contribution is a wrong answer is worse than an absent one.
+ *
+ * Kept separate from the secret list on purpose: a future reader deciding whether the column can
+ * be dropped needs to know these were withheld for tidiness, not for safety. The migration's
+ * FOLLOW-UP block drops all four together.
+ */
+export const PICKUP_RETIRED_FIELDS = ["qrExpiresAt"] as const;
+
+/**
  * Every Pickup scalar EXCEPT the three above.
  *
  * Enumerated rather than derived so that adding a column to the model is a decision someone has
@@ -49,7 +71,6 @@ export const PICKUP_SAFE_SELECT = {
   scheduledAt: true,
   completedAt: true,
   location: true,
-  qrExpiresAt: true,
   proposedTime: true,
   proposedBy: true,
   proposedAt: true,

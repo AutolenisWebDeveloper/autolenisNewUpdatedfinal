@@ -24,8 +24,9 @@ export interface RescheduleOptions {
   now?: Date;
 }
 
-// `pickup` is PROJECTED: `app/api/buyer/pickup/[dealId]/route.ts:162` returns it straight to
-// the browser, and the raw model now carries `token_hash` (see `pickup-select.ts`).
+// `pickup` is PROJECTED: the buyer reschedule route returns it straight to the browser
+// (`successResponse({ pickup: result.pickup })`), and the raw model now carries `token_hash`
+// (see `pickup-select.ts`).
 export type RescheduleResult =
   | { ok: true; pickup: SafePickup }
   | { ok: false; reason: string };

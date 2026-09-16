@@ -19,6 +19,12 @@ let dealRow: unknown = null;
 let updateCalls = 0;
 let lastUpdate: { where: unknown; data: Record<string, unknown> } | null = null;
 let activityEvents: Array<Record<string, unknown>> = [];
+// A reschedule RETIRES the code minted for the old appointment (release-token.service).
+// Until 2026-09-16 this mock had no `pickup.updateMany`, so `revokeReleaseToken` threw a
+// TypeError that the service's own `.catch(logger.error)` absorbed — and the suite reported
+// 7/7 pass with the revoke path never once executed. That is the §8.1h class exactly: something
+// reported success while checking nothing. The spy below is what makes it checkable.
+let revokeCalls: Array<Record<string, unknown>> = [];
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -34,6 +40,10 @@ mock.module("@/lib/prisma", {
           updateCalls += 1;
           lastUpdate = args;
           return { id: "pickup_1", status: args.data.status ?? "RESCHEDULED", ...args.data };
+        },
+        updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+          revokeCalls.push(args.where);
+          return { count: 1 };
         },
       },
       buyerActivityEvent: {
@@ -66,6 +76,7 @@ beforeEach(() => {
   updateCalls = 0;
   lastUpdate = null;
   activityEvents = [];
+  revokeCalls = [];
 });
 
 test("an out-of-availability reschedule is REJECTED and writes nothing (the bug fix)", async () => {
@@ -114,4 +125,35 @@ test("a valid reschedule records an audit activity event (buyer path — no over
   assert.match(String(meta.reason), /work conflict/);
   // The buyer seam has no override concept at all.
   assert.equal("override" in meta, false, "buyer reschedule carries no override flag");
+});
+
+// ── The code minted for the OLD appointment ─────────────────────────────────
+//
+// A release token's expiry is bound to `scheduledAt`, so a reschedule leaves a code that is
+// wrong in one of two directions: minted for Tuesday and still live on a handover moved to
+// Friday, or already expired on one moved earlier. `RESCHEDULED` is itself a mintable status, so
+// nothing else refuses it — unlike the coordination service's compensating revert, which lands
+// on `PROPOSED` and is covered by the resolver's status re-check.
+
+test("a completed reschedule REVOKES the outstanding release code", async () => {
+  const { reschedulePickup } = await loadService();
+  const res = await reschedulePickup("deal_1", WED_2PM_CST, { now: NOW });
+  assert.equal(res.ok, true);
+
+  assert.equal(revokeCalls.length, 1, "the revoke must actually run — not throw into a catch");
+  assert.deepEqual(revokeCalls[0], {
+    dealId: "deal_1",
+    tokenHash: { not: null },
+    tokenConsumedAt: null,
+    tokenRevokedAt: null,
+  }, "scoped to a LIVE code: nothing to revoke on a pickup that never had one, and a spent code stays spent");
+});
+
+test("a reschedule the availability gate refuses revokes nothing", async () => {
+  // Killing a working code on a request that was rejected would be the worst of both.
+  const { reschedulePickup } = await loadService();
+  const res = await reschedulePickup("deal_1", SUN_2PM_CST, { now: NOW });
+  assert.equal(res.ok, false);
+  assert.deepEqual(revokeCalls, []);
+  assert.equal(updateCalls, 0);
 });

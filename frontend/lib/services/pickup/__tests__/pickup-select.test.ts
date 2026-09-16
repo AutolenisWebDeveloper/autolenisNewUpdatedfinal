@@ -20,7 +20,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Prisma } from "@prisma/client";
-import { PICKUP_SAFE_SELECT, PICKUP_SECRET_FIELDS } from "../pickup-select";
+import { PICKUP_SAFE_SELECT, PICKUP_SECRET_FIELDS, PICKUP_RETIRED_FIELDS } from "../pickup-select";
 
 function pickupScalarFields(): string[] {
   const model = Prisma.dmmf.datamodel.models.find((m) => m.name === "Pickup");
@@ -39,7 +39,9 @@ function pickupScalarFields(): string[] {
 }
 
 const published = Object.keys(PICKUP_SAFE_SELECT);
-const withheld = [...PICKUP_SECRET_FIELDS];
+const secret = [...PICKUP_SECRET_FIELDS] as string[];
+const retired = [...PICKUP_RETIRED_FIELDS] as string[];
+const withheld = [...secret, ...retired];
 
 test("the projection publishes something, and it is not the whole model", () => {
   assert.ok(published.length > 0);
@@ -54,7 +56,7 @@ test("published and withheld PARTITION every Pickup scalar — nothing unclassif
   assert.deepEqual(
     unclassified,
     [],
-    `these Pickup columns are neither published nor withheld: ${unclassified.join(", ")}. ` +
+    `these Pickup columns are in none of the three buckets: ${unclassified.join(", ")}. ` +
       "A new column is a decision about whether it may cross a network boundary — make it in " +
       "pickup-select.ts rather than defaulting it to hidden by omission.",
   );
@@ -63,9 +65,11 @@ test("published and withheld PARTITION every Pickup scalar — nothing unclassif
   assert.deepEqual(phantom, [], `classified but not on the model: ${phantom.join(", ")}`);
 });
 
-test("nothing is both published and withheld", () => {
-  const both = published.filter((f) => withheld.includes(f as (typeof PICKUP_SECRET_FIELDS)[number]));
-  assert.deepEqual(both, [], `contradictory classification: ${both.join(", ")}`);
+test("nothing is in two buckets at once", () => {
+  const both = published.filter((f) => withheld.includes(f));
+  assert.deepEqual(both, [], `published AND withheld: ${both.join(", ")}`);
+  const doubleWithheld = secret.filter((f) => retired.includes(f));
+  assert.deepEqual(doubleWithheld, [], `secret AND retired: ${doubleWithheld.join(", ")}`);
 });
 
 test("the token HASH is withheld — it is an offline oracle, not a harmless digest", () => {
@@ -74,18 +78,28 @@ test("the token HASH is withheld — it is an offline oracle, not a harmless dig
   // at memory speed, with no request to us, no rate limit and no log line. Hash-at-rest promises
   // a database read cannot recover the credential; a hash on an API response makes the database
   // read unnecessary.
-  assert.ok(withheld.includes("tokenHash"));
+  assert.ok(secret.includes("tokenHash"));
   assert.equal("tokenHash" in PICKUP_SAFE_SELECT, false);
 });
 
-test("the retired plaintext columns are withheld too", () => {
+test("the retired plaintext columns are withheld as SECRETS", () => {
   // Migration 20261201000000 clears `qr_code_data` and `qr_code_image` and no code writes them
   // any more — but "nothing writes it" is a claim about today's code, and this is a claim about
   // the wire. They stay classified until they are dropped.
   for (const f of ["qrCodeData", "qrCodeImage"]) {
-    assert.ok(withheld.includes(f as (typeof PICKUP_SECRET_FIELDS)[number]), `${f} must be withheld`);
+    assert.ok(secret.includes(f), `${f} must be withheld as a secret`);
     assert.equal(f in PICKUP_SAFE_SELECT, false, `${f} must not be published`);
   }
+});
+
+test("the writer-less column is withheld as RETIRED — the distinction is not cosmetic", () => {
+  // `qr_expires_at` is not a credential; it is a column nothing writes. Publishing it would put
+  // a value on the wire that is null on every new row and a stale expiry — disagreeing with
+  // `token_expires_at` — on any older one. Classifying it as a SECRET would tell the next reader
+  // it is dangerous rather than dead, and they would leave it in place for the wrong reason.
+  assert.deepEqual(retired, ["qrExpiresAt"]);
+  assert.equal("qrExpiresAt" in PICKUP_SAFE_SELECT, false);
+  assert.equal(secret.includes("qrExpiresAt"), false, "not a secret — just unwritten");
 });
 
 test("the token's STATE is published — a screen that cannot say 'expired' is worse than useless", () => {
