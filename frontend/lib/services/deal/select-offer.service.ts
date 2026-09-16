@@ -109,6 +109,34 @@ export async function commitOfferSelection(
     });
     if (!auction) return null;
 
+    // §13-D59 — ONE live Deal per Vehicle Request, checked INSIDE this transaction.
+    //
+    // Everything above is AUCTION-scoped: the `FOR UPDATE` locks the auction row, and the race
+    // re-check looks for an ACCEPTED offer on THAT auction. A Vehicle Request is one-to-many
+    // with both deals and auctions and `deals.vehicle_request_id` has no UNIQUE index, so two
+    // selections on one request — through two auctions — each produced a Deal, and nothing here
+    // noticed. The concierge path guards this (`respond/route.ts:71-86`) but from OUTSIDE its
+    // transaction; this path had no guard at all.
+    //
+    // It matters beyond tidiness: `upgrade-window.service.ts:113` closes the $400 Premium window
+    // on the REQUEST, which the owner ruled correct — §23.2 closes it because the request is
+    // ending. That makes a second deal on one request the defect, and this the place to refuse it.
+    //
+    // Null lineage is skipped deliberately: `Auction.vehicleRequestId` is nullable, and
+    // `findFirst({ vehicleRequestId: null })` would match the first lineage-less deal in the
+    // table and refuse every later selection.
+    //
+    // The durable fix is a partial unique index in the style of Phase 1's one-open-request index.
+    // It stays recorded in §13-D59 for Phase 10 rather than scoped mid-phase; this is the
+    // application guard alongside it.
+    if (auction.vehicleRequestId) {
+      const existingDeal = await tx.deal.findFirst({
+        where: { vehicleRequestId: auction.vehicleRequestId },
+        select: { id: true },
+      });
+      if (existingDeal) return null;
+    }
+
     const offer = await tx.offer.findFirst({
       // `status: SUBMITTED` as well as the auction binding: an ACCEPTED offer is caught by the
       // race check above, but a WITHDRAWN, DECLINED or EXPIRED one is not, and none of those is
