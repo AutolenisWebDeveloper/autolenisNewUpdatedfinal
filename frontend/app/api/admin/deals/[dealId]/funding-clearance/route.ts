@@ -3,7 +3,8 @@
 // GET  — the six-item clearance list, each item with its state and its OWNER. Read-only, so
 //        the admin screen, the buyer screen and the blocked notice all read the same
 //        evaluation rather than each deriving its own.
-// POST — record financing completion, or clear funding, or send the transaction back.
+// POST — record financing completion, record the clearance facts, clear funding, or send the
+//        transaction back.
 //
 // §13-D32, RULED: `finance.funding.clear` on the MONEY tier — SUPER_ADMIN and FINANCE_ADMIN.
 // Stage 14 says "an authorized Finance or Operations administrator", which describes who does
@@ -26,6 +27,7 @@ import { requirePermissionStrict } from "@/lib/auth/permissions";
 import {
   clearFunding,
   evaluateFundingClearance,
+  recordClearanceFacts,
   recordFinancingCompletion,
   sendBackForFinancingChange,
   FundingClearanceError,
@@ -52,6 +54,25 @@ const schema = z.discriminatedUnion("action", [
         vin: z.string().trim().max(32).optional(),
       })
       .optional(),
+  }),
+  z.object({
+    // P9-00. The writer for the three facts items 2-4 read. Phase 8 shipped the gate with no
+    // way to satisfy it: every reference to `lenderConditionsClearedAt`, `downPaymentMethod`
+    // and `dealerFundingConfirmedAt` was a read, so `funding_cleared_at` could never be
+    // stamped. Same permission, same reason bar — this records evidence, it does not override.
+    action: z.literal("RECORD_CLEARANCE_FACTS"),
+    reason: z.string().trim().min(10, "Reason must be at least 10 characters"),
+    // `.strict()` IS THE POINT, not tidiness. It refuses any field this schema does not name —
+    // in particular a caller-supplied timestamp. The caller states WHETHER a fact holds and
+    // the service stamps WHEN, so a clearance fact cannot be backdated through this route.
+    // The omission is load-bearing, so it is pinned by a test rather than left to convention.
+    facts: z
+      .object({
+        lenderConditionsCleared: z.boolean().optional(),
+        downPaymentMethod: z.string().trim().max(120).nullable().optional(),
+        dealerFundingConfirmed: z.boolean().optional(),
+      })
+      .strict(),
   }),
   z.object({
     action: z.literal("CLEAR_FUNDING"),
@@ -98,6 +119,17 @@ export async function POST(request: NextRequest, { params }: Props) {
         evidence: parsed.data.evidence,
       });
       return adminSuccess({ recorded: "FINANCING_COMPLETED" });
+    }
+
+    if (parsed.data.action === "RECORD_CLEARANCE_FACTS") {
+      const result = await recordClearanceFacts({
+        dealId,
+        actorId: admin.adminId,
+        actorEmail: admin.email,
+        reason: parsed.data.reason,
+        facts: parsed.data.facts,
+      });
+      return adminSuccess({ recorded: result.recorded });
     }
 
     if (parsed.data.action === "CLEAR_FUNDING") {
