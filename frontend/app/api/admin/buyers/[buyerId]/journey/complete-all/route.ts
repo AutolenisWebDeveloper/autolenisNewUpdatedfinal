@@ -10,6 +10,7 @@ import { PreQualTier } from "@prisma/client";
 import { z } from "zod";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { moveBuyerWorkflowStage } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { completeJourneyPickup } from "@/lib/services/pickup/pickup-completion.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
 const schema = z.object({ note: z.string().max(500).optional() });
@@ -143,23 +144,11 @@ export async function POST(request: NextRequest, { params }: Props) {
           }
           break;
 
+        // §8.2 defect (4) — see the sibling route. The one completion writer, gates included.
         case "pickup":
           if (activeDeal && activeDeal.status !== "COMPLETED") {
-            const existingPickup = await prisma.pickup.findUnique({
-              where: { dealId: activeDeal.id },
-              select: { id: true },
-            });
-            if (existingPickup) {
-              await prisma.pickup.update({
-                where: { dealId: activeDeal.id },
-                data: { status: "COMPLETED", completedAt: new Date() },
-              });
-            } else {
-              await prisma.pickup.create({
-                data: { dealId: activeDeal.id, status: "COMPLETED", completedAt: new Date() },
-              });
-            }
-            await advanceDeal("COMPLETED");
+            const completed = await completeJourneyPickup(activeDeal.id, adminId);
+            if (!completed.ok) return adminError(completed.code, completed.message, 409);
           }
           break;
       }
