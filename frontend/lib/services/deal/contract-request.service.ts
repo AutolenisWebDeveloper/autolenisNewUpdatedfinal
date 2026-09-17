@@ -44,6 +44,7 @@ import {
   renderInsuranceRequired,
 } from "@/lib/services/comms/phase8-email-content";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
+import type { TransactionActorRole } from "./transition-authority";
 
 /** §14a: "a secure upload request with a 24-hour deadline". */
 export const CONTRACT_REQUEST_WINDOW_HOURS = 24;
@@ -57,7 +58,7 @@ export interface OpenContractRequestResult {
 export async function openContractRequest(params: {
   dealId: string;
   actorId?: string;
-  actorRole?: string;
+  actorRole?: TransactionActorRole;
   now?: Date;
 }): Promise<OpenContractRequestResult> {
   const now = params.now ?? new Date();

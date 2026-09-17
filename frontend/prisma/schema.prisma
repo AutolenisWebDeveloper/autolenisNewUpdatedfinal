@@ -2013,6 +2013,11 @@ enum PickupStatus {
   // Phase 1 transaction spine (20261106000000_transaction_spine_enums).
   NO_SHOW
   RELEASED
+
+  // Phase 10 (20261215000000_phase10_cancellation_vocabulary). §24 — "pickup
+  // cancelled and release tokens revoked". Not NOT_SCHEDULED, which would erase the
+  // fact that an appointment existed, and not RESCHEDULED, which promises another.
+  CANCELLED
 }
 
 enum NotificationChannel {
@@ -6862,6 +6867,11 @@ enum AuctionInvitationStatus {
   OFFER_SUBMITTED
   EXPIRED
   REPLACED
+
+  // Phase 10 (20261215000000_phase10_cancellation_vocabulary). §24 — AutoLenis
+  // withdrew this invitation because the transaction was cancelled. Distinct from
+  // EXPIRED, which says the dealership let a deadline pass.
+  CANCELLED
 }
 
 enum AuctionVehicleCandidateStatus {

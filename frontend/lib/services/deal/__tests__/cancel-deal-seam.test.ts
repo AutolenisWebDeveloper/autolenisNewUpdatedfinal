@@ -58,6 +58,10 @@ mock.module("@/lib/prisma", {
       },
       dealStatusHistory: { create: async ({ data }: { data: Record<string, unknown> }) => { history.push(data); return data; } },
       buyerActivityEvent: { create: async ({ data }: { data: Record<string, unknown> }) => { activity.push(data); return data; } },
+      // PHASE 10 §28.3 #4 — the swap and its history row now commit together, so the
+      // mock models the interactive transaction. Same shape and same caveat as
+      // `advance-deal-status.test.ts`: it proves the call shape, not rollback.
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn((await import("@/lib/prisma")).prisma),
     },
   },
 });

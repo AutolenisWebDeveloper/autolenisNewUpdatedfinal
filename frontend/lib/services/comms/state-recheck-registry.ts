@@ -1319,3 +1319,43 @@ const skipIfPickupNoLongerAhead: StateRecheckFn = async (ctx) => {
 
 registerStateRecheck(PICKUP_REMINDER_TEMPLATES.APPOINTMENT_24H, skipIfPickupNoLongerAhead);
 registerStateRecheck(PICKUP_REMINDER_TEMPLATES.APPOINTMENT_2H, skipIfPickupNoLongerAhead);
+
+// ---------------------------------------------------------------------------
+// §8.3 — the communications register, as one table.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `template_key` this repository can enqueue, keyed by the registry constant
+ * that declares it.
+ *
+ * §8.3 makes Phase 10 assert "every `template_key` … in the register has at least
+ * one enqueue site". That assertion needs a register to read, and until now there
+ * were TEN separate constants and no way to ask the question without listing them
+ * by hand in the test — a list that would silently stop covering the eleventh.
+ * Declared here instead, beside the constants it aggregates, so a new registry is
+ * covered by adding it once, in the file a reader is already editing.
+ *
+ * The VALUES are what `comms_outbox.template_key` stores; the property NAMES are
+ * how call sites reference them (`PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED`). The
+ * completeness rule has to recognise both, which is why it needs the shape and not
+ * just the flat set of keys.
+ */
+export const COMMUNICATIONS_REGISTER = {
+  PHASE_2_TEMPLATES,
+  DEPOSIT_REMINDER_TEMPLATES,
+  INVENTORY_DEALER_TEMPLATES,
+  PHASE_5_TEMPLATES,
+  PHASE_6_TEMPLATES,
+  PHASE_7_TEMPLATES,
+  PHASE_8_TEMPLATES,
+  PHASE_9_TEMPLATES,
+  POST_COMPLETION_TEMPLATES,
+  PICKUP_REMINDER_TEMPLATES,
+} as const satisfies Record<string, Readonly<Record<string, string>>>;
+
+/** Every registered `template_key`, flattened. */
+export function allTemplateKeys(): string[] {
+  return Object.values(COMMUNICATIONS_REGISTER)
+    .flatMap((registry) => Object.values(registry as Record<string, string>))
+    .sort();
+}

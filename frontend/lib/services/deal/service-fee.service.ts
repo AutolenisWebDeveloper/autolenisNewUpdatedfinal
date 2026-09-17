@@ -257,6 +257,11 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
   await advanceDealStatus(dealId, "FEE_PAID", {
     actorRole: "SYSTEM",
     force: true,
+    // §28.3 #6, PHASE 10. This forced the transition with NO reason, so the
+    // `DealStatusHistory` row recorded an override and said nothing about why —
+    // which is the one thing an override's audit row exists to carry. §8.2 Phase 10
+    // defect (4): "force audited with a reason".
+    reason: "Concierge fee settled — payment receipt is an authoritative fact, so the ladder is forced past the ordering gates",
     // feeAmountCents = amount actually charged for the fee, which is the gross less
     // whatever $99 genuinely settled — $400 in the ordinary case and $499 where the
     // credit basis is broken. `ServiceFeePayment` above retains the full

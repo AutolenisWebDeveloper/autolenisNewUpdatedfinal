@@ -42,6 +42,7 @@ import {
   renderFundingCleared,
   renderPremiumElectionReverted,
 } from "@/lib/services/comms/phase8-email-content";
+import type { TransactionActorRole } from "./transition-authority";
 
 export type ClearanceOwner = "FINANCE" | "DEALERSHIP" | "BUYER" | "OPERATIONS";
 
@@ -438,7 +439,7 @@ export async function recordClearanceFacts(params: {
 export async function clearFunding(params: {
   dealId: string;
   actorId: string;
-  actorRole?: string;
+  actorRole?: TransactionActorRole;
   reason: string;
   now?: Date;
 }): Promise<{ cleared: boolean; outstanding: ClearanceItem[] }> {

@@ -1,0 +1,153 @@
+// §8.3 COMPLETENESS — every `template_key` in the register has at least one enqueue site.
+//
+// The `template_key` half of §8.3: "Phase 10 asserts completeness by a table-driven
+// test that every `template_key` and `exception_code` in the register has at least
+// one enqueue/raise site." The `exception_code` half is
+// `lib/services/operations/__tests__/exception-register-completeness.test.ts`.
+//
+// WHY THIS RULE CANNOT BE A LITERAL SCAN, unlike its exception sibling. An
+// exception code IS the literal a raise site writes (`code: "PAYMENT_FAILURE"`).
+// A template key is not: the register maps a CONSTANT to a value
+// (`REGISTRATION_SUBMITTED: "registration_submitted"`) and every enqueue site
+// references the constant (`PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED`), so the
+// value `"registration_submitted"` appears nowhere outside the registry. A literal
+// scan would report all 79 keys as unwired and be useless; a scan for the constant
+// NAME is what matches how the code is actually written.
+//
+// So a key counts as wired when EITHER
+//   · a property access `<SOMETHING>_TEMPLATES.<NAME>` names it, or
+//   · its literal value appears in code (a raw `templateKey: "…"`, which is legal
+//     and used by a few call sites).
+// Both are collected from the PARSED source, so a key named only in a comment
+// discharges nothing.
+//
+// THE RULE IS PROVED TO FAIL — see the last test, which seeds the removal of a key
+// that is wired today and asserts the checker reports it. A completeness gate that
+// cannot go red is the Phase 9 defect class exactly, and this is the gate that
+// decides whether §27.1 is finished.
+//
+// Run: pnpm test:comms-outbox
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import ts from "typescript";
+import { readFileSync } from "node:fs";
+import { sourceFiles, assertScanned } from "@/lib/testing/source-scan";
+import { COMMUNICATIONS_REGISTER, allTemplateKeys } from "@/lib/services/comms/state-recheck-registry";
+
+const ROOT = process.cwd();
+const ROOTS = ["app", "lib"] as const;
+
+/** The registry itself necessarily names every key; counting it would pass the rule vacuously. */
+const REGISTRY_FILE = "lib/services/comms/state-recheck-registry.ts";
+
+interface Observed {
+  /** Property names reached through a `*_TEMPLATES` identifier, e.g. `REGISTRATION_SUBMITTED`. */
+  readonly constants: Set<string>;
+  /** Raw string literals, for the call sites that pass a key directly. */
+  readonly literals: Set<string>;
+}
+
+function observe(): Observed {
+  const files = sourceFiles(ROOT, [...ROOTS]).filter((f) => f !== REGISTRY_FILE);
+  assertScanned(files, 800, "communications-register-completeness");
+
+  const constants = new Set<string>();
+  const literals = new Set<string>();
+
+  for (const file of files) {
+    const src = readFileSync(`${ROOT}/${file}`, "utf8");
+    // Cheap pre-filter: most files mention neither, and parsing ~1k files is the
+    // slow part of this rule.
+    if (!src.includes("_TEMPLATES") && !src.includes("templateKey") && !src.includes("template:")) continue;
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const walk = (node: ts.Node): void => {
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text.endsWith("_TEMPLATES")
+      ) {
+        constants.add(node.name.text);
+      }
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) literals.add(node.text);
+      ts.forEachChild(node, walk);
+    };
+    ts.forEachChild(sf, walk);
+  }
+
+  assert.ok(
+    constants.size > 0,
+    "no `*_TEMPLATES.<KEY>` property access was found anywhere outside the registry — the parse failed and this rule is blind"
+  );
+  return { constants, literals };
+}
+
+/** Registered keys with neither a constant reference nor a literal use. */
+function unwired(seen: Observed): string[] {
+  const missing: string[] = [];
+  for (const [registryName, registry] of Object.entries(COMMUNICATIONS_REGISTER)) {
+    for (const [constantName, key] of Object.entries(registry as Record<string, string>)) {
+      if (seen.constants.has(constantName)) continue;
+      if (seen.literals.has(key)) continue;
+      missing.push(`${registryName}.${constantName} (${key})`);
+    }
+  }
+  return missing.sort();
+}
+
+test("the register is non-empty and every key is distinct", () => {
+  const keys = allTemplateKeys();
+  assert.ok(keys.length >= 60, `the communications register holds only ${keys.length} keys — it has lost entries`);
+  assert.equal(
+    new Set(keys).size,
+    keys.length,
+    "two registry entries share a template_key. `comms_outbox.template_key` partitions the transactional rail from the CRM rail and identifies the message; a collision makes two different messages indistinguishable in the outbox."
+  );
+});
+
+test("§8.3 — every registered template_key has at least one enqueue site", () => {
+  const missing = unwired(observe());
+  assert.deepEqual(
+    missing,
+    [],
+    "§27 requires every transaction communication to dispatch through the durable outbox, and §8.3 makes " +
+      "Phase 10 assert that the register is fully wired. These keys are registered but nothing enqueues " +
+      "them — the register describes messages the system never sends. Enqueue them through " +
+      "enqueueTransactional(), or remove the registry entry with a recorded reason. " +
+      `Unwired: ${missing.join(", ")}`
+  );
+});
+
+test("the rule detects a real gap — proved against a seeded omission", () => {
+  const seen = observe();
+
+  const wiredConstants = Object.values(COMMUNICATIONS_REGISTER)
+    .flatMap((r) => Object.keys(r as Record<string, string>))
+    .filter((name) => seen.constants.has(name));
+  assert.ok(
+    wiredConstants.length > 0,
+    "no registered key has an enqueue site at all — the scan is broken and every assertion above is vacuous"
+  );
+
+  const victim = wiredConstants[0]!;
+  const seededConstants = new Set(seen.constants);
+  seededConstants.delete(victim);
+  // The victim's VALUE must go too, or a literal use would mask the seeded removal
+  // and the proof would pass without proving anything.
+  const victimKey = Object.values(COMMUNICATIONS_REGISTER)
+    .flatMap((r) => Object.entries(r as Record<string, string>))
+    .find(([name]) => name === victim)?.[1];
+  const seededLiterals = new Set(seen.literals);
+  if (victimKey) seededLiterals.delete(victimKey);
+
+  const reported = unwired({ constants: seededConstants, literals: seededLiterals });
+  assert.ok(
+    reported.some((entry) => entry.includes(victim)),
+    `seeding the removal of ${victim} did not make the checker report it — the rule cannot fail, so its passing means nothing`
+  );
+
+  assert.ok(
+    !unwired(seen).some((entry) => entry.includes(victim)),
+    `${victim} is reported as unwired even though it has an enqueue site — the checker reports indiscriminately`
+  );
+});

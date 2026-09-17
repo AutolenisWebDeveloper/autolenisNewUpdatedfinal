@@ -11,6 +11,7 @@ import { emitDealStatusComms } from "../notifications/acquisition-comms";
 import { emitDealCompletionEvent } from "./deal-completion-event.service";
 import { buyerEnvelopeSelect } from "@/lib/services/esign/esign-schema-gate";
 import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
+import { assertActorMayDrive, type TransactionActorRole } from "./transition-authority";
 
 // Valid forward state transitions. CANCELLED/REFUNDED are handled separately in
 // canTransition() because they are reachable from (almost) any state.
@@ -129,10 +130,50 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_READINESS"],
   PICKUP_READINESS: ["PICKUP_SCHEDULED"],
   HANDOVER_PENDING: ["COMPLETED"],
-  FROZEN_PENDING_RELEASE: [],
+  // §24, PHASE 10. `FROZEN_PENDING_RELEASE` is "a coordination state, not a cancellation" —
+  // AutoLenis cannot unilaterally void an executed dealership contract, so the transaction
+  // parks here while the documented release "or other resolution" is coordinated.
+  //
+  // THE EXITS ARE THE RESOLUTIONS, and there are two shapes. A documented release unwinds the
+  // transaction, which is CANCELLED/REFUNDED — handled in `canTransition` below with the other
+  // terminal edges. "Other resolution" means the deal RESUMES, and it resumes to where it was,
+  // which is why every state a freeze can be entered from appears here.
+  //
+  // The prior state is not guessed: `unfreezeDeal` reads the `deal_status_history` row that
+  // recorded the freeze and refuses any target other than its `fromStatus`. The map is the
+  // outer bound; the history is the exact answer. Keeping both means the table stays honest
+  // about what is reachable without pretending it knows which one applies.
+  FROZEN_PENDING_RELEASE: [
+    "DEALER_EXECUTED",
+    "RECAP_PENDING",
+    "FUNDING_PENDING",
+    "PICKUP_READINESS",
+    "PICKUP_SCHEDULED",
+    "HANDOVER_PENDING",
+  ],
 };
 
 const TERMINAL: DealStatus[] = [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED];
+
+/**
+ * States a deal can only be in once the dealership has executed the contract. §24's
+ * cancellation boundary, as a static over-approximation.
+ *
+ * `RECAP_PENDING` is deliberately ABSENT even though a recap revision happens after funding:
+ * it is also Stage 11, before execution, so no status list can separate the two cases. The
+ * authoritative test is the FACT — `dealerExecutedContractId` — checked in `advanceDealStatus`,
+ * which catches `RECAP_PENDING` and anything else a `force` may have moved. This list closes
+ * the cases a pure transition check CAN close, so a caller that never loads the deal still
+ * cannot route a post-execution cancellation through the table.
+ */
+const POST_EXECUTION_STATES: DealStatus[] = [
+  DealStatus.DEALER_EXECUTED,
+  DealStatus.FUNDING_PENDING,
+  DealStatus.PICKUP_READINESS,
+  DealStatus.PICKUP_SCHEDULED,
+  DealStatus.HANDOVER_PENDING,
+  DealStatus.PICKUP_COMPLETE,
+];
 
 // Insurance proof states that satisfy the RELEASE gate — the vehicle leaving the lot.
 // Must stay in sync with the UI "satisfied" set (AdminBuyerCommandCenter.tsx and
@@ -221,18 +262,75 @@ export class InsuranceRequiredError extends Error {
   }
 }
 
+/**
+ * §24 — a cancellation was attempted on a deal whose dealership contract is executed.
+ *
+ * Not a failure to be retried with `force`, and the message says so rather than
+ * leaving an operator to discover it: after execution the transaction is unwound by
+ * coordination, through `cancelTransaction`, which parks the deal at
+ * `FROZEN_PENDING_RELEASE` and opens the Operations case that runs the release.
+ *
+ * Separate from `DealTransitionError` because the two are answered differently. An
+ * illegal transition is "not from here, not yet". This is "not by us, not alone" —
+ * a second party has signed, and telling the caller to pass `force: true` would be
+ * telling them to void a contract they cannot void.
+ */
+export class ContractExecutedError extends Error {
+  code = "CONTRACT_EXECUTED";
+  constructor(public readonly dealId: string) {
+    super(
+      "The dealership has fully executed this contract, so AutoLenis cannot cancel it unilaterally (§24). " +
+        "Use cancelTransaction(), which moves the deal to FROZEN_PENDING_RELEASE and opens the coordinated " +
+        "release with the buyer and the dealership.",
+    );
+    this.name = "ContractExecutedError";
+  }
+}
+
 export function canTransition(from: DealStatus, to: DealStatus): boolean {
   if (from === to) return false;
-  // Cancellation is allowed from any non-terminal state.
-  if (to === DealStatus.CANCELLED) return !TERMINAL.includes(from);
-  // Refund is allowed from CANCELLED, or directly from any non-terminal state.
+  // §24, PHASE 10 — THE EXECUTION BOUNDARY. Cancellation used to be legal from any
+  // non-terminal state, which included SIGNED, DEALER_EXECUTED and PICKUP_SCHEDULED:
+  // a deal whose dealership contract was fully executed could be unilaterally voided
+  // by moving its status column. §24 forbids exactly that — "AutoLenis cannot
+  // unilaterally void it. The Deal moves to FROZEN_PENDING_RELEASE while AutoLenis
+  // coordinates the buyer's and dealership's documented release."
+  //
+  // A REMOVED EDGE, RECORDED AS ONE. `POST_EXECUTION_STATES → CANCELLED` is gone and
+  // the capability MOVED rather than disappearing: the same request now reaches
+  // `FROZEN_PENDING_RELEASE` through `cancelTransaction`, and the unwind ends in
+  // CANCELLED once it is documented. What is no longer possible is reaching CANCELLED
+  // *without* that coordination.
+  //
+  // This is the half a pure function can enforce. The other half is the FACT —
+  // `dealerExecutedContractId` — checked in `advanceDealStatus`, because a deal at
+  // `RECAP_PENDING` may be either side of execution and only the row can say which.
+  if (to === DealStatus.CANCELLED) {
+    return !TERMINAL.includes(from) && !POST_EXECUTION_STATES.includes(from);
+  }
+  // Refund is allowed from CANCELLED, or directly from any non-terminal state. Left
+  // as it was: a refund is money returning, and it is Finance's to make on a frozen
+  // deal as much as on a cancelled one.
   if (to === DealStatus.REFUNDED) return from === DealStatus.CANCELLED || !TERMINAL.includes(from);
+  // §24's coordination state is entered from any non-terminal state, like the
+  // terminal edges above and for the same reason: the condition that sends a deal
+  // there is a fact about the contract, not about where the deal sits.
+  if (to === DealStatus.FROZEN_PENDING_RELEASE) return !TERMINAL.includes(from);
   return TRANSITIONS[from]?.includes(to) ?? false;
 }
 
 interface AdvanceOptions {
   actorId?: string;
-  actorRole?: string;
+  /**
+   * §28.3 #1 + #6. Typed, not free-form.
+   *
+   * This was `string`, and the drift was already in the tree: eleven call sites
+   * passing `"BUYER"` and one passing `"buyer"`. A column recording the actor in two
+   * spellings satisfies "the actor is recorded" and defeats every question anyone
+   * would ask of it. Narrowing it also lets `DEAL_TRANSITION_ACTORS` refuse a
+   * transition the actor is not entitled to make — see `transition-authority.ts`.
+   */
+  actorRole?: TransactionActorRole;
   reason?: string;
   /** Bypass the transition + insurance guards (intentional admin override). Still audit-logged. */
   force?: boolean;
@@ -351,6 +449,42 @@ export function assertReleaseGates(deal: {
   }
 }
 
+/**
+ * Transitions whose reason a caller must supply, because no derivation would be honest.
+ *
+ * §24 names one of them explicitly — cancellation "requires an authorized actor, a
+ * required reason". The others are the same shape: ending or freezing a transaction,
+ * returning money, or overriding the transition table are all acts whose *why* is the
+ * only thing the history row can usefully carry. "SIGNED → DEALER_EXECUTED" explains
+ * itself; "PICKUP_SCHEDULED → FROZEN_PENDING_RELEASE" does not.
+ *
+ * Every other transition gets a derived reason rather than `null`, so §28.3 #6's
+ * "reason recorded" is true of every row instead of true of some.
+ */
+const REASON_REQUIRED: DealStatus[] = [
+  DealStatus.CANCELLED,
+  DealStatus.REFUNDED,
+  DealStatus.FROZEN_PENDING_RELEASE,
+];
+
+export class TransitionReasonRequiredError extends Error {
+  code = "REASON_REQUIRED";
+  constructor(public readonly to: DealStatus) {
+    super(
+      `Moving a deal to ${to} requires an explicit reason (§24, §28.3 #6). A derived reason would record ` +
+        `that the transition happened and nothing about why, which is the half that matters here.`,
+    );
+    this.name = "TransitionReasonRequiredError";
+  }
+}
+
+function transitionReason(from: DealStatus, to: DealStatus, opts: AdvanceOptions): string {
+  const given = opts.reason?.trim();
+  if (given) return opts.force ? `${given} (force override)` : given;
+  if (REASON_REQUIRED.includes(to) || opts.force) throw new TransitionReasonRequiredError(to);
+  return `${from} → ${to}`;
+}
+
 export async function advanceDealStatus(
   dealId: string,
   newStatus: DealStatus,
@@ -375,6 +509,35 @@ export async function advanceDealStatus(
   // state. Checked here AND on the post-race re-resolve below, so a deal that moved
   // on under us is never dragged backwards into `newStatus`.
   if (opts.expectedFrom && deal.status !== opts.expectedFrom) return false;
+
+  // §28.3 #1 — AUTHORIZATION. Who may drive this transition, checked against the
+  // matrix rather than against whichever surface happens to be calling.
+  //
+  // NOT relaxed by `force`. `force` overrides the ORDER of the transition table; it
+  // is not a statement that a different party may act. A forced completion driven by
+  // a dealership would be precisely what §Stage 19 forbids — "the Deal never
+  // completes automatically on the dealer's word alone" — reached through the
+  // override instead of through an edge, which is the shape Phase 9 had to close
+  // twice.
+  //
+  // Defaulting an absent role to SYSTEM keeps every existing caller working: an
+  // unattributed advance is the platform's, which is what it already meant.
+  assertActorMayDrive(opts.actorRole ?? "SYSTEM", newStatus);
+
+  // §24 — THE EXECUTION BOUNDARY, AS A FACT. `canTransition` refuses CANCELLED from
+  // the post-execution STATUSES, which is all a pure function can see. This is the
+  // other half: a deal whose dealership contract is on file cannot be cancelled from
+  // ANY status, including `RECAP_PENDING`, which sits on both sides of execution and
+  // therefore cannot be judged by its name.
+  //
+  // Checked before the force-aware transition guard below because `force` must not
+  // reach it. §24 is not an ordering constraint — it is a statement that the
+  // contract exists and one party cannot void it alone. The owner ruled the same
+  // distinction on 2026-09-15 for the release gates: force may skip an ORDERING
+  // constraint, never a FACT.
+  if (newStatus === DealStatus.CANCELLED && deal.dealerExecutedContractId) {
+    throw new ContractExecutedError(dealId);
+  }
 
   // NOT CONDITIONED ON `!opts.force`, AND THAT — not its position — is what makes it terminal.
   //
@@ -412,10 +575,45 @@ export async function advanceDealStatus(
   // completion event) runs for the WINNING transition only. Autopilot fires the
   // same transition from a webhook, a cron reconciler, and an admin action; this
   // is what keeps "COMPLETED" (and every other advance) idempotent under replay.
-  const swap = await prisma.deal.updateMany({
-    where: { id: dealId, status: deal.status },
-    data: { status: newStatus, ...(opts.data ?? {}) },
+  // §28.3 #4 (ATOMICITY) and #6 (AUDIT) — THE SWAP AND ITS HISTORY ROW NOW COMMIT TOGETHER.
+  //
+  // They did not. The CAS ran on the bare client and the `DealStatusHistory` write followed it
+  // outside any transaction, ending `.catch(() => {})` — so a failed history write left the deal
+  // moved and the move unrecorded, silently. For a cancellation that is §24's "full history
+  // preserved" quietly not happening; for any transition it is §28.3 #6 recording nothing while
+  // reporting success.
+  //
+  // Inside one transaction the failure mode inverts, which is the correct direction: if the
+  // history cannot be written the status change rolls back, and the caller gets an error. A
+  // transition nobody can account for is worse than a transition that did not happen.
+  //
+  // The lost-race path still returns rather than throwing, and still re-resolves OUTSIDE this
+  // transaction — recursing inside it would hold the row for the whole retry.
+  // Resolved BEFORE the transaction opens: a missing required reason is a caller
+  // error, and discovering it mid-transaction would mean opening one, writing the
+  // status, and rolling it back to say so.
+  const reason = transitionReason(deal.status, newStatus, opts);
+
+  const swap = await prisma.$transaction(async (tx) => {
+    const res = await tx.deal.updateMany({
+      where: { id: dealId, status: deal.status },
+      data: { status: newStatus, ...(opts.data ?? {}) },
+    });
+    if (res.count === 0) return { count: 0 as const };
+
+    await tx.dealStatusHistory.create({
+      data: {
+        dealId,
+        fromStatus: deal.status,
+        toStatus: newStatus,
+        actorId: opts.actorId ?? null,
+        actorRole: opts.actorRole ?? "SYSTEM",
+        reason,
+      },
+    });
+    return { count: 1 as const };
   });
+
   if (swap.count === 0) {
     // Another writer moved the deal between our read and our write. The winner's
     // arrival hooks can carry it SEVERAL hops (fee ladder → insurance gate), so the
@@ -430,17 +628,6 @@ export async function advanceDealStatus(
     if (!opts.force && !canTransition(fresh.status, newStatus)) return false;
     return advanceDealStatus(dealId, newStatus, opts);
   }
-
-  await prisma.dealStatusHistory.create({
-    data: {
-      dealId,
-      fromStatus: deal.status,
-      toStatus: newStatus,
-      actorId: opts.actorId ?? null,
-      actorRole: opts.actorRole ?? null,
-      reason: opts.reason ?? (opts.force ? "force override" : null),
-    },
-  }).catch(() => {});
 
   // Log activity
   await prisma.buyerActivityEvent.create({
@@ -595,7 +782,7 @@ async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: Adva
  */
 export async function settleFeeLadderIfPaid(
   dealId: string,
-  opts: { actorId?: string; actorRole?: string } = {},
+  opts: { actorId?: string; actorRole?: TransactionActorRole } = {},
 ): Promise<boolean> {
   try {
     const deal = await prisma.deal.findUnique({
@@ -650,7 +837,7 @@ export async function settleFeeLadderIfPaid(
  */
 export async function advanceOnInsuranceSatisfied(
   dealId: string,
-  opts: { actorId?: string; actorRole?: string } = {},
+  opts: { actorId?: string; actorRole?: TransactionActorRole } = {},
 ): Promise<boolean> {
   try {
     const deal = await prisma.deal.findUnique({
@@ -698,7 +885,7 @@ export async function getDealForBuyer(buyerId: string, dealId?: string) {
 /** Who cancelled. Defaults to SYSTEM so automated callers read unchanged. */
 export interface CancelActor {
   actorId?: string | null;
-  actorRole?: string | null;
+  actorRole?: TransactionActorRole | null;
 }
 
 /**
@@ -724,11 +911,26 @@ export async function cancelDeal(
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (!deal) throw new Error("Deal not found");
 
+  // NO LONGER `force: true` — PHASE 10, §24.
+  //
+  // The force was load-bearing only while `canTransition` allowed CANCELLED from
+  // every non-terminal state, which made it redundant anyway. Now that the
+  // transition table enforces §24's execution boundary, a force here would step
+  // straight over the rule this phase exists to add: it would let the generic cancel
+  // path void a deal whose dealership contract is executed, which is the single
+  // thing §24 says AutoLenis cannot do.
+  //
+  // The fact-check inside `advanceDealStatus` already refuses that case with
+  // `ContractExecutedError` regardless of `force`, so removing the flag is not what
+  // closes the hole — but leaving it would mean the table said one thing and this
+  // caller quietly did another, and the next reader would have to know which guard
+  // was the real one. A post-execution cancellation now throws here and is routed to
+  // `FROZEN_PENDING_RELEASE` by `cancelTransaction`, which is where that decision
+  // belongs.
   const cancelled = await advanceDealStatus(dealId, DealStatus.CANCELLED, {
     reason,
     actorId: actor.actorId ?? undefined,
     actorRole: actor.actorRole ?? "SYSTEM",
-    force: true,
     expectedFrom: deal.status,
   });
 

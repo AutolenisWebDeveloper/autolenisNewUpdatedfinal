@@ -109,3 +109,36 @@ export function assertScanned(files: readonly string[], minimum: number, what: s
 export function format(hits: readonly Hit[]): string[] {
   return hits.map((h) => `${h.file}:${h.line}`);
 }
+
+/**
+ * Every string literal that appears in the CODE of `files`, as a set.
+ *
+ * Parsed rather than grepped, and that is the whole reason this exists. The §8.3
+ * completeness rules ask whether a registered `exception_code` or `template_key`
+ * has a real raise/enqueue site — and a code named only in a comment, a doc block
+ * or a `// TODO: wire X` is exactly the false pass that would make those rules
+ * report a register as complete while nothing raises it. `ts.forEachChild` never
+ * descends into trivia, so a mention in prose cannot satisfy the rule.
+ *
+ * Template literals with no substitution count (they are ordinary strings); ones
+ * with substitution deliberately do not, because `\`${prefix}_FAILED\`` is not a
+ * literal any register can be matched against.
+ */
+export function stringLiterals(repoRoot: string, files: readonly string[]): Set<string> {
+  // Imported lazily so `source-scan` stays usable by rules that do not need the
+  // compiler — it is a heavyweight dependency to pull into every guard.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ts = require("typescript") as typeof import("typescript");
+  const out = new Set<string>();
+
+  for (const file of files) {
+    const src = read(repoRoot, file);
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const walk = (node: import("typescript").Node): void => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) out.add(node.text);
+      ts.forEachChild(node, walk);
+    };
+    ts.forEachChild(sf, walk);
+  }
+  return out;
+}

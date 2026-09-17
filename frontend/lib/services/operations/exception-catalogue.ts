@@ -894,6 +894,71 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     raisedByPhase: 2,
     specSection: "§7.2 (iv); rule 16",
   },
+
+  {
+    code: "COMMS_GUARD_UNAVAILABLE",
+    type: "COMMS_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "A transaction message could not be sent because its idempotency guard was unavailable",
+    requiredResult:
+      "Restore the guard, then re-drive the named message; it was refused rather than sent unguarded",
+    // Null by design. The buyer is not owed a notice saying a notice failed — they
+    // are owed the notice. Surfacing this would replace a missing message with a
+    // confusing one.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Check that the idempotency guard's backing store is reachable and its configuration is present, then re-drive the transition named in the detail. The message was NOT sent, so re-driving cannot duplicate it.",
+    deadlineHours: 4,
+    returnPoint: "§27 — the deal-status transition that produced the message",
+    raisedByPhase: 10,
+    specSection: "§27; §28.3 #5, #8",
+  },
+
+  // ── Phase 10, §24 — the two cases the cancellation orchestration opens ──────
+  //
+  // Both are stated OUTSIDE §26's table, like COMMS_TERMINAL_FAILURE (§27) and
+  // LINEAGE_ORPHAN (§3) above, and catalogued here for the same reason: a code with
+  // no register entry has no owner, no deadline and no buyer-visible status, which is
+  // precisely what §26 exists to guarantee every exception has.
+  {
+    code: "DEAL_FROZEN_PENDING_RELEASE",
+    type: "DEAL_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Transaction cancelled after the dealership executed the contract",
+    requiredResult:
+      "Coordinate the buyer's and dealership's documented release, or another resolution; the Deal is frozen, not cancelled",
+    // §24 calls this "a coordination state, not a cancellation", and the buyer copy
+    // has to carry that difference. Telling a buyer their deal is cancelled when a
+    // dealership holds an executed contract would be false, and telling them nothing
+    // leaves them watching a deal that has visibly stopped.
+    buyerVisibleStatus:
+      "Your purchase is on hold while we agree a release with the dealership. Your deal is not cancelled and nothing further is owed while this is open.",
+    requiredAction:
+      "Contact the dealership and the buyer, obtain a documented release or agree another resolution, then either complete the unwind (CANCELLED/REFUNDED) or resume the deal to the stage it was frozen from. AutoLenis cannot void an executed contract unilaterally (§24).",
+    deadlineHours: 72,
+    returnPoint: "§24 — the stage recorded on the freeze, from deal_status_history",
+    raisedByPhase: 10,
+    specSection: "§24",
+  },
+  {
+    code: "CANCELLATION_CLEANUP_INCOMPLETE",
+    type: "DEAL_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "A cancellation stop did not complete",
+    requiredResult:
+      "Finish the named stop by hand; the transaction is cancelled but something it should have stopped is still live",
+    // Deliberately null. The buyer's transaction IS cancelled — the failure is on
+    // AutoLenis's side of the boundary, and surfacing "one of our cleanup steps
+    // failed" would alarm without giving them anything to do. §26 permits a null
+    // where the row is an infrastructure condition, and this is one.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Read the stops listed in the detail and complete each by hand — a live e-sign envelope, an un-revoked release token, an open invitation or a pending outbox row. Each names its own subsystem.",
+    deadlineHours: 24,
+    returnPoint: "§24 — re-run the failed stop; the orchestration is idempotent",
+    raisedByPhase: 10,
+    specSection: "§24; §28.3 #8",
+  },
 ] as const;
 
 /** Every catalogued exception code. */

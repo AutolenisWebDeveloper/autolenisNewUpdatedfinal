@@ -27,6 +27,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { INSURANCE_SATISFIED } from "@/lib/services/deal/deal.service";
+import type { TransactionActorRole } from "@/lib/services/deal/transition-authority";
 
 /** Same four parties as Stage 14's clearance list — one vocabulary across both checklists. */
 export type ReadinessOwner = "FINANCE" | "DEALERSHIP" | "BUYER" | "OPERATIONS";
@@ -283,7 +284,7 @@ export const STAGE_16_ITEM_COUNT = 13;
  */
 export async function enterPickupReadiness(
   dealId: string,
-  actor: { actorId?: string | null; actorRole?: string } = {},
+  actor: { actorId?: string | null; actorRole?: TransactionActorRole } = {},
 ): Promise<{ evaluation: ReadinessEvaluation; entered: boolean; schedulable: boolean }> {
   const evaluation = await evaluatePickupReadiness(dealId);
 

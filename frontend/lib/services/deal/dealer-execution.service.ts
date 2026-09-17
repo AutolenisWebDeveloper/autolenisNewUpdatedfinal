@@ -49,6 +49,7 @@ import {
   renderDealerExecutionRequested,
   renderExecutedContractStored,
 } from "@/lib/services/comms/phase8-email-content";
+import type { TransactionActorRole } from "./transition-authority";
 
 export class DealerExecutionError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -134,7 +135,7 @@ export async function recordDealerExecution(params: {
   dealId: string;
   executedDocumentUrl: string;
   actorId: string;
-  actorRole?: string;
+  actorRole?: TransactionActorRole;
   now?: Date;
 }): Promise<RecordExecutionResult> {
   const now = params.now ?? new Date();

@@ -883,17 +883,31 @@ export async function pauseBuyerWorkflow(
   auctionId: string,
   reason: string
 ) {
-  // Pausing workflow = setting auction to CANCELLED (temporarily)
-  // Only ACTIVE auctions can be paused
-  const auction = await prisma.auction.findFirst({
+  // PHASE 10 — TWO DEFECTS, ONE OF THEM LIVE.
+  //
+  // (1) PAUSE WAS NOT REVERSIBLE. This wrote `CANCELLED`, and `resumeBuyerWorkflow`
+  //     below looks for `status: "PENDING"` and throws "No pending auction found"
+  //     otherwise. So every paused auction was unresumable through the pair that
+  //     exists to pause and resume it, and the only way back was a manual status
+  //     write. The comment said "(temporarily)" and nothing made that true.
+  //
+  //     PENDING is what a paused auction IS: the auction exists, it is not running,
+  //     and `resume` already knows how to start it. CANCELLED is a terminal
+  //     judgement about the transaction, which is §24's word, not this one's — and
+  //     conflating an operational pause with a cancellation is exactly the
+  //     vocabulary collapse §24's orchestration exists to undo.
+  //
+  // (2) THE WRITE WAS UNCONDITIONAL — §28.3 #3. The read above filtered on
+  //     `status: "ACTIVE"` and the update named only the id, so two admins acting at
+  //     once, or an auction that closed between the read and the write, both ended
+  //     with the later write silently winning over a status nobody had observed. The
+  //     guard now carries the observed status, and a count of zero means someone else
+  //     moved it — reported, not overwritten.
+  const paused = await prisma.auction.updateMany({
     where: { id: auctionId, buyerId, status: "ACTIVE" },
+    data: { status: "PENDING" },
   });
-  if (!auction) throw new Error("No active auction found for this buyer");
-
-  await prisma.auction.update({
-    where: { id: auctionId },
-    data: { status: "CANCELLED" },
-  });
+  if (paused.count === 0) throw new Error("No active auction found for this buyer");
 
   await prisma.adminAuditLog.create({
     data: {
@@ -917,15 +931,14 @@ export async function resumeBuyerWorkflow(
   auctionId: string,
   reason: string
 ) {
-  const auction = await prisma.auction.findFirst({
+  // §28.3 #3, the same read-then-write as `pauseBuyerWorkflow` above and fixed the
+  // same way: the observed status moves into the guard, so a concurrent launch or
+  // close cannot be overwritten by a resume that never saw it.
+  const resumed = await prisma.auction.updateMany({
     where: { id: auctionId, buyerId, status: "PENDING" },
-  });
-  if (!auction) throw new Error("No pending auction found for this buyer");
-
-  await prisma.auction.update({
-    where: { id: auctionId },
     data: { status: "ACTIVE", startedAt: new Date() },
   });
+  if (resumed.count === 0) throw new Error("No pending auction found for this buyer");
 
   await prisma.adminAuditLog.create({
     data: {

@@ -23,6 +23,7 @@ import { logger } from "@/lib/logger";
 import { checkPickupTime } from "./availability.service";
 import { PICKUP_SAFE_SELECT, type SafePickup } from "./pickup-select";
 import { advanceDealStatus } from "../deal/deal.service";
+import type { TransactionActorRole } from "@/lib/services/deal/transition-authority";
 import {
   createNotificationOnce,
   notifyDealerProposed,
@@ -283,7 +284,7 @@ export async function proposePickup(
 async function readinessGate(
   dealId: string,
   actorId: string | null,
-  actorRole: string,
+  actorRole: TransactionActorRole,
 ): Promise<CoordResult | null> {
   const readiness = await enterPickupReadiness(dealId, { actorId, actorRole });
   if (readiness.schedulable) return null;

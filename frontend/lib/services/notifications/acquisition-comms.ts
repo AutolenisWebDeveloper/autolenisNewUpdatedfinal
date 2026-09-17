@@ -372,7 +372,7 @@ export type SmsOutcome =
   | "disabled";
 
 export interface EmitResult {
-  status: "sent" | "deduped" | "skipped" | "no_buyer";
+  status: "sent" | "deduped" | "skipped" | "no_buyer" | "guard_unavailable";
   inApp: boolean;
   sms: SmsOutcome;
 }
@@ -415,19 +415,47 @@ export async function emitDealStatusComms(
     const buyerId = deal.buyerId;
     const buyer = deal.buyer;
 
-    // ── Event-level idempotency latch (shared idempotency_keys guard) ──────────
-    // Fail-open + log on guard errors, mirroring the transactional-email plane's
-    // documented choice: a missing latch must not silence a real notification.
+    // ── Event-level idempotency latch — §8.2 Phase 10 defect (5) ───────────────
+    //
+    // THIS WAS FAIL-OPEN IN THREE PLACES, not the two the defect list names:
+    //
+    //   1. `if (guardSupabase)` — when `getGuardSupabase()` returned null (either
+    //      required env name unset, or the import threw) the ENTIRE latch was skipped
+    //      with no log and no signal. Not a degraded guard: no guard at all, silently.
+    //   2. the `catch` below it, which logged "proceeding" and sent anyway.
+    //   3. the terminal-outcome write further down, same shape.
+    //
+    // The old comment justified (2) as "a missing latch must not silence a real
+    // notification", and that trade was defensible when nothing else deduplicated.
+    // §27 removes the premise: "All transactional email, SMS, and in-app notices
+    // dispatch through the durable outbox with … an idempotency key", and
+    // `comms_outbox.dedup_key` is a UNIQUE constraint — dedup enforced by the
+    // database, which cannot fail open. §8.2 says this guard is "superseded by the
+    // outbox `dedup_key`".
+    //
+    // WHAT CHANGES HERE, AND WHAT DOES NOT. This path still sends in-app and SMS
+    // directly rather than through the dispatcher — moving it is the remaining half
+    // and is recorded as such in §8.1j. What changes is the failure direction: a
+    // guard that cannot be consulted now REFUSES and raises a COMMS_EXCEPTION, so an
+    // unguarded send becomes an Operations case instead of a duplicate a buyer
+    // receives twice with nothing recorded. §28.3 #8 — every failure has an owner
+    // and a return path — and the return path is that the exception carries the key,
+    // so the send can be re-driven once the guard is back.
     const key = dealCommsIdempotencyKey(dealId, status, buyerId);
     const guardSupabase = await getGuardSupabase();
-    if (guardSupabase) {
-      try {
-        const { acquireIdempotencyGuard } = await import("@/lib/jobs/idempotency");
-        const claimed = await acquireIdempotencyGuard(guardSupabase, key);
-        if (!claimed) return { status: "deduped", inApp: false, sms: "disabled" };
-      } catch (err) {
-        logger.error("[acq-comms] idempotency guard failed — proceeding:", err);
-      }
+    if (!guardSupabase) {
+      await raiseCommsGuardException(dealId, buyerId, key, "the idempotency guard is not configured");
+      return { status: "guard_unavailable", inApp: false, sms: "disabled" };
+    }
+    try {
+      const { acquireIdempotencyGuard } = await import("@/lib/jobs/idempotency");
+      const claimed = await acquireIdempotencyGuard(guardSupabase, key);
+      if (!claimed) return { status: "deduped", inApp: false, sms: "disabled" };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      logger.error("[acq-comms] idempotency guard failed — refusing to send unguarded", { key, detail });
+      await raiseCommsGuardException(dealId, buyerId, key, detail);
+      return { status: "guard_unavailable", inApp: false, sms: "disabled" };
     }
 
     // ── Channel eligibility ───────────────────────────────────────────────────
@@ -482,18 +510,31 @@ export async function emitDealStatusComms(
     }
 
     // ── Record terminal outcome on the idempotency ledger ──────────────────────
-    if (guardSupabase) {
-      try {
-        const { updateIdempotencyState } = await import("@/lib/jobs/idempotency");
-        await updateIdempotencyState(guardSupabase, key, "completed", {
-          dealId,
-          dealStatus: status,
-          inApp: channels.inApp,
-          sms: smsOutcome,
-        });
-      } catch {
-        /* ledger update is best-effort */
-      }
+    //
+    // The THIRD fail-open of §8.2 defect (5), and the only one that stays best-effort
+    // — deliberately, with the reason stated rather than an empty `catch`.
+    //
+    // The latch was CLAIMED above; this write only annotates it with the outcome. A
+    // failure here cannot cause a duplicate send, because the claim already holds the
+    // key. Refusing the send at this point would mean discarding a message that has
+    // ALREADY gone out, which is strictly worse than an un-annotated ledger row.
+    //
+    // What changes is that it is no longer silent: an empty `catch` block left a
+    // ledger entry stuck at its claimed state with nothing anywhere saying so.
+    try {
+      const { updateIdempotencyState } = await import("@/lib/jobs/idempotency");
+      await updateIdempotencyState(guardSupabase, key, "completed", {
+        dealId,
+        dealStatus: status,
+        inApp: channels.inApp,
+        sms: smsOutcome,
+      });
+    } catch (err) {
+      logger.error("[acq-comms] idempotency ledger annotation failed — the message WAS sent", {
+        key,
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     return { status: "sent", inApp: channels.inApp, sms: smsOutcome };
@@ -502,6 +543,40 @@ export async function emitDealStatusComms(
     // state transition.
     logger.error("[acq-comms] emitDealStatusComms failed:", err);
     return { status: "skipped", inApp: false, sms: "failed" };
+  }
+}
+
+/**
+ * §28.3 #8 — an unguarded comms path gets an owner and a return path.
+ *
+ * Raised when the idempotency latch cannot be consulted at all. `COMMS_EXCEPTION` is
+ * the §26 bucket; the code is the catalogued `COMMS_NO_DELIVERABLE_CHANNEL` sibling
+ * for a guard fault, and the detail carries the key so the send can be re-driven by
+ * hand once the guard is back.
+ *
+ * Never throws. This is the failure handler; a failure inside it must not replace the
+ * original fault with a less useful one.
+ */
+async function raiseCommsGuardException(
+  dealId: string,
+  buyerId: string,
+  key: string,
+  detail: string,
+): Promise<void> {
+  try {
+    const { raiseException } = await import("@/lib/services/operations/queue-item.service");
+    await raiseException({
+      code: "COMMS_GUARD_UNAVAILABLE",
+      dealId,
+      buyerId,
+      detail: `${detail}. Idempotency key: ${key}. The message was NOT sent.`,
+      idempotencyKey: `COMMS_GUARD_UNAVAILABLE:${key}`,
+    });
+  } catch (err) {
+    logger.error("[acq-comms] could not raise the guard-unavailable exception", {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
