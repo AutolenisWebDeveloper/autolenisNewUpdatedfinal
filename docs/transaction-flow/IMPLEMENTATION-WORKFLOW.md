@@ -2969,6 +2969,115 @@ The remaining six were resolved as proposed and are recorded here as **stated as
 - **The duplicate-hash assertion in `verify.sql`** read 0 of 0 on the proof fixture — falsifiable in
   principle, not falsified there. Stated rather than glossed.
 
+### 8.1j Phase 10 — AS BUILT (2026-09-17)
+
+Implemented on `claude/txflow-10-control-plane` from `8f58a151`. **INCOMPLETE AS OF THIS WRITING** —
+the two §8.3 completeness gates are RED BY DESIGN and name what is left. This section records what
+was actually built, what was measured rather than recalled, and what is not done, because a section
+that described the plan would be the drift it exists to prevent.
+
+#### The two owner rulings this phase turns on
+
+**§13-D14 is UNSATISFIED, and the §8.2 rollback sentence was CORRECTED rather than inherited.** The
+counter was read from the right table for the first time (owner-run census, 2026-09-17 17:00 UTC):
+12 rows, every one `DIRECT_TRANSACTIONAL_SEND`, the most recent 3.2 days old; `QSTASH_PRODUCER` 0
+and never fired. An earlier reading of 0 came from `admin_audit_logs`, a DIFFERENT table from the
+`audit_logs` that `recordLegacyPathWrite` writes — structurally always empty for that label, so it
+reads as a clean zero for ever. **Zero-by-disuse and zero-by-retirement are different facts and
+only one satisfies D14.** This phase therefore DELETES NOTHING. Full detail in the §13-D14 row and
+in §8.2 Phase 10's Rollback.
+
+**The direct-send allowlist target is "zero §27.1 transactional traffic", not literal zero** — ruled
+by the owner at STOP 1. `comms-providers.ts` and `resend.service.ts` are the §27 rail itself and
+cannot scan clean by construction; `twilio-verify.ts`, `call-transfer.service.ts` and
+`handle-turn.ts` are real-time voice, and an OTP that waits for a drain is not an OTP. **The
+reclassification and its test change are NOT DONE** — see *Not done* below.
+
+#### §27.1 is 77 rows, not 76
+
+Counted, not recalled: 79 pipe lines between the header and §28, minus header and separator, all
+distinct events, no duplicates. Corrected in **both** places the document said otherwise — §8.1 row
+10 and §8.3.
+
+#### What was built
+
+- **§24, one cancellation orchestration** — `lib/services/transaction/cancellation.service.ts`. It
+  COMPOSES the stops that already existed and that nothing called from a cancellation:
+  `voidEnvelopeInternal`, `revokeReleaseToken` (whose own docstring already named "Phase 10's
+  cancellation orchestration" as its intended caller), `cancelByKey`, `transitionCase` → CLOSED,
+  the auction and invitation writes, the pickup, and the vehicle request.
+- **The execution boundary keys on a FACT, not a status list.** `Deal.dealerExecutedContractId` is
+  non-null exactly when a fully executed dealership contract exists. A status list cannot work:
+  `RECAP_PENDING` sits on BOTH sides of execution. `canTransition` additionally refuses CANCELLED
+  from the post-execution statuses, which is the half a pure function can enforce.
+- **`FROZEN_PENDING_RELEASE` gained edges and a writer.** It had an empty exit list and no writer
+  since Phase 1; `Deal.frozenAt` / `frozenReason` existed and were READ by two release gates and
+  written by nothing. A freeze now writes them, so it bites immediately.
+- **§28.3 #1** — `DEAL_TRANSITION_ACTORS` in `lib/services/deal/transition-authority.ts`.
+  `actorRole` was an unconstrained `string` and had ALREADY DRIFTED: eleven `"BUYER"` against one
+  `"buyer"` (`app/api/public/request-vehicle/complete/route.ts:305`). §Stage 19's "never on the
+  dealer's word alone" is now enforced at the authorization layer, where `force` cannot reach it.
+- **§28.3 #3** — conditional writes on pause/resume, `closeAuction` and `extendAuction`. The last
+  two were NOT on §8.2's defect list and are real: `closeAuction` would overwrite a CANCELLED
+  auction, and `extendAuction` lost a concurrent extension while `AuctionExtensionLog` recorded
+  both as having happened.
+- **§28.3 #4** — the CAS and its `DealStatusHistory` row now commit in ONE transaction. The history
+  write sat outside it and ended `.catch(() => {})`.
+- **§28.3 #6** — every history row carries a reason; a forced transition must supply one. This
+  surfaced a real gap: `service-fee.service.ts` forced with no reason at all.
+- **Cross-portal parity** — `lib/services/operations/exception-lineage.service.ts`. The lineage
+  already existed in `queue_items` and NOTHING READ IT: `buyer_visible_status` was written for all
+  58 catalogued exceptions and had zero readers outside the catalogue and its own writer. Buyer
+  panel, dealer notice and the existing Ops queue now read one projection; the dealer view is a
+  fail-closed ALLOWLIST held server-side, so a §26 row added later is silent to dealers until
+  someone decides otherwise.
+- **`makeFmt` — the parity defect in miniature, and it HAD ALREADY DRIFTED.** Buyer: `weekday
+  "long", month "long"`. Dealer: `"short"`/`"short"`. The same appointment rendered differently to
+  the two people who have to meet at it. One formatter now, density as a parameter.
+- **§25.2 / §13-D42 suspension** — dealer-initiated, after a paid auction, second attempt in 90
+  days. `undefined` scope does NOT suspend: the queue row already says "Establish it before
+  applying any consequence".
+- **A Phase 9 sweep that was never called.** `flagSuspectedNoShows` was exported, tested,
+  documented, raising §26's `PICKUP_MISSED` — and had NO CALLER. It is now wired, alongside the new
+  `sweepReleasedNotConfirmed`.
+
+#### A limit in this phase's own gate, stated rather than left to be found
+
+§8.3's rules prove a code HAS a raise site. They do NOT prove anything CALLS it — `PICKUP_MISSED`
+counted as satisfied for the whole time its only raiser was unreachable. Closing that needs
+reachability analysis from the cron and route entry points, which is not built here. The gate's
+header records the limit. **A gate whose boundary is undocumented is how the first nine instances
+of this class survived.**
+
+#### Migrations — authored and proven, NOT applied
+
+`20261215000000_phase10_cancellation_vocabulary` (the `CANCELLED` labels
+`AuctionInvitationStatus` and `PickupStatus` lacked — `EXPIRED` would tell a dealership it missed a
+deadline it never missed) and `20261215000100_phase10_obligation_unique` (§13-D60's partial unique).
+
+Proven on a disposable loopback PostgreSQL restored from the committed baseline: full chain applied,
+both halves verified, re-applied as a no-op. The index's semantics were proved in all five
+directions, including that a RESOLVED row does not bar a recurring obligation. **DEGRADED: 16.13,
+not CI's 17.6** — no Docker daemon in the environment. CI's `migrations` job remains the authority.
+
+§13-D60 is discharged by the index landing. The resolve-only route it was written about is **not
+built** — see below — so the "second writer" override was never triggered.
+
+#### Not done, and not implied to be
+
+- **12 exception codes and 15 template keys remain unwired.** The two gates name them and are the
+  authority; the counts move as they are closed.
+- **`pnpm test:all` cannot pass until they are.** The chain is 70 `&&` segments and stops at the
+  first failure — segment 46 (`test:comms-outbox`) — so `test:operations` at segment 48 does not
+  run in a full invocation. 3524 tests pass across the first 46 suites; that is NOT a full-matrix
+  pass and must not be reported as one.
+- The direct-send allowlist reclassification and its test change (`removalPhase === 10` for every
+  entry is now false, and the pinned count of 94 pins the wrong thing).
+- §8.2 defect (6) — the losing-offer dispatcher's 7-day window and 4-attempt abandon.
+- `resolveObligation` has no route; `identityVerified: true` is still hard-coded on both admin
+  release paths.
+- Playwright; the second independent review; CI.
+
 ### 8.2 Phase scopes
 
 #### Phase 0 — Pre-schema security correction: shut down the authenticated SSN intake

@@ -73,7 +73,6 @@ import {
 import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { cancelByKey } from "@/lib/services/comms/transactional-dispatcher.service";
 import { revokeReleaseToken } from "@/lib/services/pickup/release-token.service";
-import { voidEnvelopeInternal } from "@/lib/services/esign/buyer-signing.service";
 import { transitionCase, SOURCING_CASE_STATUS } from "@/lib/services/sourcing/sourcing-case.service";
 
 /** Every stop §24 names, as a stable key so the result can be asserted on. */
@@ -232,6 +231,15 @@ async function runStops(
     if (!frozen) {
       stops.push(
         await runStop("ESIGN_ENVELOPES", async () => {
+          // LAZY, and for the reason `acquisition-comms.ts` records at the top of its own
+          // file: `buyer-signing.service` reaches `contract-shield/extract-text`, which
+          // imports `server-only`. A static import here would make this whole module
+          // unloadable by the Node test runner and by Playwright — so the §24
+          // orchestration could not be exercised by the very journeys that prove it.
+          //
+          // Inside the stop rather than at the top of `runStops`, so the cost is paid only
+          // on a cancellation that actually has envelopes to void.
+          const { voidEnvelopeInternal } = await import("@/lib/services/esign/buyer-signing.service");
           let voided = 0;
           for (const signerKind of ["BUYER", "CO_BUYER"] as const) {
             try {
