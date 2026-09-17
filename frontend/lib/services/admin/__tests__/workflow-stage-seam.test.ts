@@ -71,6 +71,45 @@ mock.module("@/lib/services/deal/deal.service", {
   },
 });
 
+// PHASE 10 §24 — `cancelBuyerWorkflow` now routes through the CANCELLATION ORCHESTRATION
+// rather than calling `cancelDeal` itself, because `cancelDeal` refuses a post-execution
+// cancellation and leaving this second entry point on it would have thrown an unmapped
+// `ContractExecutedError` from an admin button.
+//
+// MOCKED HERE, AND THAT IS NOT A WEAKENING. This file's subject is the COMMAND CENTRE: that
+// it writes no `deal.status` of its own, attributes the admin, audits the attempt and reports
+// the real outcome. Whether the orchestration then reaches `cancelDeal` is the orchestration's
+// own property and is proved against the real service in
+// `lib/services/transaction/__tests__/cancel-transaction.test.ts` — which did not exist when
+// this route changed, and is the gap that let this file go red.
+//
+// The mock deliberately CALLS the mocked `cancelDeal` so the delegation assertions below still
+// pin the terminal path they were written to pin, rather than being downgraded to "some
+// function was called".
+mock.module("@/lib/services/transaction/cancellation.service", {
+  namedExports: {
+    cancelTransaction: async (input: {
+      dealId?: string;
+      reason: string;
+      actorId?: string;
+      actorRole?: "ADMIN" | "BUYER" | "DEALER" | "SYSTEM";
+    }) => {
+      const { cancelDeal } = await import("@/lib/services/deal/deal.service");
+      const moved = await cancelDeal(input.dealId!, input.reason, {
+        actorId: input.actorId,
+        actorRole: input.actorRole,
+      });
+      return {
+        outcome: moved ? ("CANCELLED" as const) : ("NOT_MOVED" as const),
+        stageAtCancellation: "Deal SIGNED",
+        stops: [],
+        dealId: input.dealId,
+      };
+    },
+    CancellationInputError: class extends Error {},
+  },
+});
+
 mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } } });
 
 async function load() {
