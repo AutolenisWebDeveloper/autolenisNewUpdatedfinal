@@ -42,6 +42,13 @@ type Db = typeof prisma | Prisma.TransactionClient;
 /** §13-D42's window, as the owner ruled it. */
 export const REPEAT_WINDOW_DAYS = 90;
 
+/**
+ * Attempts within the window that warrant suspension pending review. §13-D42: "A second
+ * within the window warrants suspension pending review." The count INCLUDES the attempt
+ * being recorded, so two means this is the repeat.
+ */
+export const REPEAT_SUSPENSION_THRESHOLD = 2;
+
 export interface RecordAttemptInput {
   threadId: string;
   messageId: string;
@@ -113,6 +120,37 @@ export async function recordCircumventionAttempt(
     },
     prisma,
   );
+
+  // §13-D42 — PHASE 10 ENFORCES THE SUSPENSION. "Phase 5 records and warns, Phase 10
+  // enforces suspension" (owner ruling, 2026-09-11).
+  //
+  // THREE CONDITIONS, ALL REQUIRED, and each one is in the ruling rather than chosen here:
+  //
+  //   · DEALER-INITIATED. §25.2: "Buyers are protected, not penalized, when the dealership
+  //     initiates." A buyer-initiated detection carries no dealer consequence at all.
+  //   · AFTER A PAID AUCTION. That is the scope §25.2 gives the violation — an approach
+  //     outside a paid auction is reviewable, not a breach of the dealer agreement.
+  //     `undefined` does NOT satisfy this: the queue detail already says "Establish it
+  //     before applying any consequence", and suspending a dealership on a scope nobody
+  //     could determine is the opposite of that instruction.
+  //   · SECOND ATTEMPT IN THE 90-DAY WINDOW. "A second within the window warrants
+  //     suspension pending review"; a first warns and records.
+  //
+  // THE ENFORCEMENT POINT ALREADY EXISTED, which is why this bites immediately rather than
+  // needing a reader built for it: `validateRooftop` refuses a rooftop whose dealer is not
+  // ACTIVE, and the dealer invitation's state recheck refuses at send time.
+  //
+  // PENDING REVIEW, NOT TERMINAL. §26's required result is "Review; scorecard, suspension,
+  // or termination" — termination is a human's, and this writes the reversible one. The
+  // CIRCUMVENTION_DETECTED case raised above is where that review happens.
+  if (
+    dealerId &&
+    input.initiatorRole === "DEALER" &&
+    scope.afterPaidAuction === true &&
+    dealerAttemptsInWindow >= REPEAT_SUSPENSION_THRESHOLD
+  ) {
+    await suspendForCircumvention(dealerId, attempt.id, dealerAttemptsInWindow);
+  }
 
   // The §8.4 mirror. Best-effort: the exception above is the store, and an admin surface losing
   // one row must not lose the detection.
@@ -261,6 +299,65 @@ async function resolveDealerForUser(userId: string): Promise<string | null> {
 }
 
 /** §13-D42's 90-day count, dealer-initiated only. */
+/**
+ * Suspend a dealership for repeat circumvention. §25.2 / §13-D42.
+ *
+ * CONDITIONAL (§28.3 #3): the update names ACTIVE, so a dealership already SUSPENDED or
+ * TERMINATED is untouched and a concurrent admin decision is never overwritten. A count
+ * of zero is not an error — it means someone else already acted, which is the correct
+ * outcome, and it is recorded rather than silently passed over.
+ *
+ * NEVER THROWS INTO THE DETECTION PATH. The exception has already been raised by the
+ * time this runs; failing the whole detection because the suspension write failed would
+ * lose the record of the attempt, which is worse than an unsuspended dealership that an
+ * operator is already being told to review.
+ */
+async function suspendForCircumvention(
+  dealerId: string,
+  attemptId: string,
+  attemptsInWindow: number,
+): Promise<void> {
+  try {
+    const suspended = await prisma.dealer.updateMany({
+      where: { id: dealerId, status: "ACTIVE" },
+      data: { status: "SUSPENDED" },
+    });
+
+    await prisma.adminAuditLog.create({
+      data: {
+        adminId: "system",
+        adminEmail: "system@autolenis.com",
+        action: "DEALER_SUSPENDED_CIRCUMVENTION",
+        entityType: "Dealer",
+        entityId: dealerId,
+        reason:
+          `§25.2 / §13-D42: ${attemptsInWindow} dealer-initiated circumvention attempt(s) in ` +
+          `${REPEAT_WINDOW_DAYS} days, after a paid auction. Suspended pending Operations review.`,
+        metadata: { attemptId, attemptsInWindow, applied: suspended.count === 1 },
+      },
+    });
+
+    if (suspended.count === 0) {
+      // Not a failure. The dealership was already suspended or terminated, and saying so
+      // beats a silent no-op that reads as "the rule did not fire".
+      logger.info(
+        `[anti-circumvention] dealer=${dealerId} not ACTIVE at suspension time — left as-is; attempt=${attemptId}`,
+      );
+    } else {
+      logger.warn(
+        `[anti-circumvention] dealer=${dealerId} SUSPENDED pending review (§13-D42): ` +
+          `${attemptsInWindow} attempts in ${REPEAT_WINDOW_DAYS}d, attempt=${attemptId}`,
+      );
+    }
+  } catch (err) {
+    logger.error("[anti-circumvention] suspension write failed", {
+      dealerId,
+      attemptId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 async function countDealerAttemptsInWindow(dealerId: string, now: Date = new Date()): Promise<number> {
   const since = new Date(now.getTime() - REPEAT_WINDOW_DAYS * 86_400_000);
   return prisma.circumventionAttempt.count({

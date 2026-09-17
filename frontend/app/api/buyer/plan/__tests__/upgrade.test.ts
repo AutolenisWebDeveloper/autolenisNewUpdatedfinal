@@ -18,6 +18,10 @@ const USER_ID = "33333333-3333-4333-8333-333333333333";
 
 // ── Controllable prisma behaviour ────────────────────────────────────────────
 let buyerPlan = "STANDARD";
+// PHASE 10 §26 — "never upsell a buyer whose deal is stalled". The route now asks
+// whether this buyer has an open exception; the default here is NO so every existing
+// case still exercises the ordinary upgrade path.
+let openExceptionCount = 0;
 let auditLogs: Array<Record<string, unknown>> = [];
 let activityEvents: Array<Record<string, unknown>> = [];
 // Records any call that would move money — the no-charge contract asserts this
@@ -30,6 +34,9 @@ const paymentCanary = (table: string) =>
   new Proxy({}, { get: () => async () => { paymentWrites.push(table); return {}; } });
 
 const prismaMock = {
+  queueItem: {
+    count: async () => openExceptionCount,
+  },
   buyer: {
     updateMany: async ({ where }: { where: { plan?: { not?: string } } }) => {
       if (where.plan?.not === "PREMIUM" && buyerPlan !== "PREMIUM") {
@@ -203,4 +210,35 @@ test("the response says the election is NOT an entitlement", async () => {
   );
   assert.equal(res.data.balance?.dueCents, 40000, "and it says what is still owed");
   assert.equal(res.data.upgradeWindow?.open, true);
+});
+
+
+// ── PHASE 10 — §26 upgrade suppression, pinned ──────────────────────────────────────
+//
+// The dashboard hides the card while an exception is open, but a hidden card is UX:
+// this route is reachable directly and from a stale page. Server-side authorization
+// always.
+
+test("§26: the upgrade is REFUSED while the buyer has an open exception", async () => {
+  buyerPlan = "STANDARD";
+  openExceptionCount = 1;
+  try {
+    const { POST } = await import("../upgrade/route");
+    const res = await POST(new NextRequest("http://localhost/api/buyer/plan/upgrade", { method: "POST" }));
+    assert.equal(res.status, 409, "a stalled buyer must not be upgraded");
+    const body = (await res.json()) as { error?: { code?: string } };
+    assert.equal(body.error?.code, "EXCEPTION_OPEN");
+    assert.equal(buyerPlan, "STANDARD", "and the plan must not have moved");
+  } finally {
+    openExceptionCount = 0;
+  }
+});
+
+test("§26: with no open exception the upgrade proceeds — the rule is not 'always refuse'", async () => {
+  buyerPlan = "STANDARD";
+  openExceptionCount = 0;
+  const { POST } = await import("../upgrade/route");
+  const res = await POST(new NextRequest("http://localhost/api/buyer/plan/upgrade", { method: "POST" }));
+  assert.equal(res.status, 200);
+  assert.equal(buyerPlan, "PREMIUM");
 });

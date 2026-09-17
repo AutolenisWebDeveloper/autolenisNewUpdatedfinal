@@ -422,7 +422,7 @@ test("the mintable DEAL statuses are exactly those that can still reach HANDOVER
   // but "can it reach handover FROM WHERE IT IS NOW, and is it not being held". A
   // frozen deal reaches handover only after the freeze resolves, by which point its
   // status is no longer FROZEN_PENDING_RELEASE.
-  const HELD: DealStatus[] = [DealStatus.FROZEN_PENDING_RELEASE];
+  const HELD: string[] = [DealStatus.FROZEN_PENDING_RELEASE];
   const canReachHandover = Object.values(DealStatus).filter(
     (from) =>
       from !== DealStatus.HANDOVER_PENDING &&
