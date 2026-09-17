@@ -19,13 +19,41 @@ import type { ClearanceItem } from "@/lib/services/deal/funding-clearance.servic
  * no trade is not satisfied and not outstanding: it does not apply. Rendering it as a green
  * tick would claim a check that never ran, and rendering it as outstanding would hold a
  * buyer on a condition that cannot exist.
+ *
+ * PHASE 9 GAVE IT TWO MORE LISTS AND NO SECOND COMPONENT. §Stage 16's thirteen readiness items
+ * and §Stage 20's fourteen completion preconditions ask the buyer the same question this screen
+ * already answers — what is outstanding, and whose move is it — so they render here. The
+ * headings are props because the three lists say different things at different moments; the rows
+ * are identical because the problem is.
+ *
+ * §Stage 16 ALSO asks for "a required action" and "a deadline", which Stage 14 and Stage 20 do
+ * not. Both render only when the item carries them, so the other two lists are unchanged rather
+ * than growing empty rows. The name of this file is now narrower than what it does; renaming it
+ * would touch a working Phase 8 consumer for a naming nicety, which is not this phase's to spend.
  */
+/**
+ * §Stage 16 adds these two to every row it renders. Structural, not a type import, so this
+ * component stays usable by a caller that has neither.
+ */
+interface ChecklistItem extends ClearanceItem {
+  requiredAction?: string;
+  deadlineAt?: Date | string | null;
+}
+
 export default function FundingClearanceChecklist({
   items,
   clear,
+  heading = "Before your vehicle is released",
+  intro = "We never release a vehicle on the expectation that financing will complete later. Each of these is confirmed against evidence first — it is what protects you from a deal unwinding after you have driven away.",
+  clearedLabel = "All clear",
+  testId = "funding-clearance-checklist",
 }: {
-  items: ClearanceItem[];
+  items: ChecklistItem[];
   clear: boolean;
+  heading?: string;
+  intro?: string;
+  clearedLabel?: string;
+  testId?: string;
 }) {
   const OWNER_LABEL: Record<string, string> = {
     FINANCE: "AutoLenis Finance",
@@ -37,26 +65,24 @@ export default function FundingClearanceChecklist({
   return (
     <section
       className="bg-white border border-slate-200 rounded-xl p-5 md:p-6"
-      aria-labelledby="clearance-heading"
-      data-testid="funding-clearance-checklist"
+      aria-labelledby={`${testId}-heading`}
+      data-testid={testId}
     >
       <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
-        <h2 id="clearance-heading" className="font-semibold text-slate-900">
-          Before your vehicle is released
+        <h2 id={`${testId}-heading`} className="font-semibold text-slate-900">
+          {heading}
         </h2>
         {clear && (
           <span
             className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1"
-            data-testid="funding-clearance-cleared"
+            data-testid={`${testId}-cleared`}
           >
-            All clear
+            {clearedLabel}
           </span>
         )}
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        We never release a vehicle on the expectation that financing will complete later. Each of
-        these is confirmed against evidence first — it is what protects you from a deal unwinding
-        after you have driven away.
+        {intro}
       </p>
 
       <ul className="space-y-3">
@@ -108,6 +134,26 @@ export default function FundingClearanceChecklist({
                     buyer the row was checked and does not apply. At 2.56:1 it was the least
                     readable text on the row while carrying its whole meaning. */}
                 {notApplicable && <p className="text-xs text-slate-500 mt-0.5">Not needed for your deal.</p>}
+                {/* §Stage 16: "a required action" and "a deadline". Shown only on an OUTSTANDING
+                    row and only when the list carries them — a satisfied row with an action
+                    beside it tells a buyer to do something that is already done. */}
+                {!item.satisfied && !notApplicable && item.requiredAction && (
+                  <p className="text-xs text-slate-600 mt-1" data-testid={`clearance-action-${item.key}`}>
+                    <span className="text-slate-500">What happens next: </span>
+                    {item.requiredAction}
+                  </p>
+                )}
+                {!item.satisfied && !notApplicable && item.deadlineAt && (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Expected by{" "}
+                    <time dateTime={new Date(item.deadlineAt).toISOString()}>
+                      {new Date(item.deadlineAt).toLocaleDateString("en-US", {
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </time>
+                  </p>
+                )}
               </div>
             </li>
           );

@@ -10,6 +10,9 @@ import PickupScheduleForm from "@/components/buyer/PickupScheduleForm";
 import PickupRescheduleButton from "@/components/buyer/PickupRescheduleButton";
 import PickupCounterClient from "@/components/buyer/PickupCounterClient";
 import PickupReleaseCode from "@/components/buyer/PickupReleaseCode";
+import PickupPossessionForm from "@/components/buyer/PickupPossessionForm";
+import FundingClearanceChecklist from "@/components/buyer/FundingClearanceChecklist";
+import { evaluatePickupReadiness } from "@/lib/services/pickup/pickup-readiness.service";
 import { resolveDealerAvailability } from "@/lib/services/pickup/availability.service";
 import { allSignedFrom, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
@@ -56,6 +59,18 @@ export default async function PickupPage() {
   // carries its own expiry, which PickupReleaseCode shows from the mint response. A second expiry
   // read from a column nothing writes any more would always have said "never".
 
+  // §STAGE 16, ON THE SCREEN THE BUYER ACTUALLY LOOKS AT. The thirteen readiness items are
+  // derived, never stored, so this is a read — and it is only rendered while the pickup is not
+  // yet agreed, because once a time is confirmed the list has served its purpose and a
+  // thirteen-row checklist above a confirmed appointment is noise.
+  //
+  // Evaluated only when there is something to evaluate: a deal that has not reached scheduling
+  // at all would show thirteen outstanding rows for a handover nobody has asked for yet.
+  const readiness =
+    deal && (deal.status === "FUNDING_PENDING" || deal.status === "PICKUP_READINESS")
+      ? await evaluatePickupReadiness(deal.id)
+      : null;
+
   const noOpenPickup = !pickup || status === "NOT_SCHEDULED";
   const isConfirmed = status === "SCHEDULED" || status === "RESCHEDULED" || status === "CHECKED_IN";
   // A concierge (vehicle-request) deal has no Offer, and VehicleRequestOffer carries
@@ -71,6 +86,23 @@ export default async function PickupPage() {
         <MapPin size={24} className="text-al-primary" />
         <h1 className="text-xl font-bold text-al-text">Vehicle Pickup</h1>
       </div>
+
+      {/* §Stage 16: "the website shows the exact unresolved item and the party responsible for
+          it". Above the scheduling controls, because an unmet item is the reason those controls
+          will refuse — a buyer who proposes a time and is told "not ready" without being told
+          WHAT is not ready has learned nothing. */}
+      {readiness && !readiness.ready && (
+        <div className="mb-6">
+          <FundingClearanceChecklist
+            items={readiness.items}
+            clear={readiness.ready}
+            heading="Before we can book your pickup"
+            intro="Your vehicle is nearly ready. These are the checks that have to be complete before a handover can be scheduled — most of them are never yours."
+            clearedLabel="Ready to schedule"
+            testId="pickup-readiness-checklist"
+          />
+        </div>
+      )}
 
       {/* ── No open pickup: propose a time (dealer confirms) ─────────────────── */}
       {noOpenPickup ? (
@@ -113,6 +145,13 @@ export default async function PickupPage() {
           <p className="text-al-text-muted text-sm mb-6">Your vehicle has been picked up. Enjoy your new car!</p>
           <Button href={`/buyer/deal/${deal?.id}/complete`} data-testid="view-deal-complete-btn">View Deal Summary</Button>
         </div>
+
+      /* ── Released by the dealership → the buyer confirms possession ────────── */
+      ) : deal?.status === "HANDOVER_PENDING" ? (
+        // §Stage 19. The form is keyed on the DEAL's status rather than the pickup's, because
+        // that is what `confirmPossession` gates on — a page that offered the form on a pickup
+        // the service would refuse is worse than one that never offered it.
+        <PickupPossessionForm dealId={deal.id} vin={deal.vin} />
 
       /* ── Buyer proposed → waiting on the dealership ───────────────────────── */
       ) : status === "PROPOSED" ? (

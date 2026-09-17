@@ -324,6 +324,19 @@ export type NoShowParty = "BUYER" | "DEALERSHIP" | "BOTH" | "UNDETERMINED";
  * lives, and a new proposal round happens on the PICKUP row — `schedulePickup` and the
  * coordination service own that transition, and duplicating it here would make a second writer
  * of the scheduling state machine, which is the defect this phase spent its first half removing.
+ *
+ * AND THE PICKUP GOES TO `NOT_SCHEDULED`, NOT TO `NO_SHOW`, WHICH IS A CHOICE WORTH DEFENDING.
+ * `PickupStatus.NO_SHOW` exists — Phase 1 added it and nothing has ever written it. Using it here
+ * would read naturally and be wrong twice over. §Stage 17 says a missed pickup "RETURNS TO
+ * SCHEDULING", and `status` is the field that answers "where is this pickup in the scheduling
+ * flow?"; the answer after a no-show is "nowhere, it needs a new time", which is exactly
+ * NOT_SCHEDULED. A NO_SHOW status would also strand the row outside every branch of
+ * `/buyer/pickup`, whose "propose a time" form keys on NOT_SCHEDULED — the buyer would be left
+ * on a blank page, unable to rebook the handover the document says they return to.
+ *
+ * What happened is recorded where what-happened belongs: `no_show_at` and `no_show_party`, which
+ * survive the next round and are what a human reads. The unused enum label is REPORTED rather
+ * than removed — it is not this phase's to delete.
  */
 export async function recordPickupNoShow(
   dealId: string,
