@@ -24,12 +24,16 @@ import { PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
-  sendPrequalUnderReviewEmail,
+  // `sendPrequalUnderReviewEmail` is GONE from this file — PHASE 10 moved that notice
+  // onto the §27 rail. The export itself stays in resend.service for now: §13-D14 is
+  // unsatisfied, so this phase deletes nothing, and an unused export is inert where a
+  // deleted one would be a capability removed without the counter to justify it.
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_2_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { renderPrequalAdminReceipt } from "@/lib/services/comms/phase2-email-content";
 
 // ── Provider-failure observability ──────────────────────────────────────────
@@ -702,16 +706,57 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     finalDecision === PreQualDecision.OFAC_ESCALATED;
 
   if (needsReview) {
+    // §27 + §27.1 "Prequalification under review | Buyer | Honest status and expected
+    // follow-up" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
+    //
+    // This was `sendPrequalUnderReviewEmail`, a direct Resend call wrapped in a
+    // try/catch that logged and moved on. §27: "No page request determines whether a
+    // transaction communication survives." A buyer whose credit application has gone
+    // to a human is exactly who must not be left in silence because one HTTP call
+    // failed — and the old shape had no retry, no send-time recheck and no
+    // terminal-failure alert, so that silence was invisible too.
+    //
+    // The recheck registered for this key is `alwaysSend("an honest status notice
+    // about a review that has begun")`: the review DID begin, so a later decision does
+    // not make the notice untrue, and it must not be cancelled by one.
     try {
-      await sendPrequalUnderReviewEmail({
-        to: buyer.user.email,
+      const { renderPrequalUnderReview } = await import("@/lib/services/comms/phase2-email-content");
+      const content = renderPrequalUnderReview({
         firstName: input.firstName,
-        prequalApplicationId: prequal.id,
-        decisionTimestamp: prequal.updatedAt.toISOString(),
+        dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/buyer/dashboard`,
+      });
+      await enqueueTransactional({
+        triggerEvent: "prequal.under_review",
+        templateKey: PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW,
+        channel: "email",
+        recipientKind: "buyer",
+        recipientId: buyer.id,
+        to: buyer.user.email,
+        payload: { email: buyer.user.email, subject: content.subject, html: content.html, text: content.text },
+        // Per APPLICATION. A re-decision on the same application is the same review;
+        // a new application is a new one.
+        idempotencyKey: `${PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW}:${prequal.id}`,
       });
     } catch (emailErr) {
-      logger.error("[prequal] Failed to send under-review email:", emailErr);
+      logger.error("[prequal] Failed to enqueue the under-review notice:", emailErr);
     }
+
+    // §26 — "Prequalification needs manual or OFAC review | Operations". The
+    // compliance event below RECORDS that the buyer was notified; it is not a work
+    // item and nothing sweeps it. This is the row an operator actually works from,
+    // with the owner and deadline §26 gives it.
+    //
+    // The decision is NOT in the detail. A queue row naming OFAC_ESCALATED would put
+    // the screening outcome on a surface that is read more widely than the compliance
+    // log, and §Stage 3 keeps that narrow.
+    await raiseException({
+      code: "PREQUAL_MANUAL_OR_OFAC_REVIEW",
+      buyerId: buyer.id,
+      detail: `Prequalification ${prequal.id} requires a manual decision. The buyer has been told a review is under way and that no action is needed from them.`,
+      idempotencyKey: `PREQUAL_MANUAL_OR_OFAC_REVIEW:${prequal.id}`,
+    }).catch((err) => {
+      logger.error("[prequal] Failed to raise the manual-review exception:", err);
+    });
     try {
       await prisma.complianceEvent.create({
         data: {

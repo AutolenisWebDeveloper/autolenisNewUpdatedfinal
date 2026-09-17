@@ -149,3 +149,37 @@ export function renderRegisteredClaimPrompt(input: { firstName?: string | null; 
     text: `${lines.join("\n\n")}\n\nContinue: ${input.claimUrl}`,
   };
 }
+
+/**
+ * §27.1 — "Prequalification under review | Buyer | Honest status and expected follow-up".
+ *
+ * PHASE 10. This message existed as `sendPrequalUnderReviewEmail`, a DIRECT Resend call
+ * on the §8.4 allowlist: no retry, no send-time state recheck, no terminal-failure
+ * alert, and it lived and died with the request that triggered it. §27 is explicit that
+ * "no page request determines whether a transaction communication survives", and this
+ * is a compliance-adjacent notice to someone whose credit application is being reviewed
+ * by a human — one of the worst messages in the system to lose silently.
+ *
+ * WHAT IT MUST NOT SAY. The OFAC screen is one of the reasons a decision lands here,
+ * and §Stage 3 keeps that silent: a buyer is never told they were screened, matched, or
+ * escalated. So the copy names no reason at all — not "further checks", which invites
+ * the question, and not a decision, which has not been made. It commits to the one
+ * thing that IS true and useful: a person is looking, and they will hear back.
+ */
+export function renderPrequalUnderReview(input: {
+  firstName?: string | null;
+  dashboardUrl: string;
+}): RenderedEmail {
+  const name = input.firstName?.trim() || "there";
+  const lines = [
+    `Hi ${name},`,
+    "Thanks for your prequalification application. It needs a manual review before we can give you a decision, so one of our team is looking at it now.",
+    "You do not need to do anything. We will email you as soon as the review is complete — this usually takes one business day.",
+  ];
+  const subject = "Your prequalification is under review";
+  return {
+    subject,
+    html: layout(subject, lines.map(paragraph).join(""), { label: "View my dashboard", url: input.dashboardUrl }),
+    text: `${lines.join("\n\n")}\n\nDashboard: ${input.dashboardUrl}`,
+  };
+}

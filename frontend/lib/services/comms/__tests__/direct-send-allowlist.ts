@@ -145,7 +145,9 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "lib/services/esign/buyer-signing.service.ts", reasons: ["direct-sender"], senders: ["sendContractSignedEmail"], removalPhase: 10 },
   { file: "lib/services/notifications/acquisition-comms.ts", reasons: ["sms"], senders: [], removalPhase: 10 },
   { file: "lib/services/prequal/admin-prequal.service.ts", reasons: ["direct-sender"], senders: ["sendAdminPrequalAlertEmail", "sendAdverseActionEmail", "sendPrequalApprovedEmail", "sendPrequalUnderReviewEmail"], removalPhase: 10 },
-  { file: "lib/services/prequal/prequal.service.ts", reasons: ["direct-sender"], senders: ["sendAdminPrequalAlertEmail", "sendAdverseActionEmail", "sendPrequalApprovedEmail", "sendPrequalUnderReviewEmail"], removalPhase: 10 },
+  // Phase 10: `sendPrequalUnderReviewEmail` migrated to the §27 dispatcher
+  // (PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW). Three direct senders remain here.
+  { file: "lib/services/prequal/prequal.service.ts", reasons: ["direct-sender"], senders: ["sendAdminPrequalAlertEmail", "sendAdverseActionEmail", "sendPrequalApprovedEmail"], removalPhase: 10 },
   { file: "lib/services/sms/crm-sms.ts", reasons: ["twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   { file: "lib/services/sms/twilio.service.ts", reasons: ["twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   { file: "lib/social/creator-package.generator.ts", reasons: ["direct-sender"], senders: ["sendCreatorPackageEmail"], removalPhase: 10 },
