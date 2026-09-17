@@ -536,6 +536,23 @@ jobs:
           NODE_OPTIONS: --conditions=react-server
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase8-contract-journeys.spec.ts
 
+      # Phase 9 — §12.4 Stage 16-to-21: readiness, turn-taking and the counter cap, the release
+      # token's single use, the handover rung the ladder gained, the buyer's possession
+      # confirmation, Stage 20's fourteen preconditions and terminality, and Stage 21's
+      # obligations.
+      #
+      # NAMED HERE IN THE SAME COMMIT AS THE SPEC, which is #433's lesson and Phase 8's comment
+      # above: `tests/e2e/` is globbed by no script and `check-test-coverage.ts` exempts the
+      # Playwright scripts from the test:all chain, so a spec that is not named HERE is a spec CI
+      # never runs.
+      #
+      # Same `--conditions=react-server` requirement: this spec calls services in-process and
+      # `server-only` throws without it.
+      - name: E2E — Phase 9 pickup journeys
+        env:
+          NODE_OPTIONS: --conditions=react-server
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase9-pickup-journeys.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
