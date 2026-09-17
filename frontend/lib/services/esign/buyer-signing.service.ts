@@ -653,7 +653,18 @@ export async function sweepExpiredEnvelopes(limit = 500): Promise<{ scanned: num
   const now = new Date();
   const candidates = await prisma.eSignEnvelope.findMany({
     where: { status: { in: EXPIRABLE_STATUSES }, expiresAt: { lt: now } },
-    select: { id: true, dealId: true, status: true },
+    // `dealerId` is selected so the §26 row below can carry it. `listOpen` ANDs its filters
+    // and the dealer deal page queries by dealer, so a row raised with only a deal reference
+    // is invisible to the dealership — and this row's own dealer copy
+    // (`DEALER_VISIBLE_CODES.SIGNATURE_NOT_COMPLETED`) is what tells them why signing has
+    // stopped. Found by the second independent review. `Deal.dealerId` is nullable on the
+    // concierge rail, so the accepted offer is the fallback.
+    select: {
+      id: true,
+      dealId: true,
+      status: true,
+      deal: { select: { dealerId: true, offer: { select: { dealerId: true } } } },
+    },
     take: limit,
   });
   let expired = 0;
@@ -681,6 +692,7 @@ export async function sweepExpiredEnvelopes(limit = 500): Promise<{ scanned: num
       await raiseException({
         code: "SIGNATURE_NOT_COMPLETED",
         dealId: c.dealId,
+        dealerId: c.deal?.dealerId ?? c.deal?.offer?.dealerId ?? null,
         detail: `Signing envelope ${c.id} expired unsigned after the 14-day window. A reissue is permitted — the deal returns to signing.`,
         idempotencyKey: `SIGNATURE_NOT_COMPLETED:${c.id}`,
       }).catch((err) => {

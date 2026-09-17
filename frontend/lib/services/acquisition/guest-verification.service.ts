@@ -56,6 +56,10 @@ export function guestVerificationCancelKey(buyerId: string): string {
 
 export interface GuestVerificationInput {
   buyerId: string;
+  /**
+   * The address the CALLER supplied. It is checked against the account's own address and is
+   * NEVER used for delivery — see the refusal in `enqueueGuestVerification`.
+   */
   email: string;
   firstName?: string | null;
   /** Carried onto the rows so an Operations exception can name the request. */
@@ -100,7 +104,12 @@ export async function enqueueGuestVerification(
 
   const buyer = await db.buyer.findUnique({
     where: { id: input.buyerId },
-    select: { id: true, isGuest: true, firstName: true, user: { select: { supabaseId: true } } },
+    select: {
+      id: true,
+      isGuest: true,
+      firstName: true,
+      user: { select: { supabaseId: true, email: true } },
+    },
   });
   if (!buyer) return nothing("buyer_not_found");
   // BOTH halves, because they can disagree: `isGuest` is the intake flag and the
@@ -108,6 +117,38 @@ export async function enqueueGuestVerification(
   // "claimed" is not a guest capture.
   const looksGuest = buyer.isGuest && (buyer.user?.supabaseId ?? "").startsWith("guest_");
   if (!looksGuest) return nothing("not_a_guest");
+
+  // ── THE CREDENTIAL IS ADDRESSED FROM THE ACCOUNT, NEVER FROM THE REQUEST ───
+  //
+  // Found by the SECOND independent review, and the `looksGuest` guard above does not close
+  // it — it checks WHOSE account, and the hole was WHERE THE MAIL GOES.
+  //
+  // The attack, end to end: a caller POSTs to the public route with a live claim token for
+  // guest buyer G (forwarded, leaked, or read from a shared inbox) and an `email` of their own
+  // choosing. `resolveIdentity` resolves tier CLAIM_TOKEN and `buyerId = G`
+  // (`intake-identity.ts:139-150`); the intake CONSUMES that token inside its transaction
+  // (`unified-buyer-intake.service.ts:735-737`), which is precisely the "a forwarded link works
+  // once" guarantee. G is still `isGuest`, so `looksGuest` passes; the token was just spent, so
+  // `findLiveClaimToken` finds none. A FRESH five-day claim credential is then minted for G and
+  // mailed to the attacker's address — a single-use leak converted into a renewable one,
+  // delivered to a mailbox the guest does not control.
+  //
+  // Two changes close it, and the second is the one that matters:
+  //   1. delivery uses `users.email` — the account's own address, read here — so a credential
+  //      for G can only ever reach G;
+  //   2. a supplied address that DISAGREES with the account is refused outright rather than
+  //      quietly redirected, because on this route the two agreeing is the ordinary case (the
+  //      guest row was just created from that same address) and a disagreement means the
+  //      caller is acting on an account that is not theirs.
+  const accountEmail = (buyer.user?.email ?? "").trim().toLowerCase();
+  if (!accountEmail) return nothing("no_account_email");
+  if (accountEmail !== input.email.trim().toLowerCase()) {
+    logger.warn(
+      "[guest-verification] refused: the supplied address does not match the account's own",
+      { buyerId: input.buyerId },
+    );
+    return nothing("address_mismatch");
+  }
 
   const { issueResumeToken, findLiveClaimToken, TOKEN_PURPOSE } = await import(
     "@/lib/services/buyer/request-resume-token.service"
@@ -142,11 +183,11 @@ export async function enqueueGuestVerification(
       channel: "email",
       recipientKind: "buyer",
       recipientId: input.buyerId,
-      to: input.email,
+      to: accountEmail,
       vehicleRequestId: input.vehicleRequestId ?? null,
       idempotencyKey: claimKey,
       cancelKey,
-      payload: { email: input.email, subject: claim.subject, html: claim.html, text: claim.text },
+      payload: { email: accountEmail, subject: claim.subject, html: claim.html, text: claim.text },
     },
     db,
   );
@@ -165,12 +206,12 @@ export async function enqueueGuestVerification(
           channel: "email",
           recipientKind: "buyer",
           recipientId: input.buyerId,
-          to: input.email,
+          to: accountEmail,
           vehicleRequestId: input.vehicleRequestId ?? null,
           idempotencyKey: `${r.template}:${input.buyerId}:${tokenId}`,
           cancelKey,
           runAt: new Date(base + r.hours * HOUR),
-          payload: { email: input.email, subject: content.subject, html: content.html, text: content.text },
+          payload: { email: accountEmail, subject: content.subject, html: content.html, text: content.text },
         },
         db,
       );

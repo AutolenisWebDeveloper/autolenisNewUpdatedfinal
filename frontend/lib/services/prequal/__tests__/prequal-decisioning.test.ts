@@ -138,6 +138,10 @@ mock.module("@/lib/services/operations/queue-item.service", {
 
 mock.module("@/lib/services/email/resend.service", {
   namedExports: {
+    // PHASE 10: retained so the mock still models the module's real shape, but this export
+    // is NO LONGER CALLED by prequal.service — the approval notice moved onto the §27
+    // dispatcher, so the assertions below count the ENQUEUE. `cap.approvedEmails` staying at
+    // 0 is the point, and the direct rail had no retry and no terminal-failure alert.
     sendPrequalApprovedEmail: async () => { cap.approvedEmails++; },
     sendAdverseActionEmail: async () => { cap.adverseEmails++; return { outcome: "SENT" as const }; },
     // PHASE 10: retained so the mock still models the module's real shape, but this
@@ -172,13 +176,17 @@ beforeEach(() => {
   cap.adminAlerts = [];
 });
 
-test("APPROVED + OFAC cleared ⇒ persists APPROVED, sets budget, sends approval email", async () => {
+test("APPROVED + OFAC cleared ⇒ persists APPROVED, sets budget, ENQUEUES the approval notice", async () => {
   await run({ decision: PreQualDecision.APPROVED, ofacFlagged: false });
   const persisted = cap.upserts[0]!;
   assert.equal(persisted.decision, "APPROVED");
   assert.equal(persisted.maxOtdAmountCents, 4_200_000);
   assert.equal(persisted.checkOfacAlert, false);
-  assert.equal(cap.approvedEmails, 1);
+  assert.ok(
+    cap.enqueued.includes("prequal_approved"),
+    `§27: the decision notice goes through the durable outbox. Enqueued: ${cap.enqueued.join(", ")}`,
+  );
+  assert.equal(cap.approvedEmails, 0, "and NOT through the direct rail, which has no retry");
 });
 
 test("INDETERMINATE OFAC (null) on an APPROVED result ⇒ NEVER persisted APPROVED (fail-closed)", async () => {
@@ -187,6 +195,10 @@ test("INDETERMINATE OFAC (null) on an APPROVED result ⇒ NEVER persisted APPROV
   assert.notEqual(persisted.decision, "APPROVED", "an approval must never be issued without an affirmative OFAC clear");
   assert.equal(persisted.maxOtdAmountCents, 0, "no budget granted under indeterminate OFAC");
   assert.equal(cap.approvedEmails, 0, "no approval email under indeterminate OFAC");
+  assert.ok(
+    !cap.enqueued.includes("prequal_approved"),
+    "and none enqueued either — fail-closed means no notice, on either rail",
+  );
 });
 
 test("OFAC hit (true) ⇒ OFAC_REVIEW + ops notification, no budget", async () => {

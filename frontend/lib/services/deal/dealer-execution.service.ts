@@ -93,6 +93,10 @@ export async function requestDealerExecution(dealId: string): Promise<void> {
     await raiseException({
       code: "DEALER_DOES_NOT_EXECUTE",
       dealId,
+      // Carried so the row reaches the dealer surface as well as Operations. This
+      // particular occurrence — "no email address" — is precisely the one a dealership
+      // will not learn about by email, which is why the in-portal notice matters.
+      dealerId: deal.offer?.dealerId ?? null,
       detail:
         "Every required signature is in, but the winning dealership has no email address, so the " +
         "execution request could not be sent. Release is blocked until the executed copy is stored.",

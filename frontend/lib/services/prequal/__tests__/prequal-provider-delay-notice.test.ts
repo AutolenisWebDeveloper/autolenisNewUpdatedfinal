@@ -190,9 +190,13 @@ test("a risk review raises the manual-review row and NOT the provider-delay row"
   assert.ok(!codes.includes("PREQUAL_PROVIDER_DELAY"), "the provider answered; nothing is delayed");
 });
 
-test("an APPROVED decision sends neither notice and raises neither row", async () => {
+test("an APPROVED decision sends the APPROVAL notice and neither hold notice", async () => {
   await run(result({}));
-  assert.deepEqual(buyerNotices().filter((k) => k.startsWith("prequal_")), []);
+  assert.deepEqual(
+    buyerNotices().filter((k) => k.startsWith("prequal_")),
+    ["prequal_approved"],
+    "the decision notice IS the outcome — and it is neither a delay nor a review",
+  );
   const codes = raised.map((r) => r.code);
   assert.ok(!codes.includes("PREQUAL_PROVIDER_DELAY"));
   assert.ok(!codes.includes("PREQUAL_MANUAL_OR_OFAC_REVIEW"));

@@ -50,11 +50,31 @@ export async function GET(request: NextRequest) {
       select: { id: true, dealId: true, dueAt: true },
       take: 50,
     });
+
+    // WHICH DEALERSHIP EACH OVERDUE REQUEST BELONGS TO.
+    //
+    // A separate read, because `DocumentRequest.dealId` is a plain column with no relation —
+    // Prisma cannot join it. One batched query rather than one per row.
+    //
+    // It is needed because `listOpen` ANDs its filters and the dealer deal page queries by
+    // dealer, so a row raised with only a deal reference is invisible to the one party who
+    // can END this by uploading the contract. Found by the second independent review.
+    const overdueDealIds = [...new Set(overdue.map((r) => r.dealId).filter((id): id is string => !!id))];
+    const dealerByDeal = new Map<string, string | null>();
+    if (overdueDealIds.length > 0) {
+      const deals = await prisma.deal.findMany({
+        where: { id: { in: overdueDealIds } },
+        select: { id: true, dealerId: true, offer: { select: { dealerId: true } } },
+      });
+      for (const d of deals) dealerByDeal.set(d.id, d.dealerId ?? d.offer?.dealerId ?? null);
+    }
+
     for (const request of overdue) {
       if (!request.dealId) continue;
       await raiseException({
         code: "CONTRACT_OVERDUE_FROM_DEALER",
         dealId: request.dealId,
+        dealerId: dealerByDeal.get(request.dealId) ?? null,
         detail: `The contract package was due ${request.dueAt?.toISOString() ?? "earlier"} and has not arrived. The buyer cannot sign and the vehicle cannot be released until it does.`,
       }).catch(() => {});
       contractsOverdue += 1;

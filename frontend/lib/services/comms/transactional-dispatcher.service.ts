@@ -210,6 +210,34 @@ export async function enqueueTransactional(input: EnqueueTransactionalInput, db:
   }
   assertRenderableEmail(input);
 
+  // ── THE RAIL STAMPS ITS OWN TIER. Found by the second independent review. ──
+  //
+  // `deliverEmail` chooses the suppression tier from the PAYLOAD:
+  // `suppressionTier ?? (payload.type === "transactional" ? "hard" : "full")`
+  // (`comms-outbox.service.ts:220-222`). A payload that omits `type` therefore gets the
+  // MARKETING tier — `isEmailSuppressed`, which is soft+hard AND fails closed on a lookup
+  // error (`suppression.service.ts:24-27` returns `true`). `SUPPRESSED` is terminal: no
+  // retry, no `COMMS_TERMINAL_FAILURE`, nothing said.
+  //
+  // What that meant concretely, before this line: a person who had ever unsubscribed from
+  // marketing, or who signed up during one Supabase blip, would silently never receive their
+  // sign-up verification link — and `users.email` is UNIQUE, so they could not try again with
+  // the same address. The direct rail this phase migrated off applied hard-only
+  // (`resend.service.ts:156-174`), so the migration was a regression in exactly the dimension
+  // its own comments claimed to improve.
+  //
+  // Stamped HERE rather than at each call site, because "remember to add `type`" is the
+  // failure mode that produced it: every one of the ten new sites omitted it, and the
+  // convention was followed only where a site had been copied from an older one. This
+  // function IS the transactional rail — a payload on it that is not transactional is a
+  // contradiction, and the two callers that deliberately want the marketing tier say so with
+  // an explicit `suppressionTier: "full"` (`auction-invitation.service.ts:549,1305`), which
+  // takes precedence and is untouched by this.
+  if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {
+    const payload = input.payload as Record<string, unknown>;
+    if (payload.type === undefined) payload.type = "transactional";
+  }
+
   const dedupKey = input.idempotencyKey ?? `${input.templateKey}:${input.recipientId ?? input.to ?? "unknown"}`;
   const now = new Date();
 

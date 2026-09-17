@@ -2975,8 +2975,8 @@ Implemented on `claude/txflow-10-control-plane` from `8f58a151`. This section re
 actually built, what was measured rather than recalled, and what is not done, because a section that
 described the plan would be the drift it exists to prevent.
 
-**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,198 tests,
-5,197 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
+**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,214 tests,
+5,213 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
 in its own skip message). An earlier draft of this section said the chain "stops at the first
 failure — segment 46" and quoted 3,524 tests across 46 suites as an explicitly-not-a-pass figure;
 that was true when written and is superseded here.
@@ -3132,6 +3132,93 @@ Per CLAUDE.md — "anything that looks obsolete, duplicated, unfinished, mislead
 REPORTED for an owner decision, never deleted" — it is left in place. It is a correct,
 concurrency-safe helper; it is either a missing caller or a redundant export, and which of the two
 is not this phase's call to make.
+
+#### The SECOND independent review — one blocker, five majors, and what each one cost
+
+The second review read the final implementation from a clean context, as
+`autolenis-code-verification` STEP 6 requires, and found that the first round of fixes had
+introduced problems of its own. Every finding below was verified against the code before it
+was acted on.
+
+**BLOCKER — the migration off the direct rail was a REGRESSION in the dimension its own
+comments claimed to improve.** `deliverEmail` picks the suppression tier from the payload:
+`suppressionTier ?? (payload.type === "transactional" ? "hard" : "full")`
+(`comms-outbox.service.ts:220-222`). Every one of the ten enqueue sites this phase added
+omitted `type`, so each got the MARKETING tier — `isEmailSuppressed`, which is soft+hard AND
+**fails closed on a lookup error** (`suppression.service.ts:24-27` returns `true`). `SUPPRESSED`
+is terminal: no retry, no `COMMS_TERMINAL_FAILURE`, nothing said.
+
+Concretely: a person who had ever unsubscribed from marketing, or who signed up during one
+Supabase blip, would silently never receive their sign-up verification link — and
+`users.email` is UNIQUE, so they could not try again with the same address. The direct rail
+this replaced applied hard-only (`resend.service.ts:156-174`).
+
+Fixed on the RAIL, not in a convention: `enqueueTransactional` now stamps
+`type: "transactional"` when the payload does not set one. A payload on the transactional rail
+that is not transactional is a contradiction, and "remember to add `type`" is precisely the
+failure mode that produced ten instances. The two callers that deliberately want the marketing
+tier pass `suppressionTier: "full"` explicitly and are untouched.
+
+**MAJOR — the guest claim credential was addressed from the REQUEST BODY.** `looksGuest`
+checks whose account; it does not check where the mail goes. A caller holding a leaked
+single-use claim token could present it with an address of their own: the intake CONSUMES the
+token (so `findLiveClaimToken` finds nothing), `looksGuest` passes, and a fresh five-day
+credential is minted for the guest and mailed to the attacker — a one-shot leak converted into
+a renewable one, delivered to a mailbox the guest does not control. Delivery now uses
+`users.email`, and a supplied address that disagrees is refused **before** the mint.
+
+**MAJOR — a lost CAS cancelled the request anyway.** `advanceDealStatus` returns `false`
+without throwing when its compare-and-swap matches nothing, and the stops take real time (two
+DocuSign voids), so the window is seconds wide. A deal that advanced during the stops left a
+LIVE deal progressing toward signing attached to a CANCELLED vehicle request. The request stop
+is now gated on the deal having moved.
+
+**MAJOR — the terminal-deal refusal broke the register's own remediation.**
+`CANCELLATION_CLEANUP_INCOMPLETE`'s `returnPoint` reads "re-run the failed stop; the
+orchestration is idempotent", and the first cut of that guard refused CANCELLED too — so an
+operator following the instruction got a no-op and the live envelope could only be cleaned by
+hand. Split on a principle rather than compromised: the stops UNDO a transaction, so
+COMPLETED and REFUNDED are refused before the first destructive act, and CANCELLED re-runs
+them, which is exactly the retry the register promises.
+
+**MAJOR — the dealer surface was half inert, in two ways reading could not show.** Two of the
+six allowlisted keys were **not exception codes at all** (`CONTRACT_FAIL` is a `QueueItemType`;
+`DEALER_REAFFIRMATION_OVERDUE` does not exist), so `findException` dropped those rows. And a
+code that IS in the list still reaches nobody unless its raise site sets `dealer_id`, because
+`listOpen` ANDs its filters — `DEAL_FROZEN_PENDING_RELEASE`, the one line that says *"do not
+release the vehicle"*, was raised with no dealer reference at all, and so were
+`SIGNATURE_NOT_COMPLETED`, `CONTRACT_OVERDUE_FROM_DEALER` and `DEALER_DOES_NOT_EXECUTE`. All
+four now carry it, the two dead keys are replaced with the codes the register really has, and
+two new gates assert both directions against the real catalogue and the real raise sites.
+
+**MAJOR — `PAYMENT_FAILURE` was a permanent upgrade lockout.** It has `deadlineHours: null`
+and was resolved by nothing. Elements retries on the same intent, so the ordinary sequence is:
+card declines → row opens → buyer retries → payment succeeds → **the row stays open for ever**.
+From then on `hasOpenException` is true, the dashboard hides the upgrade card and
+`POST /api/buyer/plan/upgrade` answers 409 permanently, while the exception panel keeps saying
+"your payment did not go through" about a paid deposit. Card decline rates are a few percent,
+so this is the ordinary path. `payment_intent.succeeded` now closes the row keyed on that
+intent — the same auto-resolution `closeDisputeException` performs, and defensible for the same
+reason: the condition is settled by the provider, not by judgement.
+
+**Minors, all fixed:** the contract-revision notices keyed on `max(version)` read separately
+from the scan that produced them (now the scan ROW's id, which is unique by construction, so
+two concurrent scans cannot collide); `expiringNotified` counted deduped enqueues; the
+`PREQUAL_EXPIRING` payload omitted `prequalExpiresAt`, making its registered recheck silently
+inert; `LOCATION_UNUSABLE` used an explicit once-ever key, so a second bad ZIP after the first
+was resolved raised nothing; the suppressed-upgrade card said "the item above" when the
+blocking row is one §26 keeps ops-only; and two load-bearing comments no longer described the
+code — including "a caller holding either end reaches the same stops", which was false for the
+request end. That last one is now TRUE rather than corrected: a request-side cancellation
+resolves its live auction AND its live deal.
+
+**And the tightened gate found one more.** Acting on the review's note that both §8.3 rules
+count a MENTION rather than a call, the scans were narrowed to files that actually call
+`raiseException` / `enqueueTransactional` — and `prequal_approved` immediately went red. It was
+in the same position as `prequal_declined`: sent every day on a rail with no retry and no
+terminal-failure alert, and discharged in the register by a coincidence of naming. Unlike the
+declined notice it carries no FCRA outcome machinery, so it was migrated rather than ledgered.
+**The loose gate was hiding a real gap, which is the argument for the tightening.**
 
 #### The first review's three open questions, answered
 

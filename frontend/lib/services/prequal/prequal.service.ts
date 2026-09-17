@@ -22,7 +22,6 @@ import {
 import { createAlertOnce } from "@/lib/services/monitoring/health-alert.service";
 import { PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import {
-  sendPrequalApprovedEmail,
   sendAdverseActionEmail,
   // `sendPrequalUnderReviewEmail` is GONE from this file — PHASE 10 moved that notice
   // onto the §27 rail. The export itself stays in resend.service for now: §13-D14 is
@@ -634,17 +633,49 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     const decisionDate = new Date();
     const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
+    // §27.1 "Prequalification approved → Buyer" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
+    //
+    // FOUND BY TIGHTENING THE §8.3 GATE, not by reading. The first cut of the completeness
+    // rule counted a template key named ANYWHERE in `app/`/`lib/`, and `prequal_approved`
+    // was discharged by a coincidence of naming rather than by an enqueue site — the second
+    // independent review flagged the shape, and restricting the scan to files that actually
+    // call the dispatcher turned the row red. It was the same situation as `prequal_declined`
+    // one branch down: sent every day, on a rail with no retry and no terminal-failure
+    // alert, and unrepresented in the outbox the register describes.
+    //
+    // UNLIKE `prequal_declined`, THIS ONE IS SAFE TO MOVE. The declined notice is the FCRA
+    // §615 adverse-action notice and its synchronous `EmailSendOutcome` drives a compliance
+    // record §29 forbids weakening. The approval notice has no such machinery: the compliance
+    // event below records that a decision was made and notified, and is written whether or
+    // not the provider accepted the message — which is exactly the claim the outbox makes
+    // true rather than assumed.
+    //
+    // Keyed per APPLICATION, not per day. The direct rail keyed on
+    // `to + decisionDate.slice(0,10)`, so a buyer who applied twice in one day got one email
+    // for two decisions.
     try {
-      await sendPrequalApprovedEmail({
+      const { prequalApprovedHtml } = await import("@/lib/services/email/templates/prequal-approved");
+      await enqueueTransactional({
+        triggerEvent: "prequal.approved",
+        templateKey: PHASE_2_TEMPLATES.PREQUAL_APPROVED,
+        channel: "email",
+        recipientKind: "buyer",
+        recipientId: buyer.id,
         to: buyer.user.email,
-        firstName: input.firstName,
-        maxOtdAmountCents: result.maxOtdAmountCents,
-        tier: result.tier,
-        decisionDate,
-        expiryDate,
+        idempotencyKey: `${PHASE_2_TEMPLATES.PREQUAL_APPROVED}:${prequal.id}`,
+        payload: {
+          email: buyer.user.email,
+          subject: `You're Pre-Qualified — Here's Your Buying Power, ${input.firstName}`,
+          html: prequalApprovedHtml({
+            firstName: input.firstName,
+            maxOtdAmountCents: result.maxOtdAmountCents,
+            tier: result.tier,
+            expiryDate,
+          }),
+        },
       });
     } catch (emailErr) {
-      logger.error("[prequal] Failed to send approval email:", emailErr);
+      logger.error("[prequal] Failed to enqueue the approval email:", emailErr);
     }
 
     try {

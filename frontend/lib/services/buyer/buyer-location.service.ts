@@ -186,11 +186,20 @@ export async function geocodeBuyerLocation(buyerId: string, db: Db = prisma): Pr
     //
     // Keyed per BUYER, not per attempt: an unusable address is one condition until it is
     // fixed, however many times a page re-renders and re-attempts the placement.
+    //
+    // ON THE DERIVED KEY RATHER THAN AN EXPLICIT ONE. Found by the second independent
+    // review: `buyerId` alone already fingerprints the subject, so the derived key gives the
+    // same per-buyer dedup — but an EXPLICIT key takes `raiseException`'s strict once-ever
+    // path (`acceptTerminal: true`), where a collision returns the row WHATEVER its status.
+    // That made the second unusable address unreportable: buyer enters a bad ZIP → row opens
+    // → Operations resolves it → buyer enters another ungeocodable ZIP → the raise returns
+    // the RESOLVED row, nothing opens, and location-dependent stages are blocked with no
+    // owner. The derived key suffixes `#2` on recurrence, which is the behaviour the comment
+    // above already described.
     await raiseException({
       code: "LOCATION_UNUSABLE",
       buyerId,
       detail: `The geocoder could not place ZIP ${buyer.zip}. Location-dependent stages are blocked until the address is corrected.`,
-      idempotencyKey: `LOCATION_UNUSABLE:${buyerId}`,
     }).catch((err) => {
       logger.error("[buyer-location] could not raise the unusable-location exception", {
         buyerId,

@@ -676,8 +676,15 @@ export default async function BuyerDashboard() {
               <p className="mt-2 text-sm font-semibold text-slate-900">
                 {buyerPlan === "PREMIUM" ? "Premium" : "Standard"}
               </p>
+              {/* "The item above" was only true when the blocking exception happened to be
+                  one the buyer can see. `hasOpenException` deliberately counts the rows with
+                  no buyer-visible status — a deal blocked by an infrastructure condition is
+                  still blocked — and `TransactionExceptionPanel` drops exactly those, so a
+                  buyer held by one saw an empty page top and a sentence pointing at nothing.
+                  Found by the second independent review. The wording is now true in both
+                  cases, and says nothing about a row §26 keeps ops-only. */}
               <p className="mt-1.5 text-sm text-slate-600">
-                We are holding off on plan changes until the item above is resolved.
+                We are holding off on plan changes until an open item on your purchase is resolved.
               </p>
             </div>
           ) : (

@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
         renewUrl,
       });
       try {
-        await enqueueTransactional({
+        const enq = await enqueueTransactional({
           triggerEvent: "prequal.expiring",
           templateKey: PHASE_2_TEMPLATES.PREQUAL_EXPIRING,
           channel: "email",
@@ -84,9 +84,27 @@ export async function GET(request: NextRequest) {
           // warning seven times; `skipIfPrequalRenewed` would not stop it, because
           // renewing is exactly what the buyer has NOT done.
           idempotencyKey: `${PHASE_2_TEMPLATES.PREQUAL_EXPIRING}:${row.id}`,
-          payload: { email, subject: content.subject, html: content.html, text: content.text },
+          payload: {
+            email,
+            subject: content.subject,
+            html: content.html,
+            text: content.text,
+            // WITHOUT THIS THE REGISTERED RECHECK IS INERT. Found by the second independent
+            // review. `skipIfPrequalRenewed` reads `payload.prequalExpiresAt` and skips only
+            // when it disagrees with the live `expires_at`; absent, `warnedAbout` is
+            // undefined and the function always returns `proceed: true` — a recheck that
+            // degrades to `alwaysSend` without saying so. The window is short here (`runAt`
+            // is now), but the recheck IS §27's guarantee and a silently non-functional one
+            // is worse than none.
+            prequalExpiresAt: row.expiresAt.toISOString(),
+          },
         });
-        expiringNotified++;
+        // COUNTED ONLY WHEN A ROW WAS ACTUALLY WRITTEN. `enqueueTransactional` absorbs the
+        // P2002 a duplicate key raises and returns `{ enqueued: false }`; incrementing
+        // regardless made this daily cron report seven "expiring notices sent" over a
+        // seven-day window for one buyer who was mailed once. The cron record is the
+        // observability this adds, so it must not overcount.
+        if (enq.enqueued) expiringNotified++;
       } catch (err) {
         // One buyer's notice must not stop the rest, and none of them may fail the cron —
         // this run's other job is the expired count, which is already computed.

@@ -76,12 +76,32 @@ const ROOTS = ["app", "lib"] as const;
  */
 const CATALOGUE_FILE = "lib/services/operations/exception-catalogue.ts";
 
+/**
+ * Literals from files that ACTUALLY CALL `raiseException`.
+ *
+ * Tightened after the second independent review. The first cut collected every string literal
+ * in `app/` and `lib/`, so a code named in an allowlist, a UI map or a suppression set
+ * discharged its register row without anything raising it. The review checked empirically and
+ * found nothing vacuous at the time — but `SUPPRESSION_EXEMPT_CODES` in
+ * `exception-lineage.service.ts` is exactly that shape, and it was added in this same phase.
+ *
+ * Restricting the scan to files that call the writer is not a full reachability analysis (the
+ * limit stated above still stands) but it does close the cheapest way to fool this rule.
+ */
 function raiseSiteLiterals(): Set<string> {
-  const files = sourceFiles(ROOT, [...ROOTS]).filter((f) => f !== CATALOGUE_FILE);
-  assertScanned(files, 800, "exception-register-completeness");
+  const all = sourceFiles(ROOT, [...ROOTS]).filter((f) => f !== CATALOGUE_FILE);
+  assertScanned(all, 800, "exception-register-completeness");
+
+  const { readFileSync } = require("node:fs") as typeof import("node:fs");
+  const files = all.filter((f) => readFileSync(`${ROOT}/${f}`, "utf8").includes("raiseException"));
+  assert.ok(
+    files.length >= 20,
+    `only ${files.length} files call raiseException — the filter is wrong and this rule is now blind`
+  );
+
   const literals = stringLiterals(ROOT, files);
   assert.ok(
-    literals.size > 1000,
+    literals.size > 200,
     `the literal scan collected only ${literals.size} strings — the parse failed and this rule is now blind`
   );
   return literals;

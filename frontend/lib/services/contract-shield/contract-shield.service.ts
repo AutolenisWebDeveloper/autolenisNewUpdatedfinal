@@ -376,8 +376,21 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   const existingScans = await prisma.contractScan.findMany({ where: { dealId }, orderBy: { version: "desc" }, take: 1 });
   const version = (existingScans[0]?.version ?? 0) + 1;
 
-  await prisma.contractScan.create({
+  // THE SCAN'S OWN ID IS THE IDENTITY, NOT ITS VERSION NUMBER.
+  //
+  // Found by the second independent review. `version` is derived by a read-then-create with
+  // no unique constraint behind it, so two scans of the same deal in flight — the cron over
+  // `UPLOADED` versions and a dealer re-upload — both read `max(version) = N` and both write
+  // `N+1`. Anything keyed on `v${version}` then COLLIDES, and an explicit idempotency key
+  // takes the strict once-ever path: the second, DIFFERENT discrepancy set silently returns
+  // the first row and opens nothing, while both parties keep the stale list.
+  //
+  // The row's own id is unique by construction, so it is what the exception and the notices
+  // key on below. The version stays in the copy, where it is a human-readable label rather
+  // than an identifier.
+  const scan = await prisma.contractScan.create({
     data: { dealId, score, status, fixList: fixList as object[], version, scannedAt: new Date(), contractVersionId: contractVersionId ?? null },
+    select: { id: true, version: true },
   });
 
   await prisma.deal.update({
@@ -413,7 +426,7 @@ export async function scanContract(dealId: string, contractText: string, dealerI
       detail:
         `Contract scan v${version} does not match the agreed terms. ` +
         `${mismatchSummary.join("; ")}.`,
-      idempotencyKey: `CONTRACT_MISMATCH:${dealId}:v${version}`,
+      idempotencyKey: `CONTRACT_MISMATCH:scan:${scan.id}`,
     }).catch((err) => {
       logger.error("[contract-shield] could not raise the contract-mismatch exception", {
         dealId,
@@ -440,7 +453,7 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   // condition (any WARNING/FAIL, including a junk-fee finding with no mismatch at all). This
   // one fires only when the contract disagrees with the agreed terms.
   if (mismatchSummary.length > 0) {
-    await notifyContractRevisionRequired(dealId, mismatchSummary).catch((err) => {
+    await notifyContractRevisionRequired(dealId, mismatchSummary, scan).catch((err) => {
       logger.error("[contract-shield] revision-required notices could not be enqueued", {
         dealId,
         error: err instanceof Error ? err.message : String(err),
@@ -612,7 +625,11 @@ async function createContractApprovedNotifications(
  * Keyed per SCAN VERSION so a corrected upload that still disagrees sends a new pair with the
  * new list, while a re-scan of the same document does not re-send.
  */
-async function notifyContractRevisionRequired(dealId: string, discrepancies: string[]): Promise<void> {
+async function notifyContractRevisionRequired(
+  dealId: string,
+  discrepancies: string[],
+  scan: { id: string; version: number },
+): Promise<void> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     select: {
@@ -621,13 +638,11 @@ async function notifyContractRevisionRequired(dealId: string, discrepancies: str
       vehicleYear: true, vehicleMake: true, vehicleModel: true,
       buyer: { select: { user: { select: { email: true } } } },
       offer: { select: { dealerId: true, dealer: { select: { user: { select: { email: true } } } } } },
-      contractScans: { orderBy: { version: "desc" }, take: 1, select: { version: true } },
     },
   });
   if (!deal) return;
 
   const vehicle = [deal.vehicleYear, deal.vehicleMake, deal.vehicleModel].filter(Boolean).join(" ") || "your vehicle";
-  const version = deal.contractScans[0]?.version ?? 1;
   const { renderContractRevisionRequired } = await import("@/lib/services/comms/phase8-email-content");
   const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
   const { PHASE_8_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
@@ -655,7 +670,7 @@ async function notifyContractRevisionRequired(dealId: string, discrepancies: str
       recipientId: r.id,
       to: r.email,
       dealId,
-      idempotencyKey: `${PHASE_8_TEMPLATES.CONTRACT_REVISION_REQUIRED}:${dealId}:v${version}:${r.audience}`,
+      idempotencyKey: `${PHASE_8_TEMPLATES.CONTRACT_REVISION_REQUIRED}:scan:${scan.id}:${r.audience}`,
       payload: { email: r.email, subject: content.subject, html: content.html, text: content.text },
     }).catch((err) => {
       logger.error("[contract-shield] revision-required enqueue failed", {

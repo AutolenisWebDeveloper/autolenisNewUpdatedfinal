@@ -13,7 +13,14 @@ import assert from "node:assert/strict";
 
 type Rec = Record<string, unknown>;
 
-interface BuyerRow { id: string; isGuest: boolean; firstName: string | null; supabaseId: string }
+interface BuyerRow {
+  id: string;
+  isGuest: boolean;
+  firstName: string | null;
+  supabaseId: string;
+  /** `users.email` — the ONLY address this sequence may deliver to. */
+  accountEmail: string;
+}
 
 let buyer: BuyerRow | null;
 let enqueued: Rec[];
@@ -26,7 +33,14 @@ mock.module("@/lib/prisma", {
     prisma: {
       buyer: {
         findUnique: async () =>
-          buyer ? { id: buyer.id, isGuest: buyer.isGuest, firstName: buyer.firstName, user: { supabaseId: buyer.supabaseId } } : null,
+          buyer
+            ? {
+                id: buyer.id,
+                isGuest: buyer.isGuest,
+                firstName: buyer.firstName,
+                user: { supabaseId: buyer.supabaseId, email: buyer.accountEmail },
+              }
+            : null,
       },
     },
   },
@@ -50,7 +64,7 @@ mock.module("@/lib/services/comms/transactional-dispatcher.service", {
 mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } } });
 
 beforeEach(() => {
-  buyer = { id: "b1", isGuest: true, firstName: "Ada", supabaseId: "guest_abc" };
+  buyer = { id: "b1", isGuest: true, firstName: "Ada", supabaseId: "guest_abc", accountEmail: "ada@example.invalid" };
   enqueued = [];
   cancelled = [];
   liveToken = null;
@@ -110,7 +124,7 @@ test("THE CREDENTIAL APPEARS IN EXACTLY ONE MESSAGE", async () => {
 });
 
 test("REFUSES a claimed account — a public form must not mint a claim credential for one", async () => {
-  buyer = { id: "b1", isGuest: false, firstName: "Ada", supabaseId: "sb_real" };
+  buyer = { id: "b1", isGuest: false, firstName: "Ada", supabaseId: "sb_real", accountEmail: "ada@example.invalid" };
   const { enqueueGuestVerification } = await svc();
   const result = await enqueueGuestVerification(input);
 
@@ -124,7 +138,7 @@ test("both halves of 'guest' must agree — the flag alone is not enough", async
   // `isGuest` is the intake flag; the `guest_` prefix is the identity fact `skipIfVerified`
   // reads. A row where they disagree has been half-claimed, and minting against it is the
   // takeover primitive this guard exists to refuse.
-  buyer = { id: "b1", isGuest: true, firstName: "Ada", supabaseId: "sb_real" };
+  buyer = { id: "b1", isGuest: true, firstName: "Ada", supabaseId: "sb_real", accountEmail: "ada@example.invalid" };
   const { enqueueGuestVerification } = await svc();
   assert.equal((await enqueueGuestVerification(input)).reason, "not_a_guest");
   assert.equal(issued, 0);
@@ -155,4 +169,45 @@ test("claiming cancels the whole sequence by the same handle", async () => {
   assert.deepEqual(cancelled, [
     { key: guestVerificationCancelKey("b1"), reason: "guest claimed their account" },
   ]);
+});
+
+// ── THE CREDENTIAL IS ADDRESSED FROM THE ACCOUNT, NEVER FROM THE REQUEST ────
+//
+// Found by the SECOND independent review. `looksGuest` checks WHOSE account; it does not
+// check WHERE THE MAIL GOES, and that was the hole: a caller holding a leaked single-use
+// claim token could present it with an address of their own, the intake would CONSUME the
+// token (so `findLiveClaimToken` finds nothing), and a fresh five-day credential would be
+// minted for the guest and mailed to the attacker — a one-shot leak turned into a renewable
+// one, delivered to a mailbox the guest does not control.
+
+test("a caller-supplied address that DISAGREES with the account mints nothing and sends nothing", async () => {
+  const { enqueueGuestVerification } = await svc();
+  const result = await enqueueGuestVerification({ ...input, email: "attacker@evil.invalid" });
+
+  assert.equal(result.reason, "address_mismatch");
+  assert.equal(result.claimSent, false);
+  assert.equal(issued, 0, "NO token is minted — the refusal comes before the mint");
+  assert.deepEqual(enqueued, [], "and nothing is sent to anyone");
+});
+
+test("delivery uses the ACCOUNT's address, not the one that was passed in", async () => {
+  // Same address, different case and whitespace — a legitimate caller, and the proof that the
+  // address on the row comes from `users.email` rather than from the request body.
+  const { enqueueGuestVerification } = await svc();
+  await enqueueGuestVerification({ ...input, email: "  ADA@Example.Invalid " });
+
+  assert.equal(enqueued.length, 4);
+  for (const row of enqueued) {
+    assert.equal(row.to, "ada@example.invalid", "a credential for this buyer can only reach this buyer");
+    assert.equal((row.payload as Record<string, unknown>).email, "ada@example.invalid");
+  }
+});
+
+test("an account with no address of its own is refused rather than guessed at", async () => {
+  buyer = { id: "b1", isGuest: true, firstName: "Ada", supabaseId: "guest_abc", accountEmail: "" };
+  const { enqueueGuestVerification } = await svc();
+  const result = await enqueueGuestVerification(input);
+
+  assert.equal(result.reason, "no_account_email");
+  assert.equal(issued, 0);
 });

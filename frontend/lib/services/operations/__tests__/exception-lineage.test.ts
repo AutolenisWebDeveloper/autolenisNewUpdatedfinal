@@ -240,3 +240,79 @@ test("the suppression predicate still counts an exception the buyer is never sho
       "same mistake as upselling one whose payment failed",
   );
 });
+
+// ── FINDING 6 FROM THE SECOND INDEPENDENT REVIEW ────────────────────────────
+//
+// The dealer allowlist was half inert and reading it could not show that. Two of its six
+// keys were NOT EXCEPTION CODES — `CONTRACT_FAIL` is a `QueueItemType` and
+// `DEALER_REAFFIRMATION_OVERDUE` does not exist anywhere — so `findException` returned
+// undefined and `toLineage` dropped those rows. And a key that IS a code still reaches
+// nobody unless its raise site sets `dealer_id`, because `listOpen` ANDs its filters and
+// the dealer deal page queries by dealer.
+//
+// The existing "an allowlisted code MUST reach the dealer" test could not catch either: its
+// fixture row carries `dealerId: null` and its `findMany` stub ignores the `where` entirely,
+// so it proved the projection function and nothing about reachability.
+//
+// These two assert against the REAL catalogue and the REAL raise sites.
+
+test("every dealer-visible code is a real §26 code — a typo here is dead text, not a capability", async () => {
+  const { DEALER_VISIBLE_EXCEPTION_CODES } = await load();
+  const { EXCEPTION_CATALOGUE } = await import("@/lib/services/operations/exception-catalogue");
+  const known = new Set(EXCEPTION_CATALOGUE.map((d) => d.code));
+
+  const bogus = DEALER_VISIBLE_EXCEPTION_CODES.filter((c) => !known.has(c));
+  assert.deepEqual(
+    bogus,
+    [],
+    "These keys are not in the register, so `findException` returns undefined and the row is " +
+      `dropped before any dealer sees it. They read as capabilities and are not. Bogus: ${bogus.join(", ")}`
+  );
+});
+
+test("every dealer-visible code is RAISED with a dealerId — allowlisting alone reaches nobody", async () => {
+  const { DEALER_VISIBLE_EXCEPTION_CODES } = await load();
+  const { readFileSync } = await import("node:fs");
+  const { sourceFiles } = await import("@/lib/testing/source-scan");
+
+  const ROOT = process.cwd();
+  const files = sourceFiles(ROOT, ["app", "lib"]).filter(
+    (f) => f !== "lib/services/operations/exception-lineage.service.ts",
+  );
+
+  // For each code, find the `raiseException({ ... code: "X" ... })` blocks that name it and
+  // check the same object literal also names `dealerId`. Deliberately textual over the
+  // BLOCK rather than the file: a `dealerId` fifty lines away in an unrelated call proves
+  // nothing about this one.
+  const missing: string[] = [];
+  for (const code of DEALER_VISIBLE_EXCEPTION_CODES) {
+    let sawRaise = false;
+    let sawDealerId = false;
+    for (const file of files) {
+      const src = readFileSync(`${ROOT}/${file}`, "utf8");
+      if (!src.includes(`"${code}"`)) continue;
+      // Each raise is an object literal; take the text from the code line to the closing
+      // `})` that follows it.
+      const re = new RegExp(`code:\\s*(?:exceptionCode|"${code}")[\\s\\S]{0,900}?\\}\\s*[,)]`, "g");
+      for (const m of src.matchAll(re)) {
+        const block = m[0];
+        // `exceptionCode` is a local that is assigned the code one line above the raise.
+        if (!block.includes(`"${code}"`) && !src.includes(`exceptionCode = "${code}"`)) continue;
+        sawRaise = true;
+        // `dealerId: x` AND the shorthand `dealerId,` — the two real call sites that get
+        // this right both use the shorthand, and a rule that missed them would report
+        // correct code as broken.
+        if (/\bdealerId\s*[:,]/.test(block)) sawDealerId = true;
+      }
+    }
+    if (sawRaise && !sawDealerId) missing.push(code);
+  }
+
+  assert.deepEqual(
+    missing,
+    [],
+    "These codes are shown to dealers by the allowlist and raised WITHOUT a dealer reference, " +
+      "so `listOpen({ dealerId })` on the dealer deal page can never return them. The allowlist " +
+      `entry is then a message nobody receives. Missing dealerId: ${missing.join(", ")}`
+  );
+});

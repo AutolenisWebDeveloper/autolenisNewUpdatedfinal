@@ -49,6 +49,25 @@
 // reused from the buyer's. A code absent from the list is invisible to dealers —
 // fail-closed, so a new §26 row is silent on the dealer surface until someone
 // decides it belongs there, rather than leaking by default.
+//
+// ── TWO WAYS THIS LIST CAN BE WRONG, AND BOTH HAPPENED ──────────────────────
+//
+// The SECOND independent review found this list half inert, in two different ways, and
+// neither was visible from reading it:
+//
+//   1. TWO KEYS WERE NOT EXCEPTION CODES AT ALL. `CONTRACT_FAIL` is a `QueueItemType`, not
+//      a code, and `DEALER_REAFFIRMATION_OVERDUE` does not exist anywhere. `findException`
+//      returns undefined for both and `toLineage` drops the row — so two entries that read
+//      as capabilities were dead text. They are replaced with the codes the register
+//      actually carries for those conditions.
+//   2. A CODE IN THE LIST STILL NEEDS A `dealer_id` ON ITS ROW. `listOpen` ANDs its
+//      filters and the dealer page queries by `dealerId`, so an exception raised without
+//      one is invisible however well it is allowlisted. `DEAL_FROZEN_PENDING_RELEASE` —
+//      the one message that says "do not release the vehicle" — was raised with no dealer
+//      reference at all, and so was `SIGNATURE_NOT_COMPLETED`.
+//
+// `exception-lineage.test.ts` now asserts BOTH directions against the real catalogue and
+// the real raise sites, so neither failure can be reintroduced by editing this object alone.
 
 import { prisma } from "@/lib/prisma";
 import type { QueueItem, QueueOwnerRole } from "@prisma/client";
@@ -115,17 +134,28 @@ const OWNER_LABELS: Record<QueueOwnerRole, Record<LineageAudience, string>> = {
 const DEALER_VISIBLE_CODES: Record<string, string> = {
   DEAL_FROZEN_PENDING_RELEASE:
     "This purchase is on hold while AutoLenis agrees a release with you and the buyer. Do not release the vehicle until this is resolved.",
-  CONTRACT_FAIL:
-    "Contract Shield found issues in the contract you supplied. AutoLenis will send the specific findings — a corrected contract is needed before signing continues.",
+  CONTRACT_MISMATCH:
+    "Contract Shield found that the contract you supplied does not match the agreed numbers. AutoLenis has sent you the specific findings — a corrected contract is needed before signing continues.",
+  CONTRACT_OVERDUE_FROM_DEALER:
+    "The contract for this deal is overdue. The buyer is waiting, and the deal cannot move to signing until you upload it.",
+  DEALER_DOES_NOT_EXECUTE:
+    "This deal is waiting on your execution of the signed contract. The buyer has completed their part.",
   SIGNATURE_NOT_COMPLETED:
     "A signature on this deal is outstanding. Signing cannot complete until every party has signed.",
   RELEASED_BUT_NOT_CONFIRMED:
     "You recorded the vehicle as released, but the buyer has not confirmed possession. AutoLenis is contacting them — the deal does not complete until they confirm.",
   POST_COMPLETION_OBLIGATION_OVERDUE:
     "A post-completion obligation on this deal is overdue. This affects your dealership scorecard.",
-  DEALER_REAFFIRMATION_OVERDUE:
-    "This deal is waiting on your reaffirmation. The buyer has been told the deal is held.",
 };
+
+/**
+ * The allowlist's keys, exported for the gate in `exception-lineage.test.ts`.
+ *
+ * Exported rather than re-typed there: a test that restates the list only ever proves the
+ * list agrees with itself, which is exactly how two keys that were not exception codes
+ * survived being read several times.
+ */
+export const DEALER_VISIBLE_EXCEPTION_CODES: readonly string[] = Object.keys(DEALER_VISIBLE_CODES);
 
 function toLineage(row: QueueItem, audience: LineageAudience): ExceptionLineage | null {
   const def = findException(row.exceptionCode ?? "");
@@ -258,6 +288,15 @@ export async function hasOpenException(buyerId: string): Promise<boolean> {
     where: {
       buyerId,
       status: { in: [...OPEN_QUEUE_STATUSES] },
+      // WHY THE NULL BRANCH IS SPELLED OUT. `exception_code NOT IN (...)` is NULL for a
+      // NULL column under SQL's three-valued logic, which would silently EXCLUDE every
+      // uncoded row — the same shape as the stale-sweep defect recorded in
+      // `stale-sweep.service.ts`. The OR keeps them counted.
+      //
+      // Counting them is also the intended behaviour, not a side effect: `raiseException`
+      // is the sole writer of `queue_items` and always sets a code, so an uncoded row is
+      // either historical or written by something that should not exist — and either way a
+      // buyer with an unexplained open work item is not someone to upsell.
       OR: [
         { exceptionCode: null },
         { exceptionCode: { notIn: [...SUPPRESSION_EXEMPT_CODES] } },

@@ -61,8 +61,23 @@ interface Observed {
 }
 
 function observe(): Observed {
-  const files = sourceFiles(ROOT, [...ROOTS]).filter((f) => f !== REGISTRY_FILE);
-  assertScanned(files, 800, "communications-register-completeness");
+  const all = sourceFiles(ROOT, [...ROOTS]).filter((f) => f !== REGISTRY_FILE);
+  assertScanned(all, 800, "communications-register-completeness");
+
+  // ONLY FILES THAT ACTUALLY ENQUEUE. Tightened after the second independent review: the
+  // first cut counted any `*_TEMPLATES.<KEY>` property access, so a key named in a
+  // `cancelByKey` helper or a recheck registration discharged its register row without
+  // anything sending it. `enqueueOrRaise` is the Phase 7 wrapper around the dispatcher and
+  // counts as an enqueue; it is named here rather than resolved, because resolving a wrapper
+  // chain is a call-graph problem and this rule is deliberately not one.
+  const files = all.filter((f) => {
+    const src = readFileSync(`${ROOT}/${f}`, "utf8");
+    return src.includes("enqueueTransactional") || src.includes("enqueueOrRaise");
+  });
+  assert.ok(
+    files.length >= 15,
+    `only ${files.length} files enqueue at all — the filter is wrong and this rule is now blind`
+  );
 
   const constants = new Set<string>();
   const literals = new Set<string>();

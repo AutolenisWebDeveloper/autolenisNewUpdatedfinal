@@ -183,11 +183,13 @@ async function trySendEmailVerified(supabaseId: string, email: string): Promise<
 
     // §27.1 "Verification completed → Buyer" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
     //
-    // The dedup record above (an `AdminAuditLog` row) survives, because it guards something
-    // this key cannot: it is written only after a successful send, so a failed send leaves it
-    // absent and the next callback visit tries again. The outbox key is the second guard, for
-    // the case the audit row cannot cover — two callback visits racing before either has
-    // written it.
+    // TWO GUARDS, AND NEITHER IS THE OTHER'S SPARE. The `AdminAuditLog` row above is written
+    // after a successful ENQUEUE — not after a successful send, which is what an earlier
+    // version of this comment claimed and the second independent review corrected. So a
+    // message the outbox later terminal-fails leaves the audit row present and the next
+    // callback visit a no-op; the outbox's own terminal-failure exception is what covers that
+    // case, not a retry from here. The outbox key covers what the audit row cannot: two
+    // callback visits racing before either has written it.
     const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
     const { PHASE_2_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
     const { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } = await import(

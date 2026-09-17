@@ -682,3 +682,77 @@ test("it FAILS CLOSED: no request reference, no request row, no buyer reference"
     "none of these is permission to ask someone for money",
   );
 });
+
+// ── THE RAIL STAMPS ITS OWN SUPPRESSION TIER ────────────────────────────────
+//
+// Found by the SECOND independent review, and it was a BLOCKER. `deliverEmail` reads
+// `suppressionTier ?? (payload.type === "transactional" ? "hard" : "full")`, so a payload
+// with no `type` gets the MARKETING tier — soft+hard suppression, and a lookup that FAILS
+// CLOSED on a query error. `SUPPRESSED` is terminal: no retry, no exception, nothing said.
+//
+// Concretely: a person who had once unsubscribed from marketing, or who signed up during one
+// Supabase blip, would never receive their sign-up verification link — and `users.email` is
+// UNIQUE, so they could not try again with the same address. Every one of the ten enqueue
+// sites this phase added omitted `type`, which is why the fix is on the rail and not in a
+// convention.
+
+test("a payload with no `type` is stamped transactional — the rail cannot enqueue marketing-tier mail", async () => {
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  const r = await enqueueTransactional({
+    triggerEvent: "auth.registration_submitted",
+    templateKey: PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED,
+    channel: "email",
+    recipientKind: "buyer",
+    recipientId: null,
+    to: "new@x.com",
+    idempotencyKey: "registration_submitted:tier-default",
+    payload: { email: "new@x.com", subject: "S", html: "<p>H</p>" },
+  });
+  assert.equal(r.enqueued, true);
+
+  const payload = db.rows.get(r.id!)!.payload as Record<string, unknown>;
+  assert.equal(
+    payload.type,
+    "transactional",
+    "without this the drain applies soft suppression to a verification link, and an unsubscribe " +
+      "or one lookup outage silently and permanently swallows it",
+  );
+});
+
+test("an explicit type is NOT overwritten — the stamp is a default, not a policy", async () => {
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  const r = await enqueueTransactional({
+    triggerEvent: "auth.registration_submitted",
+    templateKey: PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED,
+    channel: "email",
+    recipientKind: "buyer",
+    recipientId: null,
+    to: "explicit@x.com",
+    idempotencyKey: "registration_submitted:tier-explicit",
+    payload: { email: "explicit@x.com", subject: "S", html: "<p>H</p>", type: "marketing" },
+  });
+  const payload = db.rows.get(r.id!)!.payload as Record<string, unknown>;
+  assert.equal(payload.type, "marketing", "a caller that means it still gets what it asked for");
+});
+
+test("an explicit suppressionTier still wins — the two dealer-invitation sites depend on it", async () => {
+  // `auction-invitation.service.ts:549,1305` pass `suppressionTier: "full"` deliberately: a
+  // dealership that unsubscribed should not be cold-invited. The stamp must not take that away.
+  const { enqueueTransactional } = await svc();
+  const { PHASE_2_TEMPLATES } = await registry();
+  const r = await enqueueTransactional({
+    triggerEvent: "auth.registration_submitted",
+    templateKey: PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED,
+    channel: "email",
+    recipientKind: "dealer",
+    recipientId: "d1",
+    to: "d@x.com",
+    idempotencyKey: "registration_submitted:tier-full",
+    payload: { email: "d@x.com", subject: "S", html: "<p>H</p>", suppressionTier: "full" },
+  });
+  const payload = db.rows.get(r.id!)!.payload as Record<string, unknown>;
+  assert.equal(payload.suppressionTier, "full");
+  assert.equal(payload.type, "transactional", "the stamp lands, and the explicit tier overrides it downstream");
+});

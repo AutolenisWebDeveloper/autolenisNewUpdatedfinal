@@ -49,15 +49,41 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const { cancelTransaction } = await import("@/lib/services/transaction/cancellation.service");
-  const outcome = await cancelTransaction({
-    vehicleRequestId: requestId,
-    // §24 requires a reason and this route collects none. The ACTION is the reason, stated
-    // rather than defaulted to "cancelled" — an operator reading the record learns who ended
-    // it and from where, which is the question they would actually ask.
-    reason: "Cancelled by the buyer from their requests page.",
-    actorId: buyer.id,
-    actorRole: "BUYER",
-  });
+  const { TransitionActorError } = await import("@/lib/services/deal/transition-authority");
+
+  let outcome;
+  try {
+    outcome = await cancelTransaction({
+      vehicleRequestId: requestId,
+      // §24 requires a reason and this route collects none. The ACTION is the reason, stated
+      // rather than defaulted to "cancelled" — an operator reading the record learns who ended
+      // it and from where, which is the question they would actually ask.
+      reason: "Cancelled by the buyer from their requests page.",
+      actorId: buyer.id,
+      actorRole: "BUYER",
+    });
+  } catch (err) {
+    // §24's EXECUTION BOUNDARY, reaching a buyer as an answer rather than a 500.
+    //
+    // `DEAL_TRANSITION_ACTORS.FROZEN_PENDING_RELEASE` is SYSTEM/ADMIN only — a buyer may not
+    // put their own deal into a coordinated unwind — so a request whose deal turns out to be
+    // executed makes `assertActorMayDrive` throw. The status allowlist above should prevent
+    // that, and the second independent review was right that "should" is not a contract:
+    // `cancelTransaction` now resolves a live deal from the request end, so the case is
+    // reachable in principle and must not surface as an unhandled error.
+    //
+    // Rethrown if it is anything else. Swallowing an unknown failure here would report a
+    // cancellation that did not happen.
+    if (err instanceof TransitionActorError) {
+      return errorResponse(
+        "CANNOT_CANCEL",
+        "This purchase has reached a stage we cannot unwind from your account. Contact us and we " +
+          "will coordinate it with the dealership.",
+        409,
+      );
+    }
+    throw err;
+  }
 
   // The buyer-facing audit row stays HERE. It is about this route's actor and surface, which
   // the orchestration does not know about, and `DealStatusHistory` — the row the orchestration

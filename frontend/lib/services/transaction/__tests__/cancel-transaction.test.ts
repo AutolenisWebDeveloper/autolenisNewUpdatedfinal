@@ -47,7 +47,11 @@ let order: string[];
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
-      deal: { findUnique: async () => (deal ? { ...deal } : null) },
+      deal: {
+        findUnique: async () => (deal ? { ...deal } : null),
+        // The request-side entry resolves its live deal rather than skipping it.
+        findFirst: async () => (deal ? { id: deal.id } : null),
+      },
       vehicleRequest: {
         findUnique: async () => ({ status: "OPEN" }),
         updateMany: async ({ where, data }: { where: Rec; data: Rec }) => {
@@ -58,6 +62,9 @@ mock.module("@/lib/prisma", {
       },
       sourcingCase: { findUnique: async () => null },
       auction: {
+        // The request-only path looks its live auction up rather than taking it off a deal.
+        findFirst: async ({ where }: { where: Rec }) =>
+          where.vehicleRequestId === "vr_1" ? { id: "au_from_request" } : null,
         updateMany: async ({ where, data }: { where: Rec; data: Rec }) => {
           if (auctionThrows) throw new Error("auction store unavailable");
           order.push("stop:AUCTION");
@@ -229,6 +236,57 @@ test("a cancellation the seam DECLINED reports NOT_MOVED, never success", async 
   assert.equal(out.outcome, "NOT_MOVED");
 });
 
+test("a DECLINED seam leaves the vehicle request alone — no CANCELLED request under a live deal", async () => {
+  // Found by the second independent review. `advanceDealStatus` returns false without throwing
+  // when its CAS matches nothing, and the stops above take real time — two DocuSign voids — so
+  // the race window is seconds wide. The request used to be cancelled anyway, leaving a deal
+  // that is still progressing toward signing attached to a request that says CANCELLED.
+  advanceReturns = false;
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction(input);
+
+  assert.equal(out.outcome, "NOT_MOVED");
+  assert.deepEqual(
+    requestUpdates,
+    [],
+    "the stops that already ran cannot be undone — that is what CANCELLATION_CLEANUP_INCOMPLETE " +
+      "is for — but the request must not be dragged down with a deal that is still alive",
+  );
+});
+
+test("a request-only cancellation still cancels the request — the guard is about the DEAL", async () => {
+  deal = null;
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction({
+    vehicleRequestId: "vr_1",
+    reason: "buyer changed their mind",
+    actorId: "adm_1",
+    actorRole: "ADMIN",
+  });
+
+  assert.equal(out.outcome, "CANCELLED");
+  assert.equal(requestUpdates.length, 1, "with no deal there is no CAS to lose, and the stop is the move");
+});
+
+test("EITHER END reaches the same stops — a request with no deal still stops its live auction", async () => {
+  // Found by the second independent review: `auctionId` came only from `deal?.auctionId`, so
+  // a request-only cancellation silently skipped AUCTION and INVITATIONS. The auction kept
+  // running and its dealerships kept working a request that had ended — and the docstring
+  // said the opposite.
+  deal = null;
+  const { cancelTransaction } = await svc();
+  await cancelTransaction({
+    vehicleRequestId: "vr_1",
+    reason: "buyer changed their mind",
+    actorId: "adm_1",
+    actorRole: "ADMIN",
+  });
+
+  assert.equal(auctionUpdates.length, 1, "the auction is stopped");
+  assert.equal((auctionUpdates[0]!.where as Rec).id, "au_from_request", "resolved from the request");
+  assert.equal(invitationUpdates.length, 1, "and its dealerships are withdrawn from");
+});
+
 test("§24 requires a reason, and refuses without one", async () => {
   const { cancelTransaction, CancellationInputError } = await svc();
   await assert.rejects(
@@ -260,7 +318,7 @@ test("§24 — the stage the transaction was at is captured BEFORE anything move
 
 // ── FINDINGS 14 AND 21 FROM THE FIRST INDEPENDENT REVIEW ────────────────────
 
-test("a TERMINAL deal is refused BEFORE any stop runs — a stop cannot be undone", async () => {
+test("a FINISHED purchase is refused BEFORE any stop runs — a stop cannot be undone", async () => {
   deal!.status = "COMPLETED";
   const { cancelTransaction } = await svc();
   const out = await cancelTransaction(input);
@@ -277,14 +335,47 @@ test("a TERMINAL deal is refused BEFORE any stop runs — a stop cannot be undon
   assert.equal(out.stageAtCancellation, "Deal COMPLETED", "the stage is still reported honestly");
 });
 
-test("cancelling an ALREADY-CANCELLED deal is a quiet no-op, not a second teardown", async () => {
+test("cancelling an ALREADY-CANCELLED deal RE-RUNS the stops — that is the register's own remediation", async () => {
+  // Found by the second independent review. `CANCELLATION_CLEANUP_INCOMPLETE`'s returnPoint
+  // reads "§24 — re-run the failed stop; the orchestration is idempotent". The first cut of
+  // the terminal guard refused CANCELLED too, so an operator following that instruction got a
+  // no-op and the live e-sign envelope the row was raised about could only be cleaned by hand.
   deal!.status = "CANCELLED";
   const { cancelTransaction } = await svc();
   const out = await cancelTransaction(input);
 
+  assert.equal(out.outcome, "NOT_MOVED", "the DEAL does not move — it is already at the target");
+  assert.ok(out.stops.length > 0, "but the stops ran, which is the whole point of the retry");
+  assert.ok(order.some((o) => o.startsWith("stop:")), `stops ran. Order: ${order.join(" → ")}`);
+  assert.deepEqual(advances, [], "and nothing was advanced");
+  assert.deepEqual(requestUpdates, [], "and the request is not re-cancelled");
+  assert.deepEqual(raised, [], "nothing failed this time, so no new case");
+});
+
+test("a cleanup retry that fails AGAIN opens a case again", async () => {
+  deal!.status = "CANCELLED";
+  auctionThrows = true;
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction(input);
+
+  assert.ok(out.stops.some((s) => !s.ok), "the failure is carried");
+  assert.ok(
+    raised.some((r) => r.code === "CANCELLATION_CLEANUP_INCOMPLETE"),
+    "a retry that does not fix it must not read as success",
+  );
+});
+
+test("a COMPLETED purchase is still refused outright — the stops UNDO a transaction", async () => {
+  deal!.status = "COMPLETED";
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction(input);
+
   assert.equal(out.outcome, "NOT_MOVED");
-  assert.deepEqual(order, [], "re-voiding envelopes on a deal somebody already cancelled helps nobody");
-  assert.deepEqual(raised, [], "and opens no case — nothing failed");
+  assert.deepEqual(
+    order,
+    [],
+    "undoing a finished purchase is never what anybody meant, and a stop cannot be undone",
+  );
 });
 
 test("a DIFFERENT cleanup failure opens its OWN case — the key names what failed", async () => {
@@ -307,4 +398,37 @@ test("a DIFFERENT cleanup failure opens its OWN case — the key names what fail
     undefined,
     "and it is the DERIVED key, so a recurrence after resolution is suffixed rather than swallowed",
   );
+});
+
+test("a request-side cancellation resolves its LIVE DEAL — the guarded transition is not skipped", async () => {
+  // Found by the second independent review, as a question: is it guaranteed that no request
+  // in the buyer route's allowed statuses can carry a deal? The guarantee belongs here, not
+  // in one caller's precondition — without it a request-side cancellation moved no deal, wrote
+  // no history row and never reached the execution-boundary check.
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction({
+    vehicleRequestId: "vr_1",
+    reason: "buyer changed their mind",
+    actorId: "adm_1",
+    actorRole: "ADMIN",
+  });
+
+  assert.equal(advances.length, 1, "the deal goes through the seam");
+  assert.equal(advances[0]!.to, "CANCELLED");
+  assert.equal(out.outcome, "CANCELLED");
+  assert.equal(out.dealId, "deal_1");
+});
+
+test("a request-side cancellation of an EXECUTED deal still freezes rather than cancels", async () => {
+  deal!.dealerExecutedContractId = "cv_1";
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction({
+    vehicleRequestId: "vr_1",
+    reason: "buyer changed their mind",
+    actorId: "adm_1",
+    actorRole: "ADMIN",
+  });
+
+  assert.equal(out.outcome, "FROZEN_PENDING_RELEASE", "§24's boundary does not depend on which id the caller held");
+  assert.deepEqual(requestUpdates, [], "and a frozen transaction does not cancel its request");
 });

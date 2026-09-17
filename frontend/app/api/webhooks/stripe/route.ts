@@ -30,7 +30,14 @@ import {
   REFUND_FROM,
 } from "@/lib/payments/deposit-state";
 import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
-import { raiseException } from "@/lib/services/operations/queue-item.service";
+import {
+  raiseException,
+  // Aliased the way `fulfillment-hold.service.ts:32` does, so the two auto-resolution
+  // paths read identically at their call sites.
+  resolve as resolveQueueItem,
+  QueueItemConcurrencyError,
+  OPEN_QUEUE_STATUSES,
+} from "@/lib/services/operations/queue-item.service";
 
 // PaymentIntent metadata types this endpoint can actually fulfil. A
 // signature-valid payment whose type is not in this set is a real charge the
@@ -61,6 +68,40 @@ const ROUTABLE_PI_TYPES = new Set(["deposit", "concierge_deposit", "concierge_fe
 // already-acknowledged webhook, or Stripe retries a delivery that did have an
 // effect. The writer itself throws — the swallow is here, where the trade-off is
 // visible, rather than hidden inside the writer.
+/**
+ * Close the §26 `PAYMENT_FAILURE` row this PaymentIntent opened, once it succeeds.
+ *
+ * NARROW BY CONSTRUCTION: it matches the one row keyed on this intent and only while that
+ * row is still OPEN. A human who already worked it wins — `resolveQueueItem` is a
+ * compare-and-swap and its refusal is the correct answer here, not an error to retry.
+ *
+ * AUTO-RESOLVING IS DEFENSIBLE FOR THIS CODE, and the test is the same one
+ * `closeDisputeException` applies to its own: the condition is settled by the PROVIDER, not
+ * by judgement. "Stripe declined this intent" stops being true the moment Stripe accepts the
+ * same intent. Nothing about the buyer's obligation is decided here — the deposit's own
+ * settlement path below does that.
+ */
+async function resolvePaymentFailureException(paymentIntentId: string): Promise<boolean> {
+  const key = `PAYMENT_FAILURE:${paymentIntentId}`;
+  const open = await prisma.queueItem.findFirst({
+    where: { idempotencyKey: key, status: { in: [...OPEN_QUEUE_STATUSES] } },
+    select: { id: true },
+  });
+  if (!open) return false;
+  try {
+    await resolveQueueItem({
+      queueItemId: open.id,
+      resolution: `The buyer retried and Stripe accepted ${paymentIntentId}. The decline this row was raised about is over.`,
+      resolvedBy: "stripe-webhook",
+      status: "RESOLVED",
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof QueueItemConcurrencyError) return false; // someone else worked it first
+    throw err;
+  }
+}
+
 async function raiseUnroutablePaymentException(pi: Stripe.PaymentIntent, reason: string) {
   try {
     await raiseException({
@@ -170,6 +211,34 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
+
+        // §26 — THE DECLINE THAT PRECEDED THIS IS OVER, AND THE ROW MUST SAY SO.
+        //
+        // Found by the SECOND independent review, and it was a lockout. `PAYMENT_FAILURE`
+        // is raised on `payment_intent.payment_failed` keyed `PAYMENT_FAILURE:<pi.id>`, has
+        // `deadlineHours: null`, and — until this — was resolved by NOTHING. Elements
+        // retries on the same intent, so the ordinary sequence is: card declines → row opens
+        // → buyer retries → payment succeeds → **the row stays open for ever**.
+        //
+        // From that moment `hasOpenException(buyerId)` is true, so the buyer's dashboard
+        // swaps the upgrade card for "we are holding off on plan changes" and
+        // `POST /api/buyer/plan/upgrade` answers 409 — permanently — while the exception
+        // panel keeps telling them "your payment did not go through" about a deposit that is
+        // paid. Card decline rates are a few percent, so this is the ordinary path, not a
+        // corner.
+        //
+        // Auto-resolved for the same reason `closeDisputeException` is: the condition is
+        // settled BY THE PROVIDER, not by judgement. Stripe has taken the money on the same
+        // intent the failure was raised about. Narrow and best-effort — it closes the one row
+        // keyed on this intent, only while it is still open, and a human who already worked
+        // it wins.
+        await resolvePaymentFailureException(pi.id).catch((err) => {
+          logger.error("[stripe/webhook] could not close the payment-failure exception", {
+            paymentIntentId: pi.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
         // `buyerId` is deliberately NOT destructured here. Every branch below resolves
         // the buyer from the DEPOSIT row it acted on (`deposit.buyerId`) rather than from
         // provider metadata, because the admin send-link path mints a Checkout Session
