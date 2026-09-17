@@ -7,17 +7,15 @@ import PickupActionsClient from "@/components/dealer/PickupActionsClient";
 import PickupConfirmClient, { type AvailabilityHint } from "@/components/dealer/PickupConfirmClient";
 import { PageContainer, PageHeader, EmptyState, CARD } from "@/components/ui/patterns";
 import { cn } from "@/lib/utils";
+import { makeAppointmentFormatter } from "@/lib/domain/appointment-format";
 
 export const dynamic = "force-dynamic";
 
 // Pickup times are rendered in the DEALER's business timezone (Server Components
 // run in UTC on Vercel, so an unqualified toLocaleString would show UTC).
-function makeFmt(timeZone: string, label: string) {
-  return (d: Date | null): string =>
-    d
-      ? `${d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} ${label}`
-      : "—";
-}
+// PHASE 10 — the same formatter the buyer's pickup page uses. `short` is the list
+// density, stated as a parameter rather than as a second implementation that drifts.
+const makeFmt = (timeZone: string, label: string) => makeAppointmentFormatter(timeZone, label, "short");
 
 function location(a: DealerPickupAction): string {
   const parts = [a.buyerCity, a.buyerState].filter(Boolean);

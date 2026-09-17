@@ -17,17 +17,17 @@ import { resolveDealerAvailability } from "@/lib/services/pickup/availability.se
 import { allSignedFrom, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
+import { makeAppointmentFormatter } from "@/lib/domain/appointment-format";
 
 export const dynamic = "force-dynamic";
 
 // Pickup times are shown in the dealership's timezone (Server Components run in
 // UTC on Vercel, so an unqualified toLocaleString would display UTC).
-function makeFmt(timeZone: string, label: string) {
-  return (d: Date | null | undefined): string =>
-    d
-      ? `${d.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} ${label}`
-      : "—";
-}
+// PHASE 10 — cross-portal parity. This was a local `makeFmt`, and its twin in
+// `app/dealer/pickups/page.tsx` had already drifted to a shorter form, so the buyer
+// and the dealership read the same appointment differently. One formatter now, with
+// density as an explicit parameter.
+const makeFmt = (timeZone: string, label: string) => makeAppointmentFormatter(timeZone, label, "long");
 
 export default async function PickupPage() {
   const buyer = await requireBuyer();

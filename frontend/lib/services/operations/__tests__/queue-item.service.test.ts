@@ -98,9 +98,9 @@ beforeEach(() => {
   state.createCalls = 0;
 });
 
-test("the catalogue covers §26's 48 rows plus the seven the Markdown states elsewhere", async () => {
+test("the catalogue covers §26's 48 rows plus the ten the Markdown states elsewhere", async () => {
   const { EXCEPTION_CATALOGUE } = await cat();
-  assert.equal(EXCEPTION_CATALOGUE.length, 55);
+  assert.equal(EXCEPTION_CATALOGUE.length, 58);
   // §26 proper: 48 rows. The seven additions are each stated in the Markdown, just
   // not as a §26 row:
   //   • COMMS_TERMINAL_FAILURE — §27, rendered in the HTML register (§2 diff D2)
@@ -135,6 +135,26 @@ test("the catalogue covers §26's 48 rows plus the seven the Markdown states els
     "LAUNCH_READINESS_BLOCKED",
     "AUCTION_TRENDING_TO_ZERO_OFFERS",
     "COMMS_NO_DELIVERABLE_CHANNEL",
+    //   • COMMS_GUARD_UNAVAILABLE — §27/§28.3 #5. Added Phase 10 with the fix to
+    //     §8.2 defect (5): the acquisition-comms idempotency latch was fail-open in
+    //     three places, one of them a silent total skip when the guard client could
+    //     not be constructed. It now REFUSES to send unguarded, and a refusal with
+    //     no owner would simply be a quieter silence — so the refusal raises.
+    "COMMS_GUARD_UNAVAILABLE",
+    //   • DEAL_FROZEN_PENDING_RELEASE — §24. "After the dealership contract is fully
+    //     executed, AutoLenis cannot unilaterally void it. The Deal moves to
+    //     FROZEN_PENDING_RELEASE while AutoLenis coordinates the buyer's and
+    //     dealership's documented release." That coordination has an owner, a
+    //     deadline and a return point, which is what a queue_items row IS. A frozen
+    //     deal with no case is a transaction nobody is driving.
+    "DEAL_FROZEN_PENDING_RELEASE",
+    //   • CANCELLATION_CLEANUP_INCOMPLETE — §24 + §28.3 #8. The cancellation
+    //     orchestration's stops span an e-sign provider, the outbox, the auction and
+    //     the pickup, so they cannot share one transaction. A stop that fails is
+    //     therefore carried rather than rolled back, and this is the row that names
+    //     which subsystem is still live. The alternative is the swallowed error this
+    //     phase exists to remove.
+    "CANCELLATION_CLEANUP_INCOMPLETE",
   ];
   const extras = EXCEPTION_CATALOGUE.filter((d) => extraCodes.includes(d.code));
   assert.equal(extras.length, extraCodes.length, "each addition must be present exactly once");

@@ -3,6 +3,8 @@ import Link from "next/link";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgradeCard";
+import TransactionExceptionPanel from "@/components/buyer/TransactionExceptionPanel";
+import { exceptionLineage, type ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
@@ -39,6 +41,33 @@ const TOTAL_STEPS = 14;
 
 export default async function BuyerDashboard() {
   const buyer = await requireBuyer();
+
+  // §8.2 Phase 10 defect (8) — THE BUYER-FACING EXCEPTION SURFACE.
+  //
+  // One lineage, shared with the dealer portal and the Ops queue, so the three
+  // surfaces cannot describe the same checkpoint differently.
+  //
+  // The failure is CAPTURED, not swallowed. `exceptionLineage` throws on a read
+  // failure by design — an empty list reads as "nothing is wrong", which is the most
+  // expensive possible lie to tell a buyer whose deal is stuck — so the catch records
+  // that the read failed and the panel renders that honestly instead of rendering
+  // nothing.
+  let openExceptions: ExceptionLineage[] = [];
+  let exceptionsUnavailable = false;
+  try {
+    openExceptions = await exceptionLineage({ audience: "BUYER", buyerId: buyer.id });
+  } catch {
+    exceptionsUnavailable = true;
+  }
+
+  // §26: "Upgrade prompt fires during an open exception | Operations | Suppress;
+  // never upsell a buyer whose deal is stalled."
+  //
+  // Derived from the SAME read, not a second query: a buyer whose lineage could not
+  // be loaded is treated as possibly-stalled and the prompt is suppressed. Failing
+  // open here would mean a read error becomes an upsell to someone whose purchase is
+  // blocked, which is the exact outcome the rule exists to prevent.
+  const suppressUpgradePrompt = exceptionsUnavailable || openExceptions.length > 0;
   const prequal = buyer?.preQualification ?? null;
   const firstName = buyer?.firstName ?? "there";
   // Use the shared validity helper so the dashboard's prequal gating can never
@@ -230,6 +259,13 @@ export default async function BuyerDashboard() {
 
   return (
     <PageContainer testId="buyer-dashboard">
+
+      {/* §26 — what is holding this buyer's transaction, before anything else on the
+          page. A buyer whose deal is stuck should not have to scroll past their
+          journey ladder to find out why. */}
+      <div data-testid="buyer-exception-panel" className="mb-6 empty:mb-0">
+        <TransactionExceptionPanel exceptions={openExceptions} unavailable={exceptionsUnavailable} />
+      </div>
 
       {/* Feature 16 — Proactive Nudges (only shows real state-driven nudges) */}
       {nudges.length > 0 && (
@@ -613,11 +649,26 @@ export default async function BuyerDashboard() {
 
         {/* PlanUpgradeCard — keep existing component */}
         <div data-testid="dashboard-plan-section">
-          <PlanUpgradeCard
-            plan={buyerPlan}
-            depositStatus={depositStatus}
-            planUpgradedAt={buyer.planUpgradedAt?.toISOString() ?? null}
-          />
+          {/* §26 — suppressed while an exception is open. The card is the upsell, so
+              suppressing the card IS the rule; rendering a disabled one would still
+              be an upsell to a buyer whose deal is stalled. */}
+          {suppressUpgradePrompt ? (
+            <div className={`${CARD} p-5 sm:p-6`} data-testid="plan-upgrade-suppressed">
+              <p className={EYEBROW}>Your plan</p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                {buyerPlan === "PREMIUM" ? "Premium" : "Standard"}
+              </p>
+              <p className="mt-1.5 text-sm text-slate-600">
+                We are holding off on plan changes until the item above is resolved.
+              </p>
+            </div>
+          ) : (
+            <PlanUpgradeCard
+              plan={buyerPlan}
+              depositStatus={depositStatus}
+              planUpgradedAt={buyer.planUpgradedAt?.toISOString() ?? null}
+            />
+          )}
         </div>
 
         {/* How It Works — dark premium card */}
