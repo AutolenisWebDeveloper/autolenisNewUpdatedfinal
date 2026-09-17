@@ -21,6 +21,18 @@ interface Props { params: Promise<{ dealId: string }> }
 
 const schema = z.object({
   reason: z.string().min(1, "Override reason is required"),
+  // §STAGE 20 ASKS FOR THESE, SO THE ROUTE HAS TO BE ABLE TO CARRY THEM. Its thirteenth
+  // precondition is "Buyer possession, VIN, mileage, and condition confirmed" — four facts, not
+  // a timestamp. On the buyer's own route they come from the form; on this one they come from
+  // whoever coordinated the handover.
+  //
+  // OPTIONAL, AND NOT DEFAULTED. An admin who does not have the mileage gets the completion
+  // refused with "the mileage at possession was not recorded" naming the buyer, which is what
+  // §Stage 20 says should happen. Substituting a zero would satisfy the checklist by
+  // manufacturing evidence about a vehicle's condition at handover, which is the one thing a
+  // completion record must never do.
+  odometerAtPossession: z.number().int().min(0).max(1_000_000).optional(),
+  conditionAsDelivered: z.string().trim().min(1).max(2000).optional(),
 });
 
 export async function POST(request: NextRequest, { params }: Props) {
@@ -89,6 +101,8 @@ export async function POST(request: NextRequest, { params }: Props) {
       buyerId: deal.buyerId,
       vehicleReceived: true,
       vinMatch: true,
+      odometerAtPossession: parsed.data.odometerAtPossession ?? null,
+      conditionAsDelivered: parsed.data.conditionAsDelivered ?? null,
       keysAndAccessoriesReceived: true,
       actor: { role: "ADMIN", id: admin.adminId },
     });

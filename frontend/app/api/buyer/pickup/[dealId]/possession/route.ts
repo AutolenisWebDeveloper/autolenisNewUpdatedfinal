@@ -114,6 +114,30 @@ export async function POST(request: NextRequest, { params }: Props) {
           "This deal is not waiting for a possession confirmation yet.",
           409,
         );
+      case "preconditions_unmet":
+        // §Stage 20: "If any is false, the Deal is not complete and the website shows the exact
+        // missing checkpoint and the responsible party." The buyer's confirmation is already
+        // recorded — this refuses the COMPLETION, not the report, and says what is still owed
+        // and by whom rather than "could not complete".
+        //
+        // THIS IS ALSO WHY `odometerAtPossession` AND `conditionAsDelivered` STAY OPTIONAL
+        // ABOVE. A buyer who cannot read the odometer at the kerb must still be able to confirm;
+        // §Stage 20 then names the missing mileage as the outstanding checkpoint, owned by the
+        // buyer, and the deal completes when they supply it. Making the field required would
+        // block the confirmation instead of collecting the evidence and asking for the rest.
+        return errorResponse(
+          "COMPLETION_BLOCKED",
+          `We've recorded your confirmation. The deal is not complete yet: ${outcome.outstanding[0]?.detail ?? "a checkpoint is outstanding."}`,
+          409,
+          {
+            outstanding: outcome.outstanding.map((i) => ({
+              key: i.key,
+              checkpoint: i.label,
+              responsibleParty: i.owner,
+              detail: i.detail,
+            })),
+          },
+        );
       default:
         return errorResponse("NOT_FOUND", "Deal not found", 404);
     }

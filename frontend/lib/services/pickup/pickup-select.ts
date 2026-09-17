@@ -81,6 +81,7 @@ export const PICKUP_SAFE_SELECT = {
   updatedAt: true,
   buyerConfirmedAt: true,
   conditionAtRelease: true,
+  conditionAtPossession: true,
   dealerReadinessChecklist: true,
   dealerReleasedAt: true,
   deliveryAddress: true,

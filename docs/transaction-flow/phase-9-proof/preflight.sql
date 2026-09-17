@@ -1,4 +1,5 @@
--- Phase 9 preflight — the pickup RELEASE TOKEN (migration 20261201000000).
+-- Phase 9 preflight — the pickup RELEASE TOKEN (20261201000000) and the POSSESSION CONDITION
+-- column (20261201000100).
 --
 -- CONTRACT: every row returns a `verdict` of CHECKED or BLOCK. A BLOCK stops the run. The
 -- terminal row reports how many assertions ran, so a preflight that produced NO OUTPUT — the
@@ -13,6 +14,7 @@
 -- WHAT THIS PHASE IS ABOUT TO DO, and therefore what must be true first:
 --
 --   20261201000000_phase9_pickup_release_token
+--   20261201000100_phase9_possession_condition
 --     1. CREATE UNIQUE INDEX pickups_token_hash_key ON pickups (token_hash)
 --     2. CREATE INDEX pickups_live_release_token_idx ON pickups (token_expires_at)
 --          WHERE token_hash IS NOT NULL AND token_consumed_at IS NULL AND token_revoked_at IS NULL
@@ -64,6 +66,20 @@ SELECT 'pickups.' || expected.name || ' column (target of the clearing UPDATE)' 
             THEN 'CHECKED' ELSE 'BLOCK' END AS verdict
   FROM (VALUES ('qr_code_data'), ('qr_code_image')) AS expected(name);
 
+-- 2b. THE POSSESSION-CONDITION COLUMN MUST NOT EXIST YET (20261201000100). `ADD COLUMN IF NOT
+--     EXISTS` makes re-application a no-op, which is what makes the migration safe to retry —
+--     and also what would let a column created OUT OF BAND, with a different type, survive while
+--     the ledger records the migration as applied. Same reasoning as the indexes below.
+SELECT 'pickups.condition_at_possession column (20261201000100 adds it)' AS assertion,
+       CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'pickups'
+                            AND column_name = 'condition_at_possession')
+            THEN 'ALREADY PRESENT — created out of band?' ELSE 'absent, will be added' END AS detail,
+       CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'pickups'
+                            AND column_name = 'condition_at_possession')
+            THEN 'BLOCK' ELSE 'CHECKED' END AS verdict;
+
 -- 3. NEITHER INDEX MAY ALREADY EXIST. Both statements carry `IF NOT EXISTS`, which is what
 --    makes re-application a no-op — and also what would let an index created OUT OF BAND, with
 --    a different predicate, survive silently while the ledger records this migration as
@@ -104,11 +120,14 @@ SELECT 'duplicate token_hash values (what CREATE UNIQUE INDEX fails on)' AS asse
 --    success is retry history, not a fault, and must not read as applied.
 --
 --    THE EXPECTED SET IS DECLARED ONCE, here, and the count below is derived from it. Phase 9
---    has one migration today; a phase with one migration and a hand-written `= 1` beside it is
+--    had one migration when this file was written and has two now; the second was added by
+--    editing this list and nothing else, which is the property the shape was chosen for. A
+--    hand-written `= 1` beside a one-name list is
 --    the same shape that let phase-8's verify.sql name two of four. `phase9-proof-sql.test.ts`
 --    checks this list against the directories on disk.
 WITH phase9_expected(name) AS (
-  VALUES ('20261201000000_phase9_pickup_release_token')
+  VALUES ('20261201000000_phase9_pickup_release_token'),
+         ('20261201000100_phase9_possession_condition')
 )
 SELECT 'ledger: ' || expected.name || ' not yet applied' AS assertion,
        CASE WHEN (SELECT count(*) FROM _prisma_migrations m
@@ -182,5 +201,5 @@ SELECT 'cron failures in the last 24 hours' AS assertion,
 
 -- TERMINAL ROW. If this is absent the preflight did not run, whatever the exit code said.
 SELECT 'preflight complete' AS assertion,
-       '17 assertions: 13 block-capable, 3 reported' AS detail,
+       '19 assertions: 15 block-capable, 3 reported' AS detail,
        'CHECKED' AS verdict;

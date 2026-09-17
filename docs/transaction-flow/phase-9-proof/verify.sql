@@ -105,6 +105,29 @@ SELECT 'pickups.' || expected.name AS object,
   FROM (VALUES ('token_hash'), ('token_expires_at'),
                ('token_consumed_at'), ('token_revoked_at')) AS expected(name);
 
+-- 13. THE POSSESSION-CONDITION COLUMN (20261201000100). TYPE CHECKED, not merely presence: the
+--     column is what stops the buyer's condition report overwriting the dealership's, and a
+--     column of the wrong type would be present and useless.
+SELECT 'pickups.condition_at_possession' AS object,
+       CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'pickups'
+                            AND column_name = 'condition_at_possession'
+                            AND data_type = 'text')
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'confirmPossession writes the BUYER''s condition here; absent means it falls back to ' ||
+       'nothing and Stage 20''s thirteenth precondition can never be satisfied' AS remedy;
+
+-- 14. AND THE DEALERSHIP'S COLUMN MUST STILL BE THERE. The defect 20261201000100 repairs was two
+--     facts in one column; a "repair" that moved the buyer's out and dropped the dealer's would
+--     pass assertion 13 and lose the Stage 18 record.
+SELECT 'pickups.condition_at_release (still present after the split)' AS object,
+       CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                          WHERE table_schema = 'public' AND table_name = 'pickups'
+                            AND column_name = 'condition_at_release'
+                            AND data_type = 'text')
+            THEN 'PRESENT' ELSE 'MISSING' END AS status,
+       'recordDealerRelease writes the DEALERSHIP''s condition here (Stage 18)' AS remedy;
+
 -- ── HALF TWO: THE LEDGER ────────────────────────────────────────────────────
 -- Counted FINISHED and NOT rolled back. A rolled-back row sitting beside a success is RETRY
 -- HISTORY, not a fault, and must render as PRESENT rather than MISSING — production reads 119
@@ -115,9 +138,12 @@ SELECT 'pickups.' || expected.name AS object,
 -- shape that let phase-8's verify.sql name two migrations out of four and report a clean
 -- deploy with the other two missing. `phase9-proof-sql.test.ts` checks this list against the
 -- directories on disk and fails the build when a Phase 9 migration is added and this file is
--- not updated — because a list maintained by hand is how that drifted in the first place.
+-- not updated — because a list maintained by hand is how that drifted in the first place. It
+-- has already earned its place: 20261201000100 was added mid-phase and this file was red until
+-- the name was added here.
 WITH phase9_expected(name) AS (
-  VALUES ('20261201000000_phase9_pickup_release_token')
+  VALUES ('20261201000000_phase9_pickup_release_token'),
+         ('20261201000100_phase9_possession_condition')
 )
 SELECT 'ledger ' || expected.name AS object,
        CASE WHEN (SELECT count(*) FROM _prisma_migrations m
@@ -133,7 +159,8 @@ SELECT 'ledger ' || expected.name AS object,
 -- Exactly ONE applied row each, and exactly as many as the phase has migrations. The count is
 -- derived from the same list rather than restated.
 WITH phase9_expected(name) AS (
-  VALUES ('20261201000000_phase9_pickup_release_token')
+  VALUES ('20261201000000_phase9_pickup_release_token'),
+         ('20261201000100_phase9_possession_condition')
 )
 SELECT 'ledger has exactly one applied row per phase 9 migration' AS object,
        CASE WHEN (SELECT count(*) FROM _prisma_migrations m
@@ -159,5 +186,5 @@ SELECT 'no stuck migrations in the chain' AS object,
 -- statement emits rather than trusting this line — phase 8's equivalent went stale twice, and
 -- a typed count drifting beside a hand-written list is the defect this directory is about.
 SELECT 'verify complete' AS object,
-       '16 assertions: 12 physical, 3 ledger.' AS status,
+       '19 assertions: 14 physical, 4 ledger.' AS status,
        'no PRESENT/MISSING row above may be MISSING' AS remedy;

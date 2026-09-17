@@ -41,6 +41,8 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { assertReleaseGates, InsuranceRequiredError, ReleaseNotClearedError } from "@/lib/services/deal/deal.service";
+import { evaluateCompletionPreconditions } from "@/lib/services/deal/completion-preconditions.service";
+import type { ClearanceItem } from "@/lib/services/deal/funding-clearance.service";
 import { emitDealCompletionEvent } from "@/lib/services/deal/deal-completion-event.service";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_9_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
@@ -142,7 +144,13 @@ export interface PossessionInput {
 
 export type PossessionOutcome =
   | { ok: true; alreadyComplete: boolean; completedAt: Date }
-  | { ok: false; reason: "deal_missing" | "not_in_handover" | "not_received" | "discrepancy_blocks" };
+  | { ok: false; reason: "deal_missing" | "not_in_handover" | "not_received" | "discrepancy_blocks" }
+  /**
+   * §Stage 20: "the website shows the exact missing checkpoint and the responsible party". The
+   * items travel with the refusal so the surface can say WHICH of the fourteen is false and WHO
+   * owes it, rather than "could not complete".
+   */
+  | { ok: false; reason: "preconditions_unmet"; outstanding: ClearanceItem[] };
 
 /**
  * §Stage 18 — the dealership released the vehicle. PICKUP_SCHEDULED → HANDOVER_PENDING.
@@ -359,6 +367,45 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
 
     assertReleaseGates(deal);
 
+    // §STAGE 19'S EVIDENCE LANDS FIRST, AND IT LANDS EITHER WAY. The buyer's report of what they
+    // received is a fact about a vehicle that has already moved; it does not become untrue
+    // because paperwork elsewhere on the deal is outstanding. This is the same posture as the
+    // material-discrepancy branch above, which commits the report and refuses the completion.
+    //
+    // IT ALSO HAS TO PRECEDE THE FOURTEEN, not merely accompany them. Three of §Stage 20's
+    // preconditions — possession confirmed, the VIN matched, the mileage and condition recorded
+    // — are satisfied BY this write. Evaluating before it would find them false on every single
+    // call and no deal could ever complete; evaluating on the input instead of the row would be
+    // checking the request rather than the record.
+    await tx.pickup.update({
+      where: { dealId: input.dealId },
+      data: {
+        buyerConfirmedAt: now,
+        vinMatch: input.vinMatch,
+        odometerAtPossession: input.odometerAtPossession ?? undefined,
+        conditionAtPossession: input.conditionAsDelivered ?? undefined,
+        ...(discrepancyJson !== undefined ? { possessionDiscrepancy: discrepancyJson } : {}),
+      },
+    });
+
+    // §STAGE 20'S FOURTEEN, ON THE SAME SNAPSHOT THIS TRANSACTION WILL WRITE INTO. "Completion
+    // requires all of the following to be true. If any is false, the Deal is not complete and
+    // the website shows the exact missing checkpoint and the responsible party." Returning the
+    // outstanding items rather than a bare refusal is what makes that sentence renderable.
+    //
+    // A REFUSAL HERE COMMITS. Prisma rolls back on a throw, not on a return — so the evidence
+    // above survives and the Deal stays at HANDOVER_PENDING, which is exactly the outcome the
+    // document describes. Throwing instead would discard the buyer's report to punish the
+    // dealership's missing paperwork.
+    const preconditions = await evaluateCompletionPreconditions(input.dealId, tx);
+    if (!preconditions.complete) {
+      return {
+        ok: false as const,
+        reason: "preconditions_unmet" as const,
+        outstanding: preconditions.outstanding,
+      };
+    }
+
     // THE COMPARE-AND-SWAP. Everything below runs for the winning transaction only.
     const swap = await tx.deal.updateMany({
       where: { id: input.dealId, status: "HANDOVER_PENDING" },
@@ -371,15 +418,7 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
 
     await tx.pickup.update({
       where: { dealId: input.dealId },
-      data: {
-        status: "COMPLETED",
-        completedAt: now,
-        buyerConfirmedAt: now,
-        vinMatch: input.vinMatch,
-        odometerAtPossession: input.odometerAtPossession ?? undefined,
-        conditionAtRelease: input.conditionAsDelivered ?? undefined,
-        ...(discrepancyJson !== undefined ? { possessionDiscrepancy: discrepancyJson } : {}),
-      },
+      data: { status: "COMPLETED", completedAt: now },
     });
 
     await tx.dealStatusHistory.create({
@@ -499,7 +538,14 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
 export async function completeJourneyPickup(
   dealId: string,
   adminId: string,
-): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+  /**
+   * §Stage 20's thirteenth precondition needs the mileage and the condition, and this wrapper
+   * cannot invent either. The journey tools do not collect them, so a deal with no possession
+   * evidence is refused with that checkpoint named — which is the documented behaviour, not a
+   * lost capability. A caller that HAS the facts passes them through.
+   */
+  evidence: { odometerAtPossession?: number | null; conditionAsDelivered?: string | null } = {},
+): Promise<{ ok: true } | { ok: false; code: string; message: string; outstanding?: ClearanceItem[] }> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     select: { id: true, status: true, offer: { select: { dealerId: true } } },
@@ -529,10 +575,26 @@ export async function completeJourneyPickup(
       buyerId: "",
       vehicleReceived: true,
       vinMatch: true,
+      odometerAtPossession: evidence.odometerAtPossession ?? null,
+      conditionAsDelivered: evidence.conditionAsDelivered ?? null,
       keysAndAccessoriesReceived: true,
       actor,
     });
     if (!completed.ok) {
+      // §Stage 20's "the website shows the exact missing checkpoint and the responsible party"
+      // applies to the admin console too — an operator told only "could not be completed" has to
+      // go and find out which of fourteen things is false.
+      if (completed.reason === "preconditions_unmet") {
+        const first = completed.outstanding[0];
+        return {
+          ok: false,
+          code: "COMPLETION_BLOCKED",
+          message: first
+            ? `${completed.outstanding.length} completion precondition(s) outstanding. ${first.label} — ${first.owner}: ${first.detail}`
+            : "A completion precondition is outstanding.",
+          outstanding: completed.outstanding,
+        };
+      }
       return { ok: false, code: "NOT_COMPLETABLE", message: "This deal could not be completed." };
     }
     return { ok: true };

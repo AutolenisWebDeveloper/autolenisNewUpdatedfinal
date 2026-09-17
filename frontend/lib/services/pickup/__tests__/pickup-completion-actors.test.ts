@@ -34,6 +34,9 @@ import { hashToken } from "@/lib/services/dealer-recruitment/account-claim.servi
 /** The code the buyer holds, in this fixture. */
 const LIVE_CODE = "AL-7Q2K-9XTB";
 
+/** §Stage 20's thirteenth precondition. Operations supplies what it observed at the handover. */
+const EVIDENCE = { odometerAtPossession: 14, conditionAsDelivered: "Clean, as described." };
+
 interface Ctrl {
   dealStatus: string;
   /** The pickup row's stored credential — a REAL hash, so a wrong or empty code really misses. */
@@ -42,6 +45,16 @@ interface Ctrl {
   tokenRevokedAt: Date | null;
   consumeAttempts: Array<string | undefined>;
   revokeCalls: string[];
+  /**
+   * THE PICKUP ROW, MUTABLE, because §Stage 20's ordering depends on it. `confirmPossession`
+   * writes the buyer's evidence and THEN evaluates the fourteen, three of which that write
+   * satisfies. A static fixture would either carry the evidence already — hiding the ordering —
+   * or never carry it, so nothing could ever complete. This row starts without it and the
+   * update below merges into it, so the ordering is exercised rather than assumed.
+   */
+  pickupRow: Record<string, unknown>;
+  /** Set to make one of the fourteen false, to prove the gate is wired. */
+  dealOverrides: Record<string, unknown>;
   statusHistory: Array<Record<string, unknown>>;
   pickupUpdates: Array<Record<string, unknown>>;
   outbox: Array<Record<string, unknown>>;
@@ -50,16 +63,53 @@ interface Ctrl {
 }
 let ctrl: Ctrl;
 
+const PAST = new Date("2026-02-01T00:00:00Z");
+const VIN = "1HGCM82633A004352";
+
+/**
+ * A deal on which all fourteen of §Stage 20's preconditions hold — EXCEPT the three the buyer's
+ * own confirmation supplies, which arrive when `tx.pickup.update` merges them in.
+ */
 const dealRow = () => ({
   id: "deal_1",
   status: ctrl.dealStatus,
   buyerId: "buyer_1",
   completedAt: null,
+  coBuyerId: null,
+  coBuyer: null,
+  vehicleRequestId: "vr_1",
+  vehicleRequest: { id: "vr_1" },
+  depositId: "dep_1",
+  deposit: { id: "dep_1", status: "PAID" },
+  auctionId: "auc_1",
+  auction: { id: "auc_1", sourcingCaseId: "sc_1", vehicleRequestId: "vr_1" },
+  offerId: "off_1",
+  vehicleRequestOfferId: null,
+  vehicleRequestOffer: null,
+  dealerId: "dlr_1",
+  dealer: { id: "dlr_1" },
+  vin: VIN,
+  vehicleYear: 2021,
+  vehicleMake: "Honda",
+  vehicleModel: "Accord",
+  recapConfirmedByBuyerAt: PAST,
+  recapConfirmedByDealerAt: PAST,
+  financingCompletedAt: PAST,
+  fundingClearedAt: PAST,
+  feePaidAt: PAST,
+  feeAmountCents: 49900,
   insuranceStatus: "VERIFIED",
   dealerExecutedContractId: "cv_1",
-  fundingClearedAt: new Date("2026-02-01T00:00:00Z"),
-  buyer: { firstName: "Ada", user: { email: "ada@example.com" } },
-  offer: { dealerId: "dlr_1", dealer: { dealershipName: "North Motors", user: { email: "sales@north.example" } } },
+  holdReason: null,
+  frozenAt: null,
+  buyer: { id: "buyer_1", firstName: "Ada", lastName: "Byron", user: { email: "ada@example.com" } },
+  offer: { id: "off_1", dealerId: "dlr_1", auctionId: "auc_1", dealer: { dealershipName: "North Motors", user: { email: "sales@north.example" } } },
+  dealerReaffirmations: [{ status: "CONFIRMED", confirmedVin: VIN, decidedAt: PAST }],
+  contractVersions: [{ id: "cv_1", version: 3 }],
+  eSignEnvelopes: [{ signerKind: "BUYER", status: "COMPLETED", documentVersionId: "cv_1" }],
+  pickup: ctrl.pickupRow,
+  queueItems: [],
+  ...ctrl.dealOverrides,
 });
 
 const tx = {
@@ -72,7 +122,11 @@ const tx = {
     },
   },
   pickup: {
-    update: async (args: Record<string, unknown>) => { ctrl.pickupUpdates.push(args); return {}; },
+    update: async (args: Record<string, unknown>) => {
+      ctrl.pickupUpdates.push(args);
+      Object.assign(ctrl.pickupRow, args.data as Record<string, unknown>);
+      return {};
+    },
     // THE TOKEN SERVICE IS NOT MOCKED. `consumeReleaseToken` and `revokeReleaseToken` are a hash
     // and a conditional `updateMany`, and mocking them to return `true` is precisely how the
     // empty-string defect stayed invisible: a stub that answers "spent" for any input cannot tell
@@ -94,6 +148,9 @@ const tx = {
   },
   dealStatusHistory: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.statusHistory.push(data); return {}; } },
   buyerActivityEvent: { create: async () => ({}) },
+  // Read by the real `signatureProgress`, which §Stage 20's tenth precondition uses and this
+  // file does not mock — see `completion-preconditions.test.ts`.
+  eSignEnvelope: { findMany: async () => [{ signerKind: "BUYER", status: "COMPLETED" }] },
 };
 
 mock.module("@/lib/prisma", {
@@ -133,6 +190,17 @@ beforeEach(() => {
     tokenRevokedAt: null,
     consumeAttempts: [],
     revokeCalls: [],
+    pickupRow: {
+      dealerReleasedAt: null,
+      releasedBy: null,
+      identityVerifiedAt: null,
+      buyerConfirmedAt: null,
+      vinMatch: null,
+      odometerAtPossession: null,
+      conditionAtPossession: null,
+      possessionDiscrepancy: null,
+    },
+    dealOverrides: {},
     statusHistory: [],
     pickupUpdates: [],
     outbox: [],
@@ -144,7 +212,7 @@ beforeEach(() => {
 test("an Operations-recorded release needs no code, and drives the journey route to COMPLETED", async () => {
   // THE REGRESSION. Before the union, this wrapper passed `rawToken: ""`, the consume matched no
   // row, and the release refused — so the admin journey route could not complete a pickup at all.
-  const out = await (await service()).completeJourneyPickup("deal_1", "admin_1");
+  const out = await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
 
   assert.deepEqual(out, { ok: true }, "the admin journey path must still be able to complete a pickup");
   assert.equal(ctrl.dealStatus, "COMPLETED");
@@ -157,7 +225,7 @@ test("an Operations-recorded release needs no code, and drives the journey route
 });
 
 test("the release and the completion are recorded as ADMIN acts, not as the dealer's or the buyer's", async () => {
-  await (await service()).completeJourneyPickup("deal_1", "admin_1");
+  await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
 
   assert.deepEqual(
     ctrl.statusHistory.map((h) => [h.fromStatus, h.toStatus, h.actorRole, h.actorId]),
@@ -206,7 +274,7 @@ test("an unverified identity refuses before anything is spent or revoked", async
 test("the journey wrapper refuses a deal that never reached a scheduled pickup", async () => {
   ctrl.dealStatus = "FUNDING_PENDING";
 
-  const out = await (await service()).completeJourneyPickup("deal_1", "admin_1");
+  const out = await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
 
   assert.deepEqual(out, {
     ok: false,
@@ -218,10 +286,10 @@ test("the journey wrapper refuses a deal that never reached a scheduled pickup",
 });
 
 test("a second journey completion is a no-op, not a second completion", async () => {
-  await (await service()).completeJourneyPickup("deal_1", "admin_1");
+  await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
   const before = { history: ctrl.statusHistory.length, events: ctrl.completionEvents.length };
 
-  const again = await (await service()).completeJourneyPickup("deal_1", "admin_1");
+  const again = await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
 
   assert.deepEqual(again, { ok: true });
   assert.equal(ctrl.statusHistory.length, before.history, "COMPLETED is terminal — no second history row");
@@ -230,12 +298,17 @@ test("a second journey completion is a no-op, not a second completion", async ()
 
 test("the buyer's own confirmation is still the normal path, and is recorded as the buyer's", async () => {
   ctrl.dealStatus = "HANDOVER_PENDING";
+  // The dealership already released — §Stage 20's twelfth precondition. This test starts the
+  // deal mid-ladder rather than walking it, so the release has to be on the row.
+  Object.assign(ctrl.pickupRow, { dealerReleasedAt: PAST, releasedBy: "dlr_1" });
 
   const out = await (await service()).confirmPossession({
     dealId: "deal_1",
     buyerId: "buyer_1",
     vehicleReceived: true,
     vinMatch: true,
+    odometerAtPossession: EVIDENCE.odometerAtPossession,
+    conditionAsDelivered: EVIDENCE.conditionAsDelivered,
     keysAndAccessoriesReceived: true,
   });
 
@@ -246,4 +319,52 @@ test("the buyer's own confirmation is still the normal path, and is recorded as 
     [["BUYER", "buyer_1"]],
     "the default actor is the buyer — the ADMIN carve-out must not become the default"
   );
+});
+
+test("§Stage 20 gates the completion, and names the checkpoint and the party", async () => {
+  // THE GATE IS PROVED BY BREAKING ONE OF THE FOURTEEN — and the one chosen matters. Funding,
+  // insurance and the executed contract are ALSO the three release gates, which `assertReleaseGates`
+  // throws on earlier in the same transaction; breaking one of those proves the release gate, not
+  // this one. The recap is a Stage 20 precondition and nothing else, so reaching COMPLETION_BLOCKED
+  // through it can only be the fourteen.
+  ctrl.dealOverrides = { recapConfirmedByDealerAt: null };
+
+  const out = await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
+
+  assert.equal(out.ok, false);
+  assert.equal(out.ok === false && out.code, "COMPLETION_BLOCKED");
+  assert.match(out.ok === false ? out.message : "", /final recap confirmed by both parties/i);
+  assert.match(out.ok === false ? out.message : "", /DEALERSHIP/);
+  assert.notEqual(ctrl.dealStatus, "COMPLETED", "a deal missing a precondition must not complete");
+});
+
+test("a blocked completion still KEEPS the buyer's evidence, and does not write the pickup COMPLETED", async () => {
+  // §Stage 19's report is a fact about a vehicle that already moved. Discarding it to punish the
+  // dealership's missing paperwork would lose evidence and make the buyer re-enter it.
+  ctrl.dealOverrides = { recapConfirmedByDealerAt: null };
+
+  await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
+
+  assert.equal(ctrl.pickupRow.buyerConfirmedAt instanceof Date, true, "the possession evidence must be committed");
+  assert.equal(ctrl.pickupRow.odometerAtPossession, 14);
+  assert.equal(ctrl.pickupRow.conditionAtPossession, "Clean, as described.");
+  assert.notEqual(ctrl.pickupRow.status, "COMPLETED", "the pickup must not read COMPLETED on a blocked deal");
+  assert.equal(ctrl.statusHistory.filter((h) => h.toStatus === "COMPLETED").length, 0);
+});
+
+test("the buyer's condition report no longer overwrites the dealership's", async () => {
+  // The two used to share `condition_at_release`, so every completed handover destroyed the
+  // dealership's record and relabelled the buyer's as the dealer's.
+  await (await service()).recordDealerRelease({
+    dealId: "deal_1",
+    dealerId: "dlr_1",
+    pickupId: "pu_1",
+    rawToken: LIVE_CODE,
+    identityVerified: true,
+    conditionAtRelease: "Two stone chips on the bonnet.",
+  });
+  await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
+
+  assert.equal(ctrl.pickupRow.conditionAtRelease, "Two stone chips on the bonnet.", "the DEALERSHIP's record must survive");
+  assert.equal(ctrl.pickupRow.conditionAtPossession, "Clean, as described.", "the BUYER's record is its own column");
 });
