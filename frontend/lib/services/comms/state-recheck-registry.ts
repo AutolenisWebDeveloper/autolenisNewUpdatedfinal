@@ -1279,3 +1279,43 @@ const skipIfObligationResolved: StateRecheckFn = async (ctx) => {
 
 registerStateRecheck(POST_COMPLETION_TEMPLATES.OBLIGATION_OVERDUE_BUYER, skipIfObligationResolved);
 registerStateRecheck(POST_COMPLETION_TEMPLATES.OBLIGATION_OVERDUE_DEALER, skipIfObligationResolved);
+
+/**
+ * §Stage 17's two appointment reminders. Separate keys because the 2-hour one is the last thing
+ * a buyer reads before they travel and §27 partitions rails by `template_key` — a 24-hour
+ * reminder stuck behind a slow rail must not delay it.
+ */
+export const PICKUP_REMINDER_TEMPLATES = {
+  APPOINTMENT_24H: "pickup_appointment_reminder_24h",
+  APPOINTMENT_2H: "pickup_appointment_reminder_2h",
+} as const;
+
+/**
+ * "Here is what to bring to your pickup" is worthless once the pickup has happened, and worse
+ * than worthless once the deal is cancelled — a buyer told to bring a cashier's cheque to a
+ * dealership for a car they no longer have is the clearest possible version of the stale message
+ * §27 exists to stop. Both legs are checked against the DEAL's state rather than the pickup's,
+ * because `cancelDeal` never touches the Pickup row: a deal cancelled at PICKUP_SCHEDULED leaves
+ * `pickups.status` reading SCHEDULED forever, which the release-token service already documents.
+ */
+const skipIfPickupNoLongerAhead: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: true };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, pickup: { select: { dealerReleasedAt: true, noShowAt: true } } },
+  });
+  if (!deal) return { proceed: false, reason: "deal no longer exists" };
+  if (deal.status !== "PICKUP_SCHEDULED") {
+    return { proceed: false, reason: `the deal is ${deal.status}, not awaiting a pickup` };
+  }
+  if (deal.pickup?.dealerReleasedAt) {
+    return { proceed: false, reason: "the dealership has already released the vehicle" };
+  }
+  if (deal.pickup?.noShowAt) {
+    return { proceed: false, reason: "the appointment was recorded as missed and is being rescheduled" };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(PICKUP_REMINDER_TEMPLATES.APPOINTMENT_24H, skipIfPickupNoLongerAhead);
+registerStateRecheck(PICKUP_REMINDER_TEMPLATES.APPOINTMENT_2H, skipIfPickupNoLongerAhead);

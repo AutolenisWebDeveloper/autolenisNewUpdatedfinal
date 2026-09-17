@@ -297,7 +297,16 @@ export async function confirmPickup(
 
   const res = await prisma.pickup.updateMany({
     where: { dealId, status: PickupStatus.PROPOSED, proposedAt: expectedProposedAt },
-    data: { status: PickupStatus.SCHEDULED, scheduledAt },
+    data: {
+      status: PickupStatus.SCHEDULED,
+      scheduledAt,
+      // THE APPOINTMENT CHANGED, SO WHAT WAS SENT ABOUT THE OLD ONE NO LONGER APPLIES. Same
+      // reasoning as the token revocation: §Stage 17's 24h and 2h reminders are stamped per
+      // appointment, and leaving the markers set means the NEW time gets no reminders at all —
+      // silently, because a reminder that is never sent looks exactly like one that was not due.
+      reminder24hSentAt: null,
+      reminder2hSentAt: null,
+    },
   });
   if (res.count !== 1) return CONFLICT;
 
@@ -367,7 +376,16 @@ export async function acceptCounter(
 
   const res = await prisma.pickup.updateMany({
     where: { dealId, status: PickupStatus.DEALER_COUNTERED, proposedAt: expectedProposedAt },
-    data: { status: PickupStatus.SCHEDULED, scheduledAt },
+    data: {
+      status: PickupStatus.SCHEDULED,
+      scheduledAt,
+      // THE APPOINTMENT CHANGED, SO WHAT WAS SENT ABOUT THE OLD ONE NO LONGER APPLIES. Same
+      // reasoning as the token revocation: §Stage 17's 24h and 2h reminders are stamped per
+      // appointment, and leaving the markers set means the NEW time gets no reminders at all —
+      // silently, because a reminder that is never sent looks exactly like one that was not due.
+      reminder24hSentAt: null,
+      reminder2hSentAt: null,
+    },
   });
   if (res.count !== 1) return CONFLICT;
 

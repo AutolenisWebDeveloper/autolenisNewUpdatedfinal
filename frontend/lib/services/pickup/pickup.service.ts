@@ -47,6 +47,12 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
       scheduledAt,
       location,
       status: PickupStatus.SCHEDULED,
+      // THE APPOINTMENT CHANGED, SO WHAT WAS SENT ABOUT THE OLD ONE NO LONGER APPLIES. Same
+      // reasoning as the token revocation: §Stage 17's 24h and 2h reminders are stamped per
+      // appointment, and leaving the markers set means the NEW time gets no reminders at all —
+      // silently, because a reminder that is never sent looks exactly like one that was not due.
+      reminder24hSentAt: null,
+      reminder2hSentAt: null,
     },
   });
 
