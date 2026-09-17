@@ -113,6 +113,26 @@ mock.module("@/lib/services/operations/queue-item.service", {
     raiseException: async (i: Row) => { ctrl.exceptions.push(i); return { item: { id: "qi_1" }, created: true }; },
   },
 });
+// The sweep now resolves the dealership's timezone so the email agrees with the pickup page.
+// Mocked to a known zone, and COUNTED, so the per-dealership memo is observable rather than assumed.
+let availabilityLookups = 0;
+mock.module("@/lib/services/pickup/availability.service", {
+  namedExports: {
+    resolveDealerAvailability: async () => {
+      availabilityLookups += 1;
+      return {
+        timezone: "America/New_York",
+        timezoneLabel: "ET",
+        minLeadTimeHours: 0,
+        maxAdvanceDays: 30,
+        openHour: 9,
+        closeHour: 18,
+        days: [1, 2, 3, 4, 5, 6],
+      };
+    },
+  },
+});
+
 mock.module("@/lib/services/pickup/release-token.service", {
   namedExports: {
     revokeReleaseToken: async (dealId: string) => { ctrl.revoked.push(dealId); return true; },
@@ -123,6 +143,7 @@ const svc = () => import("../pickup-reminders.service");
 
 beforeEach(() => {
   ctrl = { pickups: [pickupRow()], outbox: [], exceptions: [], updates: [], revoked: [] };
+  availabilityLookups = 0;
 });
 
 test("the reminder carries all seven of §Stage 17's items, and the count is asserted", async () => {
@@ -139,6 +160,8 @@ test("the reminder carries all seven of §Stage 17's items, and the count is ass
     hasCoBuyer: true,
     hasTrade: true,
     downPaymentMethod: "CASHIERS_CHECK",
+    timezone: "America/New_York",
+    timezoneLabel: "ET",
   });
 
   // Each of the seven, by the thing it must actually say — not by its key, which would let the
@@ -157,6 +180,7 @@ test("the reminder never contains the code itself", async () => {
   const body = renderAppointmentReminder({
     buyerFirstName: "Ada", scheduledAt: NOW, location: null, dealershipName: "North Motors",
     hasCoBuyer: false, hasTrade: false, downPaymentMethod: null,
+    timezone: "America/New_York", timezoneLabel: "ET",
   });
 
   // The raw token is returned once by `issueReleaseToken` and never stored, so this is
@@ -172,6 +196,7 @@ test("a deal with no trade does not get trade instructions, and still reads as a
   const body = renderAppointmentReminder({
     buyerFirstName: "Ada", scheduledAt: NOW, location: "Bay 3", dealershipName: "North Motors",
     hasCoBuyer: false, hasTrade: false, downPaymentMethod: null,
+    timezone: "America/New_York", timezoneLabel: "ET",
   });
 
   assert.doesNotMatch(body.html, /payoff letter/i, "there is no trade to bring");
@@ -384,4 +409,70 @@ test("a RESCHEDULED appointment is reminded, flagged and recordable — not invi
   const out = await s.recordPickupNoShow("deal_1", "BUYER", { id: "a1", role: "OPERATIONS_ADMIN" }, NOW);
   assert.deepEqual(out, { ok: true, returnedToScheduling: true }, "the CAS must match a rescheduled row too");
   assert.equal(ctrl.pickups[0].status, "NOT_SCHEDULED");
+});
+
+test("the reminder states the appointment in the DEALERSHIP's timezone, not GMT", async () => {
+  // §Stage 17's reminder is the most time-critical message in the phase, and it rendered
+  // `scheduledAt.toUTCString()`: a buyer with a 14:00 Eastern handover was told "18:00:00 GMT".
+  // `/buyer/pickup` renders the same instant through the dealer's availability timezone, so the
+  // email and the screen disagreed by four hours about when to turn up.
+  //
+  // The seven-item test next to this one asserts the LABELS are present, so it stayed green
+  // throughout — presence is not correctness.
+  const { renderAppointmentReminder } = await import("@/lib/services/pickup/pickup-reminders.service");
+
+  const body = renderAppointmentReminder({
+    buyerFirstName: "Ada",
+    scheduledAt: new Date("2026-03-17T18:00:00Z"), // 14:00 America/New_York (EDT)
+    location: "12 Forecourt Way",
+    dealershipName: "Riverside Motors",
+    hasCoBuyer: false,
+    hasTrade: false,
+    downPaymentMethod: null,
+    timezone: "America/New_York",
+    timezoneLabel: "ET",
+  });
+
+  assert.match(body.html, /2:00\s*PM/i, "the buyer must read their own local appointment time");
+  assert.match(body.html, /ET\b/, "and the zone it is stated in, as the pickup page does");
+  assert.doesNotMatch(body.html, /GMT/, "GMT is not a time any buyer is standing in");
+  assert.match(body.html, /March 17/, "and the date in that same zone");
+});
+
+test("a reminder with no resolvable timezone still renders, and says which zone it used", async () => {
+  // Anti-vacuity for the assertion above: the formatter must be capable of producing a DIFFERENT
+  // answer, or matching "2:00 PM" proves only that some string appeared.
+  const { renderAppointmentReminder } = await import("@/lib/services/pickup/pickup-reminders.service");
+
+  const body = renderAppointmentReminder({
+    buyerFirstName: "Ada",
+    scheduledAt: new Date("2026-03-17T18:00:00Z"),
+    location: "12 Forecourt Way",
+    dealershipName: "Riverside Motors",
+    hasCoBuyer: false,
+    hasTrade: false,
+    downPaymentMethod: null,
+    timezone: "America/Los_Angeles",
+    timezoneLabel: "PT",
+  });
+
+  assert.match(body.html, /11:00\s*AM/i, "the same instant is a different wall-clock time in another zone");
+  assert.match(body.html, /PT\b/);
+});
+
+test("two appointments at the same dealership resolve its timezone ONCE, not once each", async () => {
+  // The sweep reads the dealership's availability so the email agrees with the pickup page. That
+  // is one row per DEALERSHIP; reading it once per PICKUP would turn an hourly sweep over a
+  // handful of appointments into a query per appointment for no new information.
+  //
+  // This also makes the counter above load-bearing: it was introduced with a comment claiming the
+  // memo was "observable rather than assumed" and then never read, which lint caught as an unused
+  // variable — a claim in a comment that nothing checked.
+  const second = { ...ctrl.pickups[0], dealId: "deal_2" };
+  ctrl.pickups = [ctrl.pickups[0], second];
+
+  const result = await (await svc()).sweepAppointmentReminders(NOW);
+
+  assert.equal(result.reminded24h, 2, "both appointments are reminded");
+  assert.equal(availabilityLookups, 1, "and the dealership's availability is read once for the pair");
 });

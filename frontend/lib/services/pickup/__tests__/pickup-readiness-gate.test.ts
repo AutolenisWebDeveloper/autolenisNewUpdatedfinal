@@ -26,6 +26,9 @@ import assert from "node:assert/strict";
 const PROPOSED_AT = new Date("2026-02-10T18:00:00Z");
 const PROPOSED_TIME = new Date("2026-02-14T18:00:00Z");
 
+/** Irreversible acts, in the order they happened. A refusal must add nothing to either list. */
+const sideEffects: { upserts: Array<Record<string, unknown>>; revokes: string[] } = { upserts: [], revokes: [] };
+
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
@@ -72,6 +75,9 @@ mock.module("@/lib/prisma", {
         updateMany: async () => ({ count: 1 }),
         findUnique: async () => ({ dealId: "deal_1", status: "SCHEDULED" }),
         update: async () => ({}),
+        // Observed, so "the gate refused" can be told apart from "the gate refused after it had
+        // already written the appointment". See the `schedulePickup` test at the end of this file.
+        upsert: async (args: Record<string, unknown>) => { sideEffects.upserts.push(args); return { dealId: "deal_1" }; },
       },
       notification: { create: async () => ({}) },
     },
@@ -79,6 +85,13 @@ mock.module("@/lib/prisma", {
 });
 
 mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } } });
+
+mock.module("@/lib/services/pickup/release-token.service", {
+  namedExports: {
+    revokeReleaseToken: async (dealId: string) => { sideEffects.revokes.push(dealId); return { count: 0 }; },
+    TOKEN_MINTABLE_STATUSES: ["PICKUP_SCHEDULED", "PICKUP_READINESS"],
+  },
+});
 
 let advanceCalls = 0;
 mock.module("@/lib/services/deal/deal.service", {
@@ -120,4 +133,33 @@ test("an unready deal CANNOT be scheduled, and the refusal names the outstanding
     "§Stage 16 requires the exact unresolved item, not a generic refusal the buyer cannot act on",
   );
   assert.equal(advanceCalls, 0, "and the Deal must not advance to PICKUP_SCHEDULED");
+});
+
+test("schedulePickup REFUSES BEFORE it writes the appointment or retires the buyer's code", async () => {
+  // THE OPERATIONS PATH, which §Stage 17 describes as "after two unsuccessful counter rounds,
+  // Operations schedules directly". `confirmPickup` above evaluates readiness BEFORE its pickup
+  // CAS; `schedulePickup` evaluated it after — the upsert (status SCHEDULED, reminder markers
+  // cleared) and `revokeReleaseToken` both committed, and only then did the gate throw.
+  //
+  // WHAT THAT LEFT BEHIND. `/buyer/pickup` branches on the PICKUP's status, not the deal's, so
+  // the buyer saw §Stage 16's "before we can book your pickup" checklist AND a confirmed
+  // appointment at the same time, with a live "reveal your code" button that 409s with "your
+  // pickup code is available once the dealership has confirmed your time. This pickup is
+  // scheduled." — a sentence that contradicts itself. Any code they were already carrying was
+  // revoked by the call that failed.
+  //
+  // A refusal must cost nothing, the same rule the journey wrapper now follows.
+  sideEffects.upserts.length = 0;
+  sideEffects.revokes.length = 0;
+
+  const { schedulePickup } = await import("@/lib/services/pickup/pickup.service");
+
+  await assert.rejects(
+    () => schedulePickup("deal_1", new Date("2026-02-14T18:00:00Z"), "123 Main St"),
+    /readiness is incomplete|Funding clearance has not been recorded/i,
+    "an unready deal must be refused by the same §Stage 16 gate the coordination path uses",
+  );
+
+  assert.deepEqual(sideEffects.upserts, [], "no appointment is written for a scheduling that was refused");
+  assert.deepEqual(sideEffects.revokes, [], "and the code the buyer is carrying is not retired by a failed call");
 });

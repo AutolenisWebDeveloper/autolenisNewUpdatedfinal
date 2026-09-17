@@ -100,6 +100,15 @@ export async function POST(request: NextRequest, { params }: Props) {
           "Tell us you have the vehicle before we complete the deal. If something is wrong, report it here and we will open a case.",
           400,
         );
+      case "not_received_reported":
+        // The buyer does not have the vehicle AND told us why. The case is open and the report is
+        // on the pickup — so this says a case exists, which the `not_received` copy above only
+        // ever promised. Nothing is confirmed: `buyerConfirmedAt` is deliberately unwritten.
+        return errorResponse(
+          "DISCREPANCY_REPORTED",
+          "Thanks — we've recorded that you don't have the vehicle and opened a case with our Operations team. Your deal stays open until it is resolved.",
+          409,
+        );
       case "discrepancy_blocks":
         // §Stage 19: "A material discrepancy blocks completion and creates an Operations case
         // with the dealership notified." The case is already open; the buyer is told so.

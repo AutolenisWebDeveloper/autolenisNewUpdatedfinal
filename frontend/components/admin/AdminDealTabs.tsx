@@ -53,9 +53,16 @@ const DEAL_STAGES = [
   // it here could only ever produce a 409 an operator cannot act on.
   //
   // COMPLETED IS GONE TOO, AND THAT IS THE POINT OF THE PHASE. A deal is completed by recording
-  // the buyer's possession, not by advancing a status — `advanceDealStatus` now refuses COMPLETED
-  // outright, because reaching it here evaluated three of §Stage 20's fourteen preconditions and
-  // left `completed_at` NULL. The capability is not lost: it moved to the buyer's confirmation,
+  // the buyer's possession, not by advancing a status, because reaching it here evaluated three
+  // of §Stage 20's fourteen preconditions and left `completed_at` NULL.
+  //
+  // THE ENFORCEMENT IS AT THE ROUTE, not in `advanceDealStatus`. `POST /api/admin/deals/
+  // [dealId]/action` refuses `newStatus === COMPLETED` with USE_COMPLETION_PATH. The transition
+  // map still contains `HANDOVER_PENDING → COMPLETED` and `PICKUP_COMPLETE → COMPLETED` on
+  // purpose: `advanceDealStatus` is the canonical emitter of the completion event, and the
+  // completion service itself goes through it. Putting the refusal inside that function would
+  // break the one path that is supposed to reach COMPLETED. Dropping the value from this list is
+  // the UX half; the route is the control. The capability is not lost: it moved to the buyer's confirmation,
   // and to `POST /api/admin/deals/[dealId]/pickup/complete` for an Operations-coordinated
   // handover, which collects the possession evidence §Stage 20 requires.
 ];

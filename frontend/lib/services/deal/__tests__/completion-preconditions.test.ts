@@ -216,16 +216,63 @@ test("a concierge deal has no auction and no sourcing case, and completes anyway
   // The chain the document names includes an auction and a sourcing case. A vehicle-request deal
   // never had either. Marking them outstanding would make an entire product line uncompletable;
   // marking them satisfied would claim a check that never ran.
+  //
+  // THE FIXTURE MUST BE A DEAL THAT CAN EXIST. An earlier version of this test nulled only the
+  // auction links and left `dealerId`, `dealer` and a CONFIRMED `dealerReaffirmations` row in
+  // place — and passed, because those three are exactly what a concierge deal cannot have:
+  //   * `Deal.dealerId` is nullable and NOTHING in this repository ever writes it (grep
+  //     `deal.create|update|upsert` for the field: zero hits), so it is null on every deal.
+  //   * `deal.offer` is null by construction here, and `openReaffirmationWindow` returns
+  //     `{created:false}` for a deal with no offer (dealer-reaffirmation.service.ts), so no
+  //     reaffirmation row is ever written for this shape.
+  // Asserting `complete === true` against a shape production cannot produce proved nothing.
   deal!.offerId = null;
   deal!.offer = null;
   deal!.vehicleRequestOfferId = "vro_1";
   deal!.vehicleRequestOffer = { id: "vro_1", requestId: "vr_1" };
   deal!.auctionId = null;
   deal!.auction = null;
+  deal!.dealerId = null;
+  deal!.dealer = null;
+  deal!.dealerReaffirmations = [];
 
   const result = await evaluate();
 
   assert.equal(result.complete, true, `outstanding: ${result.outstanding.map((i) => i.key).join(", ")}`);
+});
+
+test("the concierge carve-out is NOT APPLICABLE, not a silent pass", async () => {
+  // §Stage 20 shows every checkpoint. An exempt link must say it does not apply rather than
+  // claiming a check that never ran — the distinction the file header calls load-bearing.
+  deal!.offerId = null;
+  deal!.offer = null;
+  deal!.vehicleRequestOfferId = "vro_1";
+  deal!.vehicleRequestOffer = { id: "vro_1", requestId: "vr_1" };
+  deal!.auctionId = null;
+  deal!.auction = null;
+  deal!.dealerId = null;
+  deal!.dealer = null;
+  deal!.dealerReaffirmations = [];
+
+  const result = await evaluate();
+
+  const reaff = result.items.find((i) => i.key === "DEALER_REAFFIRMED");
+  assert.ok(reaff, "DEALER_REAFFIRMED must still be RENDERED on a concierge deal, not dropped");
+  assert.equal(reaff.notApplicable, true, "a concierge deal has no dealership to reaffirm");
+  assert.equal(result.outstanding.some((i) => i.key === "DEALER_REAFFIRMED"), false);
+
+  // And the exemption must not leak to an auction deal that genuinely lacks the reaffirmation.
+  deal!.offerId = "off_1";
+  deal!.offer = { id: "off_1", dealerId: "dlr_1", auctionId: "auc_1" };
+  deal!.vehicleRequestOfferId = null;
+  deal!.vehicleRequestOffer = null;
+  deal!.dealerReaffirmations = [];
+  const auctionResult = await evaluate();
+  assert.equal(
+    auctionResult.outstanding.some((i) => i.key === "DEALER_REAFFIRMED"),
+    true,
+    "an AUCTION deal with no reaffirmation is outstanding — the carve-out must not reach it",
+  );
 });
 
 test("an auction deal missing its sourcing case IS a broken chain", async () => {

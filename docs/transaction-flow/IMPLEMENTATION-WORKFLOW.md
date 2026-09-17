@@ -2716,9 +2716,40 @@ closed on the transitions that existed when it was written, and on no others.**
 
 #### The before → after capability map
 
-Counts reconcile: **36 capabilities accounted for — 8 KEPT · 6 MOVED · 6 REGROUPED · 6 PROGRESSIVE
-· 2 RENAMED · 3 REMOVED · 5 NEW.** (8 + 6 + 6 + 6 + 2 + 3 + 5 = 36.) The three REMOVED each carry
+
+> **Rows 3 and 4 were recorded wrongly, and the second independent review caught it.** Both routes
+> call `completeJourneyPickup(dealId, adminId)` with **two** arguments, so the `evidence` parameter
+> defaults to `{}` and §Stage 20's thirteenth precondition (mileage and condition at possession) is
+> outstanding on every call. The journey tools collect neither fact, so **these two routes cannot
+> complete a deal at all** — before Phase 9 they could, by writing the Pickup and forcing the Deal
+> with no evidence whatsoever. "REGROUPED" claimed the capability was intact behind a new seam. It
+> is not intact; it is gated on evidence these surfaces do not collect. **PROGRESSIVE** is the
+> honest disposition: the path exists, it refuses until the facts are supplied, and supplying them
+> is a UI change to an admin tool rather than an implementation detail.
+>
+> The **defect** fixed under this correction is the ORDER, not the refusal. `recordDealerRelease`
+> ran first, so a call that was always going to fail had already advanced the deal to
+> `HANDOVER_PENDING`, revoked whatever release code the buyer was carrying, and queued the buyer a
+> message reading *"the dealership has recorded that your vehicle was released to you."*
+> `HANDOVER_PENDING` has exactly one exit, so none of it could be walked back: an Operations click
+> left a stranded deal, a dead code, and a buyer told they had a car they did not have. The
+> refusal now happens before any of that, and costs nothing.
+>
+> **OWNER DECISION OUTSTANDING.** Restoring completion to the journey tools means collecting the
+> odometer and the condition on those two admin surfaces (the sibling route's zod schema already
+> has both fields and refuses to substitute a zero, for the reason stated in its own comment). The
+> alternative is to accept that the journey tools stop at `HANDOVER_PENDING` and Operations
+> completes at `POST /api/admin/deals/[dealId]/pickup/complete`, which does collect the evidence.
+> Not chosen here: it changes what an admin tool can do, which is a call for the owner.
+
+Counts reconcile: **36 capabilities accounted for — 8 KEPT · 6 MOVED · 4 REGROUPED · 8 PROGRESSIVE
+· 2 RENAMED · 3 REMOVED · 5 NEW.** (8 + 6 + 4 + 8 + 2 + 3 + 5 = 36.) The three REMOVED each carry
 explicit owner sign-off, named in the table.
+
+*(Recount 2026-09-17: rows 3 and 4 moved REGROUPED → PROGRESSIVE after the second independent
+review showed the journey routes cannot complete a deal at all. The total is unchanged at 36; the
+dispositions were wrong, not the inventory. Previous figures — 6 REGROUPED · 6 PROGRESSIVE — are
+superseded.)*
 
 **Rows 35 and 36 were added after the adversarial review**, and 36 is the one that needs the owner's
 eye: completing a deal by selecting `COMPLETED` in the admin stage dropdown is gone. It is a MOVED
@@ -2742,8 +2773,8 @@ the kind of change that should be read rather than inferred.
 | --- | --- | --- | --- |
 | 1 | Dealer scan completes the Deal (`dealer/pickup/scan`) | Scan records HANDOVER only; the buyer's confirmation completes | **REGROUPED** |
 | 2 | Admin `deals/[dealId]/pickup/complete` upserts the Pickup and forces the Deal | Calls the one completion writer; accepts possession evidence | **REGROUPED** |
-| 3 | Admin journey `complete` (stage `pickup`) writes Pickup + forces Deal | Calls `completeJourneyPickup` | **REGROUPED** |
-| 4 | Admin journey `complete-all` (stage `pickup`) — same | Same | **REGROUPED** |
+| 3 | Admin journey `complete` (stage `pickup`) writes Pickup + forces Deal | Calls `completeJourneyPickup`, which **refuses** — see the note below | **PROGRESSIVE** — corrected 2026-09-17 |
+| 4 | Admin journey `complete-all` (stage `pickup`) — same | Same | **PROGRESSIVE** — corrected 2026-09-17 |
 | 5 | `pickup.service.completePickup` (caller-less fifth writer) | Retired by REFUSING; symbol retained, hazard removed, reported for an owner decision | **REGROUPED** |
 | 6 | `DEAL_STAGE_ADVANCED` reaching COMPLETED | Routed through the guarded seam | **REGROUPED** |
 | 7 | Admin FORCE out of `COMPLETED` (`advanceDealStatus(..., force: true)`) | **Gone.** Replaced by append-only `DealCorrection` | **REMOVED** — owner-ruled, Q4, 2026-09-16 |
@@ -2781,6 +2812,51 @@ the kind of change that should be read rather than inferred.
 separately because a capability that exists in a service and appears on no screen is not a
 capability a buyer has — which is exactly the defect row 30 records: §Stage 19's route shipped
 earlier in this phase with no branch on `/buyer/pickup` able to reach it.)*
+
+#### The SECOND independent review (2026-09-17) — three blockers, four majors
+
+The owner required a second review from a clean context, pointed at the final code **including the
+two blocker fixes from the first review**, on the grounds that those fixes are themselves new,
+unreviewed code — and that the second one's first attempt had deleted tested behaviour, caught only
+by eight failing tests. That was the right call: the second review found three blockers the first
+had not, two of them **created or left open by the first round's fixes**.
+
+Every finding below was re-verified against the code before any change was made; the reviewer was
+wrong on one supporting detail (it claimed `adminError` already took a details bag — it took three
+arguments, so the bag was added additively).
+
+| # | Severity | Defect | Fix |
+| --- | --- | --- | --- |
+| 1 | BLOCKER | **A concierge deal could never reach COMPLETED.** `chainBreaks.push("dealership")` sat OUTSIDE the `isConcierge` carve-out, and `Deal.dealerId` is nullable with **no writer anywhere in the repository**, so both operands were null on every vehicle-request deal. `DEALER_REAFFIRMED` failed the same way — `openReaffirmationWindow` returns `{created:false}` for a deal with no offer. With row 36 closing the dropdown, such a deal had no exit from `HANDOVER_PENDING` at all | Dealership link folded into the carve-out; `DEALER_REAFFIRMED` marked `notApplicable` on a concierge deal. This is also what made `notApplicable` load-bearing — it had been dead code under a header calling it load-bearing |
+| 1b | BLOCKER | The test covering it was **vacuous**: it nulled the auction links but left `dealerId`, `dealer` and a CONFIRMED reaffirmation in the fixture — the two facts a real concierge deal cannot have — and asserted `complete === true` on a shape production cannot produce | Fixture corrected; it went red (`outstanding: REFERENCE_CHAIN_INTACT, DEALER_REAFFIRMED`) before the fix. A second test pins that the carve-out renders as NOT APPLICABLE rather than silently passing, and does not leak to auction deals |
+| 2 | BLOCKER | Both journey routes call `completeJourneyPickup` with **two** arguments, so completion always failed — but only **after** `recordDealerRelease` had advanced the deal to `HANDOVER_PENDING`, revoked the buyer's live code, and queued them *"your vehicle was released to you"*. One exit from that status; nothing walk-back-able | The evidence check moved **before** the release. A refusal now costs nothing. Capability rows 3/4 re-dispositioned REGROUPED → PROGRESSIVE, with the owner decision stated above |
+| 3 | MAJOR | Blocker 2's guard is route-local, and the **AI action catalogue** still offered `COMPLETED` with `availability: "AVAILABLE"` and `canonicalService: …#advanceDealStatus` — a third surface resolving the target at runtime, invisible to both "one writer" guards (one scans `lib/services`+`lib/jobs` for pickup writes, the other `app/api/admin` for routes) | `COMPLETED` removed from the enum. New guard reads the intent's own zod schema rather than grepping, with anti-vacuity probes; **mutation-tested** — reintroducing the value makes it fail with the right message |
+| 4 | MAJOR | `schedulePickup` committed the pickup upsert and revoked the release token **before** the readiness gate threw, leaving a phantom confirmed appointment the buyer's page rendered alongside the "not ready" checklist | Gate hoisted above both writes, matching `pickup-coordination.service.ts`, which already ordered it correctly |
+| 5 | MAJOR | Precondition 14 blocks on **any** OPEN queue item — including the `PICKUP_MISSED` this phase's own sweep raises for a handover running >4h late. One writer, **zero resolvers** in the entire repository. The buyer drives away and the deal is stuck | `recordDealerRelease` now CLOSES an open `PICKUP_MISSED` inside the release transaction — the release disproves the suspicion. CLOSED, not RESOLVED (§26: "it no longer applies"). Scoped to that one code; a genuine hold still blocks |
+| 6 | MAJOR | The buyer's "Report a problem" path **discarded the report** when "I have the vehicle" was unticked — the case where it matters most — while the copy said a case would be opened | New `not_received_reported` outcome records the report and raises the case. `buyerConfirmedAt` deliberately **not** written: the buyer confirmed nothing |
+| 7–19 | MINOR / NIT | Opaque 409 on the admin completion route · a comment asserting `advanceDealStatus` refuses COMPLETED (it does not) · unenforced obligation idempotency claimed as a guarantee · a scorecard and an email promising a control that does not exist · a lost Operations escalation when a chase message throws · a cron returning 200 on a failed sweep · reminders stated in **GMT** while the buyer's page used the dealership's timezone · a retry re-sending the dealership's payout notice · a stale `PERMITTED_STAGES` · `buyerId: ""` · a concurrent confirmation overwriting a COMPLETED deal's evidence | All fixed. The timezone fix threads the dealership's zone through the sweep, memoized per dealership. The race fix takes `SELECT … FOR UPDATE` on the deal row, matching `select-offer.service.ts` |
+
+**Reported, not fixed** (owner decisions, not implementation choices):
+
+- **`resolveObligation` still has no route or authorization** — unchanged from the first round, and
+  the owner's stated next priority.
+- **A partial unique index on `(deal_id, type) WHERE status <> 'RESOLVED'`** would make
+  `openObligation`'s idempotency a database guarantee rather than a single-writer convention. The
+  comment now says which it is. Adding it is a **third migration** and was not added without a
+  ruling, since the owner asked for the migration count before running them.
+- **Both admin release paths hard-code `identityVerified: true`**, writing `identityVerifiedAt` for
+  an ID check AutoLenis did not perform. Changing what that column asserts is a record-semantics
+  decision.
+- **Dialog semantics on the two release-code overlays** (no `role="dialog"`, no focus trap, no
+  Escape, QR with no text alternative) — a continuation of the pre-existing `confirmModal` pattern
+  in the same files, so out of scope for this phase.
+- **`makeFmt` is duplicated** in `app/buyer/pickup/page.tsx` and `app/dealer/pickups/page.tsx`.
+  Pre-existing; the reminder service does not add a third copy but does not extract them either.
+
+**Verification after the second round:** `pnpm typecheck` exit 0 · `pnpm lint` 0 errors, 130
+warnings (the one new warning was mine — an unused counter behind a comment claiming it was
+checked; it is now asserted) · `pnpm test:all` **5099 passing, 0 failing across all 70 segments**
+(5085 before; +14 new tests) · `pnpm test:coverage-check` 478/478 reachable · `pnpm build` exit 0.
 
 #### The nine Q-items, as resolved
 

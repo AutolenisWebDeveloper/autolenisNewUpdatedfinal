@@ -92,9 +92,17 @@ export interface OpenObligationInput {
 /**
  * Open one obligation against a COMPLETED deal.
  *
- * IDEMPOTENT PER (deal, type). Two calls for the same obligation on the same deal return the
- * existing row rather than a second one — a buyer who reports a missing second key twice has one
- * obligation, not two, and a duplicate would double-count on the dealership's scorecard.
+ * IDEMPOTENT PER (deal, type), BY THE SINGLE WRITER — NOT BY THE DATABASE. Two calls for the
+ * same obligation on the same deal return the existing row rather than a second one, because this
+ * is a read-then-write and the only caller today runs inside the completion CAS's winning
+ * transaction, so no second caller can interleave. There is NO unique constraint behind it:
+ * `PostCompletionObligation` carries only `@@index([dealId])`. Two concurrent callers WOULD
+ * produce two PENDING rows for the same (deal, type) and double-count on the scorecard.
+ *
+ * This function is the declared seam for §Stage 21's future writers, so the constraint that would
+ * make the guarantee real — a partial unique index on `(deal_id, type) WHERE status <> 'RESOLVED'`
+ * — is REPORTED as the migration to add before a second writer exists. Do not read the paragraph
+ * above as a promise the schema keeps.
  *
  * REFUSES A DEAL THAT IS NOT COMPLETE, and that is not pedantry. An obligation opened before
  * completion would be indistinguishable from one of §Stage 20's fourteen preconditions, and the
@@ -247,6 +255,26 @@ export async function sweepOverdueObligations(
       const dealerEmail = ob.deal?.offer?.dealer?.user?.email ?? null;
       const dealershipName = ob.deal?.offer?.dealer?.dealershipName ?? "the dealership";
 
+      // ── THE ESCALATION COMES FIRST, BECAUSE IT IS THE HALF THAT REACHES A HUMAN ──
+      //
+      // The swap to OVERDUE commits above, so a throw below is never retried: the next sweep
+      // matches zero rows because the status is already OVERDUE. With the chase messages sent
+      // first, ONE `enqueueTransactional` failure lost the dealer's notice AND this Operations
+      // case together — permanently, and silently but for a log line. The comment further down
+      // justifies losing one chase message; losing the escalation loses the thing §Stage 21
+      // requires to put an overdue obligation in front of a person at all.
+      await raiseException({
+        code: "POST_COMPLETION_OBLIGATION_OVERDUE",
+        dealId: ob.dealId,
+        buyerId: ob.deal?.buyerId ?? null,
+        dealerId,
+        // One exception per OBLIGATION, not per deal. A deal with an overdue title and an
+        // overdue payoff is two problems for two different people to chase.
+        idempotencyKey: `POST_COMPLETION_OBLIGATION_OVERDUE:${ob.id}`,
+        detail: `${label} is overdue${ob.dueAt ? ` (due ${ob.dueAt.toISOString().slice(0, 10)})` : ""}.`,
+      });
+      result.escalated += 1;
+
       if (buyerEmail && ob.deal) {
         await enqueueTransactional({
           triggerEvent: "post_completion_obligation_overdue",
@@ -302,8 +330,7 @@ export async function sweepOverdueObligations(
             html:
               `<p><strong>${label}</strong> on a completed AutoLenis transaction is past its due ` +
               `date${ob.dueAt ? ` of ${ob.dueAt.toISOString().slice(0, 10)}` : ""}.</p>` +
-              `<p>Overdue obligations register on your dealership scorecard. Resolving this one ` +
-              `clears the entry.</p>` +
+              `<p>Overdue obligations register on your dealership scorecard.</p>` +
               `<p>Reply to this email with the current status and our Operations team will update ` +
               `the record.</p>`,
           },
@@ -311,17 +338,6 @@ export async function sweepOverdueObligations(
         result.notified += 1;
       }
 
-      await raiseException({
-        code: "POST_COMPLETION_OBLIGATION_OVERDUE",
-        dealId: ob.dealId,
-        buyerId: ob.deal?.buyerId ?? null,
-        dealerId,
-        // One exception per OBLIGATION, not per deal. A deal with an overdue title and an
-        // overdue payoff is two problems for two different people to chase.
-        idempotencyKey: `POST_COMPLETION_OBLIGATION_OVERDUE:${ob.id}`,
-        detail: `${label} is overdue${ob.dueAt ? ` (due ${ob.dueAt.toISOString().slice(0, 10)})` : ""}.`,
-      });
-      result.escalated += 1;
     } catch (e) {
       result.failed += 1;
       logger.error(`[post-completion-obligations] sweep failed obligation=${ob.id}:`, e);

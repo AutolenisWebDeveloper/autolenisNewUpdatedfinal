@@ -9,8 +9,23 @@ import { prisma } from "@/lib/prisma";
 export function adminSuccess<T>(data: T, status = 200) {
   return NextResponse.json({ success: true, data }, { status });
 }
-export function adminError(code: string, message: string, status = 400) {
-  return NextResponse.json({ error: { code, message }, correlationId: crypto.randomUUID() }, { status });
+/**
+ * `details` is OPTIONAL and additive — every existing three-argument caller is unchanged.
+ *
+ * It exists because §Stage 20 requires the admin console to show "the exact missing checkpoint
+ * and the responsible party", which a `{ code, message }` envelope cannot carry. The buyer-facing
+ * `errorResponse` has had the same bag for the same reason.
+ */
+export function adminError(
+  code: string,
+  message: string,
+  status = 400,
+  details?: Record<string, unknown>,
+) {
+  return NextResponse.json(
+    { error: { code, message, ...(details ? { details } : {}) }, correlationId: crypto.randomUUID() },
+    { status },
+  );
 }
 export async function getAdminFromRequest(request: NextRequest): Promise<AdminJwtPayload | null> {
   const cookieStore = await cookies();

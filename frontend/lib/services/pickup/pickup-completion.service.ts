@@ -46,7 +46,7 @@ import type { ClearanceItem } from "@/lib/services/deal/funding-clearance.servic
 import { emitDealCompletionEvent } from "@/lib/services/deal/deal-completion-event.service";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_9_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
-import { raiseException } from "@/lib/services/operations/queue-item.service";
+import { raiseException, listOpen, resolve } from "@/lib/services/operations/queue-item.service";
 import { consumeReleaseToken, revokeReleaseToken } from "./release-token.service";
 import { openObligation } from "@/lib/services/deal/post-completion-obligations.service";
 import { DEAL_COMPLETE_SUBJECT, renderDealCompleteEmail } from "@/lib/services/email/templates/deal-complete";
@@ -145,7 +145,16 @@ export interface PossessionInput {
 
 export type PossessionOutcome =
   | { ok: true; alreadyComplete: boolean; completedAt: Date }
-  | { ok: false; reason: "deal_missing" | "not_in_handover" | "not_received" | "discrepancy_blocks" }
+  | {
+      ok: false;
+      reason:
+        | "deal_missing"
+        | "not_in_handover"
+        | "not_received"
+        /** Reported a problem AND does not have the vehicle. The case is open; nothing is confirmed. */
+        | "not_received_reported"
+        | "discrepancy_blocks";
+    }
   /**
    * §Stage 20: "the website shows the exact missing checkpoint and the responsible party". The
    * items travel with the refusal so the surface can say WHICH of the fourteen is false and WHO
@@ -246,6 +255,33 @@ export async function recordDealerRelease(input: DealerReleaseInput): Promise<De
       },
     });
 
+    // ── THE RELEASE DISPROVES THE SUSPICION THE SWEEP RAISED ──
+    //
+    // `flagSuspectedNoShows` raises PICKUP_MISSED when an appointment is four hours old with no
+    // recorded release, and says in its own comment that it "does not decide that anything was
+    // missed" — handovers run late for ordinary reasons. §Stage 20's FOURTEENTH precondition then
+    // blocks on any OPEN queue item, and PICKUP_MISSED had one writer and no resolver anywhere in
+    // this repository. A handover that ran five hours late therefore stranded the deal AFTER the
+    // buyer had driven away, until an administrator closed the item by hand.
+    //
+    // Recording the release is proof the pickup was not missed, so it closes it here, inside the
+    // same transaction: if the release rolls back, so does the closure. CLOSED, not RESOLVED —
+    // §26's vocabulary is "RESOLVED = the condition was fixed, CLOSED = it no longer applies", and
+    // nothing was fixed. Only this one code is closed; a genuine hold is what precondition 14 is
+    // for, and a release says nothing about an identity mismatch or a delivery discrepancy.
+    const missed = await listOpen({ dealId: input.dealId, exceptionCode: "PICKUP_MISSED" }, tx);
+    for (const item of missed) {
+      await resolve(
+        {
+          queueItemId: item.id,
+          status: "CLOSED",
+          resolution: "The dealership recorded the vehicle release, so the pickup was not missed.",
+          resolvedBy: "pickup-completion.service",
+        },
+        tx,
+      );
+    }
+
     await tx.dealStatusHistory.create({
       data: {
         dealId: input.dealId,
@@ -305,7 +341,10 @@ export async function recordDealerRelease(input: DealerReleaseInput): Promise<De
 export async function confirmPossession(input: PossessionInput): Promise<PossessionOutcome> {
   const now = input.now ?? new Date();
 
-  if (!input.vehicleReceived) return { ok: false, reason: "not_received" };
+  // AN UNTICKED BOX WITH NOTHING REPORTED IS A TRUTHFUL ANSWER, NOT A DISPUTE — a plain refusal
+  // that writes nothing. The buyer who ALSO told us what went wrong is handled below, after the
+  // deal is read, because their report is evidence and discarding it is the defect this splits.
+  if (!input.vehicleReceived && !input.discrepancy) return { ok: false, reason: "not_received" };
 
   const pre = await prisma.deal.findUnique({
     where: { id: input.dealId },
@@ -324,6 +363,40 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
   const discrepancyJson = input.discrepancy
     ? ({ material: input.discrepancy.material, note: input.discrepancy.note, reportedAt: now.toISOString() } as Prisma.InputJsonValue)
     : undefined;
+
+  // ── THE BUYER DOES NOT HAVE THE VEHICLE, AND TOLD US WHY ──
+  //
+  // This returned on `!vehicleReceived` before the deal was even read, so the report was dropped:
+  // no `possessionDiscrepancy`, no queue item — while the route answered "if something is wrong,
+  // report it here and we will open a case", which is exactly what they had just done. The
+  // dealership had already recorded a release, so the deal sat at HANDOVER_PENDING with an
+  // unrecorded dispute and nobody assigned to it. It is the case where the report matters most.
+  //
+  // `buyerConfirmedAt` IS DELIBERATELY NOT WRITTEN. It means "the buyer confirmed possession".
+  // Stamping it to reuse the branch below would manufacture evidence about a vehicle the buyer
+  // has just said they do not have, and §Stage 20's thirteenth precondition reads it. The report
+  // is recorded; the confirmation is not, because it did not happen.
+  if (!input.vehicleReceived) {
+    await prisma.$transaction(async (tx) => {
+      await tx.pickup.update({
+        where: { dealId: input.dealId },
+        data: {
+          ...(discrepancyJson !== undefined ? { possessionDiscrepancy: discrepancyJson } : {}),
+        },
+      });
+      await raiseException(
+        {
+          code: "DELIVERY_DISCREPANCY_REPORTED",
+          dealId: input.dealId,
+          buyerId: input.buyerId,
+          dealerId: pre.offer?.dealerId ?? null,
+          detail: input.discrepancy!.note,
+        },
+        tx,
+      );
+    });
+    return { ok: false, reason: "not_received_reported" };
+  }
 
   // The blocking branch commits the EVIDENCE and the case, and nothing else. Recording the
   // buyer's report is not optional just because it stops the deal.
@@ -353,6 +426,21 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    // ── SERIALIZE CONCURRENT CONFIRMATIONS ON THE DEAL ROW, BEFORE ANYTHING IS READ ──
+    //
+    // §Stage 20 (owner ruling Q4): COMPLETED is terminal and corrections are append-only
+    // `DealCorrection` rows. Without this lock two confirmations both read HANDOVER_PENDING; the
+    // second then blocked on the PICKUP row inside `tx.pickup.update`, and once the first
+    // committed it resumed and OVERWROTE `buyerConfirmedAt`, `odometerAtPossession`,
+    // `conditionAtPossession` and `possessionDiscrepancy` on an already-COMPLETED deal — losing
+    // the CAS afterwards and returning `alreadyComplete: true`, so the overwrite was silent. The
+    // possession evidence of a completed deal was editable in place by a retry or a double-click.
+    //
+    // Taking the DEAL lock first inverts that: the loser blocks here, re-reads COMPLETED below,
+    // and returns without writing anything. Same shape as `select-offer.service.ts`, which locks
+    // the auction row and re-checks the invariant under it.
+    await tx.$queryRaw`SELECT id FROM deals WHERE id = ${input.dealId} FOR UPDATE`;
+
     const deal = await tx.deal.findUnique({
       where: { id: input.dealId },
       select: {
@@ -612,10 +700,43 @@ export async function completeJourneyPickup(
 ): Promise<{ ok: true } | { ok: false; code: string; message: string; outstanding?: ClearanceItem[] }> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    select: { id: true, status: true, offer: { select: { dealerId: true } } },
+    // `buyerId` IS SELECTED RATHER THAN PLACEHOLDERED. The same shape as the `rawToken: ""` defect
+    // the union fix removed: `confirmPossession` reads `input.buyerId` when it raises a
+    // DELIVERY_DISCREPANCY_REPORTED exception and when it resolves an actor id, so an empty string
+    // would have written a queue item pointing at a buyer that does not exist. Not reachable from
+    // this wrapper today — it passes no discrepancy and always an ADMIN actor — but the wrapper
+    // already loads the deal, so carrying the real id costs one selected column.
+    select: { id: true, status: true, buyerId: true, offer: { select: { dealerId: true } } },
   });
   if (!deal) return { ok: false, code: "NO_DEAL", message: "No active deal found" };
   if (deal.status === "COMPLETED") return { ok: true };
+
+  // ── A REFUSAL MUST COST NOTHING, SO IT HAPPENS BEFORE THE RELEASE ──
+  //
+  // §Stage 20's thirteenth precondition needs the mileage and the condition, and this wrapper
+  // cannot invent either — so refusing a call that carries neither is correct and documented.
+  // The ORDER was not. `recordDealerRelease` below advances the deal to HANDOVER_PENDING,
+  // revokes whatever code the buyer is still carrying, and queues them a message reading "the
+  // dealership has recorded that your vehicle was released to you". All three committed before
+  // `confirmPossession` returned the refusal, and HANDOVER_PENDING has exactly one exit —
+  // COMPLETED — so the deal could not be walked back: an Operations click that was always going
+  // to fail left a stranded deal, a dead code, and a buyer told they had a car they did not have.
+  //
+  // Both journey routes call this wrapper with TWO arguments, so that was every journey pickup,
+  // not an edge case. Checking the facts we were handed costs one branch and no query.
+  const missingEvidence =
+    evidence.odometerAtPossession === null || evidence.odometerAtPossession === undefined
+      ? "The mileage at possession was not recorded."
+      : !evidence.conditionAsDelivered
+        ? "The condition as delivered was not recorded."
+        : null;
+  if (missingEvidence) {
+    return {
+      ok: false,
+      code: "COMPLETION_BLOCKED",
+      message: `1 completion precondition(s) outstanding. Buyer possession, VIN, mileage, and condition confirmed — BUYER: ${missingEvidence}`,
+    };
+  }
 
   const actor = { role: "ADMIN" as const, id: adminId };
 
@@ -636,7 +757,7 @@ export async function completeJourneyPickup(
 
     const completed = await confirmPossession({
       dealId,
-      buyerId: "",
+      buyerId: deal.buyerId,
       vehicleReceived: true,
       vinMatch: true,
       odometerAtPossession: evidence.odometerAtPossession ?? null,

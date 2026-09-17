@@ -37,6 +37,7 @@ import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { PICKUP_REMINDER_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { revokeReleaseToken } from "./release-token.service";
 import { TOKEN_MINTABLE_STATUSES } from "./pickup-statuses";
+import { resolveDealerAvailability } from "./availability.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 const BATCH_LIMIT = 200;
@@ -70,9 +71,26 @@ export function renderAppointmentReminder(params: {
   hasCoBuyer: boolean;
   hasTrade: boolean;
   downPaymentMethod: string | null;
+  /**
+   * THE DEALERSHIP'S ZONE, because that is where the buyer will be standing.
+   *
+   * This rendered `scheduledAt.toUTCString()`, so a 14:00 Eastern handover read "18:00:00 GMT" —
+   * while `/buyer/pickup` rendered the same instant through `resolveDealerAvailability`'s
+   * timezone. The single most time-critical message in the phase disagreed with the screen it
+   * came from by four hours. Same shape as the page's own formatter, deliberately.
+   */
+  timezone: string;
+  timezoneLabel: string;
 }): { subject: string; html: string } {
   const when = params.scheduledAt
-    ? params.scheduledAt.toUTCString()
+    ? `${params.scheduledAt.toLocaleString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: params.timezone,
+      })} ${params.timezoneLabel}`
     : "the time confirmed with the dealership";
   const where = params.location ?? params.dealershipName;
 
@@ -147,6 +165,8 @@ const MARKER_FOR: Record<ReminderLeg, "reminder24hSentAt" | "reminder2hSentAt"> 
 
 async function sendLeg(leg: ReminderLeg, now: Date): Promise<{ sent: number; failed: number }> {
   const marker = MARKER_FOR[leg];
+  /** Per-sweep memo so one availability row is read once per dealership, not once per pickup. */
+  const availabilityByDealer = new Map<string, { timezone: string; timezoneLabel: string }>();
   const horizon = new Date(now.getTime() + REMINDER_LEAD_HOURS[leg] * 3600_000);
 
   const due = await prisma.pickup.findMany({
@@ -175,7 +195,7 @@ async function sendLeg(leg: ReminderLeg, now: Date): Promise<{ sent: number; fai
           buyerId: true,
           coBuyerId: true,
           buyer: { select: { firstName: true, user: { select: { email: true } } } },
-          offer: { select: { dealer: { select: { dealershipName: true } } } },
+          offer: { select: { dealerId: true, dealer: { select: { dealershipName: true } } } },
           financing: { select: { downPaymentMethod: true } },
           tradeInSubmissions: { select: { id: true }, take: 1 },
         },
@@ -209,6 +229,17 @@ async function sendLeg(leg: ReminderLeg, now: Date): Promise<{ sent: number; fai
         continue;
       }
 
+      // One availability lookup per DEALERSHIP, not per pickup: an hourly sweep over a handful of
+      // appointments should not re-read the same row once for each of them.
+      const dealerId = p.deal?.offer?.dealerId ?? null;
+      const cacheKey = dealerId ?? "__platform_default__";
+      let zone = availabilityByDealer.get(cacheKey);
+      if (!zone) {
+        const availability = await resolveDealerAvailability(dealerId);
+        zone = { timezone: availability.timezone, timezoneLabel: availability.timezoneLabel };
+        availabilityByDealer.set(cacheKey, zone);
+      }
+
       const body = renderAppointmentReminder({
         buyerFirstName: p.deal?.buyer?.firstName ?? null,
         scheduledAt: p.scheduledAt,
@@ -217,6 +248,8 @@ async function sendLeg(leg: ReminderLeg, now: Date): Promise<{ sent: number; fai
         hasCoBuyer: Boolean(p.deal?.coBuyerId),
         hasTrade: (p.deal?.tradeInSubmissions.length ?? 0) > 0,
         downPaymentMethod: p.deal?.financing?.downPaymentMethod ?? null,
+        timezone: zone.timezone,
+        timezoneLabel: zone.timezoneLabel,
       });
 
       await enqueueTransactional({

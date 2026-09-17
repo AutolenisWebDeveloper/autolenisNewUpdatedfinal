@@ -233,3 +233,56 @@ test("force does not open it either — possession is a fact, not an ordering co
   assert.equal(res.status, 409);
   assert.deepEqual(ctrl.advances, [], "owner ruling 2026-09-15: force may skip an ORDERING constraint, never a FACT");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P9-02 — THE GUARD IS ROUTE-LOCAL, AND A SECOND RUNTIME-RESOLVED CALLER EXISTED.
+//
+// The refusal above lives at `app/api/admin/deals/[dealId]/action/route.ts`, which is the right
+// layer for it: the vulnerability is a target resolved from a REQUEST BODY, and `advanceDealStatus`
+// is the documented canonical emitter of the completion event — putting the refusal inside it
+// deleted tested behaviour and broke eight tests. The sibling `workflow/move` route enforces the
+// same class of restriction the same way, with a `PERMITTED_STAGES` allowlist whose comment reads
+// "excludes terminal states handled by dedicated routes". The layer is the repo's own precedent.
+//
+// BUT A ROUTE-LOCAL GUARD ONLY COVERS THAT ROUTE. The AI action catalogue declared
+// `admin.advance_deal_status` with COMPLETED inside its `newStatus` enum, `availability:
+// "AVAILABLE"`, and `canonicalService: "…#advanceDealStatus"` — a second surface resolving the
+// target at runtime and calling straight through, past the route that refuses. An approved intent
+// on a deal at HANDOVER_PENDING would have written `status = COMPLETED` with `completed_at` NULL,
+// the pickup still RELEASED, no §Stage 21 obligations and neither party's completion mail — while
+// still emitting the completion event, so affiliate settlement would run on a deal with no
+// possession evidence at all. `canTransition("HANDOVER_PENDING", "COMPLETED")` is true, and
+// `assertReleaseGates` evaluates three of the fourteen.
+//
+// Latent rather than live — the surface is fail-closed dormant behind two activation flags — and
+// neither "one writer" guard could see it: one scans `lib/services`+`lib/jobs` for PICKUP writes,
+// the other scans `app/api/admin` for admin routes. A catalogue entry is neither.
+//
+// This reads the catalogue's own zod schema rather than grepping for the word, so it fails on
+// reintroduction however the enum is spelled.
+test("no AI intent offers COMPLETED as a selectable deal status", async () => {
+  const { ACTION_INTENT_CATALOG } = await import("@/lib/services/ai/action-intent/catalog");
+
+  const entries = Object.values(ACTION_INTENT_CATALOG);
+  assert.ok(entries.length > 5, "the catalogue scan is empty — it is proving nothing");
+
+  const advance = entries.find((d) => d.type === "admin.advance_deal_status");
+  assert.ok(advance, "admin.advance_deal_status must still EXIST — the capability is not removed");
+
+  // Pull the enum out of the intent's own zod `parameters` schema by round-tripping a candidate through it, so the
+  // assertion tracks whatever the schema actually accepts rather than its source text.
+  const accepts = (status: string) =>
+    advance.parameters.safeParse({ dealId: "deal_1", newStatus: status, reason: "test reason" }).success;
+
+  assert.equal(
+    accepts("COMPLETED"),
+    false,
+    "COMPLETED is reached by recording possession (§Stage 20's fourteen preconditions), never by " +
+      "selecting a target status. An AI intent that accepts it is the admin dropdown bypass with " +
+      "a different front door.",
+  );
+
+  // Anti-vacuity: the probe must be capable of returning true, or the assertion above is free.
+  assert.equal(accepts("PICKUP_SCHEDULED"), true, "the schema probe accepts nothing — it is not testing the enum");
+  assert.equal(accepts("CANCELLED"), true, "cancellation stays selectable; only COMPLETED is withdrawn");
+});

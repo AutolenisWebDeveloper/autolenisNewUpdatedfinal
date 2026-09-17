@@ -91,7 +91,7 @@ export async function computeDealerScorecard(dealerId: string, days = 90): Promi
   if (obligations.openOverdue > 0) {
     tips.push(
       `${obligations.openOverdue} post-completion obligation(s) are overdue — titles, trade payoffs, ` +
-        "due-bill repairs or promised accessories. Resolving them clears the entry from this scorecard.",
+        "due-bill repairs or promised accessories. Reply to the overdue notice with the current status and our Operations team will update the record.",
     );
   } else if (obligations.resolvedLate > 0) {
     tips.push(

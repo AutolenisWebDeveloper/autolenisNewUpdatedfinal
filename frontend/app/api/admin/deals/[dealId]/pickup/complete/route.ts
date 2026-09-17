@@ -119,6 +119,28 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   if (!outcome.ok) {
+    // §Stage 20: "the website shows the exact missing checkpoint and the responsible party." The
+    // buyer's route and `completeJourneyPickup` both return the list; this route dropped it, so an
+    // Operations admin who omitted the odometer got an opaque "could not be completed" and had to
+    // go and work out which of fourteen things was false. The items travel in `details`.
+    if (outcome.reason === "preconditions_unmet") {
+      const first = outcome.outstanding[0];
+      return adminError(
+        "COMPLETION_BLOCKED",
+        first
+          ? `${outcome.outstanding.length} completion precondition(s) outstanding. ${first.label} — ${first.owner}: ${first.detail}`
+          : "A completion precondition is outstanding.",
+        409,
+        {
+          outstanding: outcome.outstanding.map((i) => ({
+            key: i.key,
+            checkpoint: i.label,
+            responsibleParty: i.owner,
+            detail: i.detail,
+          })),
+        },
+      );
+    }
     return adminError(
       "NOT_COMPLETABLE",
       outcome.reason === "not_in_handover"
@@ -126,6 +148,17 @@ export async function POST(request: NextRequest, { params }: Props) {
         : "This deal could not be completed.",
       409,
     );
+  }
+
+  // ── #18: A RETRY MUST NOT SEND THE DEALERSHIP A SECOND PAYOUT NOTICE ──
+  //
+  // `confirmPossession` is idempotent and answers `alreadyComplete: true` for a second call, but
+  // everything below it here is not: a double-clicked "Mark completed" wrote a second
+  // Notification and a second AuditLog, re-fired `syncGhlTag`, scheduled a second `deal_complete`
+  // lifecycle workload, and sent a SECOND `sendDealerPayoutInitiatedEmail` to the dealership. The
+  // completion service's own outbox rows are keyed and de-duplicate; these are not.
+  if (outcome.alreadyComplete) {
+    return adminSuccess({ alreadyComplete: true, completedAt: outcome.completedAt });
   }
 
   // NULL, not "". A concierge deal may have no Pickup row, and an empty string in an audit

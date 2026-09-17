@@ -35,6 +35,31 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
   // pickup page, and an administrator reissues one through the reissue route. Minting on a
   // schedule would burn a token nobody ever sees and, worse, would make a reschedule look like
   // it had refreshed a code the buyer is still carrying.
+  // ── THE GATE RUNS FIRST, BECAUSE A REFUSAL MUST COST NOTHING ──
+  //
+  // This evaluation used to sit BELOW the upsert and the revoke. A refused scheduling had by
+  // then written the appointment (status SCHEDULED, reminder markers cleared) and retired any
+  // code the buyer was carrying, and `/buyer/pickup` branches on the PICKUP's status rather
+  // than the deal's — so the buyer saw §Stage 16's "before we can book your pickup" checklist
+  // and a confirmed appointment at once, with a reveal button that 409s on a sentence
+  // contradicting itself. `pickup-coordination.service.ts` already orders this correctly; this
+  // is the same rule on the Operations path.
+  //
+  // PHASE 9. `FUNDING_PENDING → PICKUP_SCHEDULED` is no longer an edge — §Stage 16's readiness
+  // evaluation sits between them, and "nothing is scheduled while any item is unmet". This is the
+  // Operations path §Stage 17 describes ("After two unsuccessful counter rounds, Operations
+  // schedules directly"), so it evaluates the same thirteen rather than getting its own rule:
+  // an admin scheduling around the checklist is the bypass the checklist exists to prevent.
+  const readiness = await enterPickupReadiness(dealId, { actorRole: "ADMIN" });
+  if (!readiness.schedulable) {
+    const first = readiness.evaluation.outstanding[0];
+    throw new PickupNotReadyError(
+      first
+        ? `Pickup readiness is incomplete: ${first.detail} (owner: ${first.owner})`
+        : "This deal is not ready for pickup scheduling.",
+    );
+  }
+
   const pickup = await prisma.pickup.upsert({
     where: { dealId },
     create: {
@@ -72,22 +97,7 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
   // financing still IN_PROGRESS — and the dealer's QR scan would then complete it, because the
   // scan's only gate was insurance. That is spot delivery through an admin screen, and it is
   // exactly what §Stage 14 forbids. The transition guard now decides, so scheduling is legal
-  // only from FUNDING_PENDING — after the six-item clearance list.
-  // PHASE 9. `FUNDING_PENDING → PICKUP_SCHEDULED` is no longer an edge — §Stage 16's readiness
-  // evaluation sits between them, and "nothing is scheduled while any item is unmet". This is the
-  // Operations path §Stage 17 describes ("After two unsuccessful counter rounds, Operations
-  // schedules directly"), so it evaluates the same thirteen rather than getting its own rule:
-  // an admin scheduling around the checklist is the bypass the checklist exists to prevent.
-  const readiness = await enterPickupReadiness(dealId, { actorRole: "ADMIN" });
-  if (!readiness.schedulable) {
-    const first = readiness.evaluation.outstanding[0];
-    throw new PickupNotReadyError(
-      first
-        ? `Pickup readiness is incomplete: ${first.detail} (owner: ${first.owner})`
-        : "This deal is not ready for pickup scheduling.",
-    );
-  }
-
+  // only from PICKUP_READINESS — after the readiness gate above.
   await advanceDealStatus(dealId, "PICKUP_SCHEDULED", { actorRole: "ADMIN" });
 
   // Notify buyer

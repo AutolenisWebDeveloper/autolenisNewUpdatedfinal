@@ -247,7 +247,23 @@ test("a sweep that fails on one obligation still processes the rest", async () =
 
   assert.equal(result.scanned, 2);
   assert.equal(result.failed, 1, "the first obligation's notification threw");
-  assert.equal(result.escalated, 1, "and the second was still processed — one bad row must not stop the sweep");
+
+  // BOTH ESCALATED, INCLUDING THE ONE WHOSE CHASE MESSAGE FAILED. This assertion read
+  // `escalated === 1` and was describing the defect rather than the requirement: the escalation
+  // used to run AFTER the two notification blocks, so a throw in either took the Operations case
+  // down with it. The swap to OVERDUE has already committed by then and the next sweep matches
+  // zero rows, so that case was lost permanently — the one thing §Stage 21 needs to put an
+  // overdue obligation in front of a person. `raiseException` now runs first.
+  assert.equal(result.escalated, 2, "a failed chase message must not cost the row its Operations case");
+  assert.equal(
+    ctrl.exceptions.filter((e) => e.code === "POST_COMPLETION_OBLIGATION_OVERDUE").length,
+    2,
+    "and the case is really raised for both, not merely counted",
+  );
+  assert.ok(
+    ctrl.exceptions.some((e) => String(e.idempotencyKey ?? "").endsWith(first.id!)),
+    "specifically including the obligation whose notification threw",
+  );
   assert.equal(
     ctrl.obligations.find((o) => o.id === first.id)!.status,
     "OVERDUE",

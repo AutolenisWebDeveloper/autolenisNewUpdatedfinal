@@ -179,9 +179,18 @@ export async function evaluateCompletionPreconditions(
   if (deal.offerId && !deal.offer) chainBreaks.push("selected offer");
   if (deal.vehicleRequestOfferId && !deal.vehicleRequestOffer) chainBreaks.push("selected offer");
   if (!deal.vin) chainBreaks.push("vehicle");
-  if (!deal.dealerId && !deal.offer?.dealerId) chainBreaks.push("dealership");
   if (!isConcierge) {
-    // Only the auction path has these two links. Their absence on a concierge deal is not a break.
+    // Only the auction path has these three links. Their absence on a concierge deal is not a
+    // break — §2 puts AutoLenis itself in the coordinator's seat there, which is why
+    // `admin/deals/[dealId]/pickup/complete` says "a concierge deal has no dealership".
+    //
+    // THE DEALERSHIP LINK WAS OUTSIDE THIS BLOCK AND MADE CONCIERGE COMPLETION UNREACHABLE.
+    // `Deal.dealerId` is nullable and nothing in this repository ever writes it, and a concierge
+    // deal has no `offer`, so both operands were null on every vehicle-request deal: the chain
+    // broke on "dealership" permanently, `REFERENCE_CHAIN_INTACT` never became true, and — with
+    // the admin stage dropdown's COMPLETED route now closed — the deal had no exit from
+    // HANDOVER_PENDING at all. That is the exact failure the header of this file warns about.
+    if (!deal.dealerId && !deal.offer?.dealerId) chainBreaks.push("dealership");
     if (!deal.auctionId || !deal.auction) chainBreaks.push("auction");
     else if (!deal.auction.sourcingCaseId) chainBreaks.push("sourcing case");
   }
@@ -226,14 +235,22 @@ export async function evaluateCompletionPreconditions(
         : "No VIN is bound to this deal."),
 
     // 4 — CONFIRMED, and confirming a DIFFERENT VIN is not confirming this vehicle.
+    // NOT APPLICABLE ON A CONCIERGE DEAL, and this is the sixth `mk` argument doing the work the
+    // header of this file describes. `openReaffirmationWindow` returns `{created:false}` for a
+    // deal with no offer — there is no dealership to ask — so a concierge deal can never carry a
+    // reaffirmation row. Marking it OUTSTANDING made completion unreachable; marking it
+    // SATISFIED would claim a check that never ran. It renders, and it says it does not apply.
     mk("DEALER_REAFFIRMED", "The winning dealership reaffirmed the transaction", "DEALERSHIP",
       reaffirmation?.status === "CONFIRMED" &&
         (!reaffirmation.confirmedVin || !deal.vin || reaffirmation.confirmedVin === deal.vin),
-      !reaffirmation
-        ? "The dealership has not been asked to reaffirm, or has not answered."
-        : reaffirmation.status !== "CONFIRMED"
-          ? `The dealership's reaffirmation is ${reaffirmation.status}.`
-          : "The dealership reaffirmed a different VIN from the one bound to this deal."),
+      isConcierge
+        ? "A concierge deal has no winning dealership to reaffirm — AutoLenis is the coordinator."
+        : !reaffirmation
+          ? "The dealership has not been asked to reaffirm, or has not answered."
+          : reaffirmation.status !== "CONFIRMED"
+            ? `The dealership's reaffirmation is ${reaffirmation.status}.`
+            : "The dealership reaffirmed a different VIN from the one bound to this deal.",
+      isConcierge),
 
     // 5 — the owner is whichever party still owes the confirmation.
     mk("RECAP_CONFIRMED_BOTH", "The final recap confirmed by both parties",

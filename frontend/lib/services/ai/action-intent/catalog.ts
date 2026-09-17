@@ -180,7 +180,21 @@ export const ACTION_INTENT_CATALOG: Record<string, IntentDefinition> = Object.fr
             "SIGNED",
             "PICKUP_SCHEDULED",
             "PICKUP_COMPLETE",
-            "COMPLETED",
+            // COMPLETED IS DELIBERATELY ABSENT. Phase 9 made completion an act of RECORDING
+            // POSSESSION — §Stage 20 evaluates fourteen preconditions inside the completion
+            // transaction, writes `completed_at`, opens §Stage 21's obligations and mails both
+            // parties. Selecting COMPLETED as a target status reaches `advanceDealStatus`
+            // directly, which evaluates three of those fourteen and writes only the status: a
+            // deal COMPLETED with `completed_at` NULL, the pickup still RELEASED, no obligations
+            // and no completion mail — while still emitting the completion event, so affiliate
+            // settlement runs on a deal with no possession evidence.
+            //
+            // `POST /api/admin/deals/[dealId]/action` refuses the same target for the same
+            // reason, and `workflow/move`'s PERMITTED_STAGES excludes it as a "terminal state
+            // handled by a dedicated route". This catalogue entry was the third surface and the
+            // only one neither guard could see. The capability is not removed: Operations
+            // completes a deal at `POST /api/admin/deals/[dealId]/pickup/complete`, which
+            // collects the possession evidence §Stage 20 requires.
             "CANCELLED",
           ]),
           reason: z.string().min(3).max(500).optional(),
