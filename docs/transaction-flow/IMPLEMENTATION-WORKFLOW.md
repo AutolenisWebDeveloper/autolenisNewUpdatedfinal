@@ -2716,9 +2716,18 @@ closed on the transitions that existed when it was written, and on no others.**
 
 #### The before → after capability map
 
-Counts reconcile: **34 capabilities accounted for — 8 KEPT · 5 MOVED · 6 REGROUPED · 5 PROGRESSIVE
-· 2 RENAMED · 3 REMOVED · 5 NEW.** (8 + 5 + 6 + 5 + 2 + 3 + 5 = 34.) The three REMOVED each carry
+Counts reconcile: **36 capabilities accounted for — 8 KEPT · 6 MOVED · 6 REGROUPED · 6 PROGRESSIVE
+· 2 RENAMED · 3 REMOVED · 5 NEW.** (8 + 6 + 6 + 6 + 2 + 3 + 5 = 36.) The three REMOVED each carry
 explicit owner sign-off, named in the table.
+
+**Rows 35 and 36 were added after the adversarial review**, and 36 is the one that needs the owner's
+eye: completing a deal by selecting `COMPLETED` in the admin stage dropdown is gone. It is a MOVED
+rather than a REMOVED because the capability — an Operations admin completing a deal — is intact at
+`POST /api/admin/deals/[dealId]/pickup/complete`, which is role-gated, audited, and now collects the
+possession evidence. What went is the ROUTE to it, and it went because that route resolved its
+target from the request body and therefore evaluated three of §Stage 20's fourteen preconditions.
+Flagged here because "an admin can no longer do X from the screen they used to do it on" is exactly
+the kind of change that should be read rather than inferred.
 
 > **This line was wrong when first written, and the rule caught it.** The draft read "11 KEPT · …
 > · 4 PROGRESSIVE · 3 NEW", which sums to 34 and matches the row count — and was still wrong in
@@ -2765,6 +2774,8 @@ explicit owner sign-off, named in the table.
 | 32 | — | §Stage 16 thirteen-item readiness list, surfaced to the buyer | **NEW** |
 | 33 | — | §Stage 20 fourteen completion preconditions | **NEW** |
 | 34 | — | §Stage 21 post-completion obligations + overdue sweep + scorecard | **NEW** |
+| 35 | Dealer scan form sends only the code | Collects §Stage 18's five "Recorded" facts; identity gates the button | **PROGRESSIVE** |
+| 36 | Admin advances a deal to `COMPLETED` from the stage dropdown (`DEAL_STAGE_ADVANCED`) | Refused at that route; Operations completes through `POST /api/admin/deals/[dealId]/pickup/complete`, which collects the possession evidence | **MOVED** |
 
 *(Rows 30 and 32 are the SURFACES of 31 and 33. They are itemised separately and counted
 separately because a capability that exists in a service and appears on no screen is not a
