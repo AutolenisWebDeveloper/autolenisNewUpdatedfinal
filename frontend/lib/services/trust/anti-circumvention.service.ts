@@ -21,8 +21,8 @@
 //
 // §13-D42, AS THE OWNER RULED IT ON 2026-09-11: "ACCEPT, 90-day window. Record initiator_role on
 // every attempt; consequences apply only to dealer-initiated ones. Phase 5 records and warns,
-// Phase 10 enforces suspension." So `assessDealerRepeatRisk` below COMPUTES the verdict and
-// writes it onto the exception; it does not suspend anybody. The enforcement POINT exists
+// Phase 10 enforces suspension." PHASE 10 HAS NOW DONE SO — `suspendForCircumvention`
+// below writes the suspension, on the narrower in-scope count. The enforcement POINT existed
 // already — `validateRooftop` refuses a rooftop whose dealer is not ACTIVE, and the dealer
 // invitation's state recheck refuses at send time — so when Phase 10 writes the suspension it
 // will bite immediately rather than needing a reader built for it.
@@ -298,7 +298,7 @@ async function resolveDealerForUser(userId: string): Promise<string | null> {
   return dealer?.id ?? null;
 }
 
-/** §13-D42's 90-day count, dealer-initiated only. */
+
 /**
  * Suspend a dealership for repeat circumvention. §25.2 / §13-D42.
  *

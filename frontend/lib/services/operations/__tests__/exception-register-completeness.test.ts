@@ -40,10 +40,29 @@
 // human still has to check that the implementation runs. Saying so is the difference
 // between a limit and a hole.
 //
+// ── AND WHAT "HAS A RAISE SITE" TURNED OUT TO MEAN ──────────────────────────
+//
+// Wiring the register found three rows for which the literal rule is the wrong rule, and
+// the catalogue now says so per row through `dischargedBy` (see its comment there — the
+// reason lives with the register, not in an allowlist here). Two are rendering rules with
+// owner SYSTEM and no deadline, satisfied by behaviour and proven by a named test; one has
+// no detectable trigger because the capability that produces it was never built.
+//
+// This file does not decide that — it ENFORCES it, in both directions:
+//   · a discharged row that gains a raise site FAILS, so the list cannot rot;
+//   · a BEHAVIOUR discharge whose proving test no longer exists FAILS;
+//   · an UNBUILT discharge must name a §10 parity row and its owning phase;
+//   · the number of discharged rows is PINNED, so a fourth cannot be added in passing.
+//
+// A discharge is therefore more expensive to add than a raise site, which is the correct
+// direction for the incentive to point.
+//
 // Run: pnpm test:operations
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { sourceFiles, assertScanned, stringLiterals } from "@/lib/testing/source-scan";
 import { EXCEPTION_CATALOGUE } from "@/lib/services/operations/exception-catalogue";
 
@@ -68,12 +87,19 @@ function raiseSiteLiterals(): Set<string> {
   return literals;
 }
 
-/** Registered codes with no literal anywhere outside the catalogue. */
+/**
+ * Registered codes with no literal anywhere outside the catalogue AND no recorded
+ * discharge. A discharged row is not "wired" — it is accounted for, which is a different
+ * claim and is checked separately below.
+ */
 function unwired(literals: ReadonlySet<string>): string[] {
-  return EXCEPTION_CATALOGUE.filter((d) => !literals.has(d.code))
+  return EXCEPTION_CATALOGUE.filter((d) => !literals.has(d.code) && !d.dischargedBy)
     .map((d) => d.code)
     .sort();
 }
+
+/** How many rows may carry a discharge. Pinned so a fourth cannot appear unnoticed. */
+const MAX_DISCHARGED_ROWS = 3;
 
 test("the register is non-empty and every entry is well-formed", () => {
   assert.ok(
@@ -126,5 +152,90 @@ test("the rule detects a real gap — proved against a seeded omission", () => {
   assert.ok(
     !unwired(literals).includes(victim),
     `${victim} is reported as unwired even though its literal is present — the checker reports indiscriminately`
+  );
+});
+
+// ── THE DISCHARGE LEDGER — the escape hatch, held shut ───────────────────────
+
+test("every discharged row states a reason, and a BEHAVIOUR discharge names a test that exists", () => {
+  const discharged = EXCEPTION_CATALOGUE.filter((d) => d.dischargedBy);
+
+  assert.ok(
+    discharged.length <= MAX_DISCHARGED_ROWS,
+    `${discharged.length} register rows are discharged without a raise site; the pinned ceiling is ` +
+      `${MAX_DISCHARGED_ROWS}. Raising this number is a decision about what the register means and ` +
+      `belongs in a batch, not in the change that needed one more exemption. Discharged: ` +
+      discharged.map((d) => d.code).join(", ")
+  );
+
+  for (const d of discharged) {
+    const disc = d.dischargedBy!;
+    assert.ok(
+      disc.reason.trim().length >= 80,
+      `${d.code}: a discharge needs a reason someone can disagree with, not a label. ` +
+        `Got ${disc.reason.trim().length} characters.`
+    );
+
+    if (disc.kind === "BEHAVIOUR") {
+      assert.ok(
+        existsSync(join(ROOT, disc.provenBy)),
+        `${d.code} is discharged as a BEHAVIOUR proven by ${disc.provenBy}, and that file does not ` +
+          `exist. The proof is the whole discharge — without it the row is simply unimplemented.`
+      );
+    } else {
+      assert.ok(
+        disc.parityRow.trim().length > 0,
+        `${d.code}: an UNBUILT discharge must name the §10 parity row that would build the trigger.`
+      );
+      assert.ok(
+        Number.isInteger(disc.ownedByPhase) && disc.ownedByPhase > 0,
+        `${d.code}: an UNBUILT discharge must name the phase that owns building it.`
+      );
+    }
+  }
+});
+
+test("a discharged row that GAINS a raise site is reported — the ledger cannot rot", () => {
+  const literals = raiseSiteLiterals();
+  const contradictory = EXCEPTION_CATALOGUE.filter((d) => d.dischargedBy && literals.has(d.code))
+    .map((d) => d.code)
+    .sort();
+
+  assert.deepEqual(
+    contradictory,
+    [],
+    "These codes are recorded in the catalogue as discharged WITHOUT a raise site, and a raise " +
+      "site now exists for them. One of the two is wrong. If the raise site is real, delete the " +
+      `\`dischargedBy\` entry — a stale exemption is how a register stops describing the system. ` +
+      `Contradictory: ${contradictory.join(", ")}`
+  );
+});
+
+test("the discharge check itself can fail — proved against a seeded contradiction", () => {
+  const literals = raiseSiteLiterals();
+  const discharged = EXCEPTION_CATALOGUE.filter((d) => d.dischargedBy);
+  assert.ok(
+    discharged.length > 0,
+    "no row is discharged, so the two assertions above are vacuous. Delete them rather than " +
+      "leaving a rule that cannot fail."
+  );
+
+  // Seed the contradiction the previous test exists to catch: a discharged code whose
+  // literal HAS appeared in source.
+  const victim = discharged[0]!.code;
+  const seeded = new Set(literals);
+  seeded.add(victim);
+
+  const contradictory = EXCEPTION_CATALOGUE.filter((d) => d.dischargedBy && seeded.has(d.code)).map((d) => d.code);
+  assert.ok(
+    contradictory.includes(victim),
+    `seeding a raise site for the discharged code ${victim} did not make the check report it`
+  );
+
+  // And a discharged row must NOT be counted as unwired — otherwise the two rules
+  // contradict each other and the register can never be green.
+  assert.ok(
+    !unwired(literals).includes(victim),
+    `${victim} is discharged and is still being reported as unwired — the two rules disagree`
   );
 });

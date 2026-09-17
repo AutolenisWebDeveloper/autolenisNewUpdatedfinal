@@ -183,3 +183,40 @@ export function renderPrequalUnderReview(input: {
     text: `${lines.join("\n\n")}\n\nDashboard: ${input.dashboardUrl}`,
   };
 }
+
+/**
+ * §27.1 "Prequalification provider delay | Buyer | Honest processing notice".
+ *
+ * WHY THIS IS NOT `renderPrequalUnderReview`. Both notices go to a buyer whose decision
+ * has been held, and until Phase 10 both got the under-review copy — which says "one of
+ * our team is looking at it now". When the hold is a PROVIDER FAILURE that is not true:
+ * nobody is looking, because nobody has anything to look at. The buyer was told a person
+ * was working on their file while the real state was an integration returning nothing.
+ *
+ * §26's own wording for the exception is "Retry and notify; honest processing notice", and
+ * §22a's rule that "a provider failure is never shown as an empty market" is the same
+ * principle one surface over: a failure is disclosed as a failure, in terms the person can
+ * use. So this copy says the application is still processing and is taking longer than
+ * usual — which is exactly what `queue_items.buyer_visible_status` carries for the row.
+ *
+ * WHAT IT STILL MUST NOT SAY. The same §Stage 3 silence applies: no screening, no decision,
+ * and no provider name. "Our checks are taking longer than usual" is true and discloses
+ * nothing about the buyer.
+ */
+export function renderPrequalProviderDelay(input: {
+  firstName?: string | null;
+  dashboardUrl: string;
+}): RenderedEmail {
+  const name = input.firstName?.trim() || "there";
+  const lines = [
+    `Hi ${name},`,
+    "Thanks for your prequalification application. Our checks are taking longer than usual, so your application is still processing.",
+    "You do not need to do anything and you do not need to apply again. We are retrying, and we will email you with your decision as soon as we have it.",
+  ];
+  const subject = "Your prequalification is still processing";
+  return {
+    subject,
+    html: layout(subject, lines.map(paragraph).join(""), { label: "View my dashboard", url: input.dashboardUrl }),
+    text: `${lines.join("\n\n")}\n\nDashboard: ${input.dashboardUrl}`,
+  };
+}

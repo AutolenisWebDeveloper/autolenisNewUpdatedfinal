@@ -1,5 +1,6 @@
 import { AlertTriangle, Clock } from "lucide-react";
 import type { ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
+import { LocalTime } from "@/components/buyer/LocalTime";
 
 // The dealer half of the ONE lineage — §8.1 row 10: "buyer portal, dealer portal and
 // Ops queue render the same checkpoint, owner, deadline and recovery from ONE
@@ -63,18 +64,12 @@ export function DealExceptionNotice({ exceptions, unavailable }: Props) {
                   <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${tone.chip}`}>
                     With {ex.ownerLabel}
                   </span>
+                  {/* The viewer's zone, not the server's — see `LocalTime`. A dealership
+                      reading a UTC deadline as local time would show up on the wrong day. */}
                   {ex.deadlineAt && (
                     <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
                       <Clock className="h-3 w-3" aria-hidden="true" />
-                      {ex.overdue ? "Was due" : "By"}{" "}
-                      {new Date(ex.deadlineAt).toLocaleString("en-US", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                        timeZoneName: "short",
-                      })}
+                      {ex.overdue ? "Was due" : "By"} <LocalTime iso={ex.deadlineAt} />
                     </span>
                   )}
                 </div>

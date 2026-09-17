@@ -139,10 +139,17 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // terminal edges. "Other resolution" means the deal RESUMES, and it resumes to where it was,
   // which is why every state a freeze can be entered from appears here.
   //
-  // The prior state is not guessed: `unfreezeDeal` reads the `deal_status_history` row that
-  // recorded the freeze and refuses any target other than its `fromStatus`. The map is the
-  // outer bound; the history is the exact answer. Keeping both means the table stays honest
-  // about what is reachable without pretending it knows which one applies.
+  // THE MAP IS THE OUTER BOUND, AND THE RESUME GUARD IS `assertResumeTarget` BELOW.
+  //
+  // An earlier version of this comment said the guard was a function called `unfreezeDeal`
+  // that read the freeze's history row. No such function existed — the first independent
+  // review found the comment describing a defence the code did not have, which left an
+  // OPERATIONS_ADMIN able to walk a frozen deal out through `DEAL_STAGE_ADVANCED` with no
+  // documented release and the freeze's own queue item still open. Before this phase
+  // `FROZEN_PENDING_RELEASE: []` made that impossible, so it was a hole this phase opened.
+  //
+  // The guard is real now and lives in `advanceDealStatus`: leaving the freeze is permitted
+  // only to the status the freeze was entered FROM, read back from `deal_status_history`.
   FROZEN_PENDING_RELEASE: [
     "DEALER_EXECUTED",
     "RECAP_PENDING",
@@ -415,6 +422,48 @@ export async function recordDealCorrection(input: {
  * completed, funding cleared, insurance verified" — so gating `PICKUP_READINESS` on them is not
  * an extra rule, it is Stage 16's own entry, enforced where it cannot be skipped.
  */
+/**
+ * A frozen deal resumed to a status it was not frozen from.
+ *
+ * §24's freeze is a coordination state: the resolution is either the unwind
+ * (CANCELLED/REFUNDED, handled as terminal edges) or the deal RESUMING where it stopped.
+ * Anything else is an operator walking the transaction to a different point with no
+ * documented release, which is what §24 exists to prevent.
+ */
+export class FreezeResumeError extends Error {
+  code = "FREEZE_RESUME_INVALID";
+  constructor(
+    public readonly attempted: DealStatus,
+    public readonly frozenFrom: DealStatus | null,
+  ) {
+    super(
+      frozenFrom
+        ? `This deal was frozen from ${frozenFrom} and may only resume there, not to ${attempted}. ` +
+          `Complete the unwind (CANCELLED/REFUNDED) or resume to ${frozenFrom}.`
+        : `This deal is frozen and no freeze was found in its history, so the resume target cannot be ` +
+          `established. Resolve it through the Operations case rather than by advancing its stage.`,
+    );
+    this.name = "FreezeResumeError";
+  }
+}
+
+/**
+ * Where a frozen deal is allowed to resume: the status recorded on the row that froze it.
+ *
+ * Read from `deal_status_history` rather than stored on the Deal, because the history is
+ * already §24's "full history preserved" and a second column would be a second truth.
+ * The most recent freeze wins — a deal frozen, resumed and frozen again resumes to where
+ * the LATEST freeze found it.
+ */
+async function frozenFromStatus(dealId: string): Promise<DealStatus | null> {
+  const row = await prisma.dealStatusHistory.findFirst({
+    where: { dealId, toStatus: DealStatus.FROZEN_PENDING_RELEASE },
+    orderBy: { createdAt: "desc" },
+    select: { fromStatus: true },
+  });
+  return (row?.fromStatus as DealStatus | undefined) ?? null;
+}
+
 export const RELEASE_GATED_STATUSES: DealStatus[] = [
   DealStatus.PICKUP_READINESS,
   DealStatus.PICKUP_SCHEDULED,
@@ -493,6 +542,28 @@ export async function advanceDealStatus(
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (!deal) throw new Error("Deal not found");
 
+  // §28.3 #1 — AUTHORIZATION. Who may drive this transition, checked against the
+  // matrix rather than against whichever surface happens to be calling.
+  //
+  // NOT relaxed by `force`. `force` overrides the ORDER of the transition table; it
+  // is not a statement that a different party may act. A forced completion driven by
+  // a dealership would be precisely what §Stage 19 forbids — "the Deal never
+  // completes automatically on the dealer's word alone" — reached through the
+  // override instead of through an edge, which is the shape Phase 9 had to close
+  // twice.
+  //
+  // Defaulting an absent role to SYSTEM keeps every existing caller working: an
+  // unattributed advance is the platform's, which is what it already meant.
+  //
+  // CHECKED BEFORE THE IDEMPOTENT NO-OP BELOW, and that ordering is the fix for a hole
+  // the first independent review found. The no-op path still WRITES: it merges `opts.data`
+  // and runs the arrival hooks. With the check after it, a DEALER actor calling
+  // `advanceDealStatus(id, COMPLETED, { actorRole: "DEALER", data })` on a deal ALREADY at
+  // COMPLETED wrote its data and fired the hooks without ever reaching §28.3 #1. An
+  // authorization gate that a caller can walk around by asking for a state the deal is
+  // already in is not a gate.
+  assertActorMayDrive(opts.actorRole ?? "SYSTEM", newStatus);
+
   // Idempotent no-op when already in the target state (still merge extra data).
   // The arrival hooks below STILL run: `data` can carry the very fact they key on
   // (mark-paid writes feePaidAt on a deal an admin already parked at FEE_PAID).
@@ -510,19 +581,6 @@ export async function advanceDealStatus(
   // on under us is never dragged backwards into `newStatus`.
   if (opts.expectedFrom && deal.status !== opts.expectedFrom) return false;
 
-  // §28.3 #1 — AUTHORIZATION. Who may drive this transition, checked against the
-  // matrix rather than against whichever surface happens to be calling.
-  //
-  // NOT relaxed by `force`. `force` overrides the ORDER of the transition table; it
-  // is not a statement that a different party may act. A forced completion driven by
-  // a dealership would be precisely what §Stage 19 forbids — "the Deal never
-  // completes automatically on the dealer's word alone" — reached through the
-  // override instead of through an edge, which is the shape Phase 9 had to close
-  // twice.
-  //
-  // Defaulting an absent role to SYSTEM keeps every existing caller working: an
-  // unattributed advance is the platform's, which is what it already meant.
-  assertActorMayDrive(opts.actorRole ?? "SYSTEM", newStatus);
 
   // §24 — THE EXECUTION BOUNDARY, AS A FACT. `canTransition` refuses CANCELLED from
   // the post-execution STATUSES, which is all a pure function can see. This is the
@@ -581,6 +639,23 @@ export async function advanceDealStatus(
   // hold whatever route got the deal here.
   if (RELEASE_GATED_STATUSES.includes(newStatus) && !opts.force) {
     assertReleaseGates(deal);
+  }
+
+  // §24 — LEAVING THE FREEZE. The terminal edges (CANCELLED/REFUNDED) are the unwind and
+  // are handled above; every other exit is a RESUME, and a resume may only go back to
+  // where the freeze found the deal.
+  //
+  // NOT relaxed by `force`, for the same reason the execution boundary is not: this is
+  // not an ordering constraint. A frozen deal walked to a different stage is a
+  // transaction continued without the documented release §24 requires, and the Operations
+  // case would still be open behind it.
+  if (
+    deal.status === DealStatus.FROZEN_PENDING_RELEASE &&
+    newStatus !== DealStatus.CANCELLED &&
+    newStatus !== DealStatus.REFUNDED
+  ) {
+    const resumeTo = await frozenFromStatus(dealId);
+    if (resumeTo !== newStatus) throw new FreezeResumeError(newStatus, resumeTo);
   }
 
   // Compare-and-swap: advance ONLY while the deal is still in the state we read

@@ -128,6 +128,37 @@ async function recordProviderFailure(args: {
   } catch (err) {
     logger.error("[prequal] failed to raise provider-failure operational alert:", err);
   }
+
+  // §26 "Prequalification provider delay | System | Retry and notify; honest processing
+  // notice" — PHASE 10, the raise site this register row never had.
+  //
+  // WHY A QUEUE ROW WHEN A PlatformAlert ALREADY FIRES. The alert above is a PAGE: it
+  // says the integration is unwell and it is addressed to whoever is on call. It is not
+  // attached to the buyer, carries no deadline, and nothing sweeps it — so the individual
+  // application that got no answer had no record anyone works from. §26 gives this row
+  // twenty-four hours and a buyer-visible status for exactly that: the outage is one
+  // problem and each stranded application is another, and clearing the outage does not
+  // clear the applications it stranded.
+  //
+  // Keyed on the APPLICATION, so retries of the same prequal collapse onto one row while
+  // a genuinely new application gets its own.
+  try {
+    const { raiseException } = await import("@/lib/services/operations/queue-item.service");
+    await raiseException({
+      code: "PREQUAL_PROVIDER_DELAY",
+      buyerId: args.buyerId,
+      // PRIVACY, as above: the operational reason and opaque ids only. No name, no
+      // score, no part of the consumer report.
+      detail:
+        `Prequalification ${args.prequalId} got no usable answer from the provider ` +
+        `(reason: ${args.reason}, class: ${failureClass}). The decision is held at ` +
+        `${args.decision} — fail-closed, no approval issued — and the buyer has been sent ` +
+        `the honest processing-delay notice.`,
+      idempotencyKey: `PREQUAL_PROVIDER_DELAY:${args.prequalId}`,
+    });
+  } catch (err) {
+    logger.error("[prequal] failed to raise the provider-delay exception:", err);
+  }
 }
 
 // Single source of truth for prequal approval gating across the platform.
@@ -705,6 +736,19 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     finalDecision === PreQualDecision.OFAC_REVIEW ||
     finalDecision === PreQualDecision.OFAC_ESCALATED;
 
+  // WHY THIS IS CLASSIFIED HERE AND NOT FIFTY LINES DOWN WHERE IT USED TO BE.
+  //
+  // A MicroBilt failure and a compliance hold both land at MANUAL_REVIEW, and the block
+  // below tells the buyer which one it is. It told every one of them the same thing:
+  // "one of our team is looking at it now". For a provider failure that is false —
+  // nobody is looking, because the provider returned nothing to look at. The buyer was
+  // given a reassuring account of a state that did not exist, which is the §22a mistake
+  // ("a provider failure is never shown as an empty market") one surface over.
+  //
+  // §27.1 has always had a separate row for it (`prequal_provider_delay`) and the
+  // registry has always had its recheck. Nothing enqueued it.
+  const isProviderError = isProviderErrorReason(result.reason);
+
   if (needsReview) {
     // §27 + §27.1 "Prequalification under review | Buyer | Honest status and expected
     // follow-up" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
@@ -720,22 +764,33 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     // about a review that has begun")`: the review DID begin, so a later decision does
     // not make the notice untrue, and it must not be cancelled by one.
     try {
-      const { renderPrequalUnderReview } = await import("@/lib/services/comms/phase2-email-content");
-      const content = renderPrequalUnderReview({
-        firstName: input.firstName,
-        dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/buyer/dashboard`,
-      });
+      const { renderPrequalUnderReview, renderPrequalProviderDelay } = await import(
+        "@/lib/services/comms/phase2-email-content"
+      );
+      const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/buyer/dashboard`;
+      // ONE notice, not two. A provider failure gets the delay notice INSTEAD of the
+      // review notice — sending both would have the platform tell the same buyer, in the
+      // same minute, that a person is reviewing their file and that nobody has looked at
+      // it yet.
+      const templateKey = isProviderError
+        ? PHASE_2_TEMPLATES.PREQUAL_PROVIDER_DELAY
+        : PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW;
+      const content = isProviderError
+        ? renderPrequalProviderDelay({ firstName: input.firstName, dashboardUrl })
+        : renderPrequalUnderReview({ firstName: input.firstName, dashboardUrl });
       await enqueueTransactional({
-        triggerEvent: "prequal.under_review",
-        templateKey: PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW,
+        triggerEvent: isProviderError ? "prequal.provider_delay" : "prequal.under_review",
+        templateKey,
         channel: "email",
         recipientKind: "buyer",
         recipientId: buyer.id,
         to: buyer.user.email,
         payload: { email: buyer.user.email, subject: content.subject, html: content.html, text: content.text },
         // Per APPLICATION. A re-decision on the same application is the same review;
-        // a new application is a new one.
-        idempotencyKey: `${PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW}:${prequal.id}`,
+        // a new application is a new one. The key carries the template, so an
+        // application that failed at the provider and was later held for review does
+        // get the second, different notice — they are different facts.
+        idempotencyKey: `${templateKey}:${prequal.id}`,
       });
     } catch (emailErr) {
       logger.error("[prequal] Failed to enqueue the under-review notice:", emailErr);
@@ -780,7 +835,6 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   // only that an integration outage is now recorded as one and raises an
   // operational exception, instead of being indistinguishable from a buyer who
   // is legitimately held for compliance review.
-  const isProviderError = isProviderErrorReason(result.reason);
   if (isProviderError && result.reason) {
     await recordProviderFailure({
       buyerId: buyer.id,

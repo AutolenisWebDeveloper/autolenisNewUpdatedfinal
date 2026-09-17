@@ -73,7 +73,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
   let dealExceptions: ExceptionLineage[] = [];
   let dealExceptionsUnavailable = false;
   try {
-    dealExceptions = await exceptionLineage({ audience: "DEALER", dealId: deal.id });
+    dealExceptions = await exceptionLineage({ audience: "DEALER", dealId: deal.id, dealerId: dealer.id });
   } catch {
     dealExceptionsUnavailable = true;
   }

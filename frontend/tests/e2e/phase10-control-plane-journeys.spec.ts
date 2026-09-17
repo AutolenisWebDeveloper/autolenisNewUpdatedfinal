@@ -99,7 +99,12 @@ async function seedDeal(opts: { status: string; executed: boolean }) {
     data: {
       id: `d_p10_${id}`, buyerId: buyer.id, offerId: offer.id, vehicleRequestId: request.id,
       depositId: deposit.id, auctionId: auction.id, dealerId: dealer.id,
-      status: opts.status as never, insuranceStatus: "VERIFIED",
+      status: opts.status as never,
+      insuranceStatus: "VERIFIED",
+      // A deal that has reached a release-gated status has cleared funding — the release
+      // gates re-check it on any advance INTO one, including a resume out of the freeze.
+      // Omitting it made the resume fail on a gate that had nothing to do with §24.
+      ...(opts.executed ? { fundingClearedAt: now, financingCompletedAt: now } : {}),
     },
   });
 
@@ -397,4 +402,48 @@ test("§8.1 row 10: one exception reaches buyer, dealer and Ops with identical f
   ).toBe(false);
   const opsAfter = await exceptionLineage({ audience: "OPS", dealId: f.deal.id });
   expect(opsAfter.some((x) => x.exceptionCode === "PAYMENT_FAILURE")).toBe(true);
+});
+
+
+// ── §24 — LEAVING THE FREEZE ────────────────────────────────────────────────
+
+test("§24: a frozen deal resumes ONLY to where it was frozen from", async () => {
+  test.skip(!HAS_DB, "needs DATABASE_URL pointed at an isolated database");
+  // The first independent review found the freeze's exits guarded by a comment that
+  // described a function which did not exist, so an operator could walk a frozen deal to
+  // any post-execution stage with no documented release and the Operations case still
+  // open. Before this phase `FROZEN_PENDING_RELEASE: []` made that impossible — the hole
+  // was opened by adding the resume edges.
+  const f = await seedDeal({ status: "PICKUP_SCHEDULED", executed: true });
+  await cancelTransaction({
+    dealId: f.deal.id,
+    reason: "Coordinated unwind requested",
+    actorId: "admin_p10",
+    actorRole: "ADMIN",
+  });
+  expect((await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } })).status).toBe(
+    "FROZEN_PENDING_RELEASE",
+  );
+
+  // A DIFFERENT post-execution stage is refused, even forced.
+  await expect(
+    advanceDealStatus(f.deal.id, "FUNDING_PENDING" as never, {
+      actorRole: "ADMIN",
+      reason: "walk it back",
+      force: true,
+    }),
+  ).rejects.toThrow(/frozen from/i);
+  expect((await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } })).status).toBe(
+    "FROZEN_PENDING_RELEASE",
+  );
+
+  // The recorded origin IS permitted — the freeze is a gate, not a wall.
+  const resumed = await advanceDealStatus(f.deal.id, "PICKUP_SCHEDULED" as never, {
+    actorRole: "ADMIN",
+    reason: "Release negotiated; the deal proceeds",
+  });
+  expect(resumed, "a frozen deal must be able to resume where it stopped").toBe(true);
+  expect((await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } })).status).toBe(
+    "PICKUP_SCHEDULED",
+  );
 });

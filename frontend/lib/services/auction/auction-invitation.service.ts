@@ -827,6 +827,61 @@ export async function handleInvitationBounce(
     db,
   );
 
+  // §27.1 "Dealer invitation bounced → Operations" — PHASE 10, the enqueue site this
+  // register row never had.
+  //
+  // The queue row above is the system of record; this is the ALERT that makes someone look at
+  // it. §Stage 7 says a contact is "replaced early in the auction window where possible", and
+  // that window is the whole point: a queue row worked on Thursday for an auction that closed
+  // on Tuesday helps nobody. `renderDealerInvitationBounced` and its `alwaysSend` recheck were
+  // both written in Phase 5 and nothing ever called them.
+  //
+  // Operations-addressed, so it carries the rooftop and the address — this is not a §25.1
+  // disclosure question: it names a dealership to AutoLenis staff, and no buyer fact appears.
+  try {
+    const opsEmail = (process.env.ADMIN_NOTIFICATION_EMAIL ?? "").trim();
+    if (opsEmail) {
+      const { renderDealerInvitationBounced } = await import("@/lib/services/comms/phase5-email-content");
+      const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+      const content = renderDealerInvitationBounced({
+        dealershipName: inv.dealershipName ?? "an invited rooftop",
+        rooftopId: inv.rooftopId ?? "unresolved",
+        auctionId: inv.auctionId,
+        email: inv.email ?? "no address",
+        closesAt: inv.auction?.endsAt ?? null,
+        queueUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "").trim()}/admin/queues`,
+      });
+      await enqueueTransactional(
+        {
+          triggerEvent: "auction.invitation.bounced",
+          templateKey: PHASE_5_TEMPLATES.DEALER_INVITATION_BOUNCED,
+          channel: "email",
+          recipientKind: "operations",
+          recipientId: null,
+          to: opsEmail,
+          auctionId: inv.auctionId,
+          vehicleRequestId: inv.auction?.vehicleRequestId ?? null,
+          // Once per invitation, matching the exception's own key: one bounce, one task,
+          // one alert.
+          idempotencyKey: `${PHASE_5_TEMPLATES.DEALER_INVITATION_BOUNCED}:${invitationId}`,
+          payload: { email: opsEmail, subject: content.subject, html: content.html, text: content.text },
+        },
+        db,
+      );
+    } else {
+      // Said out loud rather than skipped silently — the exception above still stands, so the
+      // task is not lost, but nobody is being paged about it.
+      logger.warn(
+        `[auction-invitation] ADMIN_NOTIFICATION_EMAIL is unset — the bounce alert for invitation ` +
+          `${invitationId} was not enqueued. The Operations queue row was still raised.`,
+      );
+    }
+  } catch (err) {
+    // The exception is the system of record and it is already written; an alert that could not
+    // be enqueued must not undo it.
+    logger.error(`[auction-invitation] bounce alert enqueue failed for ${invitationId}:`, err);
+  }
+
   // The reminders for a bounced address would bounce too, and each one consumes a delivery
   // attempt and a little sender reputation.
   if (inv.rooftopId) {

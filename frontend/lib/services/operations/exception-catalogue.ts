@@ -82,7 +82,75 @@ export interface ExceptionDefinition {
   readonly raisedByPhase: number;
   /** Where the requirement is stated. */
   readonly specSection: string;
+  /**
+   * How this row is discharged, when it is NOT discharged by a raise site.
+   *
+   * ── WHY THIS FIELD EXISTS (Phase 10, §8.3) ────────────────────────────────
+   *
+   * §8.3 makes Phase 10 assert that "every `exception_code` in the register has at least
+   * one raise site". Wiring the register found that the assertion, taken literally, is
+   * wrong for two small classes of row, and being wrong in opposite directions:
+   *
+   *   · Two rows' REQUIRED RESULT is a rendering rule, not a work item. §26 gives
+   *     "Buyer has no in-radius inventory" the owner SYSTEM, no deadline, and the required
+   *     result "lead with the custom request; never present an empty grid". Opening a
+   *     `queue_items` row for it would put a work item with no owner and no clock in front
+   *     of an operator for every buyer who browses outside a market — and, because
+   *     `hasOpenException` counts every open row, it would suppress the upgrade prompt for
+   *     those buyers indefinitely. The rule is real and it is implemented; a queue row is
+   *     simply the wrong artefact for it.
+   *
+   *   · One row's TRIGGER DOES NOT EXIST YET. "Trade appraisal changed at handover" needs a
+   *     dealership-confirmed final allowance to differ from the agreed one, and
+   *     `trade_in_submissions.final_allowance_cents` has no writer anywhere in this
+   *     repository — §10 rows R18.10 and R18.17 are both still TO IMPLEMENT, and they are
+   *     Phase 9's. Wiring a raise site to some other timestamp would make the register
+   *     report an exception the platform cannot actually detect, which is worse than the
+   *     gap it hides.
+   *
+   * The alternative the gate's own message offered — "remove it from the register with a
+   * recorded reason" — is a REMOVED capability under CLAUDE.md's capability-preservation
+   * invariant and needs owner sign-off. So the row stays, and states its disposition here
+   * where the register is, rather than in an allowlist inside the test. The gate then
+   * enforces the disposition in both directions: a discharged row that GAINS a raise site
+   * fails, so the list cannot rot, and a `BEHAVIOUR` discharge whose proving test has been
+   * deleted fails too.
+   *
+   * Absent — the normal case, 55 of 58 rows — means a raise site through `raiseException`.
+   */
+  readonly dischargedBy?: ExceptionDischarge;
 }
+
+/**
+ * The two non-raise dispositions a register row may carry. Both require a reason in prose,
+ * because the reason is the whole point: a bare exemption flag is an allowlist, and an
+ * allowlist with no reason per entry is how a register stops meaning anything.
+ */
+export type ExceptionDischarge =
+  | {
+      /**
+       * §26's required result is a product BEHAVIOUR and there is no work item. The
+       * behaviour is proven by a test, named here, and the gate asserts that file exists —
+       * so deleting the proof breaks the register rather than quietly widening it.
+       */
+      readonly kind: "BEHAVIOUR";
+      readonly reason: string;
+      /** Repo-relative path of the test that asserts the behaviour. */
+      readonly provenBy: string;
+    }
+  | {
+      /**
+       * The condition cannot be DETECTED yet because the capability that produces it was
+       * never built. Names the §10 parity row and the phase that owns building it, so this
+       * reads as a tracked gap with an address rather than as an exemption.
+       */
+      readonly kind: "UNBUILT";
+      readonly reason: string;
+      /** The §10 parity-map row id(s) that would build the trigger. */
+      readonly parityRow: string;
+      /** The §8.2 phase those rows belong to. */
+      readonly ownedByPhase: number;
+    };
 
 const DEFINITIONS: readonly ExceptionDefinition[] = [
   {
@@ -370,6 +438,19 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Stage 4 — vehicle definition",
     raisedByPhase: 4,
     specSection: "§26; §22a",
+    dischargedBy: {
+      kind: "BEHAVIOUR",
+      reason:
+        "§26 gives this row the owner SYSTEM and no deadline, and its required result is a " +
+        "rendering rule: lead with the custom request, never present an empty grid. " +
+        "`gateCatalogue` exists for exactly this — it has no filter, so the row count out equals " +
+        "the row count in, and `inRadiusCount` is what the page reads to decide whether to lead " +
+        "with the custom-request path (shortlist-radius.ts). A `queue_items` row would be a work " +
+        "item with no owner and no clock, raised for every buyer who browses outside a market, " +
+        "and `hasOpenException` would then suppress their upgrade prompt for as long as it stayed " +
+        "open.",
+      provenBy: "lib/services/shortlist/__tests__/catalogue-gating.test.ts",
+    },
   },
   {
     code: "INVENTORY_PROVIDER_BUDGET_CEILING",
@@ -409,6 +490,17 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Inventory browse — the ZIP prompt",
     raisedByPhase: 4,
     specSection: "§26; §22a",
+    dischargedBy: {
+      kind: "BEHAVIOUR",
+      reason:
+        "The same shape as NO_IN_RADIUS_INVENTORY: owner SYSTEM, no deadline, and a required " +
+        "result that is a rendering rule — ask for a ZIP before distances and shortlist actions, " +
+        "and still render the catalogue. `gateCatalogue` returns `hasZip`, and `shortlistGate` " +
+        "takes it as an input so a card with no known distance offers the ZIP prompt instead of " +
+        "an ADD action. Not knowing where a browsing visitor lives is the ordinary state of an " +
+        "inventory page, not an exception an operator works.",
+      provenBy: "lib/services/shortlist/__tests__/catalogue-gating.test.ts",
+    },
   },
   {
     code: "ALL_OFFERS_EXCEED_BUDGET",
@@ -669,6 +761,23 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Stage 18 — handover, or Stage 13 contract revision",
     raisedByPhase: 9,
     specSection: "§26; Stage 18/19c",
+    dischargedBy: {
+      kind: "UNBUILT",
+      reason:
+        "The condition is 'the dealership's final trade allowance at handover differs from the " +
+        "one the contract was built on', and NEITHER figure has a writer. " +
+        "`trade_in_submissions.final_allowance_cents` (schema.prisma:2524) and " +
+        "`preliminary_allowance_cents` (:2529) are read by the recap, the identity firewall and " +
+        "the Contract Shield comparison, and written by nothing — so the comparison at " +
+        "contract-comparison.service.ts:329 is vacuous for trade today. `appraisal_changed_at` IS " +
+        "written, but only by the BUYER editing their own packet (trade-in.service.ts:304), which " +
+        "is a different fact from a dealership re-appraising at the kerb. Phase 10 does not invent " +
+        "a trigger: a raise site keyed to the buyer's own edit would make the register report an " +
+        "exception the document does not describe, and the register would then be lying in the " +
+        "direction that is hardest to notice.",
+      parityRow: "R18.10, R18.17",
+      ownedByPhase: 9,
+    },
   },
   {
     code: "DELIVERY_DISCREPANCY_REPORTED",

@@ -462,6 +462,33 @@ export async function clearFunding(params: {
         error: err instanceof Error ? err.message : String(err),
       });
     });
+    // §26 "Trade payoff quote stale | Operations | Refresh before clearance" — PHASE 10,
+    // the raise site this register row never had.
+    //
+    // A SECOND row on purpose, and the ownership is why. FUNDING_NOT_CLEARED is FINANCE's
+    // row and says "release is blocked"; this one is OPERATIONS' and says "go and get a
+    // current payoff letter from the lienholder". They are different desks and different
+    // work, and §26 gives them separate rows with separate deadlines (48h here, and the
+    // buyer copy differs too). Collapsing them would leave the one concrete, actionable
+    // step buried in a semicolon-separated list on somebody else's queue.
+    //
+    // Item 5 is `notApplicable` on a deal with no lien, so this cannot fire on a cash
+    // trade or a deal with no trade at all.
+    if (evaluation.outstanding.some((i) => i.key === "trade_payoff")) {
+      await raiseException({
+        code: "TRADE_PAYOFF_QUOTE_STALE",
+        dealId: params.dealId,
+        detail:
+          evaluation.outstanding.find((i) => i.key === "trade_payoff")?.detail ??
+          "The trade payoff quote is not current.",
+      }).catch((err) => {
+        logger.error("funding clearance: payoff-stale exception could not be raised", {
+          dealId: params.dealId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     await notifyFundingBlocked(params.dealId, evaluation);
     return { cleared: false, outstanding: evaluation.outstanding };
   }

@@ -80,8 +80,8 @@ mock.module("@/lib/prisma", {
       //
       // What this mock deliberately does NOT simulate is rollback. A test that needs
       // to prove the status change is undone when the history write fails cannot use
-      // this fake — it is in `advance-deal-status-atomicity.test.ts`, against a real
-      // database, because atomicity is a property of the database and asserting it
+      // this fake — it is in `tests/e2e/advance-deal-status-atomicity.spec.ts`, against a
+      // REAL database, because atomicity is a property of the database and asserting it
       // against a mock that cannot roll back would assert nothing.
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
         const self = (await import("@/lib/prisma")).prisma;
@@ -572,7 +572,7 @@ test("§28.3 #6: every history row carries a reason, derived where none is requi
 test("§28.3 #4: the history row is written inside the same transaction as the swap", async () => {
   // The mock routes $transaction back to the same client, so this asserts the CALL
   // SHAPE rather than rollback — the rollback proof needs a real database and lives
-  // in the atomicity test. What it does catch is a regression to the old shape, where
+  // in `tests/e2e/advance-deal-status-atomicity.spec.ts`. What it does catch is a regression to the old shape, where
   // the history write moved back outside the transaction and swallowed its own error.
   const { advanceDealStatus } = await load();
   ctrl.deal.status = "CONTRACT_APPROVED";
@@ -581,4 +581,21 @@ test("§28.3 #4: the history row is written inside the same transaction as the s
   await advanceDealStatus("d1", "SIGNING_PENDING", { actorRole: "BUYER" });
   assert.equal(ctrl.updateManyCalls.length, 1, "exactly one guarded swap");
   assert.equal(ctrl.historyCreates.length, 1, "exactly one history row, written with it");
+});
+
+
+test("§28.3 #1: the actor gate is checked BEFORE the idempotent no-op writes anything", async () => {
+  // The no-op path is not a no-op: it merges `opts.data` and runs the arrival hooks. With
+  // the authorization check after it, a DEALER actor could ask for a state the deal was
+  // ALREADY in and write through the gate. Found by the first independent review.
+  const { advanceDealStatus } = await load();
+  ctrl.deal.status = "COMPLETED";
+  ctrl.updateCalls.length = 0;
+
+  await assert.rejects(
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER", data: { vin: "SNEAKY" } }),
+    (err: unknown) => (err as { code?: string }).code === "ACTOR_NOT_PERMITTED",
+    "an actor the matrix refuses must not reach the data merge by naming the current state",
+  );
+  assert.equal(ctrl.updateCalls.length, 0, "and nothing may be written");
 });

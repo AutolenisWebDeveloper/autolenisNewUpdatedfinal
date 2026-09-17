@@ -123,8 +123,13 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/api/twilio/voice/transfer-status/route.ts", reasons: ["twilio-sdk"], senders: [], removalPhase: 10 },
   { file: "app/api/webhooks/stripe/route.ts", reasons: ["direct-sender"], senders: ["sendAuctionActivatedEmail", "sendConciergeFeeConfirmationEmail", "sendDepositConfirmationEmail", "sendRefundConfirmationEmail"], removalPhase: 10 },
   { file: "app/api/webhooks/twilio/inbound/route.ts", reasons: ["twilio-sdk"], senders: [], removalPhase: 10 },
-  { file: "app/auth/callback/route.ts", reasons: ["direct-sender"], senders: ["sendEmailVerifiedEmail"], removalPhase: 10 },
-  { file: "lib/auth/actions.ts", reasons: ["direct-sender"], senders: ["sendPasswordResetEmail", "sendWelcomeEmail"], removalPhase: 10 },
+  // DELISTED IN PHASE 10 (§8.3 / §27.1 "Verification completed"). `sendEmailVerifiedEmail`
+  // moved onto the dispatcher; the route reaches no provider at all now.
+  // Phase 10: `sendWelcomeEmail` migrated to the §27 dispatcher
+  // (PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED). The password-reset send is NOT a §27.1
+  // transaction communication — it is an account-security message with no register row — so
+  // it stays on the direct rail and this entry stays with the one sender it really has.
+  { file: "lib/auth/actions.ts", reasons: ["direct-sender"], senders: ["sendPasswordResetEmail"], removalPhase: 10 },
   { file: "lib/qstash/notify.ts", reasons: ["resend-sdk", "twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   // DELISTED IN PHASE 5 (§13-D44, RETIRE OUTRIGHT). `notifyActiveDealersOfOpportunity` emailed
   // the first twenty ACTIVE dealers with no radius and no invitation, from the public request

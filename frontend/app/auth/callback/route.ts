@@ -5,7 +5,6 @@ import { ensurePrismaUser, recordAffiliateAttribution } from "@/lib/auth/actions
 import { getSafeBuyerRedirect } from "@/lib/auth/urls";
 import { UserRole, BuyerPlan } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendEmailVerifiedEmail } from "@/lib/services/email/resend.service";
 import { ContactService } from "@/lib/services/contact.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 
@@ -181,7 +180,38 @@ async function trySendEmailVerified(supabaseId: string, email: string): Promise<
     if (alreadySent) return;
 
     const firstName = buyer.firstName ?? email.split("@")[0];
-    await sendEmailVerifiedEmail({ to: email, firstName });
+
+    // §27.1 "Verification completed → Buyer" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
+    //
+    // The dedup record above (an `AdminAuditLog` row) survives, because it guards something
+    // this key cannot: it is written only after a successful send, so a failed send leaves it
+    // absent and the next callback visit tries again. The outbox key is the second guard, for
+    // the case the audit row cannot cover — two callback visits racing before either has
+    // written it.
+    const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+    const { PHASE_2_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
+    const { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } = await import(
+      "@/lib/services/email/templates/email-verified"
+    );
+    await enqueueTransactional({
+      triggerEvent: "auth.verification_completed",
+      templateKey: PHASE_2_TEMPLATES.VERIFICATION_COMPLETED,
+      channel: "email",
+      recipientKind: "buyer",
+      recipientId: buyer.id,
+      to: email,
+      idempotencyKey: `${PHASE_2_TEMPLATES.VERIFICATION_COMPLETED}:${buyer.id}`,
+      payload: {
+        email,
+        subject: EMAIL_VERIFIED_SUBJECT(firstName),
+        html: renderEmailVerifiedEmail({
+          firstName,
+          // The same URL `sendEmailVerifiedEmail` built (`resend.service.ts:984`), read from
+          // the same variable rather than re-derived, so the link does not change with the rail.
+          prequalUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/prequal`,
+        }),
+      },
+    });
 
     // Record the send so future callback visits are no-ops
     await prisma.adminAuditLog.create({

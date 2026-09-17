@@ -52,6 +52,40 @@ export async function GET(request: NextRequest) {
     // the blast-radius breaker fires, nothing was deactivated, so an email would be a lie.
     const notified = result.deactivated > 0 && !result.aborted;
 
+    // §22a / §26 "Shortlisted candidate goes stale or sells mid-auction" — PHASE 10.
+    //
+    // THIS IS THE MOMENT THE FACT BECOMES KNOWN. The rows above have just been flipped to
+    // `is_active = false`, and some of them are cars a buyer chose and dealers are being
+    // asked to bid on right now. Until this call nothing re-checked a candidate once an
+    // auction was running: the buyer's shortlist was validated at Stage 4 and never again,
+    // so an auction could run its full 48 hours on a listing that had gone.
+    //
+    // Guarded on the same `notified` predicate as the dealer emails, and for the identical
+    // reason: in dry_run and after an abort NOTHING was deactivated, so dropping a buyer's
+    // candidate would act on a deactivation that did not happen.
+    //
+    // `deactivatedIds` is complete here rather than sampled — the blast-radius breaker
+    // refuses above 150 candidates and MAX_RECORDED_IDS is 500, so an enforce run that got
+    // this far recorded every id it flipped. `idsTruncated` is checked anyway, because that
+    // relationship between two constants is exactly the kind that is tuned later by someone
+    // who never reads this comment.
+    let staleCandidates = { checked: 0, dropped: 0, raised: 0 };
+    if (notified && !result.idsTruncated) {
+      try {
+        const { dropStaleCandidatesMidAuction } = await import("@/lib/services/shortlist/candidate.service");
+        staleCandidates = await dropStaleCandidatesMidAuction(result.deactivatedIds, now);
+      } catch (err) {
+        // Never fails the sweep: the deactivation is the job and it is already committed.
+        logger.error("[inventory-stale-sweep] mid-auction candidate check failed:", err);
+      }
+    } else if (notified && result.idsTruncated) {
+      logger.error(
+        "[inventory-stale-sweep] deactivated ids were truncated, so the mid-auction candidate " +
+          "check was SKIPPED rather than run on a partial list — a partial run would silently " +
+          "leave some buyers' dead candidates standing.",
+      );
+    }
+
     const byDealer = new Map<string, Array<{ year: number; make: string; model: string }>>();
     if (notified) {
       for (const item of staleItems) {
@@ -188,6 +222,9 @@ export async function GET(request: NextRequest) {
       dealersNotified: byDealer.size,
       feedFailureEmails,
       feedFailureSuppressed,
+      staleCandidatesChecked: staleCandidates.checked,
+      staleCandidatesDropped: staleCandidates.dropped,
+      staleCandidateExceptions: staleCandidates.raised,
     };
   });
 

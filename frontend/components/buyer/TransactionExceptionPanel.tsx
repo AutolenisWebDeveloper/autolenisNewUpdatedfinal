@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, Clock, ShieldAlert, ArrowRight } from "lucide-react";
 import { CARD, EYEBROW } from "@/components/ui/patterns/tokens";
+import { LocalTime } from "@/components/buyer/LocalTime";
 import type { ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
 
 // THE SCREEN A BUYER SEES WHEN SOMETHING HAS GONE WRONG WITH THEIR MONEY OR THEIR CAR.
@@ -33,6 +34,25 @@ import type { ExceptionLineage } from "@/lib/services/operations/exception-linea
 // feel their purchase is in danger. Overdue is the only red, because that is the only
 // state where the promise has actually been missed.
 
+/**
+ * Where "continue where you left off" actually goes.
+ *
+ * The first version gated this link on `ex.returnPoint` and then ignored it, always
+ * linking `/buyer/deal` — so a buyer whose exception is on a vehicle REQUEST, with no
+ * deal yet (a coverage or location exception), was offered a link to a deal page they do
+ * not have. Found by the first independent review.
+ *
+ * `returnPoint` is prose written for an operator ("Stage 2 — onboarding address, at the
+ * failing field"), not a route, so it is not turned into one. The destination is derived
+ * from WHICH REFERENCE the exception carries, which is a fact rather than a parse; when
+ * neither is present there is nowhere honest to send them and the link is not rendered.
+ */
+function recoveryHref(ex: ExceptionLineage): string | null {
+  if (ex.dealId) return "/buyer/deal";
+  if (ex.vehicleRequestId) return "/buyer/requests";
+  return null;
+}
+
 interface Props {
   readonly exceptions: readonly ExceptionLineage[];
   /**
@@ -43,18 +63,24 @@ interface Props {
   readonly unavailable?: boolean;
 }
 
-function formatDeadline(iso: string | null): string | null {
-  if (!iso) return null;
-  // Explicit zone and a full date. A bare "in 2 days" is friendlier and useless for
-  // a buyer deciding whether to act tonight; a bare time is ambiguous across zones.
-  return new Date(iso).toLocaleString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
+// A deadline is rendered BY THE BROWSER, in the viewer's own zone.
+//
+// This component is a Server Component and `toLocaleString` with no `timeZone` uses the
+// SERVER's — which on Vercel is UTC. A buyer in Pacific time would have read a 10pm
+// Friday deadline as "Sat, Sep 20, 5:00 AM UTC": the wrong day, on the one line where
+// the day is the whole point. Found by the first independent review; the pickup pages
+// already pass an explicit zone, which is why they were right and this was not.
+//
+// `<time>` carries the machine-readable instant and the client formats it on mount. The
+// server-rendered fallback is the ISO date rather than a wrong local time, so a viewer
+// with no JavaScript sees something unambiguous instead of something plausible and wrong.
+function DeadlineTime({ iso, overdue }: { iso: string; overdue: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+      <Clock className="h-3 w-3" aria-hidden="true" />
+      {overdue ? "Was due" : "By"} <LocalTime iso={iso} />
+    </span>
+  );
 }
 
 export default function TransactionExceptionPanel({ exceptions, unavailable }: Props) {
@@ -104,7 +130,6 @@ export default function TransactionExceptionPanel({ exceptions, unavailable }: P
             : buyerActs
               ? { ring: "border-amber-200", chip: "bg-amber-50 text-amber-800", icon: "bg-amber-50 text-amber-600" }
               : { ring: "border-slate-200/80", chip: "bg-slate-100 text-slate-600", icon: "bg-slate-100 text-slate-500" };
-          const deadline = formatDeadline(ex.deadlineAt);
 
           return (
             <li key={ex.id} className={`bg-white ${tone.ring} border rounded-2xl shadow-sm p-5 sm:p-6`}>
@@ -125,12 +150,7 @@ export default function TransactionExceptionPanel({ exceptions, unavailable }: P
                       {buyerActs ? "Your move" : `With ${ex.ownerLabel}`}
                     </span>
 
-                    {deadline && (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
-                        <Clock className="h-3 w-3" aria-hidden="true" />
-                        {ex.overdue ? "Was due" : "By"} {deadline}
-                      </span>
-                    )}
+                    {ex.deadlineAt && <DeadlineTime iso={ex.deadlineAt} overdue={ex.overdue} />}
 
                     {ex.escalated && (
                       <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700">
@@ -142,9 +162,9 @@ export default function TransactionExceptionPanel({ exceptions, unavailable }: P
                   {/* §26's return point: where the transaction resumes. Only shown when the
                       buyer is the one who acts — telling a buyer where a deal resumes when
                       they have nothing to do is noise. */}
-                  {buyerActs && ex.returnPoint && (
+                  {buyerActs && recoveryHref(ex) && (
                     <Link
-                      href="/buyer/deal"
+                      href={recoveryHref(ex)!}
                       className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[#0B5FD1] hover:text-[#0A4DB8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1]/40 focus-visible:ring-offset-2 rounded"
                     >
                       Continue where you left off

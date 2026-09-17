@@ -169,7 +169,15 @@ test("the allowlist shrinks, never grows, without a deliberate edit", () => {
     //     path. The scan no longer completes anything; the buyer's possession-confirmation
     //     request and the completion mail are written to `comms_outbox` inside the transaction
     //     that records the handover, so they survive a crash and retry on their own.
-    94,
+    //
+    // 94 → 93 in Phase 10 (§8.3 / §27.1 rows 1-2). ONE FILE LEFT THE LIST ENTIRELY:
+    //   · app/auth/callback/route.ts — `sendEmailVerifiedEmail` was the file's only provider
+    //     call, and it now enqueues `PHASE_2_TEMPLATES.VERIFICATION_COMPLETED`.
+    // `lib/auth/actions.ts` also lost `sendWelcomeEmail` to
+    // `PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED`, but the file STAYS on the list: it still
+    // sends the password reset directly, and that message has no §27.1 register row. The
+    // entry's `senders` shrank instead, which is what the previous assertion checks.
+    93,
     "The direct-send count changed. Going DOWN is the goal — update this number and say which path was migrated. " +
       "Going UP means a new direct send was added and needs justifying."
   );

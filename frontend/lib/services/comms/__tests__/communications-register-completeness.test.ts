@@ -14,12 +14,23 @@
 // scan would report all 79 keys as unwired and be useless; a scan for the constant
 // NAME is what matches how the code is actually written.
 //
-// So a key counts as wired when EITHER
-//   · a property access `<SOMETHING>_TEMPLATES.<NAME>` names it, or
+// So a key counts as wired when ANY of
+//   · a property access `<SOMETHING>_TEMPLATES.<NAME>` names it,
+//   · an ELEMENT access `<SOMETHING>_TEMPLATES[<expr>]` names it in a string inside
+//     `<expr>`, or
 //   · its literal value appears in code (a raw `templateKey: "…"`, which is legal
 //     and used by a few call sites).
-// Both are collected from the PARSED source, so a key named only in a comment
+// All three are collected from the PARSED source, so a key named only in a comment
 // discharges nothing.
+//
+// THE ELEMENT-ACCESS BRANCH IS NOT HYPOTHETICAL, AND THIS RULE'S FIRST RUN PROVED IT.
+// `auction-invitation.service.ts:1220` picks its key with
+// `PHASE_5_TEMPLATES[percentElapsed === 50 ? "DEALER_INVITATION_REMINDER_50" : "…_90"]`,
+// which is an `ElementAccessExpression`, not a `PropertyAccessExpression`. The first cut of
+// this gate saw neither the constant (wrong node kind) nor the value (the VALUE never
+// appears; the NAME does, as a string), and reported two keys that are demonstrably wired
+// and demonstrably sending. A completeness rule with false positives is worse than a loose
+// one: its output stops being read, and the real gaps in the same list go with it.
 //
 // THE RULE IS PROVED TO FAIL — see the last test, which seeds the removal of a key
 // that is wired today and asserts the checker reports it. A completeness gate that
@@ -68,6 +79,21 @@ function observe(): Observed {
         node.expression.text.endsWith("_TEMPLATES")
       ) {
         constants.add(node.name.text);
+      }
+      // `TEMPLATES[expr]` — every string ANYWHERE inside `expr` is a candidate name, which
+      // covers the conditional form without trying to evaluate it. Over-collecting here is
+      // safe in the direction that matters: a string that is not a registry key matches
+      // nothing, while missing one reports a wired key as unwired.
+      if (
+        ts.isElementAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text.endsWith("_TEMPLATES")
+      ) {
+        const collect = (n: ts.Node): void => {
+          if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) constants.add(n.text);
+          ts.forEachChild(n, collect);
+        };
+        collect(node.argumentExpression);
       }
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) literals.add(node.text);
       ts.forEachChild(node, walk);
@@ -150,4 +176,22 @@ test("the rule detects a real gap — proved against a seeded omission", () => {
     !unwired(seen).some((entry) => entry.includes(victim)),
     `${victim} is reported as unwired even though it has an enqueue site — the checker reports indiscriminately`
   );
+});
+
+// ── THE ELEMENT-ACCESS BRANCH, PROVED ───────────────────────────────────────
+//
+// A branch added to fix a false positive is itself untested unless something asserts it.
+// This pins the real call site rather than a fixture, so deleting the branch — or the site
+// — is what makes it go red.
+
+test("a key reached through TEMPLATES[expr] counts as wired", () => {
+  const seen = observe();
+  for (const name of ["DEALER_INVITATION_REMINDER_50", "DEALER_INVITATION_REMINDER_90"]) {
+    assert.ok(
+      seen.constants.has(name),
+      `${name} is enqueued through \`PHASE_5_TEMPLATES[…]\` in auction-invitation.service.ts and the ` +
+        `scan did not see it. Either the element-access branch was removed, or the call site was — ` +
+        `and those need opposite responses.`
+    );
+  }
 });

@@ -9,6 +9,7 @@ import { getContractShieldResult } from "@/lib/constants";
 import { trackViolationPattern } from "./violation-pattern.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { NoSignableDocumentError } from "@/lib/services/esign/buyer-signing.service";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 import {
   sendContractShieldAlertEmail,
   sendContractApprovedEmail,
@@ -311,11 +312,16 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   // verdict out of PASS below, independently of the score.
   let comparisonHeld = false;
 
+  // What the comparison found, kept so the §26 row can NAME the discrepancies to both
+  // parties rather than saying "something did not match".
+  const mismatchSummary: string[] = [];
+
   try {
     const { compareContractAgainstAgreedTerms } = await import("@/lib/services/contract/contract-comparison.service");
     const discrepancies = await compareContractAgainstAgreedTerms({ dealId, contractText });
     if (discrepancies.length > 0) comparisonHeld = true;
     for (const d of discrepancies) {
+      mismatchSummary.push(`${d.label}: contract says ${d.foundValue}, the ${d.source} says ${d.expectedValue}`);
       // A changed VIN or a product that first appears in the contract is disqualifying on
       // its own — 40 points takes any contract below the FAIL threshold from a perfect
       // score, so one of these can never be outvoted by an otherwise clean document.
@@ -382,6 +388,64 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   // Track violation patterns for dealer
   if (fixList.length > 0) {
     await trackViolationPattern(dealerId, fixList).catch(() => {});
+  }
+
+  // §26 "Contract mismatch | Operations | Require correction and rescan; name discrepancies
+  // to both parties" — PHASE 10, the raise site this register row never had.
+  //
+  // The HOLD already worked: a discrepancy against the agreed terms caps the verdict at
+  // WARNING whatever the score, so the deal does not auto-advance. What did not exist was
+  // the OWNER. A held contract sat at CONTRACT_REVIEW with a fix list on an admin page
+  // nobody is paged to, no deadline, and §26's "name the discrepancies to both parties"
+  // discharged by an email that says only that the review found issues.
+  //
+  // Raised only for a real mismatch — `mismatchSummary` is non-empty only when the
+  // comparison RAN and disagreed. A comparison that could not run is already a fix-list
+  // entry (COMPARISON_UNAVAILABLE) and is an extraction-class failure, not a mismatch:
+  // calling it one would tell both parties the numbers disagree when nobody read them.
+  if (mismatchSummary.length > 0) {
+    // Keyed on the SCAN VERSION so a corrected re-upload that still disagrees opens its
+    // own row with its own deadline, while a re-scan of the same document does not.
+    await raiseException({
+      code: "CONTRACT_MISMATCH",
+      dealId,
+      dealerId,
+      detail:
+        `Contract scan v${version} does not match the agreed terms. ` +
+        `${mismatchSummary.join("; ")}.`,
+      idempotencyKey: `CONTRACT_MISMATCH:${dealId}:v${version}`,
+    }).catch((err) => {
+      logger.error("[contract-shield] could not raise the contract-mismatch exception", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  // §27.1 "Contract revision required → Buyer + dealership → Specific mismatches and required
+  // correction" — PHASE 10, the enqueue site this register row never had.
+  //
+  // WHAT THE TWO PARTIES WERE TOLD BEFORE. The buyer got `sendContractShieldAlertEmail`, which
+  // says a scan found `issueCount` issues and links the portal — a NUMBER, on the direct rail,
+  // with no retry. The dealership, whose contract it is and who has to correct it, got NOTHING
+  // from this path at all: the only dealer-facing contract-issues mail is on the ADMIN route,
+  // so a contract held by the automatic scan reached the desk that must fix it only if an
+  // administrator happened to open the review and click.
+  //
+  // §27.1's row names both recipients and names the CONTENT as "specific mismatches", which is
+  // exactly what `mismatchSummary` holds. `renderContractRevisionRequired` was written in
+  // Phase 8 with both audiences and an `alwaysSend` recheck, and nothing ever called it.
+  //
+  // The buyer's alert above is NOT removed — it is a different message on a different
+  // condition (any WARNING/FAIL, including a junk-fee finding with no mismatch at all). This
+  // one fires only when the contract disagrees with the agreed terms.
+  if (mismatchSummary.length > 0) {
+    await notifyContractRevisionRequired(dealId, mismatchSummary).catch((err) => {
+      logger.error("[contract-shield] revision-required notices could not be enqueued", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   // Notify buyer via email based on scan result
@@ -532,6 +596,74 @@ async function createContractApprovedNotifications(
     }
   } catch (err) {
     logger.error("[contract-shield] dealer approved notification failed:", err);
+  }
+}
+
+/**
+ * §27.1 "Contract revision required → Buyer + dealership". Both halves, both durable.
+ *
+ * THE TWO MESSAGES ARE NOT THE SAME MESSAGE WITH A DIFFERENT SALUTATION. §25.1's firewall is
+ * not at stake here — both parties are entitled to the discrepancy list, which is the point of
+ * "name the discrepancies to both parties" — but what each is being ASKED is opposite: the
+ * dealership must upload a corrected package; the buyer must do nothing and must be told so,
+ * because a buyer who thinks a held contract is their problem starts calling the dealership.
+ * `renderContractRevisionRequired` carries that difference as its `audience`.
+ *
+ * Keyed per SCAN VERSION so a corrected upload that still disagrees sends a new pair with the
+ * new list, while a re-scan of the same document does not re-send.
+ */
+async function notifyContractRevisionRequired(dealId: string, discrepancies: string[]): Promise<void> {
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    select: {
+      id: true,
+      buyerId: true,
+      vehicleYear: true, vehicleMake: true, vehicleModel: true,
+      buyer: { select: { user: { select: { email: true } } } },
+      offer: { select: { dealerId: true, dealer: { select: { user: { select: { email: true } } } } } },
+      contractScans: { orderBy: { version: "desc" }, take: 1, select: { version: true } },
+    },
+  });
+  if (!deal) return;
+
+  const vehicle = [deal.vehicleYear, deal.vehicleMake, deal.vehicleModel].filter(Boolean).join(" ") || "your vehicle";
+  const version = deal.contractScans[0]?.version ?? 1;
+  const { renderContractRevisionRequired } = await import("@/lib/services/comms/phase8-email-content");
+  const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+  const { PHASE_8_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
+
+  const recipients: Array<{ audience: "buyer" | "dealer"; email: string; kind: "buyer" | "dealer"; id: string | null }> = [];
+  const buyerEmail = deal.buyer?.user?.email;
+  if (buyerEmail) recipients.push({ audience: "buyer", email: buyerEmail, kind: "buyer", id: deal.buyerId });
+  const dealerEmail = deal.offer?.dealer?.user?.email;
+  if (dealerEmail) recipients.push({ audience: "dealer", email: dealerEmail, kind: "dealer", id: deal.offer?.dealerId ?? null });
+
+  for (const r of recipients) {
+    const content = renderContractRevisionRequired({
+      audience: r.audience,
+      vehicle,
+      discrepancies,
+      dealId,
+    });
+    // One failed recipient must not cost the other theirs — the dealership's copy is the one
+    // that gets the contract corrected, and the buyer's is the one that stops them worrying.
+    await enqueueTransactional({
+      triggerEvent: "contract.revision_required",
+      templateKey: PHASE_8_TEMPLATES.CONTRACT_REVISION_REQUIRED,
+      channel: "email",
+      recipientKind: r.kind,
+      recipientId: r.id,
+      to: r.email,
+      dealId,
+      idempotencyKey: `${PHASE_8_TEMPLATES.CONTRACT_REVISION_REQUIRED}:${dealId}:v${version}:${r.audience}`,
+      payload: { email: r.email, subject: content.subject, html: content.html, text: content.text },
+    }).catch((err) => {
+      logger.error("[contract-shield] revision-required enqueue failed", {
+        dealId,
+        audience: r.audience,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 }
 

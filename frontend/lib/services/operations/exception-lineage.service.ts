@@ -75,6 +75,16 @@ export interface ExceptionLineage {
   /** The recovery, in the audience's own terms. Never null on a returned row. */
   readonly recovery: string;
   readonly escalated: boolean;
+  /**
+   * The refs this exception is about. Carried so a surface can route a buyer BACK to the
+   * right place: §26's `returnPoint` is prose written for an operator, not a route, and
+   * a panel that guessed one sent buyers with no deal to a deal page.
+   *
+   * Deliberately only the transaction refs — no buyer or dealer identifier, so the shape
+   * a dealer-audience caller receives still carries nothing about the buyer (§25.1).
+   */
+  readonly dealId: string | null;
+  readonly vehicleRequestId: string | null;
 }
 
 /**
@@ -140,6 +150,8 @@ function toLineage(row: QueueItem, audience: LineageAudience): ExceptionLineage 
     returnPoint: row.returnPoint ?? null,
     recovery,
     escalated: row.escalatedAt !== null,
+    dealId: row.dealId ?? null,
+    vehicleRequestId: row.vehicleRequestId ?? null,
   };
 }
 

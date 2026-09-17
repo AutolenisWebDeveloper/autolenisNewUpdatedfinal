@@ -580,9 +580,13 @@ async function raiseCommsGuardException(
   }
 }
 
-// Lazy service-role Supabase accessor for the idempotency guard. Returns null
-// (rather than throwing) when Supabase env is not configured, so dev/test paths
-// degrade to "no latch" instead of crashing the notification.
+// Lazy service-role Supabase accessor for the idempotency guard. Returns null when
+// Supabase env is not configured.
+//
+// THE HEADER USED TO SAY THIS MEANT "degrade to no latch". It no longer does, and the
+// stale wording was flagged by the first independent review. A null now makes the
+// caller REFUSE the send and raise COMMS_GUARD_UNAVAILABLE rather than send unguarded —
+// see the latch in `emitDealStatusComms`, which records why.
 async function getGuardSupabase(): Promise<import("@supabase/supabase-js").SupabaseClient | null> {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return null;
