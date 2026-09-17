@@ -48,13 +48,18 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 let rows: ReturnType<typeof row>[] = [];
+/** The `where` the suppression predicate issued, so its exemption can be read rather than inferred. */
+let countWhere: Record<string, unknown> | null = null;
 
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       queueItem: {
         findMany: async () => rows,
-        count: async () => rows.length,
+        count: async ({ where }: { where: Record<string, unknown> }) => {
+          countWhere = where;
+          return rows.length;
+        },
       },
     },
   },
@@ -186,4 +191,52 @@ test("hasOpenException drives the §26 upgrade suppression", async () => {
   assert.equal(await hasOpenException("b1"), true);
   rows = [];
   assert.equal(await hasOpenException("b1"), false);
+});
+
+// ── FINDINGS 10 AND 11 FROM THE FIRST INDEPENDENT REVIEW ────────────────────
+//
+// 10: the suppression was SELF-PERPETUATING. `UPGRADE_PROMPT_DURING_OPEN_EXCEPTION` has no
+//     deadline and is raised BY the suppression, so once a buyer had been refused once they
+//     were refused for ever — by the record of having been refused — while being told "we
+//     will let you know as soon as it clears".
+// 11: the buyer dashboard decided the same question from the BUYER-audience lineage, which
+//     drops every row with a null buyer-visible status, so a buyer held by an ops-only
+//     exception saw the card, clicked it, and met a 409.
+
+test("a row that RECORDS the suppression does not itself suppress", async () => {
+  const { hasOpenException } = await import("@/lib/services/operations/exception-lineage.service");
+  countWhere = null;
+  await hasOpenException("buyer_1");
+
+  assert.ok(countWhere, "the predicate issued a count");
+  const or = (countWhere as unknown as Record<string, unknown>).OR as Array<Record<string, unknown>>;
+  assert.ok(Array.isArray(or), "the exemption is expressed in the query, not filtered afterwards");
+  const notIn = (or.find((c) => c.exceptionCode && typeof c.exceptionCode === "object") ?? {}) as {
+    exceptionCode?: { notIn?: string[] };
+  };
+  assert.deepEqual(
+    notIn.exceptionCode?.notIn,
+    ["UPGRADE_PROMPT_DURING_OPEN_EXCEPTION"],
+    "a row whose subject is 'the suppression fired' is evidence the rule worked, not evidence " +
+      "that the transaction is stalled",
+  );
+  assert.ok(
+    or.some((c) => c.exceptionCode === null),
+    "an uncoded row still counts — the exemption is a named class, not a way to drop rows",
+  );
+});
+
+test("the suppression predicate still counts an exception the buyer is never shown", async () => {
+  const { hasOpenException } = await import("@/lib/services/operations/exception-lineage.service");
+  countWhere = null;
+  await hasOpenException("buyer_1");
+
+  const where = countWhere as unknown as Record<string, unknown>;
+  assert.equal(where.buyerId, "buyer_1");
+  assert.deepEqual(
+    where.status,
+    { in: ["OPEN", "ASSIGNED", "ESCALATED"] },
+    "upselling someone whose deal is blocked by a provider quota they were never shown is the " +
+      "same mistake as upselling one whose payment failed",
+  );
 });

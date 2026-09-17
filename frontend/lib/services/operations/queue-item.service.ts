@@ -99,6 +99,32 @@ export interface RaiseExceptionInput extends ExceptionRefs {
   detail?: string | null;
   /** Overrides the catalogue's owner. Used only where §26 splits an owner by branch. */
   ownerRole?: QueueOwnerRole | null;
+  /**
+   * An extra discriminator folded into the DERIVED key, for a code whose refs alone do not
+   * identify the condition.
+   *
+   * ── WHY THIS EXISTS (Phase 10, first independent review) ──────────────────
+   *
+   * `CANCELLATION_CLEANUP_INCOMPLETE` is about WHICH STOPS failed, and a cancellation can
+   * fail differently on a second attempt. Keyed on the deal alone it had the wrong
+   * behaviour in both directions: with an explicit key, a genuinely different failure —
+   * the auction stopped cleanly this time but an e-sign envelope did not — collided with
+   * the first row and opened NOTHING, so a live envelope had no owner; with the plain
+   * derived key it would have done the same while the first row was open.
+   *
+   * Folding a fingerprint of the condition into the derived key gives the behaviour the
+   * writer already implements, applied to the right subject: the SAME condition
+   * re-observed while open returns that row, a DIFFERENT condition opens its own, and a
+   * repeat of a condition that was already resolved is suffixed as a recurrence.
+   *
+   * Keep it short, stable and non-identifying — it becomes part of an indexed key. A
+   * sorted list of step names is the shape this was written for; a timestamp or a random
+   * value would defeat deduplication entirely.
+   *
+   * Ignored when `idempotencyKey` is supplied: an explicit key is already the caller
+   * asserting that the trigger is unique.
+   */
+  occurrenceKey?: string | null;
 }
 
 /** How `raiseException` resolved. `created` false means an equivalent row was already open. */
@@ -204,7 +230,7 @@ export async function raiseException(input: RaiseExceptionInput, db: Db = prisma
     return attempt;
   }
 
-  const baseKey = `${def.code}:${refFingerprint(input)}`;
+  const baseKey = `${def.code}:${refFingerprint(input)}${input.occurrenceKey ? `:${input.occurrenceKey}` : ""}`;
   for (let suffix = 1; suffix <= MAX_RECURRENCE_SUFFIX; suffix++) {
     const key = suffix === 1 ? baseKey : `${baseKey}#${suffix}`;
     const attempt = await attemptCreate(db, base, key, /* acceptTerminal */ false);

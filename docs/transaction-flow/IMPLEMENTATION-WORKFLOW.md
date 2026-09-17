@@ -2971,10 +2971,15 @@ The remaining six were resolved as proposed and are recorded here as **stated as
 
 ### 8.1j Phase 10 — AS BUILT (2026-09-17)
 
-Implemented on `claude/txflow-10-control-plane` from `8f58a151`. **INCOMPLETE AS OF THIS WRITING** —
-the two §8.3 completeness gates are RED BY DESIGN and name what is left. This section records what
-was actually built, what was measured rather than recalled, and what is not done, because a section
-that described the plan would be the drift it exists to prevent.
+Implemented on `claude/txflow-10-control-plane` from `8f58a151`. This section records what was
+actually built, what was measured rather than recalled, and what is not done, because a section that
+described the plan would be the drift it exists to prevent.
+
+**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,192 tests,
+5,191 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
+in its own skip message). An earlier draft of this section said the chain "stops at the first
+failure — segment 46" and quoted 3,524 tests across 46 suites as an explicitly-not-a-pass figure;
+that was true when written and is superseded here.
 
 #### The two owner rulings this phase turns on
 
@@ -3063,20 +3068,82 @@ not CI's 17.6** — no Docker daemon in the environment. CI's `migrations` job r
 §13-D60 is discharged by the index landing. The resolve-only route it was written about is **not
 built** — see below — so the "second writer" override was never triggered.
 
+#### §8.3 completeness — how the two registers were actually closed
+
+**Six §26 codes gained a real raise site** at the point the condition is detected:
+`CONTRACT_EXTRACTION_FAILURE` (the `scanContractVersion` catch — "retryable" was true of the ROW and
+of nobody's attention), `CONTRACT_MISMATCH` (the agreed-terms comparison; the HOLD worked, the OWNER
+did not exist), `TRADE_PAYOFF_QUOTE_STALE` (`clearFunding`'s refusal, as a second row because it is
+OPERATIONS' work where `FUNDING_NOT_CLEARED` is FINANCE's), `PREQUAL_PROVIDER_DELAY`
+(`recordProviderFailure`), `DEPOSIT_CHARGEBACK_AFTER_UPGRADE` (a dispute on a $99 that is the credit
+basis for a live Premium entitlement) and `CANDIDATE_STALE_MID_AUCTION` (the stale sweep, which is
+the instant the platform learns a listing has gone — and which also supplies the missing caller for
+`revalidateRequestCandidates`, dead since Phase 4).
+
+**Three §26 rows cannot be discharged by a raise site, and now say so IN THE REGISTER.** A new
+`dischargedBy` field on `ExceptionDefinition` carries the reason with the row rather than in an
+allowlist inside the test, and the gate enforces it in both directions — a discharged row that
+GAINS a raise site fails, a `BEHAVIOUR` discharge whose proving test is deleted fails, and the
+count is pinned at three:
+
+| Row | Kind | Why |
+| --- | --- | --- |
+| `NO_IN_RADIUS_INVENTORY` | BEHAVIOUR | §26 owner SYSTEM, no deadline, required result is a rendering rule ("lead with the custom request, never present an empty grid"). `gateCatalogue`/`inRadiusCount` implement it. A queue row would be a work item with no owner raised for every buyer browsing outside a market — and `hasOpenException` would then suppress their upgrade prompt indefinitely. |
+| `NO_STORED_LOCATION_ON_INVENTORY` | BEHAVIOUR | Same shape. Not knowing where a browsing visitor lives is the ordinary state of an inventory page, not an exception an operator works. |
+| `TRADE_APPRAISAL_CHANGED_AT_HANDOVER` | UNBUILT | The trigger does not exist: `trade_in_submissions.final_allowance_cents` and `preliminary_allowance_cents` have NO WRITER anywhere, so the Contract Shield trade comparison is vacuous today. §10 rows **R18.10** and **R18.17** are still TO IMPLEMENT and are **Phase 9's**. A raise site keyed to the buyer's own packet edit would make the register report an exception the document does not describe. |
+
+**Seven §27.1 template keys were wired**, four of them to content and rechecks written in earlier
+phases that nothing ever called: `registration_submitted` and `verification_completed` (migrated off
+the direct rail), `prequal_provider_delay`, `guest_capture_claim` with
+`verification_reminder_1h/24h/72h`, `onboarding_incomplete`, `prequal_expiring`, `prequal_expired`,
+`dealer_invitation_bounced`, `contract_revision_required` (which reached the BUYER only —- the
+dealership, whose contract it is, got nothing from the automatic scan) and `premium_follow_up_final`
+(§23.2a's last ask, never made, so §23.2b's `MAX_UPGRADE_EMAILS = 2` was a ceiling one ask below
+the floor).
+
+**The comms gate had a false positive of its own.** It read `PropertyAccessExpression` only, so the
+two invitation-reminder keys chosen through `PHASE_5_TEMPLATES[expr]` were reported unwired while
+demonstrably sending. Element access is now parsed and the real call site pins the branch. *A
+completeness rule with false positives is worse than a loose one: its output stops being read, and
+the real gaps in the same list go with it.*
+
+#### One §27.1 row is REPORTED, not migrated — an owner decision
+
+`prequal_declined` is the FCRA §615 adverse-action notice and **it is sent today**; the gap is the
+rail, not the message. `sendAdverseActionEmail` returns an `EmailSendOutcome` discriminant that four
+call sites feed to `classifyAdverseActionDelivery`, which writes `ADVERSE_ACTION_NOTICE_SENT` /
+`_SUPPRESSED_DUPLICATE` / `_SEND_FAILED` to `compliance_events`, and anything that is not a confirmed
+delivery opens a §26 row. `enqueueTransactional` returns an ENQUEUE, not a delivery, so a faithful
+migration must carry the outbox's eventual result back into the compliance record — and **§29 lists
+"adverse-action outcomes distinguished" among the safeguards that must not be weakened.** Doing that
+inside a control-plane batch would weaken it by accident.
+
+It is recorded in `lib/services/comms/__tests__/register-discharge-ledger.ts` with its reason, its
+current sender and the follow-up that would discharge it; the ceiling is pinned at one and the gate
+fails if the key ever gains an enqueue site. **This needs an owner-approved compliance batch.**
+
+#### REPORTED, never deleted — `closeAuction` has no callers
+
+`lib/services/auction/auction.service.ts:153`. This phase HARDENED it (§28.3 #3 — it would have
+overwritten a CANCELLED auction) and then found that nothing in `app/`, `lib/` or `tests/` calls it,
+not even a test. Auction closing runs through `app/api/cron/auction-close` → `postCloseClaimWon`.
+
+Per CLAUDE.md — "anything that looks obsolete, duplicated, unfinished, misleading, or dead gets
+REPORTED for an owner decision, never deleted" — it is left in place. It is a correct,
+concurrency-safe helper; it is either a missing caller or a redundant export, and which of the two
+is not this phase's call to make.
+
 #### Not done, and not implied to be
 
-- **12 exception codes and 15 template keys remain unwired.** The two gates name them and are the
-  authority; the counts move as they are closed.
-- **`pnpm test:all` cannot pass until they are.** The chain is 70 `&&` segments and stops at the
-  first failure — segment 46 (`test:comms-outbox`) — so `test:operations` at segment 48 does not
-  run in a full invocation. 3524 tests pass across the first 46 suites; that is NOT a full-matrix
-  pass and must not be reported as one.
 - The direct-send allowlist reclassification and its test change (`removalPhase === 10` for every
-  entry is now false, and the pinned count of 94 pins the wrong thing).
+  entry is now false). The pinned count moved **94 → 93** as `app/auth/callback/route.ts` left the
+  list entirely; the reclassification the owner ruled on at STOP 1 is still outstanding.
 - §8.2 defect (6) — the losing-offer dispatcher's 7-day window and 4-attempt abandon.
 - `resolveObligation` has no route; `identityVerified: true` is still hard-coded on both admin
   release paths.
-- Playwright; the second independent review; CI.
+- R18.10 / R18.17 (the trade appraisal at handover), which the register discharge above names.
+- The `prequal_declined` compliance migration above.
+- CI has not run this branch at the time of writing.
 
 ### 8.2 Phase scopes
 

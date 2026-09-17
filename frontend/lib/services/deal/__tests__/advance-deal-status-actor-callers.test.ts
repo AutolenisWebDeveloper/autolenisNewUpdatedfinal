@@ -20,12 +20,23 @@
 // ── WHAT IT CAN AND CANNOT SEE, stated rather than left to be discovered ────
 //
 // It reads STATIC values: a string literal, or `X ?? "LITERAL"`. A caller that passes a
-// variable is reported as UNRESOLVED and listed — not silently skipped, because a
-// silently skipped call site is exactly how the defect above survived. The unresolved
-// list is asserted against a pinned set, so a NEW dynamic call site fails this test and
-// has to be looked at by a human.
+// variable cannot be resolved that way, and is NOT silently skipped — a silently skipped
+// call site is exactly how the defect above survived.
 //
-// Run: pnpm test:deal-lifecycle (via test:operations' sibling scripts — see package.json)
+// Every such site is instead DECLARED, in the list below, with the roles that variable can
+// actually hold and why. Those declared roles are then checked against the matrix exactly as
+// a literal would be, and an undeclared dynamic site fails the test. That is the part of the
+// contract the first draft of this header understated — it said only that the unresolved list
+// was "pinned", which would have been a membership check and nothing more.
+//
+// THE DIFFERENCE IS NOT ACADEMIC. When this file was first written its dynamic sites were only
+// checked for membership, so seeding the original defect back in left the gate GREEN. Under
+// the declared-roles form the same seed goes red — and it immediately caught a real one:
+// `FUNDING_PENDING` had been corrected and `FINANCING_PENDING`, with the same shape and the
+// same callers, had not.
+//
+// Run: pnpm test  (this file is covered by the bare `test` script's glob over
+//                  lib/services/deal/__tests__/*.test.ts — there is no `test:deal-lifecycle`)
 
 import test from "node:test";
 import assert from "node:assert/strict";

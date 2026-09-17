@@ -4,7 +4,7 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgradeCard";
 import TransactionExceptionPanel from "@/components/buyer/TransactionExceptionPanel";
-import { exceptionLineage, type ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
+import { exceptionLineage, hasOpenException, type ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
@@ -63,11 +63,29 @@ export default async function BuyerDashboard() {
   // §26: "Upgrade prompt fires during an open exception | Operations | Suppress;
   // never upsell a buyer whose deal is stalled."
   //
-  // Derived from the SAME read, not a second query: a buyer whose lineage could not
-  // be loaded is treated as possibly-stalled and the prompt is suppressed. Failing
-  // open here would mean a read error becomes an upsell to someone whose purchase is
-  // blocked, which is the exact outcome the rule exists to prevent.
-  const suppressUpgradePrompt = exceptionsUnavailable || openExceptions.length > 0;
+  // THE SAME PREDICATE THE SERVER ENFORCES, not a second answer derived from the read
+  // above. `exceptionLineage({ audience: "BUYER" })` is a RENDERING projection: it drops
+  // every row whose `buyerVisibleStatus` is null, because §26 has rows a buyer is
+  // deliberately never shown. Deciding suppression from it meant a buyer held by an
+  // ops-only exception saw the card, clicked it, and met a 409 from
+  // `POST /api/buyer/plan/upgrade`, which asks `hasOpenException` — a dead end created by
+  // two surfaces answering one question differently. Found by the first independent review.
+  //
+  // A second query, and deliberately so: it is a `count` with `take: 1`, and the
+  // alternative — a predicate derived from a projection built for rendering — is how the
+  // two drifted in the first place.
+  //
+  // FAILS CLOSED on either read. A buyer whose state could not be established is treated
+  // as possibly-stalled and the prompt is suppressed; failing open would turn a read error
+  // into an upsell to someone whose purchase is blocked, which is the exact outcome the
+  // rule exists to prevent.
+  let stalled = true;
+  try {
+    stalled = await hasOpenException(buyer.id);
+  } catch {
+    stalled = true;
+  }
+  const suppressUpgradePrompt = exceptionsUnavailable || stalled;
   const prequal = buyer?.preQualification ?? null;
   const firstName = buyer?.firstName ?? "there";
   // Use the shared validity helper so the dashboard's prequal gating can never

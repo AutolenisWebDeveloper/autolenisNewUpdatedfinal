@@ -206,21 +206,63 @@ export async function exceptionLineage(query: LineageQuery): Promise<ExceptionLi
 }
 
 /**
- * Whether this buyer has an open exception right now.
+ * Codes that RECORD a suppression, and therefore must never CAUSE one.
+ *
+ * ── THE LOOP THIS CLOSES, FOUND BY THE FIRST INDEPENDENT REVIEW ─────────────
+ *
+ * §26 gives `UPGRADE_PROMPT_DURING_OPEN_EXCEPTION` the owner OPERATIONS and NO DEADLINE,
+ * and `POST /api/buyer/plan/upgrade` raises it when a buyer reaches the upgrade action
+ * while something else is open. That row is then itself an open exception on the same
+ * buyer — so:
+ *
+ *   1. exception X opens; the buyer tries to upgrade and is refused;
+ *   2. the refusal opens Y (`UPGRADE_PROMPT_DURING_OPEN_EXCEPTION`), deadline-less;
+ *   3. X is resolved;
+ *   4. Y is still open, so the buyer is refused again — permanently, by the record of
+ *      having been refused.
+ *
+ * And the copy they are given is "we will let you know as soon as it clears", about a row
+ * that clears only when somebody notices a queue item with no deadline that describes a
+ * rule working correctly. A buyer could be locked out of Premium for ever by the fact that
+ * they once tried to buy it at a bad moment.
+ *
+ * The fix is at the cause and is a CLASS, not a special case: a row whose subject is "the
+ * suppression fired" is evidence that the rule worked, not evidence that the transaction is
+ * stalled. It stays on the Operations queue, where it is what §26 asks for; it simply stops
+ * being an input to the predicate that created it.
+ */
+const SUPPRESSION_EXEMPT_CODES: readonly string[] = ["UPGRADE_PROMPT_DURING_OPEN_EXCEPTION"];
+
+/**
+ * Whether this buyer's TRANSACTION is stalled by an open exception right now.
  *
  * §26: "Upgrade prompt fires during an open exception | Operations | Suppress; never
  * upsell a buyer whose deal is stalled." The prompt surfaces need one cheap boolean,
  * not the projection — a count query rather than a fetch-and-map, because this is
  * called on render paths that are not about exceptions at all.
  *
- * Counts EVERY open exception, including the ones with no buyer-visible status. The
- * suppression rule is about the buyer's transaction being stalled, not about whether
- * they can see why — upselling someone whose deal is blocked by a provider quota they
- * were never shown is the same mistake.
+ * COUNTS EVERY OPEN EXCEPTION, including the ones with no buyer-visible status — the rule
+ * is about the transaction being stalled, not about whether the buyer can see why, and
+ * upselling someone whose deal is blocked by a provider quota they were never shown is the
+ * same mistake. The ONE class it excludes is `SUPPRESSION_EXEMPT_CODES` above.
+ *
+ * THIS IS THE ONE PREDICATE. The buyer dashboard used to decide the same question from
+ * `exceptionLineage({ audience: "BUYER" })`, which DROPS every row whose `buyerVisibleStatus`
+ * is null — so a buyer held by an ops-only exception saw the upgrade card, clicked it, and
+ * met a 409 from this predicate. Two answers to one question, and the one the buyer could
+ * see was the wrong one. A surface that renders exceptions uses the lineage; a surface that
+ * DECIDES something uses this.
  */
 export async function hasOpenException(buyerId: string): Promise<boolean> {
   const count = await prisma.queueItem.count({
-    where: { buyerId, status: { in: [...OPEN_QUEUE_STATUSES] } },
+    where: {
+      buyerId,
+      status: { in: [...OPEN_QUEUE_STATUSES] },
+      OR: [
+        { exceptionCode: null },
+        { exceptionCode: { notIn: [...SUPPRESSION_EXEMPT_CODES] } },
+      ],
+    },
     take: 1,
   });
   return count > 0;

@@ -257,3 +257,54 @@ test("§24 — the stage the transaction was at is captured BEFORE anything move
     "captured after the stops there would be no way to say what the transaction was doing",
   );
 });
+
+// ── FINDINGS 14 AND 21 FROM THE FIRST INDEPENDENT REVIEW ────────────────────
+
+test("a TERMINAL deal is refused BEFORE any stop runs — a stop cannot be undone", async () => {
+  deal!.status = "COMPLETED";
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction(input);
+
+  assert.equal(out.outcome, "NOT_MOVED");
+  assert.deepEqual(
+    order,
+    [],
+    "a cancellation aimed at a completed purchase used to void its envelopes, cancel its dealer " +
+      "invitations and stop its pickup, and THEN throw TerminalDealError from the seam — the caller " +
+      `saw a failure and the transaction had already been dismantled. Order was: ${order.join(" → ")}`,
+  );
+  assert.deepEqual(advances, [], "and nothing was even attempted on the seam");
+  assert.equal(out.stageAtCancellation, "Deal COMPLETED", "the stage is still reported honestly");
+});
+
+test("cancelling an ALREADY-CANCELLED deal is a quiet no-op, not a second teardown", async () => {
+  deal!.status = "CANCELLED";
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction(input);
+
+  assert.equal(out.outcome, "NOT_MOVED");
+  assert.deepEqual(order, [], "re-voiding envelopes on a deal somebody already cancelled helps nobody");
+  assert.deepEqual(raised, [], "and opens no case — nothing failed");
+});
+
+test("a DIFFERENT cleanup failure opens its OWN case — the key names what failed", async () => {
+  // Finding 21: a strict once-ever key of CODE:dealId meant the second, different failure
+  // collided with the first row and opened nothing, leaving (say) a live e-sign envelope with
+  // no owner. The key now carries the failed-stop set.
+  auctionThrows = true;
+  const { cancelTransaction } = await svc();
+  await cancelTransaction(input);
+
+  const cleanup = raised.find((r) => r.code === "CANCELLATION_CLEANUP_INCOMPLETE")!;
+  assert.ok(cleanup, "the failure opens a case");
+  assert.equal(
+    cleanup.occurrenceKey,
+    "AUCTION",
+    "the discriminator is WHICH stops failed, so a different failure is a different condition",
+  );
+  assert.equal(
+    cleanup.idempotencyKey,
+    undefined,
+    "and it is the DERIVED key, so a recurrence after resolution is suffixed rather than swallowed",
+  );
+});

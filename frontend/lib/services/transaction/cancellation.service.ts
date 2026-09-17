@@ -105,6 +105,20 @@ export interface CancelTransactionInput {
   readonly actorRole: TransactionActorRole;
 }
 
+/**
+ * The three statuses a transaction cannot be cancelled OUT of.
+ *
+ * Mirrors `deal.service`'s own `TERMINAL` list. Declared here rather than imported because
+ * that one is private to the seam; if a fourth terminal status is ever added, the
+ * `advanceDealStatus` guard is still the one that holds, and this list only decides whether
+ * the refusal happens before or after the stops.
+ */
+const TERMINAL_DEAL_STATUSES: readonly DealStatus[] = [
+  DealStatus.COMPLETED,
+  DealStatus.CANCELLED,
+  DealStatus.REFUNDED,
+];
+
 export interface CancelTransactionResult {
   /**
    * `CANCELLED` before execution; `FROZEN_PENDING_RELEASE` after it; `NOT_MOVED`
@@ -361,6 +375,32 @@ export async function cancelTransaction(
   // voiding the envelopes would be the worst of both.
   assertActorMayDrive(input.actorRole, target);
 
+  // ── A TERMINAL DEAL IS REFUSED BEFORE ANY STOP RUNS ───────────────────────
+  //
+  // Found by the first independent review. `advanceDealStatus` throws `TerminalDealError`
+  // on a COMPLETED deal, and it is the LAST thing this function does — so a cancellation
+  // aimed at a completed purchase voided its e-sign envelopes, cancelled its dealer
+  // invitations and stopped its pickup, and THEN threw. The caller saw a failure; the
+  // transaction had already been dismantled.
+  //
+  // The same argument as `assertActorMayDrive` two lines up, and it belongs in the same
+  // place: every refusal this function can make must be made before the first destructive
+  // act, because a stop cannot be undone by an exception.
+  //
+  // A deal ALREADY at the target is not an error — it is the idempotent case, and it is
+  // reported as NOT_MOVED with nothing touched. Re-running the stops would be defensible
+  // (they are all conditional) but pointless, and it would re-void envelopes on a deal
+  // somebody already cancelled.
+  if (deal && TERMINAL_DEAL_STATUSES.includes(deal.status)) {
+    return {
+      outcome: "NOT_MOVED",
+      stageAtCancellation,
+      stops: [],
+      dealId: deal.id,
+      vehicleRequestId,
+    };
+  }
+
   const stops = await runStops({ dealId: deal?.id, vehicleRequestId, auctionId }, reason, frozen);
 
   // ── The state change itself ────────────────────────────────────────────────
@@ -491,6 +531,17 @@ async function finish(args: {
 
   if (failed.length > 0) {
     const code = "CANCELLATION_CLEANUP_INCOMPLETE";
+    // KEYED ON WHAT FAILED, NOT JUST ON THE TRANSACTION. Found by the first independent
+    // review: a strict once-ever key of `CODE:dealId` meant a SECOND, DIFFERENT failure
+    // opened no case at all. A retry that stopped the auction cleanly but could not void an
+    // e-sign envelope collided with the resolved first row and returned it — leaving a live
+    // envelope with no owner, which is precisely the swallowed-failure pattern this phase
+    // exists to remove.
+    //
+    // `occurrenceKey` folds the failed-stop set into the DERIVED key, so the writer's own
+    // semantics apply to the right subject: the same failure re-observed while open returns
+    // that row, a different failure opens its own, and a repeat of one already resolved is
+    // suffixed as a recurrence. Sorted, so the key does not depend on the order the stops ran.
     await raiseException({
       code,
       dealId: args.dealId,
@@ -499,7 +550,7 @@ async function finish(args: {
       detail: `Stops that did not complete: ${failed
         .map((s) => `${s.stop} (${s.error ?? "unknown"})`)
         .join("; ")}`,
-      idempotencyKey: `CANCELLATION_CLEANUP_INCOMPLETE:${args.dealId ?? args.vehicleRequestId}`,
+      occurrenceKey: failed.map((s) => s.stop).sort().join("+"),
     }).catch((err) => {
       logger.error("[cancellation] could not open the incomplete-cleanup case", {
         error: err instanceof Error ? err.message : String(err),
