@@ -229,6 +229,37 @@ test("a FAILED stop is reported and OWNED, never swallowed", async () => {
   assert.equal(out.outcome, "CANCELLED", "the transaction still cancelled; the CLEANUP is what is incomplete");
 });
 
+test("a cancellation whose stops ALL ran opens NOTHING — the clean path is not an exception", async () => {
+  // THE SYMMETRIC HALF of the test above, and the one that was missing.
+  //
+  // The Phase 10 E2E journey asserted the failure branch by relying on `ESIGN_ENVELOPES`
+  // failing to LOAD in the Playwright harness — an accident of module resolution that CI's
+  // Node 24 runner does not reproduce, so the journey went red there and the CLEAN branch
+  // was never asserted anywhere. Here both branches are forced rather than observed: the
+  // stops are mocked, so "every stop succeeded" is a fact of the fixture, and this test
+  // pins what must follow from it.
+  const { cancelTransaction } = await svc();
+  const out = await cancelTransaction(input);
+
+  assert.ok(
+    out.stops.every((s) => s.ok),
+    `the fixture must make every stop succeed. Failures were: ${out.stops
+      .filter((s) => !s.ok)
+      .map((s) => `${s.stop} (${s.error ?? "unknown"})`)
+      .join("; ")}`,
+  );
+  assert.equal(
+    out.exceptionCode,
+    undefined,
+    "a cancellation that completed every stop has nothing for Operations to finish",
+  );
+  assert.deepEqual(
+    raised.filter((r) => r.code === "CANCELLATION_CLEANUP_INCOMPLETE"),
+    [],
+    "a case opened on a clean cancellation is a queue item nobody can close",
+  );
+});
+
 test("a cancellation the seam DECLINED reports NOT_MOVED, never success", async () => {
   advanceReturns = false;
   const { cancelTransaction } = await svc();

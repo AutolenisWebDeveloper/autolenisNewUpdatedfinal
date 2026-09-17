@@ -183,32 +183,35 @@ test("§24: a cancellation before execution cancels, and stops the auction and i
   expect(request.status).toBe("CANCELLED");
   expect(request.cancelReason).toContain("changed their mind");
 
-  // EVERY STOP EXCEPT ONE SUCCEEDED, AND THE ONE IS A HARNESS ARTIFACT — the same shape
-  // Phase 9's header documents for the completion event.
+  // EVERY STOP EITHER SUCCEEDED OR FAILED ONLY BECAUSE ITS MODULE COULD NOT LOAD.
   //
-  // `ESIGN_ENVELOPES` reaches `buyer-signing.service`, and it fails to LOAD under two
-  // different harnesses for two different reasons — both of them module resolution, and
-  // neither of them a production failure:
+  // `ESIGN_ENVELOPES` is the one stop whose outcome here is a property of the HARNESS
+  // rather than of the product. It imports `buyer-signing.service` at runtime (lazily —
+  // see the stop, which records why a static import would make the whole orchestration
+  // unloadable), and that service reaches `contract-shield/extract-text`, which imports
+  // `server-only`. Whether that import resolves depends on the transform in front of it:
   //
-  //   · under `tsx`: that service imports `contract-shield/extract-text`, which imports
-  //     `server-only`, and that module throws outside a Next server build by design;
-  //   · under Playwright: the stop imports it at RUNTIME so the whole module can be
-  //     loaded by the Node test runner at all, and a runtime `await import("@/…")`
-  //     escapes Playwright's build-time `@/*` mapping — the same transform gap phases
-  //     5-9 record in their own headers for `deal-completion-event.service`.
+  //   · under `tsx`: `server-only` throws outside a Next server build, by design;
+  //   · under Playwright here: a runtime `await import("@/…")` escapes the build-time
+  //     `@/*` mapping and the load fails on a transitive `@/lib/prisma` — the same gap
+  //     phases 5-9 record for `deal-completion-event.service`;
+  //   · on a runner where that mapping DOES reach the module: it loads, the stop runs
+  //     for real against the database, finds no envelope for either signer, and succeeds.
   //
-  // So the assertion names both shapes rather than one, and asserts the CLASS: the stop
-  // failed to load its module. A test that pinned a single message would go red the next
-  // time the harness changed and read as a defect.
-  //
-  // WHAT THE FAILURE PROVED, USEFULLY AND BY ACCIDENT: the orchestration carries a failed
-  // stop rather than swallowing it, every other stop still ran, and §28.3 #8's
-  // "every failure has an owner and a return path" fired for real. That is the behaviour
-  // this phase exists to add, exercised by an actual failure rather than a simulated one.
+  // THE FIRST VERSION OF THIS ASSERTION REQUIRED THE FAILURE, and CI went red on the
+  // third case — a test pinned to an accident of module resolution rather than to a
+  // property of the code, which is the defect the comment it replaced described in the
+  // abstract and then committed. What the product guarantees in EVERY harness is the
+  // class below: no stop fails for a business reason. The failure path itself — §28.3 #8's
+  // "every failure has an owner and a return path" — is proven deterministically with an
+  // injected throw in `lib/services/transaction/__tests__/cancel-transaction.test.ts`
+  // ("a FAILED stop is reported and OWNED, never swallowed"), where nothing depends on
+  // how a module resolves.
   const esign = res.stops.find((s) => s.stop === "ESIGN_ENVELOPES");
+  expect(esign, "the ESIGN_ENVELOPES stop must be REPORTED either way, never omitted").toBeTruthy();
   expect(
-    /Server Component|Cannot find module/.test(esign?.error ?? ""),
-    `expected a module-loading artifact, got: ${esign?.error ?? "(the stop unexpectedly succeeded)"}`,
+    esign!.ok || /Server Component|Cannot find module/.test(esign!.error ?? ""),
+    `ESIGN_ENVELOPES must either succeed or fail only on module loading, got: ${esign!.error ?? "(no error)"}`,
   ).toBe(true);
   expect(
     res.stops.filter((s) => s.stop !== "ESIGN_ENVELOPES").every((s) => s.ok),
@@ -235,13 +238,30 @@ test("§24: a cancellation before execution cancels, and stops the auction and i
   const sent = await prisma.commsOutbox.findFirst({ where: { dealId: f.deal.id, status: "sent" } });
   expect(sent, "a sent message must keep its delivery record").toBeTruthy();
 
-  // §28.3 #8 — the failed stop opened a case naming the subsystem, rather than vanishing.
-  expect(res.exceptionCode).toBe("CANCELLATION_CLEANUP_INCOMPLETE");
+  // §28.3 #8 — a stop that did not complete opens a case NAMING the subsystem rather than
+  // vanishing; and a cancellation whose stops all ran opens NOTHING. Which branch runs is
+  // the harness question above, so both are asserted — the second one is the stronger of
+  // the two and was never reachable while the assertion demanded a failure.
+  const failedStops = res.stops.filter((s) => !s.ok);
   const cleanup = await prisma.queueItem.findFirst({
     where: { dealId: f.deal.id, exceptionCode: "CANCELLATION_CLEANUP_INCOMPLETE" },
   });
-  expect(cleanup, "a stop that did not complete must leave an Operations case").toBeTruthy();
-  expect(cleanup!.requiredAction ?? "").toContain("ESIGN_ENVELOPES");
+  if (failedStops.length > 0) {
+    expect(res.exceptionCode).toBe("CANCELLATION_CLEANUP_INCOMPLETE");
+    expect(cleanup, "a stop that did not complete must leave an Operations case").toBeTruthy();
+    for (const failed of failedStops) {
+      expect(
+        cleanup!.requiredAction ?? "",
+        "the case must name every stop Operations still has to finish by hand",
+      ).toContain(failed.stop);
+    }
+  } else {
+    expect(
+      res.exceptionCode,
+      "every stop ran — a clean cancellation must not open an Operations case",
+    ).toBeUndefined();
+    expect(cleanup, "there is nothing for Operations to finish").toBeNull();
+  }
 });
 
 // ── 2. §24 after execution — THE boundary ───────────────────────────────────
