@@ -38,6 +38,7 @@ import {
 } from "./consent-policy";
 import { generateAndUploadExecutedContract } from "./executed-contract.service";
 import { envelopeSelect, isExecutedArtifactEnabled, normalizeEnvelope } from "./esign-schema-gate";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 const CONTRACT_BUCKET = "dealer-contracts";
 const SIGNING_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
@@ -664,6 +665,32 @@ export async function sweepExpiredEnvelopes(limit = 500): Promise<{ scanned: num
     if (swap.count === 1) {
       expired += 1;
       await writeExceptionAudit(c.dealId, c.id, "ESIGN_ENVELOPE_EXPIRED", "Signing window elapsed");
+
+      // §26 — "Buyer or co-buyer does not sign | Remind, expire at 14 days, permit
+      // reissue." The EXPIRE half has been here since Phase 8; the OWNER half had not.
+      //
+      // `writeExceptionAudit` above is an AUDIT row: it records that the window elapsed.
+      // Nothing sweeps it, nobody is assigned to it, and it carries no deadline — so a
+      // deal whose signing window ran out simply stopped, with the fact written down and
+      // no one told. §26 gives that condition an owner and a return point ("Stage 13 —
+      // signing"), and the queue row is what an operator works from.
+      //
+      // PER ENVELOPE, not per deal. A buyer and a co-buyer each have their own window,
+      // and a deal where one signed and the other did not is a different conversation
+      // from one where neither did — collapsing them would hide which.
+      await raiseException({
+        code: "SIGNATURE_NOT_COMPLETED",
+        dealId: c.dealId,
+        detail: `Signing envelope ${c.id} expired unsigned after the 14-day window. A reissue is permitted — the deal returns to signing.`,
+        idempotencyKey: `SIGNATURE_NOT_COMPLETED:${c.id}`,
+      }).catch((err) => {
+        // The expiry itself already committed. Losing the case is worse than the sweep
+        // failing, but it must not undo an expiry that has been written and audited.
+        logger.error("[esign] could not raise the unsigned-expiry exception", {
+          envelopeId: c.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   }
   return { scanned: candidates.length, expired };
