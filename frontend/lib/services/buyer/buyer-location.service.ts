@@ -40,6 +40,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -169,7 +170,35 @@ export async function geocodeBuyerLocation(buyerId: string, db: Db = prisma): Pr
     logger.error("[buyer-location] geocode failed", { buyerId, error: err instanceof Error ? err.message : String(err) });
     return { geocoded: false, latitude: null, longitude: null, source: null };
   }
-  if (!point) return { geocoded: false, latitude: null, longitude: null, source: null };
+  if (!point) {
+    // §26 — "Onboarding location unusable | Buyer / Operations | Block location-dependent
+    // stages; specific correction task."
+    //
+    // THE DISTINCTION THIS RAISE SITE DEPENDS ON IS ALREADY DRAWN ABOVE, and it is the
+    // whole reason the exception belongs HERE and not in the `catch`. A provider outage
+    // is not an unusable address — the columns stay NULL, the predicate retries, and
+    // nothing is the buyer's fault. THIS branch is different: the provider ANSWERED and
+    // could not place the ZIP. That is an address the buyer has to correct, which is
+    // exactly what §26's row says and what its buyer-visible status tells them.
+    //
+    // Raising in the catch instead would ask a buyer to "correct the highlighted field"
+    // because our geocoder was down.
+    //
+    // Keyed per BUYER, not per attempt: an unusable address is one condition until it is
+    // fixed, however many times a page re-renders and re-attempts the placement.
+    await raiseException({
+      code: "LOCATION_UNUSABLE",
+      buyerId,
+      detail: `The geocoder could not place ZIP ${buyer.zip}. Location-dependent stages are blocked until the address is corrected.`,
+      idempotencyKey: `LOCATION_UNUSABLE:${buyerId}`,
+    }).catch((err) => {
+      logger.error("[buyer-location] could not raise the unusable-location exception", {
+        buyerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    return { geocoded: false, latitude: null, longitude: null, source: null };
+  }
 
   await db.buyer.update({
     where: { id: buyerId },

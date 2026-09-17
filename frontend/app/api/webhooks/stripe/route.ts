@@ -875,6 +875,40 @@ export async function POST(request: NextRequest) {
             `[stripe/webhook] deposit payment attempt declined for PI ${pi.id} — deposit left PENDING; ` +
               `the intent is live and the buyer may retry on it`,
           );
+
+          // §26 — "Payment failure | Buyer | Preserve request; allow safe retry."
+          //
+          // THE BRANCH ABOVE ALREADY DOES THE PRESERVING, and deliberately does nothing
+          // else. What it had no way to do is give the condition an OWNER: a buyer whose
+          // card keeps declining has a live intent, a preserved request, and nobody
+          // looking. §26 gives that a deadline and a return point ("Stage 5 — the $99
+          // checkout"), and this is the row an operator works from.
+          //
+          // KEYED PER INTENT, NOT PER EVENT, and that is what makes it safe here. Stripe
+          // Elements retries on the SAME PaymentIntent, so a buyer tapping retry five
+          // times is one failing obligation and one case — not five. Without that key
+          // this branch would be the noisiest raise site in the system.
+          //
+          // It does NOT change what the buyer is told: the six-touch series still owns
+          // buyer-facing $99 messaging and rechecks live payment state at send time, so
+          // a decline is already covered by the next due touch. No capability moves.
+          const depositBuyerId = pi.metadata.buyerId;
+          if (depositBuyerId) {
+            await raiseException({
+              code: "PAYMENT_FAILURE",
+              buyerId: depositBuyerId,
+              detail:
+                `Stripe declined the deposit on ${pi.id}` +
+                `${pi.last_payment_error?.message ? `: ${pi.last_payment_error.message}` : ""}. ` +
+                `The intent is LIVE and the deposit stays PENDING — the buyer can retry on it, and must not be charged twice.`,
+              idempotencyKey: `PAYMENT_FAILURE:${pi.id}`,
+            }).catch((err) => {
+              logger.error("[stripe/webhook] could not raise the deposit-failure exception", {
+                paymentIntentId: pi.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }
         }
 
         if (pi.metadata.type === "concierge_fee" || pi.metadata.type === "service_fee") {
