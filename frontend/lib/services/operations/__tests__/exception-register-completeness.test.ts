@@ -259,3 +259,56 @@ test("the discharge check itself can fail — proved against a seeded contradict
     `${victim} is discharged and is still being reported as unwired — the two rules disagree`
   );
 });
+
+// ── `blocksTransaction: false` — the OTHER escape hatch, held just as tight ──
+//
+// Added after CI found that a comms-infrastructure row was being read as a transactional
+// hold and stopped every deal completing. The flag is the right fix and is exactly the kind
+// of thing that grows quietly: each new entry is one more condition that no longer stops a
+// transaction, and the list is read by three separate gates.
+
+/** How many rows may be non-blocking. Pinned so a sixth cannot appear in passing. */
+const MAX_NON_BLOCKING_ROWS = 5;
+
+test("a non-blocking row is a narrow, reasoned exception — and the count is pinned", async () => {
+  const { EXCEPTION_CATALOGUE, NON_BLOCKING_EXCEPTION_CODES } = await import(
+    "@/lib/services/operations/exception-catalogue"
+  );
+
+  assert.ok(
+    NON_BLOCKING_EXCEPTION_CODES.length <= MAX_NON_BLOCKING_ROWS,
+    `${NON_BLOCKING_EXCEPTION_CODES.length} register rows are marked \`blocksTransaction: false\`; ` +
+      `the pinned ceiling is ${MAX_NON_BLOCKING_ROWS}. Each one is a condition that no longer stops ` +
+      `a transaction, read by the upgrade suppression, §Stage 20's completion precondition and ` +
+      `pickup readiness alike. Raising this is a decision about what the register means. ` +
+      `Non-blocking: ${NON_BLOCKING_EXCEPTION_CODES.join(", ")}`
+  );
+
+  // A row a BUYER is shown is a row about the buyer's transaction. If it were also
+  // non-blocking the register would be telling them something is wrong while every gate
+  // treats it as fine — which is the contradiction this assertion exists to prevent.
+  for (const code of NON_BLOCKING_EXCEPTION_CODES) {
+    const def = EXCEPTION_CATALOGUE.find((d) => d.code === code)!;
+    assert.ok(def, `${code} is marked non-blocking and is not in the register`);
+    assert.equal(
+      def.buyerVisibleStatus,
+      null,
+      `${code} is marked \`blocksTransaction: false\` AND has buyer-facing copy. A row the buyer ` +
+        `is shown is a row about their transaction; a row about AutoLenis's own plumbing is not ` +
+        `shown to them. One of the two is wrong.`
+    );
+  }
+});
+
+test("the non-blocking set is derived from the register, not restated", async () => {
+  const { EXCEPTION_CATALOGUE, NON_BLOCKING_EXCEPTION_CODES } = await import(
+    "@/lib/services/operations/exception-catalogue"
+  );
+  const derived = EXCEPTION_CATALOGUE.filter((d) => d.blocksTransaction === false).map((d) => d.code);
+  assert.deepEqual(
+    [...NON_BLOCKING_EXCEPTION_CODES],
+    derived,
+    "the exported set must be computed from the entries, so a reader cannot drift from the register — " +
+      "which is the mistake `DEALER_VISIBLE_CODES` made and the second review found"
+  );
+});

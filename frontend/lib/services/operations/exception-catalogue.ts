@@ -83,6 +83,39 @@ export interface ExceptionDefinition {
   /** Where the requirement is stated. */
   readonly specSection: string;
   /**
+   * Does an OPEN row of this kind mean the buyer's TRANSACTION is held?
+   *
+   * Absent means yes, which is the right default for almost every §26 row: the register
+   * exists because a condition stops a purchase moving, and the surfaces that ask "may this
+   * transaction proceed" — `hasOpenException` (the §26 upgrade suppression) and §Stage 20's
+   * `NO_HOLD_OR_DISCREPANCY` precondition — read every open row on the deal or the buyer.
+   *
+   * ── WHY `false` HAS TO EXIST, AND WHAT IT COST TO LEARN ────────────────────
+   *
+   * A handful of rows are not about the transaction at all. They are about AUTOLENIS'S OWN
+   * PLUMBING — a comms idempotency store that could not be reached, a message that could not
+   * be delivered, a provider budget ceiling — or about the register's own machinery, like the
+   * row that RECORDS an upgrade prompt being suppressed. Every one of them is real Operations
+   * work and belongs on the queue. None of them is a reason to stop a buyer completing a
+   * purchase they have paid for, taken delivery of, and confirmed.
+   *
+   * That was not hypothetical. This phase made the comms guard fail CLOSED (defect 5, which
+   * was right — it had been fail-open in three places), so a missing Supabase configuration
+   * raised `COMMS_GUARD_UNAVAILABLE` on every deal transition. Those rows then failed
+   * §Stage 20's precondition, and **the Phase 9 pickup journeys could no longer complete a
+   * deal at all** — eight CI failures whose cause was an infrastructure row being read as a
+   * transactional hold. The second independent review asked about this exact coupling as a
+   * question; CI answered it.
+   *
+   * Refusing to SEND unguarded is correct. Refusing to let the purchase finish is not, and
+   * the difference is this flag.
+   *
+   * Setting it to `false` is deliberately narrow and is asserted by
+   * `exception-register-completeness.test.ts`: the count is pinned and every entry carries
+   * its reason in prose beside it.
+   */
+  readonly blocksTransaction?: false;
+  /**
    * How this row is discharged, when it is NOT discharged by a raise site.
    *
    * ── WHY THIS FIELD EXISTS (Phase 10, §8.3) ────────────────────────────────
@@ -454,6 +487,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   },
   {
     code: "INVENTORY_PROVIDER_BUDGET_CEILING",
+    // NOT a transactional hold — A provider call budget was exhausted. It stops SOURCING, which is its own gate; it says nothing about a deal that already has a dealership, a contract and a vehicle.
+    blocksTransaction: false,
     type: "INVENTORY_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "Inventory provider call budget near or at its ceiling",
@@ -846,6 +881,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   },
   {
     code: "UPGRADE_PROMPT_DURING_OPEN_EXCEPTION",
+    // NOT a transactional hold — Self-referential: this row RECORDS that the suppression fired. Counting it would make the suppression permanent, which is the loop the first review found.
+    blocksTransaction: false,
     type: "PLAN_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "Upgrade prompt fires during an open exception",
@@ -907,6 +944,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   // here and counted separately from the 48.
   {
     code: "COMMS_TERMINAL_FAILURE",
+    // NOT a transactional hold — A message exhausted its attempts. Operations must re-drive it — and the buyer, who may never have received it, must still be able to finish the purchase they have already taken delivery of.
+    blocksTransaction: false,
     type: "COMMS_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "Communication terminal failure",
@@ -933,6 +972,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   // program has spent five phases eliminating."
   {
     code: "COMMS_NO_DELIVERABLE_CHANNEL",
+    // NOT a transactional hold — There is no channel that can reach this recipient. That is a contactability problem for Operations to solve, not a hold on the transaction.
+    blocksTransaction: false,
     // The existing `COMMS_EXCEPTION` label, so no enum migration — and `queue_items.exception_code`
     // is plain TEXT with no CHECK, so no migration at all.
     type: "COMMS_EXCEPTION",
@@ -1006,6 +1047,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
 
   {
     code: "COMMS_GUARD_UNAVAILABLE",
+    // NOT a transactional hold — The subject is a store AutoLenis could not reach. The message was refused rather than sent unguarded, which is correct; stopping the buyer's purchase because of it is not.
+    blocksTransaction: false,
     type: "COMMS_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "A transaction message could not be sent because its idempotency guard was unavailable",
@@ -1085,6 +1128,14 @@ if (BY_CODE.size !== DEFINITIONS.length) {
 export const EXCEPTION_CATALOGUE: readonly ExceptionDefinition[] = DEFINITIONS;
 
 /** Look up a definition, or `undefined` for an uncatalogued code. */
+/**
+ * Codes whose OPEN rows must not gate a transaction. Derived from the register rather than
+ * restated, so a reader cannot drift from it — the mistake `DEALER_VISIBLE_CODES` made.
+ */
+export const NON_BLOCKING_EXCEPTION_CODES: readonly string[] = DEFINITIONS.filter(
+  (d) => d.blocksTransaction === false,
+).map((d) => d.code);
+
 export function findException(code: string): ExceptionDefinition | undefined {
   return BY_CODE.get(code);
 }

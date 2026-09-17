@@ -2975,8 +2975,8 @@ Implemented on `claude/txflow-10-control-plane` from `8f58a151`. This section re
 actually built, what was measured rather than recalled, and what is not done, because a section that
 described the plan would be the drift it exists to prevent.
 
-**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,214 tests,
-5,213 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
+**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,216 tests,
+5,215 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
 in its own skip message). An earlier draft of this section said the chain "stops at the first
 failure — segment 46" and quoted 3,524 tests across 46 suites as an explicitly-not-a-pass figure;
 that was true when written and is superseded here.
@@ -3219,6 +3219,49 @@ in the same position as `prequal_declined`: sent every day on a rail with no ret
 terminal-failure alert, and discharged in the register by a coincidence of naming. Unlike the
 declined notice it carries no FCRA outcome machinery, so it was migrated rather than ledgered.
 **The loose gate was hiding a real gap, which is the argument for the tightening.**
+
+#### AND CI FOUND WHAT NEITHER REVIEW DID — an infrastructure row read as a transactional hold
+
+The second review asked, as a QUESTION rather than a finding: *"`emitDealStatusComms` now fails
+closed when the Supabase pair is absent. Is that pair guaranteed present in every runtime that
+reaches this path? If not, every deal transition opens a `COMMS_GUARD_UNAVAILABLE` row, which
+then feeds `hasOpenException` and blocks upgrades."*
+
+**CI answered it, and the blast radius was larger than the question supposed.** Eight Phase 9
+pickup journeys went red with
+`preconditions_unmet … "1 open exception(s) must be resolved: COMMS_GUARD_UNAVAILABLE"`. The
+rows did not merely block upgrades — §Stage 20's `NO_HOLD_OR_DISCREPANCY` precondition reads
+EVERY open `queue_items` row on the deal, so **no deal could complete at all**.
+
+The chain is worth stating plainly, because every link in it was individually right:
+
+1. Phase 10 defect (5) made the comms idempotency guard fail CLOSED. Correct — it had been
+   fail-open in three places, and sending a transaction message unguarded is worse.
+2. Failing closed raises `COMMS_GUARD_UNAVAILABLE`, an Operations row. Correct — §28.3 #8:
+   every failure has an owner.
+3. In any runtime without a reachable guard store, that fires on EVERY deal transition.
+4. `NO_HOLD_OR_DISCREPANCY` and `hasOpenException` both read every open row on the deal.
+5. So a comms-plumbing outage stopped a buyer completing a purchase they had paid for, taken
+   delivery of and confirmed.
+
+**Fixed at the cause, and as a class.** Whether an open row HOLDS A TRANSACTION is a property
+of the row, so it is recorded with the row: `blocksTransaction: false` on the register entry,
+with its reason in prose. Five rows carry it — the three `COMMS_EXCEPTION` codes, the inventory
+provider budget ceiling, and `UPGRADE_PROMPT_DURING_OPEN_EXCEPTION` (already exempted by the
+first review's fix, now part of the same class). `NON_BLOCKING_EXCEPTION_CODES` is DERIVED from
+the register, and all three gates read it: the upgrade suppression, §Stage 20's completion
+precondition, and pickup readiness.
+
+That last point is the lesson rather than the fix. The answer lived in three places and was
+wrong in two of them, and the reason the first review's `SUPPRESSION_EXEMPT_CODES` did not
+prevent this is that it was a LOCAL list — it fixed one reader of a question three readers ask.
+The gate pins the count at five and refuses any non-blocking row that carries buyer-facing
+copy: a row the buyer is shown is a row about their transaction.
+
+**The Phase 10 journeys were also not in CI.** `ci.yml` names each phase's spec individually —
+its own comment says "a spec that is not named HERE is a spec CI never runs" — and no step
+existed for `phase10-control-plane-journeys.spec.ts` or `advance-deal-status-atomicity.spec.ts`.
+Both passed locally for the whole phase. A step now runs them.
 
 #### The first review's three open questions, answered
 

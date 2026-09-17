@@ -214,11 +214,23 @@ test("a row that RECORDS the suppression does not itself suppress", async () => 
   const notIn = (or.find((c) => c.exceptionCode && typeof c.exceptionCode === "object") ?? {}) as {
     exceptionCode?: { notIn?: string[] };
   };
+  const { NON_BLOCKING_EXCEPTION_CODES } = await import("@/lib/services/operations/exception-catalogue");
   assert.deepEqual(
     notIn.exceptionCode?.notIn,
-    ["UPGRADE_PROMPT_DURING_OPEN_EXCEPTION"],
+    [...NON_BLOCKING_EXCEPTION_CODES],
+    "the exemption is the REGISTER's own classification (`blocksTransaction: false`), not a list " +
+      "this service keeps. §Stage 20's completion precondition and pickup readiness ask the same " +
+      "question, and when the answer lived in three places it was wrong in two of them.",
+  );
+  assert.ok(
+    NON_BLOCKING_EXCEPTION_CODES.includes("UPGRADE_PROMPT_DURING_OPEN_EXCEPTION"),
     "a row whose subject is 'the suppression fired' is evidence the rule worked, not evidence " +
       "that the transaction is stalled",
+  );
+  assert.ok(
+    NON_BLOCKING_EXCEPTION_CODES.includes("COMMS_GUARD_UNAVAILABLE"),
+    "and a comms store AutoLenis could not reach is not a reason to hold a buyer's purchase — " +
+      "CI proved that one by refusing to complete any deal at all",
   );
   assert.ok(
     or.some((c) => c.exceptionCode === null),

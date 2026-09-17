@@ -71,7 +71,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { QueueItem, QueueOwnerRole } from "@prisma/client";
-import { findException } from "./exception-catalogue";
+import { findException, NON_BLOCKING_EXCEPTION_CODES } from "./exception-catalogue";
 import { listOpen, OPEN_QUEUE_STATUSES } from "./queue-item.service";
 
 export type LineageAudience = "BUYER" | "DEALER" | "OPS";
@@ -260,8 +260,18 @@ export async function exceptionLineage(query: LineageQuery): Promise<ExceptionLi
  * suppression fired" is evidence that the rule worked, not evidence that the transaction is
  * stalled. It stays on the Operations queue, where it is what §26 asks for; it simply stops
  * being an input to the predicate that created it.
+ *
+ * ── AND THE CLASS TURNED OUT TO BE BIGGER THAN ONE ROW ──────────────────────
+ *
+ * The list is no longer local. `blocksTransaction: false` lives on the register entries
+ * themselves, and this reads it, because the SAME question is asked by §Stage 20's
+ * `NO_HOLD_OR_DISCREPANCY` precondition and by pickup readiness — and when the answer lived
+ * in three places it was wrong in two of them. CI proved it: the comms guard failing closed
+ * (correctly) opened `COMMS_GUARD_UNAVAILABLE` on every transition where Supabase was not
+ * configured, and those rows stopped deals COMPLETING. Whether a row holds a transaction is a
+ * property of the row, so it is recorded with the row.
  */
-const SUPPRESSION_EXEMPT_CODES: readonly string[] = ["UPGRADE_PROMPT_DURING_OPEN_EXCEPTION"];
+const SUPPRESSION_EXEMPT_CODES: readonly string[] = NON_BLOCKING_EXCEPTION_CODES;
 
 /**
  * Whether this buyer's TRANSACTION is stalled by an open exception right now.
