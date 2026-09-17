@@ -34,7 +34,7 @@
     "test:format": "tsx --test lib/__tests__/format.test.ts lib/__tests__/dealer-route-access.test.ts lib/__tests__/internal-links-resolve.test.ts",
     "test:utils": "tsx --test lib/utils/__tests__/*.test.ts",
     "test:api-client": "tsx --test lib/api/__tests__/client.test.ts",
-    "test:buyer-journey": "tsx --test lib/services/buyer/__tests__/journey.test.ts",
+    "test:buyer-journey": "tsx --test --experimental-test-module-mocks lib/services/buyer/__tests__/journey.test.ts app/api/buyer/requests/__tests__/*.test.ts",
     "test:buyer-nav": "tsx --test lib/services/buyer/__tests__/nav-gating.test.ts",
     "test:buyer-phone": "tsx --test --experimental-test-module-mocks lib/services/buyer/__tests__/buyer-phone-normalization.test.ts",
     "test:buyer-location-backfill": "tsx --test --experimental-test-module-mocks lib/services/buyer/__tests__/location-backfill.test.ts lib/services/buyer/__tests__/defect-1-location-regression.test.ts",

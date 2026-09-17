@@ -2975,8 +2975,8 @@ Implemented on `claude/txflow-10-control-plane` from `8f58a151`. This section re
 actually built, what was measured rather than recalled, and what is not done, because a section that
 described the plan would be the drift it exists to prevent.
 
-**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,192 tests,
-5,191 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
+**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,198 tests,
+5,197 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
 in its own skip message). An earlier draft of this section said the chain "stops at the first
 failure — segment 46" and quoted 3,524 tests across 46 suites as an explicitly-not-a-pass figure;
 that was true when written and is superseded here.
@@ -3132,6 +3132,58 @@ Per CLAUDE.md — "anything that looks obsolete, duplicated, unfinished, mislead
 REPORTED for an owner decision, never deleted" — it is left in place. It is a correct,
 concurrency-safe helper; it is either a missing caller or a redundant export, and which of the two
 is not this phase's call to make.
+
+#### The first review's three open questions, answered
+
+**1. A PAUSED AUCTION CAN BE SILENTLY RESUMED BY THE SOURCING SWEEP. Answered, and it is a
+DEFECT — REPORTED, not fixed here.** Traced end to end:
+
+| # | Where | What happens |
+| --- | --- | --- |
+| 1 | `admin-buyer-command-center.service.ts:907-909` | Pause writes `auction.status ACTIVE → PENDING`. There is no "paused" column; PENDING *is* what a paused auction is, which that code says explicitly. |
+| 2 | `app/api/cron/coverage-hold-reconcile/route.ts:46` | → `sweepSourcingCases` → `driveSourcing` → `launchAuction`. |
+| 3 | `deposit-auction.ts:36-40, 91` | `LIVE_AUCTION_STATUSES` **includes PENDING**, so `findLiveAuctionForDeposit` returns the paused auction. |
+| 4 | `launch-readiness.service.ts:560-569` | The refusal is `existing.status === "ACTIVE"` only. A PENDING row falls through to `auctionId = existing.id`. |
+| 5 | `launch-readiness.service.ts:685-688` | Step 3 flips `status: "PENDING"` → `ACTIVE` with a **fresh `endsAt`** and re-issues invitations. |
+
+The admin's pause is undone, the 48-hour window restarts, and dealerships are re-invited. It is
+**LATENT, not live**: `sweepSourcingCases` stands down entirely while
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is off (`sourcing-driver.service.ts:755-764`), and §8.4
+records that flag as off in production. It becomes live the moment §13-D52 is ruled and the flag
+flips.
+
+Not fixed here because the fix is not local: PENDING carries two meanings — "launching, not yet
+started" and "deliberately held" — and separating them needs either a column or a reading of the
+admin audit log, in Phase 5's launch path. **That is an owner decision about the Phase 5 ladder,
+and §13-D52 is where it belongs.**
+
+**2. Can a BUYER drive a post-execution freeze? Answered: NO, and `AUTOMATED` is correct — but the
+question found a second cancellation writer, which IS fixed here.**
+`DEAL_TRANSITION_ACTORS.FROZEN_PENDING_RELEASE` is `["SYSTEM", "ADMIN"]`, and the only
+buyer-initiated cancellation surface is `POST /api/buyer/requests/[requestId]/cancel`, which accepts
+`SUBMITTED` / `INTAKE` / `ACTIVE_SOURCING` — all pre-deal. A buyer therefore cannot reach
+`cancellationTargetFor`'s freeze branch, and §24's "AutoLenis cannot unilaterally void it" is not
+weakened by excluding them.
+
+What that route DID do was write `vehicleRequest.update({ status: CANCELLED })` directly — the
+identical second-writer shape this phase removed from the admin command centre, with the identical
+consequence: none of §24's stops ran, so a buyer cancelling at ACTIVE_SOURCING left the sourcing
+case OPEN for `sweepSourcingCases` to keep driving, left queued comms queued, and recorded no
+reason. **It now delegates to `cancelTransaction`.** Its own precondition stays FIRST and unchanged:
+the orchestration's stop accepts a wider set of statuses, and delegating without that check would
+have handed buyers a capability by refactor.
+
+**3. Migration ordering. Answered: BOTH migrations MUST be applied BEFORE the application deploy,
+and the ordering is load-bearing rather than conventional.** The cancellation orchestration writes
+`auction_invitations.status = 'CANCELLED'` and `pickups.status = 'CANCELLED'`; those enum labels do
+not exist until `20261215000000_phase10_cancellation_vocabulary` is applied. An application deploy
+that preceded it would not fail at start-up — it would fail at the first cancellation, inside a
+§24 stop, which `runStop` catches and reports as an incomplete cleanup. The transaction would
+cancel with its dealerships still invited and an exception nobody could act on.
+`IMPLEMENTATION-WORKFLOW.md` §8.1a.2 already states "step 4 precedes the application deploy"; this
+is the concrete reason for this wave. `20261215000100_phase10_obligation_unique` has no such
+coupling — it is a constraint, and applying it after the deploy would only leave §13-D60 unenforced
+in the interim — but it ships in the same wave and in the same order.
 
 #### Not done, and not implied to be
 
@@ -4092,6 +4144,31 @@ the document's own internal consistency. It is called out here rather than folde
 below because "the specification did not move" has been true for every prior phase, and a reader of
 the next phase must not inherit that assumption by default. **§1's expected value for the Markdown
 is superseded from this commit forward**; §1's table carries both.
+
+**Re-verified at the close of Phase 10 (2026-09-17).** `sha256sum` over both governing files at the
+Phase 10 close commit:
+
+| File | Expected (post-Phase-8) | Observed at the Phase 10 close | Result |
+| --- | --- | --- | --- |
+| `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | **MATCH** |
+| `AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | **MATCH** |
+
+Neither specification moved while this phase was implemented, so every §-citation in the Phase 10
+record refers to hash-verified text — including the §34 clause Phase 8 corrected, which is inside the
+Markdown's current hash rather than beside it.
+
+**There is no Phase 9 block in this list, and that is a gap rather than a claim.** Phase 9 closed
+without adding one; this phase did not reconstruct it, because a re-verification recorded after the
+fact by a different session is a statement about the file today, not about what Phase 9 read. What
+CAN be said is that the two values above are the ones §1 and the Phase 8 block record, so the file
+has not moved at any point between the Phase 8 close and this one.
+
+**This document's own hash** cannot live inside it. At the Phase 10 close commit — the commit that
+contains this block — `sha256sum docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` is reported in the
+phase report and the pull request, and the next phase verifies against that value before reading
+further. This document DID change during Phase 10, in the places the phase was authorised to
+correct: §8.1 row 10 and §8.3 (76 → 77), §8.2 Phase 10's Rollback and the §13-D14 row (the counter
+measurement and the UNSATISFIED ruling), the new §8.1j AS BUILT section, and this block.
 
 This document itself also changed during Phase 8, deliberately and only where the phase was
 authorised to correct it:
