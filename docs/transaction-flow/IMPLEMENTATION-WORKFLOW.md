@@ -2665,6 +2665,153 @@ applied rather than restated: `tests/e2e/` is globbed by nothing and `check-test
 exempts the Playwright scripts from the `test:all` chain, so a spec that is not named in the
 workflow is a spec CI never runs — which is how Phase 7's fourteen journeys ran by hand only.
 
+### 8.1i Phase 9 — AS BUILT (2026-09-17)
+
+Implemented on `claude/txflow-09-pickup`. This section records how the phase was actually built
+where that differs from how it was planned, and carries the mandatory before → after capability
+map. **Nothing was applied to production and no migration was run.** Both Phase 9 migrations are
+authored and proved on a throwaway loopback database; applying them is the owner's, per run, under
+CLAUDE.md's production-database protocol. The authoring session held **no database credential of
+any kind** — `DATABASE_URL`, `DIRECT_URL` and `PROD_READONLY_URL` were checked absent with
+`[ -n "$VAR" ]` before any database was started — so every statement about production state below
+is taken from the owner's own 20:45 UTC verification and is labelled as such rather than asserted.
+
+#### PR #440 was REBASED ONTO, not absorbed
+
+The owner disclosed at the phase open that `claude/txflow-09-release-token` (PR #440) already
+existed, unmerged, CI green, with three sign-offs, carrying defects 1/2/3/5 and migration
+`20261201000000_phase9_pickup_release_token`. The instruction was to choose, and that "nothing in
+it gets rebuilt from scratch" either way.
+
+**Rebased.** Four evidenced reasons, the first of which was decisive: #440 carries a MIGRATION, and
+a migration that exists on a reviewed branch has a checksum a reviewer has seen. Absorbing its
+content would have produced a second directory with the same intent and a different name, and
+`_prisma_migrations` would then carry whichever ran first — the out-of-band-DDL failure mode §8.1a
+records six instances of. The other three: its review sign-offs attach to commits, not to content,
+so absorbing discards them; its branch is the one CI has already run green; and the release token
+is a dependency of Stage 18, not a parallel concern, so the dependency order is already right.
+
+**The owner's "no migration needed" correction was right and my STOP 1 answer was wrong.** I had
+checked `schema.prisma`, found all four token columns present from the Phase 1 wave, and concluded
+no migration was required. The columns were indeed present. The INDEXES were not — and
+`token_hash` cannot enforce single use without a unique index, which is the property the whole
+service is built on. Checking the schema and not the branch is the error; it is recorded here
+because "the columns exist" and "the constraint exists" are different claims and reading only the
+model conflates them.
+
+#### PHASE 8'S RELEASE GATE WAS PARTIAL, NOT COMPLETE — stated plainly, at the owner's instruction
+
+§8.1h records Phase 8 closing the release gate. **It closed it on ONE rung.** `assertReleaseGates`
+was called where Phase 8's own ladder ended, and Phase 9 found the three gates — insurance, the
+dealership's executed contract, funding clearance — unenforced on every rung Phase 9 added or
+touched. They now run on all four (`RELEASE_GATED_STATUSES`), at WRITE time, on the row as read
+inside the transaction.
+
+This is not a criticism of Phase 8 and it is not a defect Phase 8 introduced: the rungs that were
+ungated did not exist when Phase 8 shipped. It matters because §8.1h can be read as "the release
+gate is closed", and a later phase adding a transition would have inherited that belief without
+inheriting the enforcement — which is precisely what happened between Phase 8 and this phase, and
+was caught only because Phase 9 re-derived the gate rather than trusting the record. **A gate is
+closed on the transitions that existed when it was written, and on no others.**
+
+#### The before → after capability map
+
+Counts reconcile: **34 capabilities accounted for — 8 KEPT · 5 MOVED · 6 REGROUPED · 5 PROGRESSIVE
+· 2 RENAMED · 3 REMOVED · 5 NEW.** (8 + 5 + 6 + 5 + 2 + 3 + 5 = 34.) The three REMOVED each carry
+explicit owner sign-off, named in the table.
+
+> **This line was wrong when first written, and the rule caught it.** The draft read "11 KEPT · …
+> · 4 PROGRESSIVE · 3 NEW", which sums to 34 and matches the row count — and was still wrong in
+> three of its seven figures, because it was written from memory of the work rather than counted
+> from the table. CLAUDE.md's "the counts must reconcile; if they do not, the map is wrong" is
+> normally read as a check on the TOTAL, and a wrong total is the easy half. The per-disposition
+> figures are the half that carries the meaning: a map claiming 3 NEW where the table holds 5 is
+> understating what this phase added, and one claiming 11 KEPT where the table holds 8 is
+> overstating what it left alone. Counted, not recalled.
+
+| # | Capability (before) | After | Disposition |
+| --- | --- | --- | --- |
+| 1 | Dealer scan completes the Deal (`dealer/pickup/scan`) | Scan records HANDOVER only; the buyer's confirmation completes | **REGROUPED** |
+| 2 | Admin `deals/[dealId]/pickup/complete` upserts the Pickup and forces the Deal | Calls the one completion writer; accepts possession evidence | **REGROUPED** |
+| 3 | Admin journey `complete` (stage `pickup`) writes Pickup + forces Deal | Calls `completeJourneyPickup` | **REGROUPED** |
+| 4 | Admin journey `complete-all` (stage `pickup`) — same | Same | **REGROUPED** |
+| 5 | `pickup.service.completePickup` (caller-less fifth writer) | Retired by REFUSING; symbol retained, hazard removed, reported for an owner decision | **REGROUPED** |
+| 6 | `DEAL_STAGE_ADVANCED` reaching COMPLETED | Routed through the guarded seam | **REGROUPED** |
+| 7 | Admin FORCE out of `COMPLETED` (`advanceDealStatus(..., force: true)`) | **Gone.** Replaced by append-only `DealCorrection` | **REMOVED** — owner-ruled, Q4, 2026-09-16 |
+| 8 | `pickups.qr_code_data` — plaintext credential at rest | Cleared by migration; nothing writes it | **REMOVED** — owner-ruled, 2026-09-16 |
+| 9 | `pickups.qr_code_image` — PNG that decodes back to the raw token | Cleared by the same migration | **REMOVED** — owner-ruled, 2026-09-16 (same ruling: "same change, or the hashing is theatre") |
+| 10 | Buyer sees a stored QR image on `/buyer/pickup` | Code REVEALED on demand, minted at that instant | **MOVED** |
+| 11 | `regenerateQr` mints a token for a pickup in ANY state | `reissueReleaseCode` refuses a pickup that is not releasable | **RENAMED** (+ gated) |
+| 12 | `getDealerDealById` selects `qrCodeData` | Field removed from the select | **MOVED** (to `PICKUP_SECRET_FIELDS`, a pinned exclusion) |
+| 13 | `getDealerPickupActions` selects `qrCodeImage` | Same | **MOVED** |
+| 14 | Token generated from `Math.random()` | `crypto.randomBytes(32)`, hashed at rest | **MOVED** |
+| 15 | Token has no `consumed_at` | Single use by compare-and-swap | **PROGRESSIVE** |
+| 16 | Buyer proposes a pickup time | Unchanged | **KEPT** |
+| 17 | Dealer confirms / counters; buyer accepts / counters; strict turn-taking | Unchanged; readiness gate added at the two transitions that reach SCHEDULED | **PROGRESSIVE** |
+| 18 | Two counter rounds then Operations schedules directly | Unchanged — `MAX_PICKUP_COUNTERS = 2` | **KEPT** — owner-ruled, Q1 |
+| 19 | Reschedule a confirmed pickup | Unchanged; now also retires the code and re-arms both reminders | **PROGRESSIVE** |
+| 20 | Proposal/counter SLA nudges (`pickup-confirmation-nudge`) | Unchanged; appointment reminders folded into the same job | **KEPT** |
+| 21 | Admin check-in / mark-arrived | Unchanged | **KEPT** |
+| 22 | Admin pickup scheduling | Unchanged (no longer `force: true`) | **PROGRESSIVE** |
+| 23 | `PICKUP_COMPLETE` Deal status | Retained, deliberately unreachable — §28.1 retires it to a supporting-record fact | **KEPT** |
+| 24 | `PickupStatus.NO_SHOW` enum label | Still unwritten; the no-show path writes `NOT_SCHEDULED` + `no_show_at`/`no_show_party`. Reported, not removed | **KEPT** |
+| 25 | `DealTimeline` / `deal-timeline.service.ts`, zero callers | Untouched; no new timeline built; skill drift recorded (defect 9) | **KEPT** |
+| 26 | Buyer funding-clearance checklist (Stage 14, six items) | Unchanged; the component now also renders Stage 16's and Stage 20's lists | **KEPT** |
+| 27 | Insurance gate on release | Now one of three gates on all four rungs | **PROGRESSIVE** |
+| 28 | Completion email sent inline from the scan route via Resend, no key | Queued through the §27 dispatcher inside the transaction | **MOVED** |
+| 29 | Dealer confirmation notice keyed per DEAL | Keyed per ROUND — a second round can notify | **RENAMED** (key shape) |
+| 30 | Buyer pickup page: no branch for a released vehicle | `HANDOVER_PENDING` renders the possession form | **NEW** |
+| 31 | — | §Stage 19 buyer possession confirmation (route + form) | **NEW** |
+| 32 | — | §Stage 16 thirteen-item readiness list, surfaced to the buyer | **NEW** |
+| 33 | — | §Stage 20 fourteen completion preconditions | **NEW** |
+| 34 | — | §Stage 21 post-completion obligations + overdue sweep + scorecard | **NEW** |
+
+*(Rows 30 and 32 are the SURFACES of 31 and 33. They are itemised separately and counted
+separately because a capability that exists in a service and appears on no screen is not a
+capability a buyer has — which is exactly the defect row 30 records: §Stage 19's route shipped
+earlier in this phase with no branch on `/buyer/pickup` able to reach it.)*
+
+#### The nine Q-items, as resolved
+
+Q1 (counter cap) and Q4 (admin force out of COMPLETED) were **owner rulings** — keep `2`, and
+REMOVE respectively. The re-pin of this document's hash was the third ruling and is recorded in §1.
+The remaining six were resolved as proposed and are recorded here as **stated assumptions**:
+
+- **Q2** — readiness is DERIVED, never stored; `readiness_confirmed_at` and `pickup_ready_at`
+  record WHEN all thirteen last held, which is a different claim from whether they hold now.
+- **Q3** — `PICKUP_COMPLETE` is retained and unreachable. §28.1 L1405 retiring it to "a supporting
+  record fact" settles it without an owner decision, as the owner noted.
+- **Q5** — the release token's expiry is bound to `scheduled_at`, not to the minting moment, with a
+  12-hour grace and a 2-hour floor for a same-day re-issue at the kerb.
+- **Q6** — an Operations-recorded release REVOKES any live code rather than consuming it: consuming
+  would record that a handover happened on that credential, which is false.
+- **Q7** — the canonical completion event is emitted AFTER commit, not inside the transaction,
+  because it runs on the Supabase client and cannot enlist in a Prisma transaction. The residual
+  crash window is REPORTED, not papered over (see below).
+- **Q8** — obligations are opened for the three types derivable at completion; the two that are
+  REPORTS (missing accessories, document correction) are opened on report.
+
+#### What is NOT VERIFIED
+
+- **Every authenticated write path in a browser.** There is no legitimate non-production
+  authenticated environment. The Playwright journeys drive the SERVICES against an isolated
+  loopback database; the buyer pickup page, the possession form and the readiness checklist are
+  **NOT BROWSER-VERIFIED**. What that would need: `E2E_STORAGE_STATE` holding an authenticated
+  buyer session and a running server. CI provides neither, and a spec that always skips is
+  decorative — so none was written.
+- **§Stage 20's "emit the canonical completion event exactly once".** Every completion in the E2E
+  run logs `[deal-completion-event] emit failed (non-fatal)`: the service resolves
+  `@/lib/events/emit` through a RUNTIME `await import()`, which escapes Playwright's build-time
+  path mapping. A harness artefact, covered by unit tests, and **not reported as proven**.
+- **The residual completion crash window.** A crash between COMMIT and the domain-event call leaves
+  a completed Deal whose CRM/affiliate settlement event never fired. Closing it needs the event
+  driven from a durable row — its own change, and Phase 10's control-plane territory.
+- **Postgres 17.6.** Both proof runs ran on 16.13; only the PG16 server binaries are installed and
+  the Docker daemon is not running. CI's `migrations` job asserts its own major version and remains
+  the authority.
+- **The duplicate-hash assertion in `verify.sql`** read 0 of 0 on the proof fixture — falsifiable in
+  principle, not falsified there. Stated rather than glossed.
+
 ### 8.2 Phase scopes
 
 #### Phase 0 — Pre-schema security correction: shut down the authenticated SSN intake

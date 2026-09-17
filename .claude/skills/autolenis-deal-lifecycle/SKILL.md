@@ -31,7 +31,8 @@ signs a contract that was never reviewed.
 ## When this skill activates
 
 - `frontend/lib/services/deal/` (`deal.service.ts`, `service-fee.service.ts`,
-  `deal-risk.service.ts`, `deal-timeline.service.ts`).
+  `deal-risk.service.ts`, `deal-timeline.service.ts` — the last has zero callers,
+  see the drift note at the end).
 - `frontend/lib/services/esign/`, `lib/services/pickup/`,
   `lib/services/trade-in/`, `lib/services/documents/`.
 - Routes under `app/api/buyer/deals/**`, `app/api/admin/deals/**`,
@@ -95,7 +96,10 @@ Off-path terminals: `CANCELLED`, `REFUNDED`.
   `TradeInSubmission` / `TradeInValuation`.
 - **Risk & audit** — `deal-risk.service.ts` (`computeDealRisk`,
   `updateAllDealRisks`) writing `riskScore` / `riskTier`;
-  `deal-timeline.service.ts` (`recordTimelineEvent`, `recordStatusTransition`).
+  `DealStatusHistory`, written by `deal.service.ts` (`advanceDealStatus`),
+  `deal-creation.ts`, `return-to-offers.service.ts` and
+  `pickup/pickup-completion.service.ts`. **`deal-timeline.service.ts` has zero
+  callers and `deal_timeline` is empty — see the drift note at the end.**
 
 ## Core rules & invariants
 
@@ -142,7 +146,8 @@ Off-path terminals: `CANCELLED`, `REFUNDED`.
 5. Run `pnpm test` (covers `lib/services/deal/__tests__`).
 
 **Diagnose a stuck deal**
-1. Read `getDealTimeline(dealId)` — the transition history, not the current row.
+1. Read `DealStatusHistory` for the deal — the transition history, not the current row.
+   **NOT `getDealTimeline(dealId)`. See the drift note at the end of this skill.**
 2. Compare current status against `canTransition` for the expected next step.
 3. Check the stage's gating field: `feePaidAt`, `insuranceStatus` ∈
    `INSURANCE_SATISFIED`, `contractShieldStatus`, `ESignEnvelope.status`,
@@ -191,3 +196,53 @@ Off-path terminals: `CANCELLED`, `REFUNDED`.
 - `autolenis-integrations` — the DocuSign adapter contract.
 - `autolenis-observability-sre` — crons that advance deals; stuck-deal runbooks.
 - `autolenis-domain-model` — exact enum values and relations.
+
+---
+
+## DRIFT NOTE — `deal_timeline` is empty, and this skill used to send you to it
+
+**Recorded at the Phase 9 close, 2026-09-17. Defect (9) of §8.2's Phase 9 list, confirmed in scope
+by the owner with the instruction: record the drift, build no new timeline.**
+
+### What is actually true
+
+`lib/services/deal/deal-timeline.service.ts` exports three functions —
+`recordTimelineEvent`, `getDealTimeline`, `recordStatusTransition` — and **all three have zero
+callers** anywhere in `lib/`, `app/` or `components/`. `recordTimelineEvent` is the only writer of
+the `deal_timeline` table, so **`deal_timeline` is empty and always has been.**
+
+The live record of how a deal moved is **`DealStatusHistory`**, and it has four writers:
+
+| Writer | What it records |
+| --- | --- |
+| `deal.service.ts` → `advanceDealStatus` | every guarded forward transition |
+| `deal-creation.ts` | the deal's first status |
+| `return-to-offers.service.ts` | the send-back |
+| `pickup/pickup-completion.service.ts` | `PICKUP_SCHEDULED → HANDOVER_PENDING` and `→ COMPLETED` (Phase 9) |
+
+`recordStatusTransition` writes to BOTH tables, which is why the two can look interchangeable when
+you read that one function — but nothing calls it, so in practice one table is written by four
+services and the other by nobody.
+
+### Why this mattered enough to correct in place
+
+This skill's "Diagnose a stuck deal" runbook opened with *"Read `getDealTimeline(dealId)` — the
+transition history"*. An engineer following it on a genuinely stuck deal gets an empty array and
+the reasonable conclusion that the deal has no recorded history — when four services have been
+writing its history all along, to a different table.
+
+**That is the repository's named failure class, in a skill rather than in code:** an artefact that
+reports nothing, read as evidence that there was nothing to report. §8.1h of
+`docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` catalogues eight instances of it across nine
+phases — in runtime, in tests, in guards, in the written record, and in the investigation itself.
+This is the same shape, one layer further out: in the guidance an engineer reads *before* the
+investigation.
+
+### What was NOT done
+
+**No new timeline was built, and `deal-timeline.service.ts` was not deleted.** Two unused tables
+would be worse than one, and CLAUDE.md is explicit that dead code is REPORTED for an owner decision
+rather than removed. Whether `deal_timeline` and its service are dropped, or given the writer they
+were designed for, is an owner decision that this note exists to put in front of one.
+
+Until then: **read `DealStatusHistory`. It is the record.**
