@@ -229,11 +229,54 @@ test.describe("removed escalation endpoints", () => {
     expect(res.status(), "POST must no longer be routable").toBeGreaterThanOrEqual(400);
   });
 
-  test("a buyer cannot mint their own pickup QR", async ({ request }) => {
+  // THIS INVARIANT WAS SUPERSEDED ON 2026-09-16. What it guarded against is now structurally
+  // impossible; what it forbade in words is now the only way the feature works.
+  //
+  // WHAT THE ROUTE ACTUALLY WAS. `POST /api/buyer/pickup/[dealId]/qr` existed: added in f9ee800
+  // (2026-09-01) on `claude/deal-completion-autopilot-heb5lg`, removed in the merge 89abb18 the
+  // same day, alongside its sibling `POST /api/buyer/contract-shield/[dealId]` — the two
+  // endpoints this section's header names. It authenticated the buyer and checked ownership, and
+  // its token was `randomBytes(24)`, so neither auth nor weak randomness was the problem. The
+  // escalation was one line: it `upsert`ed the Pickup with `status: "SCHEDULED"` in BOTH the
+  // create and the update branch. A buyer who asked for a code thereby SCHEDULED THEIR OWN
+  // PICKUP — no dealer confirmation, no coordination round-trip — and the response handed back
+  // the raw token in JSON. That is "a buyer deciding something only the system may decide": not
+  // holding a code, but creating the appointment by asking for one.
+  //
+  // WHY THE REPLACEMENT IS NOT THE SAME THING. `POST /api/buyer/pickup/[dealId]/release-code`
+  // writes no status at all. It refuses unless the pickup is ALREADY SCHEDULED / RESCHEDULED /
+  // CHECKED_IN — a state only the dealer's confirmation can produce — and unless the deal can
+  // still reach HANDOVER. (That second condition read "can still reach COMPLETED" until Phase 9
+  // closed `PICKUP_SCHEDULED → COMPLETED`: the two phrasings picked out the same statuses only
+  // while the ladder was flat, and afterwards "can reach COMPLETED" meant HANDOVER_PENDING —
+  // the state reached by CONSUMING a code.) It returns the rendered image and an expiry, never
+  // the raw token. The
+  // buyer can obtain a code for an appointment the system already granted; they cannot grant
+  // themselves the appointment. Owner sign-off for this reversal is tracked on the Phase 9
+  // step-3 PR.
+  test("the retired QR self-issue path is still gone", async ({ request }) => {
     authOnly();
     test.skip(!process.env.E2E_DEAL_ID, "E2E_DEAL_ID not set — needs a deal owned by the test buyer");
     const res = await request.post(`/api/buyer/pickup/${process.env.E2E_DEAL_ID}/qr`);
-    expect(res.status(), "the QR self-issue route must be gone").toBeGreaterThanOrEqual(400);
+    expect(res.status(), "the old QR self-issue route must not come back").toBeGreaterThanOrEqual(400);
+  });
+
+  test("the release-code route refuses an unauthenticated caller", async ({ request }) => {
+    test.skip(!process.env.E2E_DEAL_ID, "E2E_DEAL_ID not set — needs a deal id to address");
+    // Deliberately WITHOUT the buyer storage state: this is the one gate that can be proven
+    // without a session, and it is the one that matters most — minting is a write.
+    const res = await request.post(`/api/buyer/pickup/${process.env.E2E_DEAL_ID}/release-code`, {
+      headers: { cookie: "" },
+    });
+    expect([401, 403], "an anonymous caller must never mint a release credential").toContain(res.status());
+  });
+
+  test("the release-code route refuses a deal the buyer does not own", async ({ request }) => {
+    authOnly();
+    // A deal id that cannot belong to this buyer. Ownership is scoped in the WHERE, so a foreign
+    // deal is indistinguishable from one that does not exist — both 404, neither mints.
+    const res = await request.post("/api/buyer/pickup/00000000-0000-0000-0000-000000000000/release-code");
+    expect(res.status(), "another buyer's deal must not yield a code").toBe(404);
   });
 });
 

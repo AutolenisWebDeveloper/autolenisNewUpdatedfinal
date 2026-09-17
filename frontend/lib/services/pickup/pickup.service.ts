@@ -1,28 +1,64 @@
 // lib/services/pickup/pickup.service.ts
-// System 10 — QR code generation, scheduling, check-in
-// QR uses qrcode npm package — never an external API (D7)
+// System 10 — pickup scheduling, check-in, completion.
+//
+// QR CODES ARE NO LONGER GENERATED OR STORED HERE. Until 2026-09-16 this file built a release
+// credential from `Math.random()`, wrote it to `pickups.qr_code_data` in plaintext and its
+// rendered PNG to `pickups.qr_code_image`. Both columns are cleared by migration
+// 20261201000000 and neither is written any more. The credential is minted by
+// `release-token.service.ts` (CSPRNG, SHA-256 at rest, single-use, expiry bound to the
+// appointment) and rendered on demand — see `reissueReleaseCode` below.
 
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import { PickupStatus } from "@prisma/client";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
-import QRCode from "qrcode";
+import { enterPickupReadiness } from "@/lib/services/pickup/pickup-readiness.service";
 
-// Generate QR payload for vehicle pickup
-function generateQrPayload(dealId: string, pickupId: string): string {
-  return JSON.stringify({
-    type: "autolenis_pickup",
-    dealId,
-    pickupId,
-    nonce: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    issuedAt: new Date().toISOString(),
-  });
+/**
+ * The admin scheduling path refused because §Stage 16's checklist is incomplete.
+ *
+ * Its own error type so the route can map it to a 409 naming the outstanding item, rather than
+ * letting a DealTransitionError reach an operator as a 500 that says only "invalid transition".
+ */
+export class PickupNotReadyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PickupNotReadyError";
+  }
 }
+import { issueReleaseToken, revokeReleaseToken } from "./release-token.service";
+import { renderReleaseQr } from "./qr.service";
 
 export async function schedulePickup(dealId: string, scheduledAt: Date, location: string) {
-  const qrPayload = generateQrPayload(dealId, "pending");
-
-  // Generate QR code image using local qrcode library (D7 — no external API)
-  const qrCodeImage = await QRCode.toDataURL(qrPayload, { width: 300 });
+  // No credential is minted here, deliberately. A token is only useful to whoever HOLDS the raw
+  // value, and a scheduling call has nobody to hand it to — the buyer reveals theirs from the
+  // pickup page, and an administrator reissues one through the reissue route. Minting on a
+  // schedule would burn a token nobody ever sees and, worse, would make a reschedule look like
+  // it had refreshed a code the buyer is still carrying.
+  // ── THE GATE RUNS FIRST, BECAUSE A REFUSAL MUST COST NOTHING ──
+  //
+  // This evaluation used to sit BELOW the upsert and the revoke. A refused scheduling had by
+  // then written the appointment (status SCHEDULED, reminder markers cleared) and retired any
+  // code the buyer was carrying, and `/buyer/pickup` branches on the PICKUP's status rather
+  // than the deal's — so the buyer saw §Stage 16's "before we can book your pickup" checklist
+  // and a confirmed appointment at once, with a reveal button that 409s on a sentence
+  // contradicting itself. `pickup-coordination.service.ts` already orders this correctly; this
+  // is the same rule on the Operations path.
+  //
+  // PHASE 9. `FUNDING_PENDING → PICKUP_SCHEDULED` is no longer an edge — §Stage 16's readiness
+  // evaluation sits between them, and "nothing is scheduled while any item is unmet". This is the
+  // Operations path §Stage 17 describes ("After two unsuccessful counter rounds, Operations
+  // schedules directly"), so it evaluates the same thirteen rather than getting its own rule:
+  // an admin scheduling around the checklist is the bypass the checklist exists to prevent.
+  const readiness = await enterPickupReadiness(dealId, { actorRole: "ADMIN" });
+  if (!readiness.schedulable) {
+    const first = readiness.evaluation.outstanding[0];
+    throw new PickupNotReadyError(
+      first
+        ? `Pickup readiness is incomplete: ${first.detail} (owner: ${first.owner})`
+        : "This deal is not ready for pickup scheduling.",
+    );
+  }
 
   const pickup = await prisma.pickup.upsert({
     where: { dealId },
@@ -31,19 +67,28 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
       status: PickupStatus.SCHEDULED,
       scheduledAt,
       location,
-      qrCodeData: qrPayload,
-      qrCodeImage,
-      qrExpiresAt: new Date(scheduledAt.getTime() + 48 * 3600000),
     },
     update: {
       scheduledAt,
       location,
       status: PickupStatus.SCHEDULED,
-      qrCodeData: qrPayload,
-      qrCodeImage,
-      qrExpiresAt: new Date(scheduledAt.getTime() + 48 * 3600000),
+      // THE APPOINTMENT CHANGED, SO WHAT WAS SENT ABOUT THE OLD ONE NO LONGER APPLIES. Same
+      // reasoning as the token revocation: §Stage 17's 24h and 2h reminders are stamped per
+      // appointment, and leaving the markers set means the NEW time gets no reminders at all —
+      // silently, because a reminder that is never sent looks exactly like one that was not due.
+      reminder24hSentAt: null,
+      reminder2hSentAt: null,
     },
   });
+
+  // Any credential minted for the PREVIOUS time is retired here, for the same reason
+  // `reschedulePickup` retires one: a token's expiry is bound to `scheduledAt`, so re-scheduling
+  // through this upsert would otherwise leave a live code dated to an appointment that no longer
+  // exists. A no-op on a first schedule (nothing minted yet) and non-fatal by design — failing to
+  // revoke must not strand an otherwise-valid scheduling call.
+  await revokeReleaseToken(dealId).catch((e: unknown) =>
+    logger.error(`[pickup] failed to revoke the release token while scheduling deal ${dealId}:`, e),
+  );
 
   // Advance deal status (admin-initiated scheduling — authoritative; records history).
   //
@@ -52,7 +97,7 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
   // financing still IN_PROGRESS — and the dealer's QR scan would then complete it, because the
   // scan's only gate was insurance. That is spot delivery through an admin screen, and it is
   // exactly what §Stage 14 forbids. The transition guard now decides, so scheduling is legal
-  // only from FUNDING_PENDING — after the six-item clearance list.
+  // only from PICKUP_READINESS — after the readiness gate above.
   await advanceDealStatus(dealId, "PICKUP_SCHEDULED", { actorRole: "ADMIN" });
 
   // Notify buyer
@@ -62,7 +107,9 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
       data: {
         buyerId: deal.buyerId,
         title: "Vehicle pickup scheduled",
-        body: `Your pickup is scheduled for ${scheduledAt.toLocaleDateString()}. Your QR code is ready.`,
+        // Says where the code comes from rather than that one is "ready": there is no stored
+        // code to be ready any more, and telling a buyer otherwise sends them looking for it.
+        body: `Your pickup is scheduled for ${scheduledAt.toLocaleDateString()}. Show your pickup code from the pickup page when you arrive.`,
         type: "PICKUP_SCHEDULED",
       },
     }).catch(() => {});
@@ -71,23 +118,29 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
   return pickup;
 }
 
-export async function regenerateQr(dealId: string): Promise<string> {
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
-  if (!pickup) throw new Error("Pickup not found");
+export interface ReissuedReleaseCode {
+  /** Data-URL PNG of the raw token. Return it to the caller; never write it anywhere. */
+  image: string;
+  expiresAt: Date;
+}
 
-  const qrPayload = generateQrPayload(dealId, pickup.id);
-  const qrCodeImage = await QRCode.toDataURL(qrPayload, { width: 300 });
-
-  await prisma.pickup.update({
-    where: { dealId },
-    data: {
-      qrCodeData: qrPayload,
-      qrCodeImage,
-      qrExpiresAt: new Date(Date.now() + 48 * 3600000),
-    },
-  });
-
-  return qrCodeImage;
+/**
+ * Mint a fresh release credential and return its rendered QR — the successor to `regenerateQr`.
+ *
+ * RENAMED, because the contract changed in two ways a caller must see. It can now REFUSE
+ * (`null`) — `regenerateQr` minted a live 48-hour code for a pickup in any state, including one
+ * never scheduled, so an administrator could produce a code that opens a car with no appointment
+ * behind it. And it REVOKES: writing a new hash retires the previous credential, so a reissue is
+ * not an extra code, it is a replacement. A signature change alone would have made both callers
+ * recompile; the name makes the next reader stop.
+ *
+ * Returns null when the pickup does not exist or is not in a releasable state. The caller decides
+ * what to say about that — both current callers answer 409 with the reason.
+ */
+export async function reissueReleaseCode(dealId: string): Promise<ReissuedReleaseCode | null> {
+  const issued = await issueReleaseToken({ dealId });
+  if (!issued) return null;
+  return { image: await renderReleaseQr(issued.rawToken), expiresAt: issued.expiresAt };
 }
 
 export async function checkInPickup(dealId: string): Promise<void> {
@@ -97,28 +150,38 @@ export async function checkInPickup(dealId: string): Promise<void> {
   });
 }
 
-export async function completePickup(dealId: string): Promise<void> {
-  await prisma.pickup.update({
-    where: { dealId },
-    data: { status: PickupStatus.COMPLETED, completedAt: new Date() },
-  });
-
-  // Routes through the guarded seam — enforces the insurance gate before COMPLETED.
-  await advanceDealStatus(dealId, "COMPLETED", { actorRole: "SYSTEM" });
-
-  const deal = await prisma.deal.findUnique({ where: { id: dealId } });
-  if (deal) {
-    await prisma.notification.create({
-      data: {
-        buyerId: deal.buyerId,
-        title: "Pickup complete — congratulations!",
-        body: "Your vehicle has been delivered. Enjoy your new car!",
-        type: "PICKUP_READY",
-      },
-    }).catch(() => {});
-
-    await prisma.buyerActivityEvent.create({
-      data: { buyerId: deal.buyerId, eventType: "DEAL_COMPLETED", title: "Vehicle pickup complete", metadata: { dealId } },
-    }).catch(() => {});
-  }
+/**
+ * RETIRED AT PHASE 9, AND RETIRED BY REFUSING RATHER THAN BY DELETION.
+ *
+ * This was the fifth of §8.2 defect (4)'s five Deal-completion writers and the only one with no
+ * callers, which is exactly why it survived the first pass of the collapse — nothing broke when it
+ * was left alone, and a `grep` for callers finds none, so it reads as harmless.
+ *
+ * IT IS NOT HARMLESS ANY MORE, AND THIS PHASE IS WHAT MADE IT DANGEROUS. Its body wrote
+ * `pickups.status = COMPLETED` and then called `advanceDealStatus(dealId, "COMPLETED")`. Defect
+ * (8) inserted `HANDOVER_PENDING` into the ladder, so `PICKUP_SCHEDULED → COMPLETED` is no longer
+ * a legal transition — the Deal advance would now REFUSE while the Pickup write had already
+ * committed, leaving a pickup marked COMPLETED on a deal that is not. A torn state, produced by a
+ * function that used to work, caused by a change made three files away. That is the shape of thing
+ * an unused export exists to produce.
+ *
+ * It also bypassed every control this phase built: no release token, no identity check, no buyer
+ * confirmation, and none of §Stage 20's fourteen preconditions — an insurance gate alone, which
+ * §Stage 20 counts as one of fourteen.
+ *
+ * WHY IT THROWS INSTEAD OF DELEGATING. Delegating needs an actor and possession evidence that a
+ * `(dealId)` signature cannot supply, and inventing them would manufacture the record of who was
+ * standing at the car. Throwing is the honest answer to a caller that does not exist: the symbol
+ * stays (CLAUDE.md — dead code is REPORTED, never deleted), the hazard does not, and anything that
+ * calls it gets a sentence naming the replacement rather than a corrupt deal.
+ *
+ * REPORTED for an owner decision on removal. Not this phase's to delete.
+ */
+export async function completePickup(dealId: string): Promise<never> {
+  throw new Error(
+    `completePickup(${dealId}) is retired. §Stage 18/19/20 completion runs through ` +
+      "lib/services/pickup/pickup-completion.service.ts: recordDealerRelease() records the " +
+      "dealership's handover, and confirmPossession() completes the Deal against §Stage 20's " +
+      "fourteen preconditions. This function would leave the pickup COMPLETED and the Deal behind it.",
+  );
 }

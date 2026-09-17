@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import AdminDealTabs from "@/components/admin/AdminDealTabs";
 import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ dealId: string }> }
@@ -29,7 +30,10 @@ export default async function AdminDealDetailPage({ params }: Props) {
       offer: { include: { dealer: { include: { user: true } }, auction: { include: { deposit: true } } } },
       contractScans: { orderBy: { scannedAt: "desc" } },
       eSignEnvelopes: { select: LEGACY_ENVELOPE_SELECT },
-      pickup: true,
+      // PROJECTED: this row is handed to AdminDealTabs via
+      // `deal={JSON.parse(JSON.stringify(deal))}`, which puts every column in the RSC payload the
+      // browser receives. `pickup: true` would ship `token_hash` with it.
+      pickup: { select: PICKUP_SAFE_SELECT },
     },
   });
   if (!deal) notFound();

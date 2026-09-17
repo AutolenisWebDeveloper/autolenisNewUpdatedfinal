@@ -159,7 +159,17 @@ test("the allowlist shrinks, never grows, without a deliberate edit", () => {
     //     unsubscribed was re-emailed on every sweep.
     //   · lib/services/acquisition/dealer-opportunity-notification.service.ts — retired
     //     outright under §13-D44; it assembles no dealer pool at all now.
-    95,
+    //
+    // 95 → 94 in Phase 9 (§8.2 defect 7). ONE PATH MIGRATED, a phase ahead of its recorded
+    // `removalPhase: 10`:
+    //   · app/api/dealer/pickup/scan/route.ts — the completion mail went out inline through the
+    //     Resend SDK with no idempotency key and, worse, UN-AWAITED: `resend?.emails.send(...)`
+    //     with no `await` can be dropped entirely when the serverless function returns, so the
+    //     one message telling a buyer their deal is done was the least reliable thing on the
+    //     path. The scan no longer completes anything; the buyer's possession-confirmation
+    //     request and the completion mail are written to `comms_outbox` inside the transaction
+    //     that records the handover, so they survive a crash and retry on their own.
+    94,
     "The direct-send count changed. Going DOWN is the goal — update this number and say which path was migrated. " +
       "Going UP means a new direct send was added and needs justifying."
   );

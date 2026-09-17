@@ -10,6 +10,7 @@ import { PreQualTier } from "@prisma/client";
 import { z } from "zod";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { moveBuyerWorkflowStage } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { completeJourneyPickup } from "@/lib/services/pickup/pickup-completion.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -223,23 +224,14 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     // pickup — create/update Pickup record + advance deal to COMPLETED
+    // §8.2 defect (4). This wrote the Pickup to COMPLETED itself and then forced the Deal to
+    // COMPLETED, which made an admin journey tool one more writer of a release. It goes through
+    // the ONE completion writer now: the release gates, the transaction, the history rows and
+    // both parties' outbox messages are the ones a real handover gets.
     case "pickup": {
       if (!activeDeal) return adminError("NO_DEAL", "No active deal found", 400);
-      const existingPickup = await prisma.pickup.findUnique({
-        where: { dealId: activeDeal.id },
-        select: { id: true },
-      });
-      if (existingPickup) {
-        await prisma.pickup.update({
-          where: { dealId: activeDeal.id },
-          data: { status: "COMPLETED", completedAt: new Date() },
-        });
-      } else {
-        await prisma.pickup.create({
-          data: { dealId: activeDeal.id, status: "COMPLETED", completedAt: new Date() },
-        });
-      }
-      await advanceDeal("COMPLETED");
+      const completed = await completeJourneyPickup(activeDeal.id, adminId);
+      if (!completed.ok) return adminError(completed.code, completed.message, 409);
       action = "JOURNEY_COMPLETE_PICKUP";
       break;
     }

@@ -75,11 +75,15 @@ export interface DealerDealDetail {
   } | null;
   /** Null when the buyer block is populated. Otherwise the firewall's own reason. */
   identityWithheldReason: string | null;
+  // The plaintext release credential was projected here and reached the dealer portal on every
+  // deal in the list — handed to the counterparty the code is supposed to CHALLENGE, before the
+  // buyer ever arrived. Nothing rendered it, which is worse rather than better: the exposure was
+  // in the payload and no screen would have shown a change. The credential is now hashed and
+  // minted on demand; the dealer learns it by scanning.
   pickup: {
     id: string;
     status: "NOT_SCHEDULED" | "SCHEDULED" | "COMPLETE" | string;
     scheduledAt: Date | null;
-    qrCodeData: string | null;
   } | null;
   // Whether the buyer-signed EXECUTED contract copy is available to this dealer.
   // A privacy-safe boolean only (§11) — the storage key/hash and any signer
@@ -167,7 +171,6 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
           id: true,
           status: true,
           scheduledAt: true,
-          qrCodeData: true,
         },
       },
       // Executed-copy availability only — never the storage key/hash or forensic
@@ -256,7 +259,9 @@ export interface DealerPickupAction {
     proposedAt: Date | null;
     proposedBy: string | null;
     counterCount: number;
-    qrCodeImage: string | null;
+    // The rendered QR was projected onto every dealer pickup card. The stored PNG decoded back to
+    // the raw token, so this was the same exposure as the one above wearing a picture. No dealer
+    // screen rendered it either.
   };
 }
 
@@ -286,7 +291,6 @@ export async function getDealerPickupActions(dealerId: string): Promise<DealerPi
           proposedAt: true,
           proposedBy: true,
           counterCount: true,
-          qrCodeImage: true,
         },
       },
     },

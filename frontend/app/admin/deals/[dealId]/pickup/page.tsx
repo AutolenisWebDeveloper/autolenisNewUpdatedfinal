@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { MapPin } from "lucide-react";
 import { AdminPickupActions } from "@/components/admin/AdminPickupActions";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 interface Props { params: Promise<{ dealId: string }> }
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export default async function AdminDealPickupPage({ params }: Props) {
   const admin = await requireAdmin();
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: { buyer: true, pickup: true },
+    include: { buyer: true, pickup: { select: PICKUP_SAFE_SELECT } },
   });
   if (!deal) notFound();
 

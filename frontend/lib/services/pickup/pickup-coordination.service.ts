@@ -17,12 +17,14 @@
 // EXCEPTION for an admin to resolve (via the existing admin schedule route).
 
 import { prisma } from "@/lib/prisma";
+import { enterPickupReadiness } from "@/lib/services/pickup/pickup-readiness.service";
 import { PickupStatus } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { checkPickupTime } from "./availability.service";
-import { generatePickupQr } from "./qr.service";
+import { PICKUP_SAFE_SELECT, type SafePickup } from "./pickup-select";
 import { advanceDealStatus } from "../deal/deal.service";
 import {
+  createNotificationOnce,
   notifyDealerProposed,
   notifyBuyerCountered,
   notifyDealerConfirmed,
@@ -36,8 +38,12 @@ export const PICKUP_ACCEPT_SLA_HOURS = 24; // buyer to accept a dealer counter
 export type Proposer = "BUYER" | "DEALER";
 export type CoordCode = "NOT_FOUND" | "STATE" | "CONFLICT" | "AVAILABILITY" | "CAP";
 export type CoordFail = { ok: false; code: CoordCode; reason: string };
+// `pickup` is the PROJECTED row, not `prisma.pickup.findUnique`'s payload. Six routes return
+// this straight to a browser (`successResponse({ pickup: result.pickup })` in the buyer
+// schedule/reschedule/accept/counter and the dealer propose/confirm routes), and the raw model
+// now carries `token_hash` — see `pickup-select.ts` for why that must not travel.
 export type CoordResult =
-  | { ok: true; pickup: Awaited<ReturnType<typeof prisma.pickup.findUnique>> }
+  | { ok: true; pickup: SafePickup | null }
   | CoordFail;
 
 /** Map a coordination failure code to an HTTP (errorCode, status) pair. */
@@ -51,7 +57,6 @@ export function coordHttp(code: CoordCode): { errorCode: string; status: number 
   }
 }
 
-const QR_TTL_MS = 48 * 60 * 60 * 1000;
 const CONFLICT: CoordResult = {
   ok: false,
   code: "CONFLICT",
@@ -80,7 +85,26 @@ type LoadedDeal = {
 // from: the buyer's signature is no longer the last gate, the six-item funding clearance is.
 // PICKUP_SCHEDULED stays in the set so a re-confirm of an already-scheduled pickup is still
 // idempotent rather than a state error.
-const CONFIRMABLE_DEAL_STATUSES: ReadonlySet<string> = new Set(["FUNDING_PENDING", "PICKUP_SCHEDULED"]);
+/**
+ * Deal statuses from which a pickup round may still be confirmed or accepted.
+ *
+ * `PICKUP_READINESS` WAS MISSING, AND THE GATE THIS PHASE ADDED IS WHAT MADE THAT FATAL. Found by
+ * the Phase 9 adversarial review. `readinessGate` runs BEFORE the pickup compare-and-swap and
+ * advances the Deal `FUNDING_PENDING → PICKUP_READINESS`. If the swap then loses — the other party
+ * acted in the same second, or `settleConfirmation`'s compensating path reverted the pickup — the
+ * Deal is left at PICKUP_READINESS with the pickup back at PROPOSED. Every subsequent confirm or
+ * accept was then refused HERE, one line before the gate that would have let it through, with
+ * "This deal is no longer ready for pickup scheduling". The parties could counter forever and
+ * never schedule; only an admin could unstick it.
+ *
+ * PICKUP_READINESS is the state that means "ready to schedule". Refusing to schedule from it was
+ * the opposite of its meaning.
+ */
+const CONFIRMABLE_DEAL_STATUSES: ReadonlySet<string> = new Set([
+  "FUNDING_PENDING",
+  "PICKUP_READINESS",
+  "PICKUP_SCHEDULED",
+]);
 
 async function loadDeal(dealId: string): Promise<LoadedDeal | null> {
   const deal = await prisma.deal.findUnique({
@@ -104,25 +128,36 @@ async function loadDeal(dealId: string): Promise<LoadedDeal | null> {
 }
 
 /**
- * Run the post-CAS confirmation side effects (QR + deal advance + buyer notif).
+ * Run the post-CAS confirmation side effects (deal advance + buyer notif).
  * These run OUTSIDE the CAS, so `settleConfirmation` wraps this in a compensating
  * transaction: if any side effect throws (e.g. the deal was cancelled between
  * propose and confirm, so advanceDealStatus rejects), the pickup is reverted to
  * its pending state — never left SCHEDULED on a non-advanced deal.
+ *
+ * `scheduledAt` is gone from the signature: it existed only to date the QR expiry this no
+ * longer writes, and a parameter kept "in case" is a parameter the next reader has to prove
+ * unused. The agreed time is already on the row, put there by the CAS.
  */
 async function runConfirmSideEffects(
   dealId: string,
-  scheduledAt: Date,
   actor: Proposer,
   actorId: string | null,
   buyerId: string | null,
+  /**
+   * The `proposedAt` the confirming actor observed — the round token, passed in rather than
+   * re-read. A second `findUnique` here would also have been an AD-HOC select, which
+   * `pickup-select`'s guard refuses on principle: every read of this row in this service goes
+   * through PICKUP_SAFE_SELECT. The value is already in the caller's hand.
+   */
+  roundAt: Date,
 ) {
-  const { data: qrData, image: qrImage } = await generatePickupQr(dealId, "initial");
-  await prisma.pickup.update({
-    where: { dealId },
-    data: { qrCodeData: qrData, qrCodeImage: qrImage, qrExpiresAt: new Date(scheduledAt.getTime() + QR_TTL_MS) },
-  });
-  // Deal advances only here (confirm/accept). Non-forced: FUNDING_PENDING→PICKUP_SCHEDULED
+  // NO CREDENTIAL IS MINTED HERE. This block used to generate a QR payload and store it, plus
+  // its rendered PNG, on the pickup row — which is the plaintext-at-rest defect Phase 9 exists
+  // to close. A release token is only useful to whoever holds the RAW value, and a confirmation
+  // has nobody to hand it to: the buyer reveals theirs from the pickup page, which mints at that
+  // moment. Minting here would spend a token nobody ever sees and immediately retire it again on
+  // the first reveal.
+  // Deal advances only here (confirm/accept). Non-forced: PICKUP_READINESS→PICKUP_SCHEDULED
   // is legal, and advanceDealStatus is idempotent if already advanced.
   await advanceDealStatus(dealId, "PICKUP_SCHEDULED", {
     actorId: actorId ?? undefined,
@@ -132,17 +167,18 @@ async function runConfirmSideEffects(
   // Buyer in-app PICKUP_SCHEDULED notification is caller-owned (advanceDealStatus
   // emits only the SMS for this transition — see acquisition-comms).
   if (buyerId) {
-    await prisma.notification
-      .create({
-        data: {
-          buyerId,
-          type: "PICKUP_SCHEDULED",
-          title: "Pickup confirmed",
-          body: "Your vehicle pickup is confirmed. View the details and your pickup QR code.",
-          actionUrl: "/buyer/pickup",
-        },
-      })
-      .catch(() => {});
+    // §8.2 defect (6), second half. This was a bare create with no key, so a retried
+    // confirmation — the compensating path re-running after a transient failure — left the buyer
+    // with the same notice twice. Keyed per ROUND, like the five emails beside it: a second
+    // proposal round after a missed pickup is a new confirmation and SHOULD notify again.
+    await createNotificationOnce({
+      buyerId,
+      type: "PICKUP_SCHEDULED",
+      title: "Pickup confirmed",
+      body: "Your vehicle pickup is confirmed. Open the pickup page to see the details and show your pickup code when you arrive.",
+      actionUrl: "/buyer/pickup",
+      idempotencyKey: `pickup-confirmed:${dealId}:${roundAt.toISOString()}`,
+    });
   }
 }
 
@@ -153,7 +189,6 @@ async function runConfirmSideEffects(
  */
 async function settleConfirmation(
   dealId: string,
-  scheduledAt: Date,
   actor: Proposer,
   actorId: string | null,
   buyerId: string | null,
@@ -161,14 +196,21 @@ async function settleConfirmation(
   revertProposedAt: Date,
 ): Promise<{ ok: true } | CoordFail> {
   try {
-    await runConfirmSideEffects(dealId, scheduledAt, actor, actorId, buyerId);
+    await runConfirmSideEffects(dealId, actor, actorId, buyerId, revertProposedAt);
     return { ok: true };
   } catch (e) {
     logger.error("[pickup-coord] confirmation side effects failed — compensating:", e);
     await prisma.pickup
       .updateMany({
         where: { dealId, status: PickupStatus.SCHEDULED },
-        data: { status: revertStatus, proposedAt: revertProposedAt, scheduledAt: null, qrCodeData: null, qrCodeImage: null, qrExpiresAt: null },
+        // The token fields are deliberately untouched. A live token is not made safe by
+        // deleting the row's memory of it — it is made safe by the status this revert restores:
+        // `resolveReleaseToken` re-checks the pickup's OWN state and refuses anything outside
+        // SCHEDULED / RESCHEDULED / CHECKED_IN, so a token minted before this revert resolves as
+        // `pickup_not_releasable` from the moment the row goes back to PROPOSED. Stamping
+        // `token_revoked_at` here would instead record a revocation on pickups that never had a
+        // token, which is a different lie.
+        data: { status: revertStatus, proposedAt: revertProposedAt, scheduledAt: null },
       })
       .catch(() => {});
     return { ok: false, code: "STATE", reason: "We couldn't confirm the pickup right now. Please try again." };
@@ -222,11 +264,39 @@ export async function proposePickup(
   });
 
   await notifyDealerProposed(dealId).catch((e: unknown) => logger.error("[pickup-coord] notifyDealerProposed:", e));
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
+  const pickup = await prisma.pickup.findUnique({ where: { dealId }, select: PICKUP_SAFE_SELECT });
   return { ok: true, pickup };
 }
 
 /** Dealer confirms the buyer's pending proposal: PROPOSED → SCHEDULED (CAS). */
+
+/**
+ * §Stage 16's exit condition, enforced where scheduling actually begins.
+ *
+ * "All items true; Deal moves to scheduling" … "Nothing is scheduled while any item is unmet."
+ *
+ * IT RUNS BEFORE THE PICKUP COMPARE-AND-SWAP, not after. Placed in the confirmation side effects
+ * it would refuse a deal whose pickup row had already been moved to SCHEDULED — and, worse, its
+ * return value is discarded there, so the refusal never reached the caller at all. Nothing may
+ * move until the thirteen hold.
+ */
+async function readinessGate(
+  dealId: string,
+  actorId: string | null,
+  actorRole: string,
+): Promise<CoordResult | null> {
+  const readiness = await enterPickupReadiness(dealId, { actorId, actorRole });
+  if (readiness.schedulable) return null;
+  const first = readiness.evaluation.outstanding[0];
+  return {
+    ok: false,
+    code: "STATE",
+    reason: first
+      ? `Pickup cannot be scheduled yet: ${first.detail}`
+      : "This deal is not ready for pickup scheduling yet.",
+  };
+}
+
 export async function confirmPickup(
   dealId: string,
   dealerId: string,
@@ -238,19 +308,30 @@ export async function confirmPickup(
   if (!CONFIRMABLE_DEAL_STATUSES.has(loaded.dealStatus)) {
     return { ok: false, code: "STATE", reason: "This deal is no longer ready for pickup scheduling." };
   }
+  const blocked = await readinessGate(dealId, dealerId, "DEALER");
+  if (blocked) return blocked;
 
   const scheduledAt = loaded.pickup.proposedTime;
   if (!scheduledAt) return CONFLICT;
 
   const res = await prisma.pickup.updateMany({
     where: { dealId, status: PickupStatus.PROPOSED, proposedAt: expectedProposedAt },
-    data: { status: PickupStatus.SCHEDULED, scheduledAt },
+    data: {
+      status: PickupStatus.SCHEDULED,
+      scheduledAt,
+      // THE APPOINTMENT CHANGED, SO WHAT WAS SENT ABOUT THE OLD ONE NO LONGER APPLIES. Same
+      // reasoning as the token revocation: §Stage 17's 24h and 2h reminders are stamped per
+      // appointment, and leaving the markers set means the NEW time gets no reminders at all —
+      // silently, because a reminder that is never sent looks exactly like one that was not due.
+      reminder24hSentAt: null,
+      reminder2hSentAt: null,
+    },
   });
   if (res.count !== 1) return CONFLICT;
 
-  const settled = await settleConfirmation(dealId, scheduledAt, "DEALER", dealerId, loaded.buyerId, PickupStatus.PROPOSED, expectedProposedAt);
+  const settled = await settleConfirmation(dealId, "DEALER", dealerId, loaded.buyerId, PickupStatus.PROPOSED, expectedProposedAt);
   if (!settled.ok) return settled;
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
+  const pickup = await prisma.pickup.findUnique({ where: { dealId }, select: PICKUP_SAFE_SELECT });
   return { ok: true, pickup };
 }
 
@@ -290,7 +371,7 @@ export async function counterAsDealer(
   if (res.count !== 1) return CONFLICT;
 
   await notifyBuyerCountered(dealId).catch((e: unknown) => logger.error("[pickup-coord] notifyBuyerCountered:", e));
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
+  const pickup = await prisma.pickup.findUnique({ where: { dealId }, select: PICKUP_SAFE_SELECT });
   return { ok: true, pickup };
 }
 
@@ -306,20 +387,31 @@ export async function acceptCounter(
   if (!CONFIRMABLE_DEAL_STATUSES.has(loaded.dealStatus)) {
     return { ok: false, code: "STATE", reason: "This deal is no longer ready for pickup scheduling." };
   }
+  const blocked = await readinessGate(dealId, buyerId, "BUYER");
+  if (blocked) return blocked;
 
   const scheduledAt = loaded.pickup.proposedTime;
   if (!scheduledAt) return CONFLICT;
 
   const res = await prisma.pickup.updateMany({
     where: { dealId, status: PickupStatus.DEALER_COUNTERED, proposedAt: expectedProposedAt },
-    data: { status: PickupStatus.SCHEDULED, scheduledAt },
+    data: {
+      status: PickupStatus.SCHEDULED,
+      scheduledAt,
+      // THE APPOINTMENT CHANGED, SO WHAT WAS SENT ABOUT THE OLD ONE NO LONGER APPLIES. Same
+      // reasoning as the token revocation: §Stage 17's 24h and 2h reminders are stamped per
+      // appointment, and leaving the markers set means the NEW time gets no reminders at all —
+      // silently, because a reminder that is never sent looks exactly like one that was not due.
+      reminder24hSentAt: null,
+      reminder2hSentAt: null,
+    },
   });
   if (res.count !== 1) return CONFLICT;
 
-  const settled = await settleConfirmation(dealId, scheduledAt, "BUYER", buyerId, loaded.buyerId, PickupStatus.DEALER_COUNTERED, expectedProposedAt);
+  const settled = await settleConfirmation(dealId, "BUYER", buyerId, loaded.buyerId, PickupStatus.DEALER_COUNTERED, expectedProposedAt);
   if (!settled.ok) return settled;
   await notifyDealerConfirmed(dealId).catch((e: unknown) => logger.error("[pickup-coord] notifyDealerConfirmed:", e));
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
+  const pickup = await prisma.pickup.findUnique({ where: { dealId }, select: PICKUP_SAFE_SELECT });
   return { ok: true, pickup };
 }
 
@@ -357,7 +449,7 @@ export async function counterAsBuyer(
   if (res.count !== 1) return CONFLICT;
 
   await notifyDealerProposed(dealId).catch((e: unknown) => logger.error("[pickup-coord] notifyDealerProposed:", e));
-  const pickup = await prisma.pickup.findUnique({ where: { dealId } });
+  const pickup = await prisma.pickup.findUnique({ where: { dealId }, select: PICKUP_SAFE_SELECT });
   return { ok: true, pickup };
 }
 

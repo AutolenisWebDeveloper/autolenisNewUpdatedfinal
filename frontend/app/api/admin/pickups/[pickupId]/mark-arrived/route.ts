@@ -12,7 +12,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const pickup = await prisma.pickup.findUnique({ where: { id: pickupId } });
+  const pickup = await prisma.pickup.findUnique({ where: { id: pickupId }, select: { id: true, dealId: true } });
   if (!pickup) return adminError("NOT_FOUND", "Pickup not found", 404);
 
   await checkInPickup(pickup.dealId);

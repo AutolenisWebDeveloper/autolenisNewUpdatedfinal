@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { schedulePickup } from "@/lib/services/pickup/pickup.service";
+import { schedulePickup, PickupNotReadyError } from "@/lib/services/pickup/pickup.service";
 import { checkPickupTime } from "@/lib/services/pickup/availability.service";
 import {
   sendPickupReadyEmail,
@@ -64,7 +64,17 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
   }
 
-  await schedulePickup(dealId, scheduledDate, location);
+  try {
+    await schedulePickup(dealId, scheduledDate, location);
+  } catch (err) {
+    // §Stage 16: "Nothing is scheduled while any item is unmet." Mapped to a 409 that NAMES the
+    // outstanding item and its owner — an operator who is told only "invalid transition" has no
+    // way to find out whose move it is.
+    if (err instanceof PickupNotReadyError) {
+      return adminError("PICKUP_NOT_READY", err.message, 409);
+    }
+    throw err;
+  }
 
   await createAuditLog(admin, request, {
     action: "PICKUP_SCHEDULED",

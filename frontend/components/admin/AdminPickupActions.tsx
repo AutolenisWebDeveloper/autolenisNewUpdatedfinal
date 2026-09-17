@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
+import { isReleaseCodeIssuable } from "@/lib/services/pickup/pickup-statuses";
 
 interface Props {
   dealId: string;
@@ -25,6 +26,10 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
   const [scheduleModal, setScheduleModal] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{ action: string; label: string; requiresReason?: boolean } | null>(null);
   const [confirmReason, setConfirmReason] = useState("");
+  // The reissued code lives in component state for as long as this modal is open and is never
+  // stored. It used to be a column on the pickup row, permanently readable by anyone with
+  // database access — which is the exposure migration 20261201000000 closes.
+  const [issuedCode, setIssuedCode] = useState<{ image: string; expiresAt: string } | null>(null);
   const [scheduleForm, setScheduleForm] = useState({
     scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString().slice(0, 16) : "",
     location: location ?? "",
@@ -72,8 +77,13 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
     setLoading(action); setError(null);
     try {
       if (action === "regenerate-qr") {
-        await post(`/api/admin/deals/${dealId}/pickup/regenerate-qr`);
-        showToast("QR code regenerated", "success");
+        const data = await post(`/api/admin/deals/${dealId}/pickup/regenerate-qr`) as {
+          data?: { releaseCodeImage?: string; expiresAt?: string };
+        };
+        if (data?.data?.releaseCodeImage && data.data.expiresAt) {
+          setIssuedCode({ image: data.data.releaseCodeImage, expiresAt: data.data.expiresAt });
+        }
+        showToast("New pickup code issued — the previous one no longer works", "success");
       } else if (action === "complete") {
         // Calls the pre-existing route at app/api/admin/deals/[dealId]/pickup/complete/route.ts
         await post(`/api/admin/deals/${dealId}/pickup/complete`, { reason: confirmReason.trim() || "Marked complete by admin" });
@@ -156,6 +166,25 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
         </div>
       )}
 
+      {issuedCode && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4 text-center" data-testid="issued-pickup-code">
+            <h2 className="font-bold text-slate-900 mb-1">New pickup code</h2>
+            <p className="text-xs text-slate-500 mb-4">
+              Shown once. Closing this window does not invalidate it, but issuing another code does —
+              only the most recent code works.
+            </p>
+            <img src={issuedCode.image} alt="Pickup code" className="mx-auto w-40 h-40" data-testid="issued-pickup-code-image" />
+            <p className="text-xs text-slate-500 mt-3">
+              Valid until {new Date(issuedCode.expiresAt).toLocaleString()}
+            </p>
+            <div className="flex justify-center mt-4">
+              <Button size="sm" variant="secondary" onClick={() => setIssuedCode(null)}>Done</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-2 pt-2 flex-wrap" data-testid="admin-pickup-actions">
         {isCompleted ? (
           <p className="text-sm text-slate-500 italic">No actions available — pickup is completed.</p>
@@ -168,9 +197,12 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
             )}
             {pickupStatus && pickupStatus !== "COMPLETED" && (
               <>
+                {/* Gated on the same list the server gates on — see AdminPickupListActions. */}
                 <Button size="sm" variant="secondary" data-testid="regenerate-qr-admin-btn"
-                  onClick={() => { setError(null); setConfirmReason(""); setConfirmModal({ action: "regenerate-qr", label: "Regenerate QR Code" }); }}>
-                  Regenerate QR Code
+                  disabled={!isReleaseCodeIssuable(pickupStatus)}
+                  title={isReleaseCodeIssuable(pickupStatus) ? undefined : `A pickup code needs a confirmed time — this pickup is ${pickupStatus?.replace(/_/g, " ").toLowerCase()}.`}
+                  onClick={() => { setError(null); setConfirmReason(""); setConfirmModal({ action: "regenerate-qr", label: "Issue New Code" }); }}>
+                  Issue New Pickup Code
                 </Button>
                 <Button size="sm" variant="ghost" data-testid="mark-completed-btn"
                   disabled={!mayComplete}

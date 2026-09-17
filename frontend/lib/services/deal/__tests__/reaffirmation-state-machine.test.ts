@@ -78,10 +78,13 @@ test("both new stages remain cancellable — §Stage 10's failure path needs it"
   }
 });
 
-test("Phase 8's stages are still fail-closed — this phase did not open an edge it does not own", () => {
-  // A scope check as much as a behaviour one: DEALER_EXECUTED, FUNDING_PENDING, PICKUP_READINESS,
-  // HANDOVER_PENDING and FROZEN_PENDING_RELEASE belong to Phases 8 and 9 and must still have no
-  // forward exit after this phase.
+test("Phase 7 still opened no edge it does not own — now read against Phase 9's ladder", () => {
+  // A scope check as much as a behaviour one. PHASE 9 GAVE THREE OF THESE STATES THEIR EXITS, so
+  // the assertion is no longer "these have no forward exit" — that sentence was true only while
+  // Phase 9 was unbuilt, and leaving it would have made this test fail for the right reason and
+  // be "fixed" by deleting it. What it still checks is the part that was never Phase 7's or
+  // Phase 9's to open: none of these states may jump BACKWARD into the contract/financing
+  // gauntlet, and none may reach COMPLETED except through handover.
   for (const from of [
     "DEALER_EXECUTED",
     "FUNDING_PENDING",
@@ -89,8 +92,14 @@ test("Phase 8's stages are still fail-closed — this phase did not open an edge
     "HANDOVER_PENDING",
     "FROZEN_PENDING_RELEASE",
   ] as DealStatus[]) {
-    for (const to of ["FINANCING_PENDING", "CONTRACT_PENDING", "COMPLETED", "SIGNED"] as DealStatus[]) {
+    for (const to of ["FINANCING_PENDING", "CONTRACT_PENDING", "SIGNED"] as DealStatus[]) {
       assert.equal(canTransition(from, to), false, `${from} → ${to} is not Phase 7's to open`);
     }
   }
+  // COMPLETED, specifically: reachable from HANDOVER_PENDING (Phase 9's own edge) and from
+  // nowhere else in this set.
+  for (const from of ["DEALER_EXECUTED", "FUNDING_PENDING", "PICKUP_READINESS", "FROZEN_PENDING_RELEASE"] as DealStatus[]) {
+    assert.equal(canTransition(from, "COMPLETED"), false, `${from} → COMPLETED must go through handover`);
+  }
+  assert.equal(canTransition("HANDOVER_PENDING", "COMPLETED"), true, "and handover IS the way through");
 });

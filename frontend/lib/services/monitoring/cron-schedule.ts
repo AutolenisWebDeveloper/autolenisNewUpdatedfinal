@@ -89,6 +89,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "saved-search-match": { intervalMinutes: 6 * HOUR }, // migrated off Inngest cron `0 */6 * * *`
   "amips-generate": { intervalMinutes: 8 * HOUR }, // 06,14,22 → 8h max gap
   // ── daily ──
+  "post-completion-obligations": { intervalMinutes: DAY }, // §Stage 21 overdue sweep
   "apollo-ledger-rollover": { intervalMinutes: DAY },
   "dealer-contact-backfill": { intervalMinutes: DAY }, // B′ — off-peak; no-op until Apollo is enabled
 

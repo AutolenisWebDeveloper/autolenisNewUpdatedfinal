@@ -1186,3 +1186,136 @@ registerStateRecheck(
   PHASE_8_TEMPLATES.PREMIUM_ELECTION_REVERTED,
   alwaysSend("A plan changed and money stopped being due. §23.5 requires the buyer be told, and a reversion cannot become un-reverted."),
 );
+
+// ── PHASE 9 — §27.1's pickup, handover and completion rows ──────────────────────────────────
+//
+// Only the three the handover/completion path actually sends are declared here. The remaining
+// §27.1 Phase 9 rows (readiness blocked, proposal/counter, confirmed, 24h/2h approaching,
+// rescheduled, handover blocked, obligation follow-up) are declared as their senders land — a
+// template constant with no sender is a §27.1 row that LOOKS wired and is not, which is the
+// completeness claim Phase 10 has to audit.
+export const PHASE_9_TEMPLATES = {
+  /** §27.1 "Dealer releases vehicle → Buyer → Possession-confirmation request". */
+  VEHICLE_RELEASED: "pickup_vehicle_released",
+  /** §27.1 "Buyer confirms possession → Buyer + dealership → Completion confirmation". */
+  POSSESSION_CONFIRMED: "pickup_possession_confirmed",
+  /** §27.1 "Deal completed → Buyer, dealership, AutoLenis → Executed contract, receipt, support information". */
+  DEAL_COMPLETED: "deal_completed",
+} as const;
+
+/**
+ * The release notice chases a possession confirmation. Once the Deal is COMPLETED the buyer has
+ * confirmed, and asking again is asking for something already done — the exact class of stale
+ * message §27's recheck exists to stop.
+ */
+const skipIfPossessionConfirmed: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: true };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, possessionConfirmedAt: true },
+  });
+  if (!deal) return { proceed: false, reason: "deal no longer exists" };
+  if (deal.possessionConfirmedAt || deal.status === "COMPLETED") {
+    return { proceed: false, reason: "the buyer has already confirmed possession" };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(PHASE_9_TEMPLATES.VEHICLE_RELEASED, skipIfPossessionConfirmed);
+registerStateRecheck(
+  PHASE_9_TEMPLATES.POSSESSION_CONFIRMED,
+  alwaysSend("The buyer took possession. §Stage 20 makes completion terminal and corrections append-only, so the fact this reports cannot become untrue."),
+);
+registerStateRecheck(
+  PHASE_9_TEMPLATES.DEAL_COMPLETED,
+  alwaysSend("This carries the executed contract, the receipt and the support route. It is the buyer's record of the transaction; a completed deal cannot un-complete."),
+);
+
+/**
+ * §Stage 21's two chase messages. Separate keys because they say opposite things to the two
+ * parties — the buyer is told they need do nothing, the dealership is told the entry lands on
+ * its scorecard — and §27 partitions rails by `template_key`, so one key for both would put a
+ * dealership's message on the buyer's rail.
+ */
+export const POST_COMPLETION_TEMPLATES = {
+  /** §Stage 21: "Overdue obligations notify the buyer …" */
+  OBLIGATION_OVERDUE_BUYER: "post_completion_obligation_overdue_buyer",
+  /** "… and the dealership" */
+  OBLIGATION_OVERDUE_DEALER: "post_completion_obligation_overdue_dealer",
+} as const;
+
+/**
+ * THE ONE PLACE IN PHASE 9 WHERE A RECHECK IS NOT `alwaysSend`, and the reason is the delay.
+ * The sweep marks a row OVERDUE and enqueues; the outbox drains some minutes later. A dealership
+ * that resolves the obligation inside that window would receive "this is overdue and registers
+ * on your scorecard" about something it has just fixed — the exact class of stale message §27's
+ * recheck exists to stop. Keyed on the OBLIGATION, not the deal, because a deal can carry several
+ * and resolving one says nothing about the others.
+ *
+ * THE ID TRAVELS IN THE PAYLOAD, and the alternative was worse. The obligation id is in the
+ * outbox row's `idempotency_key`, but `StateRecheckContext` does not carry it — reaching it would
+ * mean widening the claim query's RETURNING clause, the `ClaimedRow` type and the context, all in
+ * Phase 8's dispatcher, which every transactional message in the platform passes through. A
+ * documented key in the payload is a smaller change than editing that path for one recheck. The
+ * mail rail reads `email`, `subject` and `html` and ignores the rest.
+ *
+ * FAILS OPEN, not closed, on a missing id: a chase message that goes out when it need not have
+ * is an annoyance, while one suppressed because a key was renamed is an overdue obligation
+ * nobody is told about.
+ */
+const skipIfObligationResolved: StateRecheckFn = async (ctx) => {
+  const obligationId = typeof ctx.payload.obligationId === "string" ? ctx.payload.obligationId : null;
+  if (!obligationId) return { proceed: true };
+  const obligation = await ctx.db.postCompletionObligation.findUnique({
+    where: { id: obligationId },
+    select: { status: true },
+  });
+  if (!obligation) return { proceed: false, reason: "the obligation no longer exists" };
+  if (obligation.status === "RESOLVED") {
+    return { proceed: false, reason: "the dealership resolved the obligation before this was sent" };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(POST_COMPLETION_TEMPLATES.OBLIGATION_OVERDUE_BUYER, skipIfObligationResolved);
+registerStateRecheck(POST_COMPLETION_TEMPLATES.OBLIGATION_OVERDUE_DEALER, skipIfObligationResolved);
+
+/**
+ * §Stage 17's two appointment reminders. Separate keys because the 2-hour one is the last thing
+ * a buyer reads before they travel and §27 partitions rails by `template_key` — a 24-hour
+ * reminder stuck behind a slow rail must not delay it.
+ */
+export const PICKUP_REMINDER_TEMPLATES = {
+  APPOINTMENT_24H: "pickup_appointment_reminder_24h",
+  APPOINTMENT_2H: "pickup_appointment_reminder_2h",
+} as const;
+
+/**
+ * "Here is what to bring to your pickup" is worthless once the pickup has happened, and worse
+ * than worthless once the deal is cancelled — a buyer told to bring a cashier's cheque to a
+ * dealership for a car they no longer have is the clearest possible version of the stale message
+ * §27 exists to stop. Both legs are checked against the DEAL's state rather than the pickup's,
+ * because `cancelDeal` never touches the Pickup row: a deal cancelled at PICKUP_SCHEDULED leaves
+ * `pickups.status` reading SCHEDULED forever, which the release-token service already documents.
+ */
+const skipIfPickupNoLongerAhead: StateRecheckFn = async (ctx) => {
+  if (!ctx.dealId) return { proceed: true };
+  const deal = await ctx.db.deal.findUnique({
+    where: { id: ctx.dealId },
+    select: { status: true, pickup: { select: { dealerReleasedAt: true, noShowAt: true } } },
+  });
+  if (!deal) return { proceed: false, reason: "deal no longer exists" };
+  if (deal.status !== "PICKUP_SCHEDULED") {
+    return { proceed: false, reason: `the deal is ${deal.status}, not awaiting a pickup` };
+  }
+  if (deal.pickup?.dealerReleasedAt) {
+    return { proceed: false, reason: "the dealership has already released the vehicle" };
+  }
+  if (deal.pickup?.noShowAt) {
+    return { proceed: false, reason: "the appointment was recorded as missed and is being rescheduled" };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(PICKUP_REMINDER_TEMPLATES.APPOINTMENT_24H, skipIfPickupNoLongerAhead);
+registerStateRecheck(PICKUP_REMINDER_TEMPLATES.APPOINTMENT_2H, skipIfPickupNoLongerAhead);

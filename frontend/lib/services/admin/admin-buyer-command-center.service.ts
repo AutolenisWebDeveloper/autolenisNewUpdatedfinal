@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { advanceDealStatus, canTransition, cancelDeal } from "@/lib/services/deal/deal.service";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -358,7 +359,7 @@ export async function getAdminBuyerDetailData(buyerId: string) {
           // advance because the co-buyer's envelope was never created. The question the
           // screen must ask is "is every REQUIRED signer done?", and that needs this flag.
           coBuyer: { select: { isRequiredSigner: true } },
-          pickup: true,
+          pickup: { select: PICKUP_SAFE_SELECT },
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },
           contractScans: { orderBy: { scannedAt: "desc" }, take: 1 },
@@ -532,7 +533,6 @@ export async function getAdminBuyerDetailData(buyerId: string) {
             scheduledAt: d.pickup.scheduledAt?.toISOString() ?? null,
             completedAt: d.pickup.completedAt?.toISOString() ?? null,
             location: d.pickup.location,
-            qrCodeImage: d.pickup.qrCodeImage,
           }
         : null,
       financing: d.financing

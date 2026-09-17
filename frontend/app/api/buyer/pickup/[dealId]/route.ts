@@ -7,6 +7,7 @@ import { reschedulePickup } from "@/lib/services/pickup/scheduling.service";
 import { proposePickup, coordHttp } from "@/lib/services/pickup/pickup-coordination.service";
 import { allSignedFrom, requiredKindsFrom } from "@/lib/services/esign/required-signers";
 import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -14,7 +15,13 @@ export async function GET(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
-  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { pickup: true } });
+  // PROJECTED, not `pickup: true`. This response goes to the buyer's browser, and the raw row
+  // now carries `token_hash` — the buyer is the token's subject, but a hash on the wire is an
+  // offline oracle for anyone who reads it there (see pickup-select.ts).
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, buyerId: buyer.id },
+    include: { pickup: { select: PICKUP_SAFE_SELECT } },
+  });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
   return successResponse({ pickup: deal.pickup, dealStatus: deal.status });
 }
@@ -120,7 +127,7 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
   const deal = await prisma.deal.findFirst({
     where:   { id: dealId, buyerId: buyer.id },
-    include: { pickup: true },
+    include: { pickup: { select: PICKUP_SAFE_SELECT } },
   });
   if (!deal)        return errorResponse("NOT_FOUND", "Deal not found", 404);
   if (!deal.pickup) return errorResponse("NOT_FOUND", "No pickup scheduled", 404);

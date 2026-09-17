@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import AdminContractUpload from "@/components/admin/AdminContractUpload";
 import { Badge } from "@/components/ui/badge";
+import { isReleaseCodeIssuable } from "@/lib/services/pickup/pickup-statuses";
 import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/kit";
@@ -42,10 +43,31 @@ const DEAL_STAGES = [
   // so the dropdown's only option 409'd and there was no admin route back onto the ladder
   // at all. The warning above this list exists because Phase 7 learned the same lesson.
   "DEALER_EXECUTED", "FUNDING_PENDING",
-  "PICKUP_SCHEDULED", "PICKUP_COMPLETE", "COMPLETED",
+  // §8.2 Phase 9. The ladder gained TWO rungs — PICKUP_READINESS (Stage 16) and HANDOVER_PENDING
+  // (Stage 18) — and this list was not updated, so the console could no longer reach either and
+  // still offered two stages the map refuses. Found by the Phase 9 adversarial review; the same
+  // lesson the warning above this list records, three phases running.
+  "PICKUP_READINESS", "PICKUP_SCHEDULED", "HANDOVER_PENDING",
+  // PICKUP_COMPLETE IS GONE FROM THIS LIST, NOT FROM THE ENUM. §28.1 retires it to a supporting
+  // record fact and `deal.service.ts` keeps it in the map deliberately unreachable, so offering
+  // it here could only ever produce a 409 an operator cannot act on.
+  //
+  // COMPLETED IS GONE TOO, AND THAT IS THE POINT OF THE PHASE. A deal is completed by recording
+  // the buyer's possession, not by advancing a status, because reaching it here evaluated three
+  // of §Stage 20's fourteen preconditions and left `completed_at` NULL.
+  //
+  // THE ENFORCEMENT IS AT THE ROUTE, not in `advanceDealStatus`. `POST /api/admin/deals/
+  // [dealId]/action` refuses `newStatus === COMPLETED` with USE_COMPLETION_PATH. The transition
+  // map still contains `HANDOVER_PENDING → COMPLETED` and `PICKUP_COMPLETE → COMPLETED` on
+  // purpose: `advanceDealStatus` is the canonical emitter of the completion event, and the
+  // completion service itself goes through it. Putting the refusal inside that function would
+  // break the one path that is supposed to reach COMPLETED. Dropping the value from this list is
+  // the UX half; the route is the control. The capability is not lost: it moved to the buyer's confirmation,
+  // and to `POST /api/admin/deals/[dealId]/pickup/complete` for an Operations-coordinated
+  // handover, which collects the possession evidence §Stage 20 requires.
 ];
 
-interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null } | null; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelopes: Array<{ status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null; signerKind?: string | null }>; pickup: { status: string; scheduledAt: string | null; location: string | null; qrCodeImage: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }
+interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null } | null; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelopes: Array<{ status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null; signerKind?: string | null }>; pickup: { status: string; scheduledAt: string | null; location: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }
 interface TimelineItem { stage: string; timestamp: string; description: string }
 interface AuditLogItem { id: string; action: string; adminEmail: string; reason: string | null; createdAt: string }
 
@@ -330,10 +352,16 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
                 <div className="flex justify-between"><span className="text-slate-500">Status</span><Badge variant={deal.pickup.status === "COMPLETED" ? "green" : "blue"}>{deal.pickup.status.replace(/_/g, " ")}</Badge></div>
                 {deal.pickup.scheduledAt && <div className="flex justify-between"><span className="text-slate-500">Scheduled</span><span>{new Date(deal.pickup.scheduledAt).toLocaleDateString()}</span></div>}
                 {deal.pickup.location && <div className="flex justify-between"><span className="text-slate-500">Location</span><span>{deal.pickup.location}</span></div>}
-                {deal.pickup.qrCodeImage && (
+                {/* The stored QR image is gone — it decoded back to the buyer's release credential,
+                    so keeping it readable here defeated hashing it (migration 20261201000000).
+                    Codes are issued on demand and shown once; this links to where. */}
+                {isReleaseCodeIssuable(deal.pickup.status) && (
                   <div className="mt-4">
-                    <p className="text-xs text-slate-400 mb-2">QR Code</p>
-                    <img src={deal.pickup.qrCodeImage} alt="Pickup QR" className="w-32 h-32" />
+                    <p className="text-xs text-slate-400 mb-2">Pickup code</p>
+                    <a href={`/admin/deals/${deal.id}/pickup`} data-testid="pickup-code-link"
+                       className="text-xs font-semibold text-blue-600 hover:underline">
+                      Issue a new pickup code →
+                    </a>
                   </div>
                 )}
               </div>

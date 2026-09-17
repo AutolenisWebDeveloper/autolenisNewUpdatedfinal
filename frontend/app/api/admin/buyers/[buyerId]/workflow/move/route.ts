@@ -12,7 +12,17 @@ import { moveBuyerWorkflowStage } from "@/lib/services/admin/admin-buyer-command
 
 interface Props { params: Promise<{ buyerId: string }> }
 
-// Permitted target stages for admin move — excludes terminal states handled by dedicated routes
+// Permitted target stages for admin move — excludes terminal states handled by dedicated routes.
+//
+// PHASE 9 CHANGED THE LADDER UNDER THIS LIST. §Stage 16 inserted PICKUP_READINESS between
+// FUNDING_PENDING and PICKUP_SCHEDULED, and §Stage 18 inserted HANDOVER_PENDING before
+// completion. This route calls `moveBuyerWorkflowStage` with `force = false`, so the transition
+// guard decides: without PICKUP_READINESS in the list, "move to PICKUP_SCHEDULED" 422s from every
+// state except one an operator could not reach from here, and PICKUP_COMPLETE — retired by §28.1
+// to a supporting record fact and deliberately unreachable in the map — 422s from every state.
+// `AdminDealTabs.tsx` got the equivalent update; this list did not.
+//
+// COMPLETED STAYS OUT, for the reason that comment gives: possession is recorded, never selected.
 const PERMITTED_STAGES = [
   DealStatus.ACTIVE,
   DealStatus.FINANCING_PENDING,
@@ -24,8 +34,9 @@ const PERMITTED_STAGES = [
   DealStatus.CONTRACT_APPROVED,
   DealStatus.SIGNING_PENDING,
   DealStatus.SIGNED,
+  DealStatus.PICKUP_READINESS,
   DealStatus.PICKUP_SCHEDULED,
-  DealStatus.PICKUP_COMPLETE,
+  DealStatus.HANDOVER_PENDING,
 ] as const;
 
 const schema = z.object({

@@ -3,12 +3,14 @@
 // Contract Shield IS a workflow gate:
 // CONTRACT_PENDING → CONTRACT_REVIEW → CONTRACT_APPROVED → SIGNING_PENDING
 
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { emitDealStatusComms } from "../notifications/acquisition-comms";
 import { emitDealCompletionEvent } from "./deal-completion-event.service";
 import { buyerEnvelopeSelect } from "@/lib/services/esign/esign-schema-gate";
+import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
 
 // Valid forward state transitions. CANCELLED/REFUNDED are handled separately in
 // canTransition() because they are reachable from (almost) any state.
@@ -36,9 +38,21 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   // no-conditional-delivery rule — `force: true` still overrides it, and still says so
   // in DealStatusHistory, which is the difference between an override and a gap.
   SIGNED: ["DEALER_EXECUTED"],
-  // A scheduled pickup may be marked complete directly (dealer QR scan / admin
-  // override) or step through the intermediate PICKUP_COMPLETE state.
-  PICKUP_SCHEDULED: ["PICKUP_COMPLETE", "COMPLETED"],
+  // PHASE 9 CLOSED THE DIRECT EDGE — §8.2 defect (8). `PICKUP_SCHEDULED → COMPLETED` let a
+  // dealer's scan complete a Deal on the dealership's word alone, which §Stage 19 forbids in
+  // as many words: "the Deal never completes automatically on the dealer's word alone." The
+  // scan now records HANDOVER, and the buyer's possession confirmation completes.
+  //
+  // `PICKUP_SCHEDULED → PICKUP_COMPLETE` went with it, and that one is worth naming because it
+  // had no writer and looked harmless. Phase 7 paid for exactly that reasoning: an edge with no
+  // domain caller is NOT unreachable while `POST /api/admin/deals/[dealId]/action`
+  // (DEAL_STAGE_ADVANCED) resolves its target at runtime. Left open, it was a two-hop route
+  // from a scheduled pickup to COMPLETED that skipped handover entirely.
+  PICKUP_SCHEDULED: ["HANDOVER_PENDING"],
+  // RETAINED, DELIBERATELY UNREACHABLE. §28.1 L1405 retires PICKUP_COMPLETE to "a
+  // supporting-record fact rather than a primary state", so Phase 9 gives it no writer and no
+  // inbound edge. The exit stays open so any historical row parked here can still reach
+  // COMPLETED rather than being stranded by an edge that vanished. Phase 10 owns its removal.
   PICKUP_COMPLETE: ["COMPLETED"],
   COMPLETED: [],
   CANCELLED: ["REFUNDED"],
@@ -106,9 +120,15 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   //
   // Phase 9 owns PICKUP_READINESS and will insert it between these two; it is deliberately
   // still `[]` below, so this phase ships no readiness path it does not own.
-  FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_SCHEDULED"],
-  PICKUP_READINESS: [],
-  HANDOVER_PENDING: [],
+  // PHASE 9 INSERTED PICKUP_READINESS BETWEEN THESE TWO, which is what the comment above
+  // anticipated. `FUNDING_PENDING → PICKUP_SCHEDULED` is REPLACED rather than kept alongside:
+  // §Stage 16's exit is "all items true; Deal moves to scheduling" and its failure clause is
+  // "nothing is scheduled while any item is unmet", so a second edge that reaches scheduling
+  // without evaluating the thirteen is the rule with a hole in it. The capability MOVED — every
+  // deal still reaches PICKUP_SCHEDULED, one rung later.
+  FUNDING_PENDING: ["RECAP_PENDING", "PICKUP_READINESS"],
+  PICKUP_READINESS: ["PICKUP_SCHEDULED"],
+  HANDOVER_PENDING: ["COMPLETED"],
   FROZEN_PENDING_RELEASE: [],
 };
 
@@ -163,6 +183,29 @@ export class DealTransitionError extends Error {
  * contract is AutoLenis's and the dealership's. A caller that cannot tell them apart cannot
  * say who has to act, which is the whole complaint §Stage 14 makes about "funding pending".
  */
+/**
+ * A COMPLETED Deal was asked to move. §Stage 20: "Completed is terminal. Corrections are
+ * append-only and never rewrite completed history."
+ *
+ * OWNER RULING Q4, 2026-09-16 — a REMOVED capability, recorded as one. `force: true` used to
+ * carry a completed deal back to PICKUP_SCHEDULED through the admin journey-reopen screen, which
+ * is why "terminal" was true of the transition map and false of the product. The replacement is
+ * an append-only `DealCorrection`: the history a correction describes stays exactly as it was.
+ *
+ * `force` overrides the transition map and the release gates. It does not override this, and
+ * that asymmetry is the whole point — an override is a judgement about a rule, and this is not a
+ * rule about what may happen next. It is a statement that the transaction is over.
+ */
+export class TerminalDealError extends Error {
+  constructor(public readonly status: DealStatus) {
+    super(
+      `Deal is ${status} and terminal — §Stage 20 makes completion final. Record an append-only ` +
+        `DealCorrection instead of moving it.`,
+    );
+    this.name = "TerminalDealError";
+  }
+}
+
 export class ReleaseNotClearedError extends Error {
   constructor(public readonly detail: string) {
     super(`This deal is not cleared for release: ${detail}.`);
@@ -219,6 +262,95 @@ interface AdvanceOptions {
  * no-op path (already in the target state, or `expectedFrom` did not match). Most
  * callers can ignore it; drivers that report whether they advanced must not.
  */
+/**
+ * §Stage 20's append-only correction — the replacement for moving a completed Deal.
+ *
+ * "Completed is terminal. Corrections are append-only and never rewrite completed history."
+ *
+ * `deal_corrections` arrived with the Phase 1 wave and had no writer until now. It records what
+ * was believed BEFORE and what is true AFTER without touching the Deal's status, its history, or
+ * the completion event — so a correction is legible as a correction rather than as a transaction
+ * that seems to have happened twice.
+ *
+ * `id` has no database default on this model, so it is supplied here rather than discovered as a
+ * constraint violation at the call site.
+ */
+export async function recordDealCorrection(input: {
+  dealId: string;
+  kind: string;
+  before?: Prisma.InputJsonValue | null;
+  after?: Prisma.InputJsonValue | null;
+  reason?: string | null;
+  actor?: string | null;
+}): Promise<string> {
+  const id = randomUUID();
+  await prisma.dealCorrection.create({
+    data: {
+      id,
+      dealId: input.dealId,
+      kind: input.kind,
+      ...(input.before != null ? { before: input.before } : {}),
+      ...(input.after != null ? { after: input.after } : {}),
+      reason: input.reason ?? null,
+      actor: input.actor ?? null,
+    },
+  });
+  return id;
+}
+
+/**
+ * The statuses a Deal may not ENTER without all three release facts.
+ *
+ * PHASE 8 GATED ONLY `COMPLETED`, AND THAT WAS ONE OF THREE. Parity row C-40 specified the
+ * preconditions belong "inside `advanceDealStatus` for PICKUP_READINESS/PICKUP_SCHEDULED/
+ * COMPLETED"; Phase 8 implemented `COMPLETED` alone and its §8.1h record called the rule
+ * structural. It was structural at the last rung only. Nothing read `funding_cleared_at` when a
+ * deal LEFT `FUNDING_PENDING`, so a deal whose funding had never cleared could legally reach
+ * `PICKUP_SCHEDULED` — the state whose entire meaning is that a vehicle is about to be handed
+ * over — and be stopped only at the final write.
+ *
+ * `HANDOVER_PENDING` is added to C-40's three because Phase 9 created it, and it is the rung
+ * where the vehicle PHYSICALLY MOVES. Gating completion but not handover would gate the
+ * paperwork and not the car.
+ *
+ * §Stage 16's entry condition is these three facts verbatim — "contract executed, financing
+ * completed, funding cleared, insurance verified" — so gating `PICKUP_READINESS` on them is not
+ * an extra rule, it is Stage 16's own entry, enforced where it cannot be skipped.
+ */
+export const RELEASE_GATED_STATUSES: DealStatus[] = [
+  DealStatus.PICKUP_READINESS,
+  DealStatus.PICKUP_SCHEDULED,
+  DealStatus.HANDOVER_PENDING,
+  DealStatus.COMPLETED,
+];
+
+/**
+ * The three hard release gates, checked against the row AS READ.
+ *
+ * Exported so the one completion writer enforces the SAME check inside its transaction rather
+ * than a second copy that can drift. Throws; never returns false.
+ */
+export function assertReleaseGates(deal: {
+  insuranceStatus: InsuranceStatus;
+  dealerExecutedContractId: string | null;
+  fundingClearedAt: Date | null;
+}): void {
+  if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
+    throw new InsuranceRequiredError();
+  }
+  // §14d — the dealership's fully executed copy must exist. A buyer's signature is not
+  // execution, and a vehicle is not released against a contract only one party signed.
+  if (!deal.dealerExecutedContractId) {
+    throw new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
+  }
+  // §Stage 14 — THE HARD RULE. No conditional delivery, no spot delivery. Funding is cleared
+  // against evidence before the vehicle moves, never on the expectation that it will complete
+  // later.
+  if (!deal.fundingClearedAt) {
+    throw new ReleaseNotClearedError("funding has not been cleared for this deal");
+  }
+}
+
 export async function advanceDealStatus(
   dealId: string,
   newStatus: DealStatus,
@@ -244,6 +376,20 @@ export async function advanceDealStatus(
   // on under us is never dragged backwards into `newStatus`.
   if (opts.expectedFrom && deal.status !== opts.expectedFrom) return false;
 
+  // NOT CONDITIONED ON `!opts.force`, AND THAT — not its position — is what makes it terminal.
+  //
+  // The first draft of this comment claimed the guard had to come BEFORE the force-aware check
+  // below or `force: true` would sail past it. Mutation-testing that claim showed it was false:
+  // the check below only SKIPS a throw when force is set, it does not return, so the guard
+  // catches a forced call from either position. Moving it changed nothing and the suite stayed
+  // green — a comment asserting a safety property the code did not have.
+  //
+  // What the suite DOES catch is the real defect shape: adding `!opts.force` here, or deleting
+  // the guard. Both turn it red.
+  if (deal.status === DealStatus.COMPLETED && newStatus !== DealStatus.COMPLETED) {
+    throw new TerminalDealError(deal.status);
+  }
+
   if (!opts.force && !canTransition(deal.status, newStatus)) {
     throw new DealTransitionError(deal.status, newStatus);
   }
@@ -254,21 +400,8 @@ export async function advanceDealStatus(
   // cleared. The transition map alone could not stop it, because `force: true` exists and
   // `schedulePickup` used it. These three run at WRITE time, on the row as read, so they
   // hold whatever route got the deal here.
-  if (newStatus === DealStatus.COMPLETED && !opts.force) {
-    if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
-      throw new InsuranceRequiredError();
-    }
-    // §14d — the dealership's fully executed copy must exist. A buyer's signature is not
-    // execution, and a vehicle is not released against a contract only one party signed.
-    if (!deal.dealerExecutedContractId) {
-      throw new ReleaseNotClearedError("the dealership's fully executed contract is not on file");
-    }
-    // §Stage 14 — THE HARD RULE. No conditional delivery, no spot delivery. Funding is
-    // cleared against evidence before the vehicle moves, never on the expectation that it
-    // will complete later.
-    if (!deal.fundingClearedAt) {
-      throw new ReleaseNotClearedError("funding has not been cleared for this deal");
-    }
+  if (RELEASE_GATED_STATUSES.includes(newStatus) && !opts.force) {
+    assertReleaseGates(deal);
   }
 
   // Compare-and-swap: advance ONLY while the deal is still in the state we read
@@ -552,12 +685,12 @@ export async function getDealForBuyer(buyerId: string, dealId?: string) {
     // full forensic record (§11 — see esign-schema-gate.BUYER_SAFE_ENVELOPE_SELECT).
     return prisma.deal.findFirst({
       where: { id: dealId, buyerId },
-      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelopes: { select: buyerEnvelopeSelect() }, coBuyer: { select: { isRequiredSigner: true } }, pickup: true },
+      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelopes: { select: buyerEnvelopeSelect() }, coBuyer: { select: { isRequiredSigner: true } }, pickup: { select: PICKUP_SAFE_SELECT } },
     });
   }
   return prisma.deal.findFirst({
     where: { buyerId, status: { notIn: [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED] } },
-    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelopes: { select: buyerEnvelopeSelect() }, coBuyer: { select: { isRequiredSigner: true } }, pickup: true },
+    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelopes: { select: buyerEnvelopeSelect() }, coBuyer: { select: { isRequiredSigner: true } }, pickup: { select: PICKUP_SAFE_SELECT } },
     orderBy: { createdAt: "desc" },
   });
 }

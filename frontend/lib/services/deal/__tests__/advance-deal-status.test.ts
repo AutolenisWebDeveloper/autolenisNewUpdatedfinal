@@ -89,7 +89,10 @@ async function load() { return import("../deal.service"); }
 beforeEach(() => {
   ctrl = {
     deal: {
-      id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1",
+      // PHASE 9: the predecessor of COMPLETED is HANDOVER_PENDING now — §8.2 defect (8)
+      // closed `PICKUP_SCHEDULED → COMPLETED`. The subject of these tests is the CAS, the
+      // completion event and the release gates, none of which changed; only the rung did.
+      id: "d1", status: "HANDOVER_PENDING", buyerId: "b1",
       insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null, feeRefundedAt: null,
       dealerExecutedContractId: "cv_executed_1", fundingClearedAt: new Date("2026-09-15T10:00:00Z"),
     },
@@ -109,7 +112,7 @@ test("status write is a compare-and-swap guarded on the observed status", async 
   assert.equal(ctrl.updateManyCalls.length >= 1, true, "must use updateMany (CAS), not an unconditional update");
   const first = ctrl.updateManyCalls[0]!;
   assert.equal(first.where.id, "d1");
-  assert.equal(first.where.status, "PICKUP_SCHEDULED", "CAS must guard on the status observed at read time");
+  assert.equal(first.where.status, "HANDOVER_PENDING", "CAS must guard on the status observed at read time");
   assert.equal(first.data.status, "COMPLETED");
 });
 
@@ -136,7 +139,7 @@ test("a non-COMPLETED transition does not emit the completion event", async () =
 });
 
 test("lost CAS race that lands on the target state re-resolves to a no-op (body runs once)", async () => {
-  // Another writer advances PICKUP_SCHEDULED → COMPLETED between our read and swap.
+  // Another writer advances HANDOVER_PENDING → COMPLETED between our read and swap.
   ctrl.raceTo = "COMPLETED";
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "COMPLETED");
@@ -441,4 +444,46 @@ test("both new gates are overridable only by an audited force, like the insuranc
   // never be unblocked by a human is its own failure mode.
   await advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "ADMIN", force: true });
   assert.equal(ctrl.deal.status, DealStatus.COMPLETED);
+});
+
+
+// ── §Stage 20: COMPLETED is terminal, and `force` does not override that ────────────────────
+//
+// OWNER RULING Q4, 2026-09-16 — recorded as a REMOVED capability. `force: true` used to carry a
+// completed deal back to PICKUP_SCHEDULED through the admin journey-reopen screen, which is why
+// "terminal" was a property of the transition map and not of the product.
+
+test("a COMPLETED deal cannot be moved, even with force — §Stage 20", async () => {
+  // Reintroduced defect: placing the terminal check AFTER the force-aware canTransition guard.
+  // Red — `force: true` sails past exactly as it used to, which is the whole defect.
+  const { advanceDealStatus, TerminalDealError } = await import("../deal.service");
+  ctrl.deal.status = "COMPLETED";
+
+  await assert.rejects(
+    () => advanceDealStatus("d1", "PICKUP_SCHEDULED", { actorRole: "ADMIN", reason: "reopen", force: true }),
+    TerminalDealError,
+    "force must not reopen a completed deal",
+  );
+  assert.equal(ctrl.updateCalls.length, 0, "and nothing may be written on the way to refusing");
+});
+
+test("force still overrides the map and the gates for every NON-terminal deal", async () => {
+  // The asymmetry is the point, and it has to be proven in both directions — a guard that
+  // refused everything would also pass the test above while breaking every audited override.
+  const { advanceDealStatus } = await import("../deal.service");
+  ctrl.deal.status = "SIGNED";
+  ctrl.deal.fundingClearedAt = null;
+  ctrl.deal.dealerExecutedContractId = null;
+
+  const moved = await advanceDealStatus("d1", "PICKUP_SCHEDULED", { actorRole: "ADMIN", reason: "audited override", force: true });
+  assert.equal(moved, true, "an audited override of a non-terminal deal still works");
+});
+
+test("a COMPLETED deal may be re-advanced to COMPLETED — replay is not a move", async () => {
+  // Idempotent replay reaches advanceDealStatus with the deal already at the target. Refusing it
+  // would turn a harmless retry into an error, so the guard is "may not LEAVE", not "may not be
+  // called".
+  const { advanceDealStatus } = await import("../deal.service");
+  ctrl.deal.status = "COMPLETED";
+  await assert.doesNotReject(() => advanceDealStatus("d1", "COMPLETED", { actorRole: "SYSTEM" }));
 });

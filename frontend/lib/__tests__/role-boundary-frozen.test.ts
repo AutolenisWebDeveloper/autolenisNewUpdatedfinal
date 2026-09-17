@@ -95,15 +95,81 @@ test("no code path makes AutoLenis the seller of record or issues a title, regis
   );
 });
 
+/**
+ * THE COMPLETING ENTRY POINTS, DERIVED FROM THE SERVICE — NOT LISTED HERE.
+ *
+ * This detector has now gone blind twice for the same reason, and the second time is why it
+ * stopped being a list of names. §8.2 defect (4) collapsed five Deal-completion writers into
+ * `pickup-completion.service.ts`. Each route that moved onto the service stopped matching the
+ * signature the test knew about — first `admin/deals/[dealId]/pickup/complete` when it stopped
+ * upserting the Pickup itself, then both journey routes when they stopped calling
+ * `confirmPossession` directly and started calling `completeJourneyPickup`. Each time, the scan
+ * silently found fewer routes than the pinned list, and each time the easy fix — shrink the
+ * pinned list, or bolt on one more literal — would have left every FUTURE route that completes
+ * through the service invisible to the boundary this test exists to hold.
+ *
+ * So the set is computed from the service's own source: seed with the functions that write the
+ * Deal to COMPLETED, then take the fixpoint over calls between them. A new completing export,
+ * or a new wrapper around an existing one, is picked up without editing this file.
+ */
+const COMPLETION_SERVICE = "lib/services/pickup/pickup-completion.service.ts";
+
+function completingEntryPoints(): string[] {
+  const src = read(ROOT, COMPLETION_SERVICE);
+
+  // Top-level exported functions, name → body (to the next declaration).
+  const starts: { name: string; at: number }[] = [];
+  for (const m of src.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z0-9_$]+)/gm)) {
+    starts.push({ name: m[1], at: m.index ?? 0 });
+  }
+  const bodies = new Map<string, string>();
+  starts.forEach((s, i) => {
+    bodies.set(s.name, src.slice(s.at, i + 1 < starts.length ? starts[i + 1].at : src.length));
+  });
+
+  // Seed: it writes the Deal (or the Pickup) to COMPLETED.
+  const completing = new Set<string>();
+  for (const [name, body] of bodies) {
+    if (/status:\s*"COMPLETED"/.test(body)) completing.add(name);
+  }
+
+  // Fixpoint: calling something that completes, completes.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [name, body] of bodies) {
+      if (completing.has(name)) continue;
+      if ([...completing].some((t) => new RegExp(`\\b${t}\\s*\\(`).test(body))) {
+        completing.add(name);
+        changed = true;
+      }
+    }
+  }
+
+  // ANTI-VACUITY, BOTH DIRECTIONS. An empty or all-inclusive derivation is the failure mode that
+  // reads as coverage: the first detects nothing, the second flags every caller of the module and
+  // gets deleted as noise. `recordDealerRelease` reaches HANDOVER_PENDING and stops, so it is the
+  // control that proves the derivation discriminates rather than listing exports.
+  assert.ok(bodies.size >= 3, `${COMPLETION_SERVICE}: parsed ${bodies.size} exported functions — the module shape changed and this derivation is no longer reading it`);
+  assert.ok(completing.has("confirmPossession"), "the derivation found no function that writes the Deal to COMPLETED — it is scanning nothing");
+  assert.ok(!completing.has("recordDealerRelease"), "recordDealerRelease records HANDOVER, not completion — a derivation that includes it is returning every export");
+
+  return [...completing].sort();
+}
+
 test("exactly three AutoLenis-actored paths can complete a pickup, and no more", () => {
   const files = sourceFiles(ROOT, ["app/api/admin"]);
   assertScanned(files, 100, "role-boundary release scan");
 
-  // A path "completes a pickup" when it writes Pickup COMPLETED. That write is the
-  // structural signature; the route's name is not.
+  const entryPoints = completingEntryPoints();
+
+  // A path "completes a pickup" when it writes Pickup COMPLETED itself — or, since Phase 9, when
+  // it calls any of the service's completing entry points.
   const candidates = files.filter((f) => {
     const src = read(ROOT, f);
-    return /\bpickup\.(?:update|upsert|updateMany|create)\s*\(/.test(src) && /"COMPLETED"|'COMPLETED'/.test(src);
+    const writesPickupComplete =
+      /\bpickup\.(?:update|upsert|updateMany|create)\s*\(/.test(src) && /"COMPLETED"|'COMPLETED'/.test(src);
+    const callsTheCompletionWriter = entryPoints.some((n) => new RegExp(`\\b${n}\\s*\\(`).test(src));
+    return writesPickupComplete || callsTheCompletionWriter;
   });
 
   assert.deepEqual(
@@ -111,7 +177,8 @@ test("exactly three AutoLenis-actored paths can complete a pickup, and no more",
     [...PINNED_RELEASE_ACTIONS].sort(),
     "A new AutoLenis-actored path can complete a pickup. §2 puts release on the dealership: " +
       "release evidence belongs to a dealer-authenticated action and possession confirmation to the buyer " +
-      "(control/B2-03, Phase 9). Adding a fourth admin path widens the boundary this rule exists to hold."
+      `(control/B2-03, Phase 9). Completing entry points in force: ${entryPoints.join(", ")}. ` +
+      "Adding a fourth admin path widens the boundary this rule exists to hold."
   );
 });
 
