@@ -2390,14 +2390,51 @@ written:
 | 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
 | 7 | 8 (#435) | **the guard written for this class** | two passing comparisons in `phase8-proof-sql.test.ts`, the drift guard added *because of* this table | **nothing** — the first draft filtered on `/^2026111700\d{2}_phase8_/`, **ten digits against a fourteen-digit stamp**, so `onDisk` and `named` were both empty and both tests passed by comparing nothing to nothing |
 | 8 | 9 (#440) | **the investigation**, and then the record built on it | three `git log` searches returning no commits, reported to the owner as *"that path never existed in this repository"* — in the PR body, in a test comment, and in a capability map the owner was asked to sign | **nothing** — `[dealId]` is a **glob** in a git pathspec, matching one character from `{d,e,a,l,I}`, so every search silently addressed a path no file has ever had. `:(literal)` returns the route's whole history: added `f9ee800`, removed `89abb18`, both 2026-09-01 |
+| 9 | 9 (#441) | **a test, written by the round that was looking for this class** | `completion-preconditions.test.ts:215` — *"a concierge deal has no auction and no sourcing case, and completes anyway"*, asserting `complete === true` and green on every run | **the opposite of the truth.** It nulled `offerId`, `offer`, `auctionId` and `auction` to simulate a concierge deal, and left `dealerId: "dlr_1"`, `dealer`, and a CONFIRMED `dealerReaffirmations` row in the fixture — the exact three facts a concierge deal **cannot** have. `Deal.dealerId` is nullable and has **no writer anywhere in this repository**; `openReaffirmationWindow` returns `{created:false}` for a deal with no offer. The real shape was **uncompletable**, permanently, and the test asserting it completes is what let that ship |
 
-**The four layers matter.** #1 and #2 are runtime; #3, #4, #5 and #7 are the tests and
+**The four layers matter.** #1 and #2 are runtime; #3, #4, #5, #7 and #9 are the tests and
 harnesses that are supposed to catch runtime; #6 is the *written record* that is supposed to
 describe both; #8 is the **investigation that the record is built from**, which sits under all
 three. The class reaches all the way up and all the way down: a verification artefact is just as
 capable of asserting nothing as the code it verifies, a prose claim is the least checkable
 artefact of all, and a *search* is the least checkable of any — it produces no artefact at all,
 only a belief.
+
+**#9 IS THE SHARPEST OF ALL NINE, and it is a different failure from the other eight.** Every
+previous instance is an artefact that *checked nothing* — a vacuous assertion, an empty fixture, a
+search with no hits, a prose claim never tested. #9 checked something. It ran the real evaluator
+against a real fixture and got a real `true`. What was wrong was the **fixture's premise**: it
+described a deal shape production cannot produce, so the test did not fail to prove its claim, it
+**proved the opposite of the truth**. An anti-vacuity assertion would not have caught it — the set
+was not empty. `assert.ok(found.length >= 4)` has no analogue here.
+
+And it happened inside the phase that opened against this pattern, in a test written by the round
+that was actively hunting for it, guarding a precondition list whose own file header warns in
+capitals that marking these links outstanding "would make completion unreachable for an entire
+product line." The warning was written, the carve-out was written, the test was written — and the
+carve-out covered two of the three links while the test hid the third.
+
+**THE CHECK THIS IMPLIES, recorded beside instance 8's.**
+
+| From | The check |
+| --- | --- |
+| #8 | A search that returns nothing has proved nothing until you have proved the search itself addresses a real target. `git log -- '[dealId]'` is a glob; `:(literal)` is the query you meant. Anti-vacuity applies to *searches*, not only to assertions. |
+| #9 | **When a test nulls fields to simulate a shape, ask which OTHER fields that shape also cannot have.** Nulling is a claim about the whole record, not about the fields you touched. Blocker 1b is what happens when you null three and leave three — and the three left behind were each individually sufficient to make the test green and the world wrong. |
+
+The #9 check has a mechanical form worth preferring where it is available: **derive the fixture from
+the shape's constructor rather than editing a happy-path fixture toward it.** A concierge deal built
+by the code that really creates one cannot carry a `dealerId`, because nothing writes it. A concierge
+deal built by deleting four fields from an auction fixture can carry anything the editor forgot.
+
+**AND THE ROUND THAT PRODUCED #9 COULD NOT HAVE CAUGHT IT.** Two of the second review's three
+blockers were **created or left open by the first review's own fixes** — #2's harmful ordering was
+introduced by the fix for the `rawToken: ""` blocker, and #3's AI-catalogue path was left open by
+the fix for the completion-bypass blocker. This is the argument for a second independent review as a
+**standing gate rather than a one-off**, and the argument is not that the first reviewer was weak.
+It is structural: *a reviewer cannot audit the round it participated in.* Its fixes are new,
+unreviewed code, and it carries the reasoning that produced them — which is exactly the context that
+makes a defect invisible. The second review must read the final code from a clean context, with the
+first round's fixes explicitly in scope, or the fixes ship unreviewed by anyone.
 
 **#7 is the most persuasive of the first seven.** The other six were written by
 someone not thinking about this class. #7 was not. It is a guard built *specifically* to catch
@@ -2716,6 +2753,39 @@ closed on the transitions that existed when it was written, and on no others.**
 
 #### The before → after capability map
 
+
+**THE DISPOSITION RULE THIS PHASE ADDS — owner-ruled 2026-09-17, and it generalises.**
+
+> **A capability is not intact behind a new seam if the seam demands evidence the surface does not
+> collect.**
+
+REGROUPED, MOVED and PROGRESSIVE all say the capability survives; they differ in where it lives and
+how much of it is reachable today. The test for REGROUPED is not "is there still a code path" — it
+is **can the surface that had the capability still exercise it**. Rows 3 and 4 had a code path
+(`completeJourneyPickup`), and that path refuses every call those two routes can construct, because
+§Stage 20's thirteenth precondition needs an odometer and a condition the journey tools do not ask
+for. A path that refuses every reachable call is not a regrouped capability. It is a **progressive**
+one: present, gated, and reachable when the missing input arrives.
+
+Applying the rule costs one question per row: *what does the new seam require, and does this surface
+supply it?* Rows 3 and 4 are what happens when that question is not asked — the disposition was
+derived from the refactor's intent ("they now call the one writer") rather than from the call the
+route actually makes.
+
+**AND THE OWNER RULED THE GAP STAYS.** 2026-09-17: the journey tools do **not** get odometer and
+condition fields. *"Those two surfaces could previously complete a deal with no evidence at all.
+Collecting odometer and condition there would make them a second possession-recording path — and
+Stage 20's whole point is that possession is evidenced once, by the buyer, or by Operations with
+evidence attached at pickup/complete. A journey tool is a workflow convenience, not a place where
+possession gets recorded."* So the PROGRESSIVE disposition is the **final** state of these two rows,
+not an interim one: the gate is the feature. What the journey tools lost is the ability to complete
+a deal without evidence, which §Stage 20 exists to remove.
+
+**Carry this into Phase 10.** That phase makes every status write conditional (§28.3 #3), which is
+precisely the shape that turns working surfaces into refusing ones — a condition added centrally is
+a capability removed from every surface that cannot satisfy it. Each such surface needs this question
+asked of it individually, and the answer recorded per row rather than inferred from the change's
+intent.
 
 > **Rows 3 and 4 were recorded wrongly, and the second independent review caught it.** Both routes
 > call `completeJourneyPickup(dealId, adminId)` with **two** arguments, so the `evidence` parameter
@@ -7543,6 +7613,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D57 | `LEASE` → `FinancingPath` mapping | DECISION | Phase 7 | **RULED 2026-09-14 — FAIL CLOSED.** *(Registered at the Phase 7 opening; it existed only as parity row `deal-early/D10`'s "owner decision: `LEASE` → `FinancingPath` mapping (UNVERIFIED #9)".)* `vehicle_request_financing.payment_method` is free text admitting `LEASE` (`schema.prisma:1421`); `FinancingPath` is `DEALER \| EXTERNAL \| CASH` and the document never contemplates leasing. The checkpoint therefore refuses to derive a path from `LEASE` and raises an Operations follow-up for a human to resolve, rather than silently mapping it to `DEALER` — which would invent business behaviour nobody agreed. | BLOCKING A NAMED LATER PHASE (Phase 7) |
 | D58 | `Deal.dealerId` has no writer at claim completion — §13-D20 depends on one | DECISION | **dealer-recruitment area** (the claim / verification / agreement sequence) | **RULED 2026-09-14 — NOT PHASE 7'S, AND NOT PHASE 8'S BY DEFAULT.** §13-D20 states that `Offer.dealerId` stays on the outside-dealer placeholder permanently and that `Deal.dealerId` is set to the claimed Dealer **when the claim, verification and agreement sequence completes**. That write does not exist. The only production writer of the field is `lib/services/deal/select-offer.service.ts:158`, which sets it to `offer.dealerId` at deal creation — the *shared system placeholder* for an outside winner, not null. **The exact write owed:** on completion of the claim sequence, set `deals.dealer_id` to the claimed, verified, agreement-signed `Dealer.id` for every Deal whose `offer.rooftop_id` matches the claimed rooftop and whose `offer.dealer.is_system_placeholder` is true. **Consequence while it is missing:** `outsideWinnerGate` (`lib/services/deal/dealer-reaffirmation.service.ts`) can never be satisfied, so `submitReaffirmation` refuses every outside winner and the deal cannot leave `DEALER_CONFIRMATION`. **Phase 7 must NOT build a second writer to compensate** — owner-ruled, parallel-system rule. What Phase 7 does instead is refuse to *penalise* the blocked dealership: `returnToRemainingOffers` gates the SLA and scorecard attribution on `dealershipWasBlocked` and opens an Operations row instead, so no outside winner accrues a rooftop SLA violation for a sequence it cannot complete. That guard is not a workaround and does not become dead when this row is built — a dealership mid-claim, suspended, or with a lapsed agreement is blocked by the same gate for the same reason. | BLOCKING A NAMED LATER PHASE (the dealer-recruitment claim sequence — §10b cannot complete end to end until it lands) |
 | D59 | Two Deals can exist for ONE Vehicle Request — no database constraint, and the auction path has no guard | DECISION (data integrity) | **Phase 10** (the control-plane phase that makes every status write conditional, §28.3 #3) | **REGISTERED 2026-09-16, found while auditing the readers of `deals.funding_cleared_at` before P9-00 gave it a writer.** The audit asked whether `upgrade-window.service.ts:113` — which closes the $400 Premium window on `findFirst({ vehicleRequestId, fundingClearedAt: { not: null } })`, matching on `vehicleRequestId` ALONE — would misfire once a deal could actually clear. **RULED 2026-09-16: the reader is RIGHT and stays as it is.** §23.2 closes the window because the REQUEST is ending, not because one deal among several cleared. *What is wrong is that two deals per request can exist at all*, and that is this row. **The evidence, each checked rather than inferred.** (1) `deals.vehicle_request_id` carries only `deals_vehicle_request_id_idx` — a grep of every `migration.sql` for a UNIQUE index on that column returns nothing. (2) `VehicleRequest.deals Deal[]` and `VehicleRequest.auctions Auction[]` are both one-to-many, and `auctions.vehicle_request_id` is non-unique too, so a request can carry several auctions and therefore several selections. (3) The **concierge** path DOES guard it — `app/api/buyer/requests/[requestId]/offer/respond/route.ts:71-86`, whose own comment names the case it exists to prevent: *"it did nothing about accepting a DIFFERENT offer on the same request, which is the case that produced two competing Deals"* — but the check is a `prisma.deal.findFirst` **outside** the `$transaction` that creates the Deal, so it is open to the very race it was written for. (4) The **auction** path has no such guard at all: `commitOfferSelection` (`lib/services/deal/select-offer.service.ts:82-92`) locks the AUCTION row `FOR UPDATE` and re-checks for an `ACCEPTED` offer on **that auction**; neither is a check on the request, and a grep of that file for `deal.findFirst` / `existingDeal` returns nothing. **Proposed:** a partial unique index making one live Deal per Vehicle Request a database fact, with the terminal statuses excluded so a cancelled deal does not bar a legitimate re-selection, and the concierge pre-check moved inside its transaction. Whether a cancelled or refunded deal should free the request is the business half of this decision and is the owner's. **Verify after:** two concurrent selections on one request, one through each path, produce exactly one Deal and one typed refusal — a destructive-concurrency test in the style of `select-offer-concurrency.test.ts`. **THE APPLICATION GUARD IS BUILT HERE; THE DATABASE CONSTRAINT IS NOT.** Owner ruling, 2026-09-16: *"record-don't-build because the real fix is a database constraint like Phase 1's one-open-request partial index, and I didn't want that scoped mid-phase. A four-line application guard alongside the §13 row is fine."* So `commitOfferSelection` now refuses inside its own transaction when the request already holds a Deal, returning the existing lost-race signal (`OfferSelectionRaceLostError`) rather than inventing a second refusal shape; null lineage is skipped deliberately, because `findFirst({ vehicleRequestId: null })` would match the first lineage-less deal in the table and refuse every later selection. Proved failing-first: without the guard the second Deal is created and two of the four cases go red. **STILL OPEN FOR PHASE 10, and this row stays open until both land:** (a) the partial unique index that makes it a database fact, with terminal statuses excluded so a cancelled deal does not bar a legitimate re-selection — and whether a cancelled or refunded deal frees the request is the business half, the owner's; (b) the CONCIERGE pre-check, which still sits OUTSIDE its transaction and is therefore still open to the race it was written for. An application guard on one of two paths is a mitigation, not the fix. Nothing was broken in the meantime: production holds zero deals, and P9-00's writer is scoped `{ id: dealId, fundingClearedAt: null }` so it cannot stamp the wrong deal. | BLOCKING A NAMED LATER PHASE (Phase 10) |
+| D60 | `PostCompletionObligation` idempotency is enforced by a SINGLE WRITER, not by the database — the constraint is owed BEFORE a second writer exists | DECISION (data integrity) | **Before any second caller of `openObligation`** — §Stage 21's resolution control is the nearest candidate | **REGISTERED 2026-09-17, from the second independent Phase 9 review. OWNER-RULED THE SAME DAY: NOT A THIRD MIGRATION — keep the count at two.** `openObligation` (`lib/services/deal/post-completion-obligations.service.ts`) documents itself as IDEMPOTENT PER (deal, type) and implements that as a `findFirst` then `create`. There is **no unique constraint behind it**: `PostCompletionObligation` carries only `@@index([dealId])`. Two concurrent callers would produce two PENDING rows for the same (deal, type) and **double-count on the dealership scorecard** — which is the harm the function's own comment names. **Not reachable today**, and that is the whole reason this is a row rather than a defect: the only caller runs inside the completion CAS's winning transaction, so no second caller can interleave. **Why the index was NOT added now.** Owner ruling, 2026-09-17: *"An index added now guards nothing and a §13 row naming the precondition guards the future."* Same shape as **§13-D59**'s record-don't-build ruling, and with a second reason specific to this phase: the owner had been given the migration count (**two**) before running the production sequence, and a third directory appearing after that number was quoted is the out-of-band-DDL shape §8.1a catalogues. **What WAS done instead:** the function's doc comment no longer claims a guarantee the schema does not keep — it now states that the idempotency is held by the single writer, that no constraint exists, and that this row is the precondition for a second writer. That correction is the control until the index lands. **The exact constraint owed:** a partial unique index on `(deal_id, type) WHERE status <> 'RESOLVED'` — partial, so a RESOLVED obligation does not bar a legitimately recurring one, which is the same carve-out reasoning §13-D59 applies to terminal deal statuses. **Verify after:** two concurrent `openObligation` calls for one (deal, type) produce exactly one row and one typed refusal — a destructive-concurrency test in the style of `select-offer-concurrency.test.ts`. **This row stays open until the index lands OR a second writer is proposed, whichever comes first — and a second writer proposed before the index is a BLOCK, not a sequencing preference.** | BLOCKING THE NEXT WRITER OF `openObligation` (§Stage 21 resolution control, currently unbuilt — see the Phase 9 AS BUILT "reported, not fixed" list) |
 
 
 ## §14 Out-of-scope findings (reported, not implemented)
