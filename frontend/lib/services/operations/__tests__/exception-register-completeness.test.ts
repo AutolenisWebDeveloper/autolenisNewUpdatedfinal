@@ -23,6 +23,23 @@
 // completeness rule that cannot fail is worse here than anywhere else, because
 // this is the rule the other nine phases are measured by.
 //
+// ── WHAT THIS RULE CANNOT SEE, STATED RATHER THAN DISCOVERED LATER ──────────
+//
+// It proves a code HAS a raise site. It does NOT prove anything CALLS that site.
+//
+// That is not a hypothetical limit. Phase 10 found `flagSuspectedNoShows`
+// (`pickup-reminders.service.ts`) — written in Phase 9, exported, tested, documented,
+// raising §26's `PICKUP_MISSED`, and with NO CALLER ANYWHERE. This rule counted
+// `PICKUP_MISSED` as satisfied the whole time, because the literal was there; the
+// exception could never actually fire. It was found by reading the callers, not by
+// this gate, and the caller was added in the same phase.
+//
+// Closing the gap properly needs reachability analysis from the cron and route entry
+// points — a real call graph, not a scan — and that is not built here. So the honest
+// contract is: this gate stops a register row from having NO implementation, and a
+// human still has to check that the implementation runs. Saying so is the difference
+// between a limit and a hole.
+//
 // Run: pnpm test:operations
 
 import test from "node:test";

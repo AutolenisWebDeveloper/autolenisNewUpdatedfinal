@@ -878,7 +878,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (pi.metadata.type === "concierge_fee" || pi.metadata.type === "service_fee") {
-          const { buyerId } = pi.metadata;
+          const { buyerId, dealId } = pi.metadata;
           if (buyerId) {
             await prisma.notification.create({
               data: {
@@ -888,6 +888,39 @@ export async function POST(request: NextRequest) {
                 body:  "Your concierge fee payment could not be processed. Return to your deal page to retry.",
               },
             }).catch(() => {});
+
+            // §26 — "Premium balance payment fails | Buyer | Retry and notify; the
+            // transaction never stalls and the buyer stays on Standard."
+            //
+            // The notification above was the whole of it, and it is written with a
+            // swallowed `.catch(() => {})` — so on a bad day the buyer was told
+            // nothing AND nobody knew. §26 gives this row an owner and a deadline for
+            // exactly that case.
+            //
+            // THE EXCEPTION IS NOT A DUPLICATE OF THE NOTIFICATION. The notification
+            // is the "notify" half and is the buyer's; the queue row is the "retry"
+            // half and is Operations' — a Premium balance that keeps failing is a
+            // buyer who elected a plan they are being charged for and cannot
+            // complete, and §23's manual-refund review is theirs to start.
+            //
+            // The transaction does not stall on it, which is the rest of that §26
+            // row: nothing here blocks the deal, and the unpaid election is reverted
+            // to Standard at funding clearance by `closePremiumWindowAndRevert`.
+            await raiseException({
+              code: "PREMIUM_BALANCE_PAYMENT_FAILED",
+              buyerId,
+              dealId: dealId ?? undefined,
+              detail: `Stripe declined the concierge fee on ${pi.id}${pi.last_payment_error?.message ? `: ${pi.last_payment_error.message}` : ""}. The buyer stays on Standard until it settles.`,
+              // Per INTENT, not per event: Stripe Elements retries on the same
+              // PaymentIntent, so a buyer tapping retry four times is one failing
+              // obligation, not four Operations cases.
+              idempotencyKey: `PREMIUM_BALANCE_PAYMENT_FAILED:${pi.id}`,
+            }).catch((err) => {
+              logger.error("[stripe/webhook] could not raise the fee-failure exception", {
+                paymentIntentId: pi.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
           }
         }
         break;

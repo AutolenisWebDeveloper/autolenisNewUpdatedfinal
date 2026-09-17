@@ -407,12 +407,42 @@ test("the mintable DEAL statuses are exactly those that can still reach HANDOVER
   const { canTransition } = await import("@/lib/services/deal/deal.service");
   const { DealStatus } = await import("@prisma/client");
 
+  // PHASE 10 — THE DERIVATION NEEDED A CARVE-OUT, AND THIS TEST IS HOW THAT SURFACED.
+  //
+  // §24 gave `FROZEN_PENDING_RELEASE` a resume path back to the state it was frozen
+  // from, HANDOVER_PENDING among them. That made the bare "can reach handover"
+  // derivation include a FROZEN deal — and a frozen deal minting a release code is
+  // precisely what §24's freeze exists to stop: the vehicle must not leave the lot
+  // while a release is being negotiated. The cancellation orchestration REVOKES
+  // release tokens on a freeze for the same reason.
+  //
+  // The runtime allowlist (`TOKEN_MINTABLE_DEAL_STATUSES = ["PICKUP_SCHEDULED"]`) was
+  // already correct, so there was never a live hole — what drifted was the rule this
+  // test derives it from. The predicate is not "can this deal ever reach handover"
+  // but "can it reach handover FROM WHERE IT IS NOW, and is it not being held". A
+  // frozen deal reaches handover only after the freeze resolves, by which point its
+  // status is no longer FROZEN_PENDING_RELEASE.
+  const HELD: DealStatus[] = [DealStatus.FROZEN_PENDING_RELEASE];
   const canReachHandover = Object.values(DealStatus).filter(
-    (from) => from !== DealStatus.HANDOVER_PENDING && canTransition(from, DealStatus.HANDOVER_PENDING),
+    (from) =>
+      from !== DealStatus.HANDOVER_PENDING &&
+      !HELD.includes(from) &&
+      canTransition(from, DealStatus.HANDOVER_PENDING),
   );
   // ANTI-VACUITY: an empty derivation would make the comparison below pass against anything.
   assert.ok(canReachHandover.length > 0, "no status can reach HANDOVER_PENDING — the derivation is broken");
   assert.deepEqual([...TOKEN_MINTABLE_DEAL_STATUSES].sort(), [...canReachHandover].sort());
+});
+
+test("§24: a FROZEN deal can never mint a release code", async () => {
+  // The carve-out above removes FROZEN_PENDING_RELEASE from the DERIVATION. This
+  // asserts the CONSTANT agrees — otherwise the carve-out would be a way of making a
+  // red test green rather than a statement about the product.
+  const { TOKEN_MINTABLE_DEAL_STATUSES } = await svc();
+  assert.ok(
+    !(TOKEN_MINTABLE_DEAL_STATUSES as readonly string[]).includes("FROZEN_PENDING_RELEASE"),
+    "a deal frozen pending release must not hand out a credential that opens a handover — §24's freeze is there to stop the vehicle moving",
+  );
 });
 
 test("a code is NOT mintable once the vehicle has been released", async () => {

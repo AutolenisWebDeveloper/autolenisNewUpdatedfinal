@@ -490,12 +490,41 @@ export async function clearFunding(params: {
   });
 
   if (stamped.count > 0) {
-    await closePremiumWindowAndRevert(params.dealId, params.actorId).catch((err) => {
-      logger.error("funding clearance: premium window close failed", {
+    // §26 #43/#44 + §8.2 Phase 10 defect (9) — THIS CATCH WAS SILENT, AND IT IS THE
+    // SAME DEFECT AS (3).
+    //
+    // `closePremiumWindowAndRevert` is the §26 rule "Premium balance unpaid when
+    // funding clears → revert to Standard, which is already paid; continue without
+    // interruption". The reversion itself is correct and is NOT rebuilt here — it
+    // derives entitlement from settled money, reverts under a CAS, appends the plan
+    // snapshot in the same transaction, and enqueues the buyer's notice.
+    //
+    // What was wrong is what happened when it FAILED. A `logger.error` and nothing
+    // else left the buyer flagged PREMIUM with an unsettled $400 balance, funding
+    // cleared, the deal proceeding, and no owner anywhere — an entitlement the
+    // platform believes is paid for and no record that anyone should look. §26 gives
+    // that row an owner precisely so it cannot end there.
+    //
+    // Still non-fatal: funding HAS cleared and the stamp is committed, so throwing
+    // would unwind a settled fact over a plan flag. The failure is now carried to
+    // Operations instead of to a log line nobody reads.
+    try {
+      await closePremiumWindowAndRevert(params.dealId, params.actorId);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      logger.error("funding clearance: premium window close failed", { dealId: params.dealId, error: detail });
+      await raiseException({
+        code: "PREMIUM_BALANCE_UNPAID_AT_CLEARANCE",
         dealId: params.dealId,
-        error: err instanceof Error ? err.message : String(err),
+        detail: `The Premium election could not be reverted at funding clearance: ${detail}. The buyer may still be flagged PREMIUM with an unsettled balance.`,
+        idempotencyKey: `PREMIUM_BALANCE_UNPAID_AT_CLEARANCE:${params.dealId}`,
+      }).catch((raiseErr) => {
+        logger.error("funding clearance: could not raise the premium-revert exception", {
+          dealId: params.dealId,
+          error: raiseErr instanceof Error ? raiseErr.message : String(raiseErr),
+        });
       });
-    });
+    }
     await notifyFundingCleared(params.dealId);
   }
 
