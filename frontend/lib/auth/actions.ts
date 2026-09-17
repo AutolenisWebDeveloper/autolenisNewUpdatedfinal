@@ -222,6 +222,20 @@ async function ensurePrismaUser(
             data:  { isGuest: false },
           }),
         ]);
+        // §27.1 — PHASE 10. The guest just claimed, so the claim link and its three
+        // verification reminders are about a question that has been answered.
+        //
+        // `skipIfVerified` and `skipIfAlreadyClaimed` would also stop them at send time and
+        // are the guard that must hold; this cancels them EARLIER so the rows are not sitting
+        // in the outbox for three days looking like pending work. Keyed on the GUEST buyer id,
+        // because that is the row the sequence was enqueued against — the claim moves the
+        // requests to `newBuyerId` but the outbox rows keep the id they were written with.
+        const { cancelGuestVerification } = await import(
+          "@/lib/services/acquisition/guest-verification.service"
+        );
+        await cancelGuestVerification(guestBuyer.id, "guest claimed their account").catch((err) =>
+          logger.error("[ensurePrismaUser] guest verification cancel failed:", err),
+        );
       }).catch(err =>
         logger.error("[ensurePrismaUser] guest transfer failed:", err)
       );

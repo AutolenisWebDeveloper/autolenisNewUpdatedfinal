@@ -123,7 +123,88 @@ export async function recheckApproval(
   // buyer whose approval EXPIRED renews, and one whose application was declined or
   // is still under review cannot.
   const reason = prequal.decision === "APPROVED" ? "EXPIRED" : "NOT_APPROVED";
-  return await fail(db, buyerId, gate, reason, opts);
+  const verdict = await fail(db, buyerId, gate, reason, opts);
+
+  // §27.1 "Prequalification expired → Buyer" — PHASE 10, the enqueue site this register
+  // row never had.
+  //
+  // THE BUYER WAS THE ONLY PARTY NOT TOLD. The §26 row above puts the expiry on an
+  // Operations queue; the gate returns a 409 to whatever called it. Neither reaches the
+  // person who has to act, and the required action is entirely theirs — renew. A buyer
+  // whose deal stopped moving learned about it by noticing.
+  //
+  // Only on EXPIRED, and only when this call is allowed to have effects (`raiseOnFailure`
+  // is off for a page render, which re-checks on every paint). `NOT_APPROVED` is not an
+  // expiry: telling someone under review that their approval expired would be false, and
+  // §Stage 3 keeps the reason silent anyway.
+  if (reason === "EXPIRED" && opts.raiseOnFailure) {
+    await notifyPrequalExpired(db, buyerId, prequal.expiresAt, opts);
+  }
+
+  return verdict;
+}
+
+/**
+ * The buyer's own copy of an expiry the gate just caught.
+ *
+ * Keyed on the APPLICATION, so the five gates that can each catch the same expiry send ONE
+ * notice between them — a buyer whose expired approval is hit at offer selection and again
+ * at contract request has one problem, not two. A renewal creates a new application, so a
+ * later expiry of THAT one is a new key and a new notice.
+ *
+ * Never throws. The gate's refusal is the load-bearing behaviour and it has already been
+ * decided; a notice that could not be enqueued must not turn a refusal into an approval.
+ */
+async function notifyPrequalExpired(
+  db: Db,
+  buyerId: string,
+  expiresAt: Date | null,
+  opts: RecheckOptions,
+): Promise<void> {
+  try {
+    const buyer = await db.buyer.findUnique({
+      where: { id: buyerId },
+      select: { firstName: true, user: { select: { email: true } } },
+    });
+    const email = buyer?.user?.email;
+    if (!email) return;
+
+    const { renderPrequalExpiry } = await import("@/lib/services/comms/phase2-email-content");
+    const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+    const { PHASE_2_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
+
+    // The application id is not in scope here and the expiry date is; the latest application
+    // for this buyer IS the one that expired, because `recheckApproval` read it that way.
+    const latest = await db.preQualification.findFirst({
+      where: { buyerId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (!latest) return;
+
+    const content = renderPrequalExpiry("expired", {
+      firstName: buyer?.firstName ?? null,
+      expiresAt: expiresAt ?? new Date(),
+      renewUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "").trim()}/buyer/prequal`,
+    });
+    await enqueueTransactional(
+      {
+        triggerEvent: "prequal.expired",
+        templateKey: PHASE_2_TEMPLATES.PREQUAL_EXPIRED,
+        channel: "email",
+        recipientKind: "buyer",
+        recipientId: buyerId,
+        to: email,
+        vehicleRequestId: opts.vehicleRequestId ?? null,
+        dealId: opts.dealId ?? null,
+        idempotencyKey: `${PHASE_2_TEMPLATES.PREQUAL_EXPIRED}:${latest.id}`,
+        payload: { email, subject: content.subject, html: content.html, text: content.text },
+      },
+      db,
+    );
+  } catch (err) {
+    logger.error("[approval-recheck] expiry notice could not be enqueued (the gate still refuses):", err);
+  }
 }
 
 async function fail(

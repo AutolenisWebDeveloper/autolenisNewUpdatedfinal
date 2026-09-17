@@ -45,6 +45,7 @@ import ts from "typescript";
 import { readFileSync } from "node:fs";
 import { sourceFiles, assertScanned } from "@/lib/testing/source-scan";
 import { COMMUNICATIONS_REGISTER, allTemplateKeys } from "@/lib/services/comms/state-recheck-registry";
+import { REGISTER_DISCHARGE_LEDGER, MAX_LEDGERED_ROWS } from "./register-discharge-ledger";
 
 const ROOT = process.cwd();
 const ROOTS = ["app", "lib"] as const;
@@ -108,13 +109,22 @@ function observe(): Observed {
   return { constants, literals };
 }
 
-/** Registered keys with neither a constant reference nor a literal use. */
+/** Constants recorded in the ledger as discharged some other way — see that file. */
+const LEDGERED = new Set(REGISTER_DISCHARGE_LEDGER.map((e) => e.constantName));
+
+/**
+ * Registered keys with neither a constant reference nor a literal use AND no ledger entry.
+ *
+ * A ledgered key is not "wired" — it is ACCOUNTED FOR, which is a weaker and different claim,
+ * and one the assertions below police from the other side.
+ */
 function unwired(seen: Observed): string[] {
   const missing: string[] = [];
   for (const [registryName, registry] of Object.entries(COMMUNICATIONS_REGISTER)) {
     for (const [constantName, key] of Object.entries(registry as Record<string, string>)) {
       if (seen.constants.has(constantName)) continue;
       if (seen.literals.has(key)) continue;
+      if (LEDGERED.has(constantName)) continue;
       missing.push(`${registryName}.${constantName} (${key})`);
     }
   }
@@ -194,4 +204,90 @@ test("a key reached through TEMPLATES[expr] counts as wired", () => {
         `and those need opposite responses.`
     );
   }
+});
+
+// ── THE DISCHARGE LEDGER, HELD SHUT ─────────────────────────────────────────
+
+test("every ledgered row names a real registry key, a reason, a current sender and a follow-up", () => {
+  assert.ok(
+    REGISTER_DISCHARGE_LEDGER.length <= MAX_LEDGERED_ROWS,
+    `${REGISTER_DISCHARGE_LEDGER.length} register rows are discharged without an enqueue site; the ` +
+      `pinned ceiling is ${MAX_LEDGERED_ROWS}. Raising it is a decision about what §27.1 means and ` +
+      `belongs in a batch, not in the change that needed one more exemption.`
+  );
+
+  const byConstant = new Map<string, string>();
+  for (const registry of Object.values(COMMUNICATIONS_REGISTER)) {
+    for (const [name, key] of Object.entries(registry as Record<string, string>)) byConstant.set(name, key);
+  }
+
+  for (const entry of REGISTER_DISCHARGE_LEDGER) {
+    const registeredKey = byConstant.get(entry.constantName);
+    assert.ok(
+      registeredKey,
+      `${entry.constantName} is ledgered and is not in the register at all — a ledger entry for a key ` +
+        `that does not exist silences nothing and hides the fact that it was removed.`
+    );
+    assert.equal(
+      registeredKey,
+      entry.templateKey,
+      `${entry.constantName}: the ledger records template_key "${entry.templateKey}" and the register ` +
+        `says "${registeredKey}". One of the two has been edited without the other.`
+    );
+    assert.ok(
+      entry.reason.trim().length >= 200,
+      `${entry.constantName}: a discharge needs a reason someone can disagree with, not a label. ` +
+        `Got ${entry.reason.trim().length} characters.`
+    );
+    assert.ok(
+      entry.sentBy.trim().length > 0,
+      `${entry.constantName}: say how the message reaches its recipient TODAY. If the answer is ` +
+        `"it does not", this is not a discharge — it is an unimplemented row.`
+    );
+    assert.ok(
+      entry.followUp.trim().length > 0,
+      `${entry.constantName}: name what would discharge this properly, so it reads as a tracked item ` +
+        `rather than as an exemption.`
+    );
+  }
+});
+
+test("a ledgered row that GAINS an enqueue site is reported — the ledger cannot rot", () => {
+  const seen = observe();
+  const contradictory = REGISTER_DISCHARGE_LEDGER.filter(
+    (e) => seen.constants.has(e.constantName) || seen.literals.has(e.templateKey)
+  ).map((e) => e.constantName);
+
+  assert.deepEqual(
+    contradictory,
+    [],
+    "These keys are recorded in the ledger as having NO enqueue site, and one now exists. Delete the " +
+      "ledger entry — a stale exemption is how a register stops describing the system. " +
+      `Contradictory: ${contradictory.join(", ")}`
+  );
+});
+
+test("the ledger check itself can fail — proved against a seeded contradiction", () => {
+  const seen = observe();
+  assert.ok(
+    REGISTER_DISCHARGE_LEDGER.length > 0,
+    "nothing is ledgered, so the two assertions above are vacuous. Delete them rather than leaving a " +
+      "rule that cannot fail."
+  );
+
+  const victim = REGISTER_DISCHARGE_LEDGER[0]!;
+  const seededConstants = new Set(seen.constants);
+  seededConstants.add(victim.constantName);
+  const contradictory = REGISTER_DISCHARGE_LEDGER.filter((e) => seededConstants.has(e.constantName));
+  assert.ok(
+    contradictory.some((e) => e.constantName === victim.constantName),
+    `seeding an enqueue site for the ledgered key ${victim.constantName} did not make the check report it`
+  );
+
+  // And the two rules must not contradict each other: a ledgered key is never ALSO reported
+  // as unwired, or the register could never be green.
+  assert.ok(
+    !unwired(seen).some((entry) => entry.includes(victim.constantName)),
+    `${victim.constantName} is ledgered and is still reported as unwired — the two rules disagree`
+  );
 });

@@ -193,6 +193,7 @@ async function trySendEmailVerified(supabaseId: string, email: string): Promise<
     const { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } = await import(
       "@/lib/services/email/templates/email-verified"
     );
+    const { renderOnboardingIncomplete } = await import("@/lib/services/comms/phase2-email-content");
     await enqueueTransactional({
       triggerEvent: "auth.verification_completed",
       templateKey: PHASE_2_TEMPLATES.VERIFICATION_COMPLETED,
@@ -211,6 +212,42 @@ async function trySendEmailVerified(supabaseId: string, email: string): Promise<
           prequalUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/prequal`,
         }),
       },
+    });
+
+    // §27.1 "Onboarding incomplete → Buyer" — PHASE 10, the enqueue site this register row
+    // never had. `skipIfOnboardingComplete` was registered in Phase 2 and nothing ever
+    // produced a row for it to check.
+    //
+    // ONE NUDGE, NOT A SEQUENCE. §27.1 registers a single key, and the buyer has just proved
+    // they read their email — a person who verifies and then stops has made a decision, and
+    // chasing it three times is how a transactional rail turns into a drip campaign.
+    //
+    // Scheduled a day out and re-checked at send: the ordinary path is that the buyer
+    // completes onboarding in the next few minutes, `skipIfOnboardingComplete` sees it, and
+    // this row is never sent. It exists for the person who does not.
+    //
+    // Enqueued in the same block as the verification notice and guarded by the same audit
+    // row, so a repeated callback visit cannot schedule a second one.
+    await enqueueTransactional({
+      triggerEvent: "auth.onboarding_incomplete",
+      templateKey: PHASE_2_TEMPLATES.ONBOARDING_INCOMPLETE,
+      channel: "email",
+      recipientKind: "buyer",
+      recipientId: buyer.id,
+      to: email,
+      idempotencyKey: `${PHASE_2_TEMPLATES.ONBOARDING_INCOMPLETE}:${buyer.id}`,
+      runAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      payload: {
+        email,
+        ...renderOnboardingIncomplete({
+          firstName,
+          onboardingUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/onboarding`,
+        }),
+      },
+    }).catch((err) => {
+      // The verification notice above is the one this visit owes; a nudge that could not be
+      // scheduled must not cost it, and must not stop the audit row being written.
+      logger.error("[auth/callback] onboarding nudge not scheduled:", err);
     });
 
     // Record the send so future callback visits are no-ops
