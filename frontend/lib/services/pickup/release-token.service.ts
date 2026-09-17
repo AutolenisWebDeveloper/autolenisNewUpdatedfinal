@@ -283,8 +283,17 @@ export async function consumeReleaseToken(
  * records that it will not happen on this credential. Collapsing them would make the pickup
  * record claim a release that never occurred.
  */
-export async function revokeReleaseToken(dealId: string, now: Date = new Date()): Promise<boolean> {
-  const res = await prisma.pickup.updateMany({
+export async function revokeReleaseToken(
+  dealId: string,
+  now: Date = new Date(),
+  /**
+   * Same handle, same reason as `consumeReleaseToken` above. An Operations-recorded release
+   * retires the code in the transaction that records the release, so a rolled-back handover
+   * leaves the buyer's code live rather than silently dead.
+   */
+  db: Pick<typeof prisma, "pickup"> | Prisma.TransactionClient = prisma,
+): Promise<boolean> {
+  const res = await db.pickup.updateMany({
     where: { dealId, tokenHash: { not: null }, tokenConsumedAt: null, tokenRevokedAt: null },
     data: { tokenRevokedAt: now },
   });

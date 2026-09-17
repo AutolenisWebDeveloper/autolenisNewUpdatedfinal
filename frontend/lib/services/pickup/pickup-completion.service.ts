@@ -40,12 +40,12 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
-import { assertReleaseGates } from "@/lib/services/deal/deal.service";
+import { assertReleaseGates, InsuranceRequiredError, ReleaseNotClearedError } from "@/lib/services/deal/deal.service";
 import { emitDealCompletionEvent } from "@/lib/services/deal/deal-completion-event.service";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_9_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
-import { consumeReleaseToken } from "./release-token.service";
+import { consumeReleaseToken, revokeReleaseToken } from "./release-token.service";
 import { DEAL_COMPLETE_SUBJECT, renderDealCompleteEmail } from "@/lib/services/email/templates/deal-complete";
 import {
   DEALER_PICKUP_COMPLETED_SUBJECT,
@@ -55,15 +55,10 @@ import {
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 /** §Stage 18's "Recorded" list, as the scan supplies it. */
-export interface DealerReleaseInput {
+interface DealerReleaseBase {
   dealId: string;
   /** The dealership recording the release — already authorised by the caller. */
   dealerId: string;
-  /** Who recorded it. DEALER by default; ADMIN for a concierge deal with no dealership. */
-  actor?: { role: "DEALER" | "ADMIN"; id: string };
-  /** The pickup whose code was scanned, and the RAW token, so the spend joins this transaction. */
-  pickupId: string;
-  rawToken: string;
   releasedBy?: string | null;
   odometerAtRelease?: number | null;
   conditionAtRelease?: string | null;
@@ -73,6 +68,46 @@ export interface DealerReleaseInput {
   tradeReceived?: boolean;
   dueBillItems?: Prisma.InputJsonValue | null;
   now?: Date;
+}
+
+/**
+ * §Stage 18's normal path: the dealership scans what the buyer presents. The RAW token comes in
+ * so the spend joins the release transaction.
+ */
+export interface ScannedDealerRelease extends DealerReleaseBase {
+  actor?: { role: "DEALER"; id: string };
+  /** The pickup whose code was scanned, and the RAW token, so the spend joins the transaction. */
+  pickupId: string;
+  rawToken: string;
+}
+
+/**
+ * THE CARVE-OUT, AND WHY IT CARRIES NO CODE. A concierge (vehicle-request) deal has no
+ * dealership, so AutoLenis staff coordinate the handover; Operations also correct a dealer deal.
+ * Neither is a scan, and neither has a code to present — the buyer's credential proves the buyer
+ * is at the counter, which is a fact about the dealership's appointment, not about an admin
+ * acting in the console. That act is proven differently: role gate, stated reason and an AWAITED
+ * audit row, pinned in `lib/__tests__/role-boundary-frozen.test.ts`.
+ *
+ * `rawToken?: never` is the load-bearing line. Its absence is what broke the journey routes when
+ * they moved onto this service: they had no code, passed `rawToken: ""`, and the hash of an empty
+ * string matched no row — so an admin completion refused with `code_already_spent` and the
+ * capability silently disappeared behind a refactor meant to preserve it. An empty string now
+ * fails to compile in either arm. `pickupId` goes with it: the pickup is identified by `dealId`
+ * everywhere else in this function, and it was read ONLY to spend the code — so an Operations
+ * release was passing `deal.pickup?.id ?? ""` into a field nothing on its path reads.
+ */
+export interface OperationsRelease extends DealerReleaseBase {
+  actor: { role: "ADMIN"; id: string };
+  pickupId?: never;
+  rawToken?: never;
+}
+
+export type DealerReleaseInput = ScannedDealerRelease | OperationsRelease;
+
+/** Narrows the union. A predicate, so the branch below narrows through the optional `actor`. */
+function isOperationsRelease(input: DealerReleaseInput): input is OperationsRelease {
+  return input.actor?.role === "ADMIN";
 }
 
 export type DealerReleaseOutcome =
@@ -158,14 +193,26 @@ export async function recordDealerRelease(input: DealerReleaseInput): Promise<De
     // the vehicle physically moves, so it is the rung that matters most.
     assertReleaseGates(deal);
 
-    // SPEND THE CODE INSIDE THE TRANSACTION. A gate that throws above rolls this back, so a
-    // refused release never burns the buyer's credential; and a second concurrent scan cannot
-    // spend the same code, because exactly one compare-and-swap matches.
-    const spent = await consumeReleaseToken(
-      { pickupId: input.pickupId, rawToken: input.rawToken, now },
-      tx,
-    );
-    if (!spent) return { ok: false as const, reason: "code_already_spent" as const };
+    // THE CREDENTIAL STEP, INSIDE THE TRANSACTION, AND DIFFERENT FOR THE TWO ACTORS.
+    //
+    // A SCAN SPENDS. A gate that throws above rolls this back, so a refused release never burns
+    // the buyer's credential; and a second concurrent scan cannot spend the same code, because
+    // exactly one compare-and-swap matches.
+    //
+    // AN OPERATIONS RELEASE RETIRES. It has no code to spend, and consuming one would record
+    // "a handover happened on this credential" — which is false, and would be the wrong thing to
+    // find in the pickup row later. Revoking records the true fact: the handover happened, and it
+    // will not happen on this code. A deal with no code issued (concierge) revokes nothing and
+    // proceeds, which is why the result is not checked.
+    if (isOperationsRelease(input)) {
+      await revokeReleaseToken(input.dealId, now, tx);
+    } else {
+      const spent = await consumeReleaseToken(
+        { pickupId: input.pickupId, rawToken: input.rawToken, now },
+        tx,
+      );
+      if (!spent) return { ok: false as const, reason: "code_already_spent" as const };
+    }
 
     const swap = await tx.deal.updateMany({
       where: { id: input.dealId, status: "PICKUP_SCHEDULED" },
@@ -431,4 +478,71 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
   }
 
   return result;
+}
+
+
+/**
+ * The admin journey tools' pickup stage, routed through the one completion writer.
+ *
+ * §8.2 defect (4). `journey/complete` and `journey/complete-all` each wrote the Pickup to
+ * COMPLETED themselves and then forced the Deal to COMPLETED — two more writers of a release,
+ * with none of its preconditions. They call this instead.
+ *
+ * THE GATES ARE NOT BYPASSED FOR A JOURNEY TOOL. One that can complete a deal with no insurance,
+ * no dealer-executed contract and no funding clearance is conditional delivery with a friendlier
+ * name, and it is exactly how "no vehicle moves before clearance" came to be a property of one
+ * code path instead of the system.
+ *
+ * Records BOTH halves as ADMIN, for the same reason the admin completion route does: the history
+ * should say who actually acted.
+ */
+export async function completeJourneyPickup(
+  dealId: string,
+  adminId: string,
+): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    select: { id: true, status: true, offer: { select: { dealerId: true } } },
+  });
+  if (!deal) return { ok: false, code: "NO_DEAL", message: "No active deal found" };
+  if (deal.status === "COMPLETED") return { ok: true };
+
+  const actor = { role: "ADMIN" as const, id: adminId };
+
+  try {
+    const released = await recordDealerRelease({
+      dealId,
+      dealerId: deal.offer?.dealerId ?? adminId,
+      identityVerified: true,
+      actor,
+    });
+    if (!released.ok && released.reason === "not_scheduled") {
+      return {
+        ok: false,
+        code: "NOT_READY_FOR_PICKUP",
+        message: "This deal has not reached a scheduled pickup, so there is no handover to record.",
+      };
+    }
+
+    const completed = await confirmPossession({
+      dealId,
+      buyerId: "",
+      vehicleReceived: true,
+      vinMatch: true,
+      keysAndAccessoriesReceived: true,
+      actor,
+    });
+    if (!completed.ok) {
+      return { ok: false, code: "NOT_COMPLETABLE", message: "This deal could not be completed." };
+    }
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof InsuranceRequiredError) {
+      return { ok: false, code: "INSURANCE_REQUIRED", message: "Insurance proof is required before this deal can complete." };
+    }
+    if (err instanceof ReleaseNotClearedError) {
+      return { ok: false, code: "RELEASE_NOT_CLEARED", message: err.message };
+    }
+    throw err;
+  }
 }

@@ -70,8 +70,6 @@ export async function POST(request: NextRequest, { params }: Props) {
   const releaseOutcome = await recordDealerRelease({
     dealId,
     dealerId: deal.offer?.dealerId ?? admin.adminId,
-    pickupId: deal.pickup?.id ?? "",
-    rawToken: "",
     identityVerified: true,
     actor: { role: "ADMIN", id: admin.adminId },
   }).catch((err: unknown) => err);
