@@ -43,7 +43,21 @@ const DEAL_STAGES = [
   // so the dropdown's only option 409'd and there was no admin route back onto the ladder
   // at all. The warning above this list exists because Phase 7 learned the same lesson.
   "DEALER_EXECUTED", "FUNDING_PENDING",
-  "PICKUP_SCHEDULED", "PICKUP_COMPLETE", "COMPLETED",
+  // §8.2 Phase 9. The ladder gained TWO rungs — PICKUP_READINESS (Stage 16) and HANDOVER_PENDING
+  // (Stage 18) — and this list was not updated, so the console could no longer reach either and
+  // still offered two stages the map refuses. Found by the Phase 9 adversarial review; the same
+  // lesson the warning above this list records, three phases running.
+  "PICKUP_READINESS", "PICKUP_SCHEDULED", "HANDOVER_PENDING",
+  // PICKUP_COMPLETE IS GONE FROM THIS LIST, NOT FROM THE ENUM. §28.1 retires it to a supporting
+  // record fact and `deal.service.ts` keeps it in the map deliberately unreachable, so offering
+  // it here could only ever produce a 409 an operator cannot act on.
+  //
+  // COMPLETED IS GONE TOO, AND THAT IS THE POINT OF THE PHASE. A deal is completed by recording
+  // the buyer's possession, not by advancing a status — `advanceDealStatus` now refuses COMPLETED
+  // outright, because reaching it here evaluated three of §Stage 20's fourteen preconditions and
+  // left `completed_at` NULL. The capability is not lost: it moved to the buyer's confirmation,
+  // and to `POST /api/admin/deals/[dealId]/pickup/complete` for an Operations-coordinated
+  // handover, which collects the possession evidence §Stage 20 requires.
 ];
 
 interface DealRecord { id: string; status: string; buyerId: string; financingPath: string | null; feePaidAt: string | null; feeAmountCents: number | null; feeRefundedAt?: string | null; insuranceStatus: string; contractShieldStatus: string | null; contractShieldScore: number | null; offer: { otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; dealer: { dealershipName: string; city: string | null; state: string | null; tier: string }; auction: { deposit: { id: string; status: string; amountCents: number; stripePaymentIntentId: string | null } | null } | null } | null; buyer: { firstName: string; lastName: string; plan: string; user: { email: string } }; eSignEnvelopes: Array<{ status: string; sentAt: string | null; completedAt: string | null; docusignEnvelopeId: string | null; signerKind?: string | null }>; pickup: { status: string; scheduledAt: string | null; location: string | null } | null; contractScans: Array<{ status: string; score: number; fixList: unknown }> }

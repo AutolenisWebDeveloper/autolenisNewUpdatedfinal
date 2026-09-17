@@ -157,11 +157,24 @@ mock.module("@/lib/services/pickup/pickup-completion.service", {
   },
 });
 
-const req = (qrToken?: string) =>
+/**
+ * THE BODY THE REAL DEALER UI SENDS. This helper used to build `{ qrToken }` and nothing else,
+ * which is what let the identity defect through every test in this file: `recordDealerRelease` is
+ * mocked here, and the stub ignores `identityVerified`, so the route returned 200 for exactly the
+ * body the production service refuses. Every assertion below was true of the route and false of
+ * the system.
+ *
+ * `identityVerified` defaults TRUE because these tests mean "a dealership completed the form".
+ * The default is not the fix — the fix is the test below that pins what the route FORWARDS, and
+ * the one that posts the old body and expects the refusal.
+ */
+const req = (qrToken?: string, extra: Record<string, unknown> = {}) =>
   new NextRequest("http://localhost/api/dealer/pickup/scan", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(qrToken === undefined ? {} : { qrToken }),
+    body: JSON.stringify(
+      qrToken === undefined ? {} : { qrToken, identityVerified: true, ...extra },
+    ),
   });
 
 function dealerPickup(): PickupRow {
@@ -200,9 +213,9 @@ beforeEach(() => {
   pickupAlreadyCompleted = false;
 });
 
-async function scan(token = "a".repeat(64)) {
+async function scan(token = "a".repeat(64), extra: Record<string, unknown> = {}) {
   const { POST } = await import("@/app/api/dealer/pickup/scan/route");
-  return POST(req(token));
+  return POST(req(token, extra));
 }
 
 test("requires authentication (401)", async () => {
@@ -480,4 +493,46 @@ test("THE HALF-WRITE IS NOW STRUCTURALLY IMPOSSIBLE, not handled", async () => {
   assert.equal(res.status, 409, "the loser is refused");
   assert.equal(activityEvents, 0, "and writes nothing — there is no partial completion to repair");
   assert.deepEqual(consumeCalls, [], "the route never spent the code, so it has none to unspend");
+});
+
+test("the route FORWARDS §Stage 18's recorded facts — not just the token", async () => {
+  // THE REGRESSION FOR THE DEFECT THIS FILE COULD NOT SEE. `recordDealerRelease` is mocked, so
+  // asserting the route's STATUS proves nothing about what the service was asked to do. The only
+  // thing worth asserting through a mocked seam is what crossed it.
+  await scan("b".repeat(64), {
+    odometerAtRelease: 12480,
+    conditionAtRelease: "Two stone chips on the bonnet.",
+    fundsCollectedMethod: "cashier's check",
+    tradeReceived: true,
+  });
+
+  assert.equal(releaseCalls.length, 1);
+  const call = releaseCalls[0]!;
+  assert.equal(call.identityVerified, true, "§Stage 18 blocks a handover on an identity mismatch — the flag must reach the service");
+  assert.equal(call.odometerAtRelease, 12480);
+  assert.equal(call.conditionAtRelease, "Two stone chips on the bonnet.");
+  assert.equal(call.fundsCollectedMethod, "cashier's check");
+  assert.equal(call.tradeReceived, true);
+});
+
+test("a body with NO identityVerified is forwarded as false — the shape the old UI sent", async () => {
+  // This is the exact request `PickupActionsClient` used to make: `{ qrToken }` alone. The route
+  // reads `body.identityVerified === true`, so it forwards FALSE, and the real service refuses
+  // and raises ID_MISMATCH_AT_HANDOVER. Pinned so a future UI regressing to that body fails here
+  // rather than at a dealership counter.
+  const { POST } = await import("@/app/api/dealer/pickup/scan/route");
+  await POST(
+    new NextRequest("http://localhost/api/dealer/pickup/scan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ qrToken: "c".repeat(64) }),
+    }),
+  );
+
+  assert.equal(releaseCalls.length, 1);
+  assert.equal(
+    releaseCalls[0]!.identityVerified,
+    false,
+    "an absent flag is not a confirmed identity, and the route must not default it to true",
+  );
 });

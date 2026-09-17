@@ -121,7 +121,7 @@ export default async function PickupPage() {
             <div className="bg-al-surface border border-al-border rounded-al-lg p-6 shadow-al-1" data-testid="pickup-schedule-container">
               <h2 className="font-display text-lg font-semibold text-al-text mb-1">Propose a pickup time</h2>
               <p className="text-sm text-al-text-muted mb-5">
-                Pick a time that works for you — the dealership will confirm it or suggest an alternative. Your QR code is issued once the time is confirmed.
+                Pick a time that works for you — the dealership will confirm it or suggest an alternative. When it&apos;s confirmed, you&apos;ll show a pickup code from this page at the dealership.
               </p>
               <PickupScheduleForm dealId={deal.id} availability={availability} />
             </div>

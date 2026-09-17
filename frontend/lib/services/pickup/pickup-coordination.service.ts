@@ -85,7 +85,26 @@ type LoadedDeal = {
 // from: the buyer's signature is no longer the last gate, the six-item funding clearance is.
 // PICKUP_SCHEDULED stays in the set so a re-confirm of an already-scheduled pickup is still
 // idempotent rather than a state error.
-const CONFIRMABLE_DEAL_STATUSES: ReadonlySet<string> = new Set(["FUNDING_PENDING", "PICKUP_SCHEDULED"]);
+/**
+ * Deal statuses from which a pickup round may still be confirmed or accepted.
+ *
+ * `PICKUP_READINESS` WAS MISSING, AND THE GATE THIS PHASE ADDED IS WHAT MADE THAT FATAL. Found by
+ * the Phase 9 adversarial review. `readinessGate` runs BEFORE the pickup compare-and-swap and
+ * advances the Deal `FUNDING_PENDING → PICKUP_READINESS`. If the swap then loses — the other party
+ * acted in the same second, or `settleConfirmation`'s compensating path reverted the pickup — the
+ * Deal is left at PICKUP_READINESS with the pickup back at PROPOSED. Every subsequent confirm or
+ * accept was then refused HERE, one line before the gate that would have let it through, with
+ * "This deal is no longer ready for pickup scheduling". The parties could counter forever and
+ * never schedule; only an admin could unstick it.
+ *
+ * PICKUP_READINESS is the state that means "ready to schedule". Refusing to schedule from it was
+ * the opposite of its meaning.
+ */
+const CONFIRMABLE_DEAL_STATUSES: ReadonlySet<string> = new Set([
+  "FUNDING_PENDING",
+  "PICKUP_READINESS",
+  "PICKUP_SCHEDULED",
+]);
 
 async function loadDeal(dealId: string): Promise<LoadedDeal | null> {
   const deal = await prisma.deal.findUnique({

@@ -33,6 +33,8 @@ const schema = z.object({
   // completion record must never do.
   odometerAtPossession: z.number().int().min(0).max(1_000_000).optional(),
   conditionAsDelivered: z.string().trim().min(1).max(2000).optional(),
+  /** False opens §Stage 21's MISSING_ACCESSORIES obligation against the dealership. */
+  keysAndAccessoriesReceived: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest, { params }: Props) {
@@ -103,7 +105,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       vinMatch: true,
       odometerAtPossession: parsed.data.odometerAtPossession ?? null,
       conditionAsDelivered: parsed.data.conditionAsDelivered ?? null,
-      keysAndAccessoriesReceived: true,
+      keysAndAccessoriesReceived: parsed.data.keysAndAccessoriesReceived ?? true,
       actor: { role: "ADMIN", id: admin.adminId },
     });
   } catch (err) {
@@ -126,7 +128,9 @@ export async function POST(request: NextRequest, { params }: Props) {
     );
   }
 
-  const pickup = deal.pickup ?? { id: "" };
+  // NULL, not "". A concierge deal may have no Pickup row, and an empty string in an audit
+  // row reads as an id that exists and resolves to nothing.
+  const pickup = deal.pickup ?? { id: null as string | null };
 
   // Notify buyer
   await prisma.notification.create({

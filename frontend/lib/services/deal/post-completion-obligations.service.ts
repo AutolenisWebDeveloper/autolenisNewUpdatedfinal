@@ -142,7 +142,18 @@ export async function openObligation(
   return { ok: true, id: row.id, created: true };
 }
 
-/** Resolve an obligation. RESOLVED is terminal; an already-resolved one is not re-resolved. */
+/**
+ * Resolve an obligation. RESOLVED is terminal; an already-resolved one is not re-resolved.
+ *
+ * NO ROUTE AND NO CALLER YET, AND THAT IS STATED RATHER THAN LEFT TO BE DISCOVERED. §Stage 21
+ * tracks obligations and chases them; the control that marks one resolved is an authenticated
+ * write against a COMPLETED transaction, which needs its authorization scoped deliberately —
+ * who may resolve, on whose behalf, and with what evidence. Until that batch exists, Operations
+ * resolves from the overdue queue item and this function is the seam they will call.
+ *
+ * The overdue email says exactly that, rather than linking a dealership to a control that is
+ * not there.
+ */
 export async function resolveObligation(
   obligationId: string,
   params: { notes?: string | null; evidence?: Prisma.InputJsonValue | null; now?: Date } = {},
@@ -278,12 +289,23 @@ export async function sweepOverdueObligations(
             email: dealerEmail,
             type: "transactional",
             subject: `Overdue: ${label}`,
+            // NO "UPDATE THE STATUS" LINK, BECAUSE THERE IS NOTHING BEHIND IT. Found by the
+            // Phase 9 adversarial review: `resolveObligation` has no route, no authorization and
+            // no caller, so the first draft of this email sent a dealership to a page with no
+            // control on it. A message that promises an action the product cannot perform is
+            // worse than one that asks for a reply — it spends the recipient's trust to save the
+            // sender a sentence.
+            //
+            // The dealer-facing resolution control is REPORTED as the next step for this stage,
+            // not built here: it is an authenticated write surface on a completed transaction and
+            // belongs in a batch that can scope its authorization properly.
             html:
               `<p><strong>${label}</strong> on a completed AutoLenis transaction is past its due ` +
               `date${ob.dueAt ? ` of ${ob.dueAt.toISOString().slice(0, 10)}` : ""}.</p>` +
-              `<p>Overdue obligations register on your dealership scorecard. Resolving it clears ` +
-              `the entry.</p>` +
-              `<p><a href="${APP_URL}/dealer/deals/${ob.dealId}">Update the status</a></p>`,
+              `<p>Overdue obligations register on your dealership scorecard. Resolving this one ` +
+              `clears the entry.</p>` +
+              `<p>Reply to this email with the current status and our Operations team will update ` +
+              `the record.</p>`,
           },
         });
         result.notified += 1;

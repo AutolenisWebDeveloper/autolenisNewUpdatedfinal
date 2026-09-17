@@ -63,7 +63,13 @@ mock.module("@/lib/prisma", {
       pickup: {
         findMany: async ({ where }: { where: Row }) =>
           ctrl.pickups.filter((p) => {
-            if (p.status !== where.status) return false;
+            // `{ in: [...] }` as well as a bare string: the sweeps match every LIVE appointment
+            // status, not just SCHEDULED, since a rescheduled handover is as real as a first one.
+            const wantStatus = where.status as string | { in: string[] } | undefined;
+            if (wantStatus) {
+              const allowed = typeof wantStatus === "string" ? [wantStatus] : wantStatus.in;
+              if (!allowed.includes(p.status as string)) return false;
+            }
             const sched = where.scheduledAt as Row | undefined;
             const at = p.scheduledAt as Date | null;
             if (sched) {
@@ -80,7 +86,13 @@ mock.module("@/lib/prisma", {
         findUnique: async () => ctrl.pickups[0] ?? null,
         updateMany: async ({ where, data }: { where: Row; data: Row }) => {
           const hits = ctrl.pickups.filter((p) =>
-            Object.entries(where).every(([k, v]) => (v === null ? p[k] === null : p[k] === v)),
+            Object.entries(where).every(([k, v]) => {
+              if (v === null) return p[k] === null;
+              if (v && typeof v === "object" && "in" in (v as Record<string, unknown>)) {
+                return ((v as { in: unknown[] }).in as unknown[]).includes(p[k]);
+              }
+              return p[k] === v;
+            }),
           );
           hits.forEach((p) => Object.assign(p, data));
           ctrl.updates.push(data);
@@ -127,7 +139,6 @@ test("the reminder carries all seven of §Stage 17's items, and the count is ass
     hasCoBuyer: true,
     hasTrade: true,
     downPaymentMethod: "CASHIERS_CHECK",
-    dealId: "deal_1",
   });
 
   // Each of the seven, by the thing it must actually say — not by its key, which would let the
@@ -145,7 +156,7 @@ test("the reminder never contains the code itself", async () => {
   const { renderAppointmentReminder } = await svc();
   const body = renderAppointmentReminder({
     buyerFirstName: "Ada", scheduledAt: NOW, location: null, dealershipName: "North Motors",
-    hasCoBuyer: false, hasTrade: false, downPaymentMethod: null, dealId: "deal_1",
+    hasCoBuyer: false, hasTrade: false, downPaymentMethod: null,
   });
 
   // The raw token is returned once by `issueReleaseToken` and never stored, so this is
@@ -160,7 +171,7 @@ test("a deal with no trade does not get trade instructions, and still reads as a
   const { renderAppointmentReminder } = await svc();
   const body = renderAppointmentReminder({
     buyerFirstName: "Ada", scheduledAt: NOW, location: "Bay 3", dealershipName: "North Motors",
-    hasCoBuyer: false, hasTrade: false, downPaymentMethod: null, dealId: "deal_1",
+    hasCoBuyer: false, hasTrade: false, downPaymentMethod: null,
   });
 
   assert.doesNotMatch(body.html, /payoff letter/i, "there is no trade to bring");
@@ -348,4 +359,29 @@ test("EVERY writer of pickups.scheduledAt clears both appointment reminder marke
       "NEW time gets no reminder at all, and a reminder that is never sent looks exactly like one " +
       "that was not due."
   );
+});
+
+test("a RESCHEDULED appointment is reminded, flagged and recordable — not invisible", async () => {
+  // THE DEFECT THE PHASE 9 ADVERSARIAL REVIEW FOUND. All three sweeps filtered `status:
+  // "SCHEDULED"`, while `reschedulePickup` sets `RESCHEDULED` — a fully live appointment
+  // everywhere else: codes are minted for it, the dealer scan accepts it, and /buyer/pickup
+  // renders it as confirmed. So a buyer who MOVED their handover got no 24-hour reminder, no
+  // 2-hour reminder, and could never be flagged as a no-show; `recordPickupNoShow`'s swap matched
+  // zero rows and returned `{ ok: true, returnedToScheduling: false }` — a silent no-op reported
+  // as success. The four comments promising the markers are cleared "so the NEW time gets
+  // reminders" were true, and nothing ever looked at the row again.
+  const s = await svc();
+  ctrl.pickups[0].status = "RESCHEDULED";
+
+  const result = await s.sweepAppointmentReminders(NOW);
+  assert.equal(result.reminded24h, 1, "a moved appointment is still an appointment");
+
+  ctrl.pickups[0].scheduledAt = new Date(NOW.getTime() - 6 * 3600_000);
+  ctrl.pickups[0].reminder2hSentAt = NOW;
+  const missed = await s.sweepAppointmentReminders(NOW);
+  assert.equal(missed.noShowsFlagged, 1, "and can still be missed");
+
+  const out = await s.recordPickupNoShow("deal_1", "BUYER", { id: "a1", role: "OPERATIONS_ADMIN" }, NOW);
+  assert.deepEqual(out, { ok: true, returnedToScheduling: true }, "the CAS must match a rescheduled row too");
+  assert.equal(ctrl.pickups[0].status, "NOT_SCHEDULED");
 });

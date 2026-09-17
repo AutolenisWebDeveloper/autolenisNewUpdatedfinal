@@ -36,6 +36,7 @@ import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatc
 import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { PICKUP_REMINDER_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { revokeReleaseToken } from "./release-token.service";
+import { TOKEN_MINTABLE_STATUSES } from "./pickup-statuses";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 const BATCH_LIMIT = 200;
@@ -69,7 +70,6 @@ export function renderAppointmentReminder(params: {
   hasCoBuyer: boolean;
   hasTrade: boolean;
   downPaymentMethod: string | null;
-  dealId: string;
 }): { subject: string; html: string } {
   const when = params.scheduledAt
     ? params.scheduledAt.toUTCString()
@@ -151,7 +151,15 @@ async function sendLeg(leg: ReminderLeg, now: Date): Promise<{ sent: number; fai
 
   const due = await prisma.pickup.findMany({
     where: {
-      status: "SCHEDULED",
+      // EVERY LIVE APPOINTMENT STATUS, NOT JUST `SCHEDULED`. Found by the Phase 9 adversarial
+      // review. `reschedulePickup` sets `RESCHEDULED`, which is a fully live appointment
+      // everywhere else in the system — `TOKEN_MINTABLE_STATUSES` mints codes for it, the dealer
+      // scan accepts it, and `/buyer/pickup` renders it as confirmed. Filtering on `SCHEDULED`
+      // alone meant a buyer who MOVED their handover got no 24-hour reminder, no 2-hour reminder,
+      // and could never be flagged as a no-show. The comments four files over say the markers are
+      // cleared "so the NEW time gets reminders" — they were cleared, and then nothing looked at
+      // the row again.
+      status: { in: [...TOKEN_MINTABLE_STATUSES] },
       scheduledAt: { not: null, lte: horizon, ...(leg === "second" ? { gt: now } : {}) },
       [marker]: null,
       deal: { status: "PICKUP_SCHEDULED" },
@@ -209,7 +217,6 @@ async function sendLeg(leg: ReminderLeg, now: Date): Promise<{ sent: number; fai
         hasCoBuyer: Boolean(p.deal?.coBuyerId),
         hasTrade: (p.deal?.tradeInSubmissions.length ?? 0) > 0,
         downPaymentMethod: p.deal?.financing?.downPaymentMethod ?? null,
-        dealId: p.dealId,
       });
 
       await enqueueTransactional({
@@ -271,7 +278,8 @@ export async function flagSuspectedNoShows(now: Date = new Date()): Promise<{ fl
 
   const stale = await prisma.pickup.findMany({
     where: {
-      status: "SCHEDULED",
+      // Same set as the reminder legs above, and for the same reason.
+      status: { in: [...TOKEN_MINTABLE_STATUSES] },
       scheduledAt: { not: null, lt: cutoff },
       dealerReleasedAt: null,
       noShowAt: null,
@@ -354,7 +362,9 @@ export async function recordPickupNoShow(
   await revokeReleaseToken(dealId, now);
 
   const swap = await prisma.pickup.updateMany({
-    where: { dealId, status: "SCHEDULED" },
+    // The CAS matched only SCHEDULED, so recording a no-show on a RESCHEDULED appointment
+    // returned `{ ok: true, returnedToScheduling: false }` — a silent no-op reported as success.
+    where: { dealId, status: { in: [...TOKEN_MINTABLE_STATUSES] } },
     data: {
       status: "NOT_SCHEDULED",
       noShowAt: now,

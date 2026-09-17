@@ -11,6 +11,7 @@ import {
   DealTransitionError,
   InsuranceRequiredError,
   ReleaseNotClearedError,
+  TerminalDealError,
 } from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
@@ -66,6 +67,37 @@ export async function POST(request: NextRequest, { params }: Props) {
       if (!newStatus || !Object.values(DealStatus).includes(newStatus as DealStatus)) {
         return adminError("INVALID_STATUS", "Invalid target status", 400);
       }
+
+      // COMPLETED IS NOT A STAGE YOU ADVANCE TO. Found by the Phase 9 adversarial review, and it
+      // is §8.2 defect (8) reappearing one rung higher than it was closed.
+      //
+      // That defect closed `PICKUP_SCHEDULED → COMPLETED` and inserted HANDOVER_PENDING — which
+      // made `HANDOVER_PENDING → COMPLETED` a legal edge. THIS route resolves its target at
+      // RUNTIME from the request body, so an OPERATIONS_ADMIN could select COMPLETED on a deal
+      // sitting at HANDOVER_PENDING and take it NON-FORCED. `assertReleaseGates` would run —
+      // three checks — and §Stage 20's other ELEVEN preconditions would never be evaluated. The
+      // result: `status = COMPLETED` with `completed_at` NULL, no pickup completion, no
+      // possession evidence, no §Stage 21 obligations, and neither party's completion message. A
+      // deal complete in the status column and nowhere else.
+      //
+      // REFUSED HERE RATHER THAN IN `advanceDealStatus`, and the distinction matters. That
+      // function is the documented canonical emitter of the completion event ("individual
+      // completion routes no longer emit it") and its release gates are pinned by eight tests;
+      // refusing COMPLETED inside it would have made its own completion handling unreachable and
+      // deleted working behaviour to close a hole that is this route's. The vulnerability is a
+      // TARGET RESOLVED FROM A REQUEST BODY, so it closes where the body is read.
+      //
+      // `force` does not open it either. Owner ruling 2026-09-15 on the sibling gate applies: force
+      // may skip an ORDERING constraint, never a FACT. Buyer possession is a fact about the world.
+      if (newStatus === DealStatus.COMPLETED) {
+        return adminError(
+          "USE_COMPLETION_PATH",
+          "A deal is completed by recording the buyer's possession, not by advancing its stage. " +
+            "Use the pickup completion action, which evaluates all fourteen §Stage 20 preconditions " +
+            "and records the handover evidence.",
+          409,
+        );
+      }
       // Route through the guarded state machine so illegal jumps (e.g. skipping
       // fee/insurance/contract gates) are rejected. An explicit `force: true`
       // performs an audit-logged override for legitimate manual corrections.
@@ -99,6 +131,13 @@ export async function POST(request: NextRequest, { params }: Props) {
         // here would point an administrator at exactly that.
         if (err instanceof ReleaseNotClearedError) {
           return adminError("RELEASE_NOT_CLEARED", err.message, 409);
+        }
+        // §Stage 20: "Completed is terminal. Corrections are append-only and never rewrite
+        // completed history." Unmapped until the Phase 9 review found it, so an administrator who
+        // tried to move a COMPLETED deal got a 500 "Action failed" — and the class exists
+        // precisely to tell them the right action is a correction. Its own message says so.
+        if (err instanceof TerminalDealError) {
+          return adminError("DEAL_TERMINAL", err.message, 409);
         }
         throw err;
       }

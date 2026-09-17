@@ -26,6 +26,16 @@
 // to be removed, to produce a completed deal that is false in the database. The message says
 // what is missing and stops.
 //
+// RETARGETED AT PHASE 9, FROM COMPLETED TO HANDOVER_PENDING, AND THE REASON IS THE POINT.
+//
+// Every case below used to advance to COMPLETED, because that was the rung this route could
+// reach. Phase 9's adversarial review found that a runtime-resolved COMPLETED target evaluates
+// three of §Stage 20's FOURTEEN preconditions, so the route now refuses it outright (see the new
+// case at the end of this file). The gate mappings these cases exist to pin are unaffected:
+// `assertReleaseGates` runs on every rung in `RELEASE_GATED_STATUSES`, and HANDOVER_PENDING —
+// the rung where the vehicle physically moves — is one of them. The subject is the same, tested
+// at a target that still exists.
+//
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
 //     "app/api/admin/deals/__tests__/deal-action-release-gate.test.ts"
@@ -127,7 +137,7 @@ test("funding not cleared → 409 RELEASE_NOT_CLEARED, not an unhandled 500", as
   const POST = await loadPOST();
 
   const res = (await POST(
-    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "COMPLETED", reason: "buyer collected the vehicle" }),
+    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "HANDOVER_PENDING", reason: "buyer collected the vehicle" }),
     { params },
   )) as unknown as { __kind: string; code: string; message: string; status: number };
 
@@ -146,7 +156,7 @@ test("the dealership's executed contract not on file → 409 RELEASE_NOT_CLEARED
   const POST = await loadPOST();
 
   const res = (await POST(
-    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "COMPLETED", reason: "closing out" }),
+    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "HANDOVER_PENDING", reason: "closing out" }),
     { params },
   )) as unknown as { __kind: string; code: string; message: string; status: number };
 
@@ -165,7 +175,7 @@ test("the mapped message does NOT tell the administrator to force past a missing
   const POST = await loadPOST();
 
   const res = (await POST(
-    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "COMPLETED", reason: "closing out" }),
+    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "HANDOVER_PENDING", reason: "closing out" }),
     { params },
   )) as unknown as { message: string };
 
@@ -183,10 +193,43 @@ test("a normal advance still succeeds and still carries force through untouched"
   const POST = await loadPOST();
 
   const res = (await POST(
-    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "COMPLETED", reason: "closing out", force: true }),
+    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "HANDOVER_PENDING", reason: "closing out", force: true }),
     { params },
   )) as unknown as { __kind: string };
 
   assert.equal(res.__kind, "success");
-  assert.deepEqual(ctrl.advances, [{ dealId: "deal_1", status: "COMPLETED", force: true }]);
+  assert.deepEqual(ctrl.advances, [{ dealId: "deal_1", status: "HANDOVER_PENDING", force: true }]);
+});
+
+test("COMPLETED is refused at this route — a deal is completed by possession, not by a dropdown", async () => {
+  // THE PHASE 9 FINDING, PINNED. §8.2 defect (8) closed `PICKUP_SCHEDULED → COMPLETED` and
+  // inserted HANDOVER_PENDING, which made `HANDOVER_PENDING → COMPLETED` a legal edge — and this
+  // route resolves its target from the REQUEST BODY, so an OPERATIONS_ADMIN could select COMPLETED
+  // on a deal already at HANDOVER_PENDING and take it non-forced. Three of fourteen preconditions
+  // would run; `completed_at` would stay NULL; no pickup completion, no possession evidence, no
+  // §Stage 21 obligations, neither party's completion message.
+  //
+  // THE CAPABILITY IS NOT LOST, IT MOVED: `POST /api/admin/deals/[dealId]/pickup/complete` still
+  // lets Operations complete a deal, with the possession evidence §Stage 20 requires.
+  const POST = await loadPOST();
+  const res = (await POST(
+    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "COMPLETED", reason: "buyer collected the vehicle" }),
+    { params },
+  )) as unknown as { code: string; message: string; status: number };
+
+  assert.equal(res.status, 409);
+  assert.equal(res.code, "USE_COMPLETION_PATH");
+  assert.match(res.message, /recording the buyer's possession/);
+  assert.deepEqual(ctrl.advances, [], "the guard must refuse BEFORE the state machine is touched");
+});
+
+test("force does not open it either — possession is a fact, not an ordering constraint", async () => {
+  const { POST } = await import("@/app/api/admin/deals/[dealId]/action/route");
+  const res = await POST(
+    req({ action: "DEAL_STAGE_ADVANCED", newStatus: "COMPLETED", reason: "closing out", force: true }),
+    { params: Promise.resolve({ dealId: "deal_1" }) },
+  );
+
+  assert.equal(res.status, 409);
+  assert.deepEqual(ctrl.advances, [], "owner ruling 2026-09-15: force may skip an ORDERING constraint, never a FACT");
 });

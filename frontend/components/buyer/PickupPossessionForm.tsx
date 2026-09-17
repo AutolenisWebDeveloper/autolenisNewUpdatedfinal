@@ -91,7 +91,15 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
 
   if (outcome?.kind === "complete") {
     return (
-      <div className="bg-al-surface border border-al-border rounded-al-lg p-6 text-center" data-testid="possession-complete">
+      // WCAG 4.1.3 (AA). The form is REPLACED by this panel, so a screen-reader user gets no
+      // announcement at all unless the new content is a live region — the outcome of the single
+      // most consequential action in the buyer's journey would simply be silent.
+      <div
+        className="bg-al-surface border border-al-border rounded-al-lg p-6 text-center"
+        role="status"
+        aria-live="polite"
+        data-testid="possession-complete"
+      >
         <CheckCircle2 size={40} className="text-al-success mx-auto mb-3" aria-hidden="true" />
         <h2 className="font-display text-lg font-semibold text-al-text mb-1">That&apos;s everything</h2>
         <p className="text-sm text-al-text-muted">
@@ -105,7 +113,12 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
 
   if (outcome?.kind === "discrepancy") {
     return (
-      <div className="bg-al-surface border border-al-border rounded-al-lg p-6" data-testid="possession-discrepancy">
+      <div
+        className="bg-al-surface border border-al-border rounded-al-lg p-6"
+        role="status"
+        aria-live="polite"
+        data-testid="possession-discrepancy"
+      >
         <div className="flex items-start gap-3">
           <AlertTriangle size={20} className="text-al-warning mt-0.5 flex-shrink-0" aria-hidden="true" />
           <div>
@@ -118,7 +131,16 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
   }
 
   return (
-    <div className="bg-al-surface border border-al-border rounded-al-lg p-6" data-testid="possession-form">
+    // A REAL <form>, so Enter submits. This is filled in on a phone at a dealership; a button that
+    // only responds to a tap is one more thing to find on a small screen with one hand full of keys.
+    <form
+      className="bg-al-surface border border-al-border rounded-al-lg p-6"
+      data-testid="possession-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!submitting) void submit();
+      }}
+    >
       <h2 className="font-display text-lg font-semibold text-al-text mb-1">Confirm you have your vehicle</h2>
       <p className="text-sm text-al-text-muted mb-5">
         The dealership recorded that they released it to you. Your deal isn&apos;t complete until you
@@ -127,22 +149,22 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
 
       <fieldset className="space-y-3 mb-5">
         <legend className="sr-only">What you received</legend>
-        <label className="flex items-start gap-3 text-sm text-al-text cursor-pointer">
+        <label className="flex items-start gap-3 text-sm text-al-text cursor-pointer min-h-11 py-1.5">
           <input
             type="checkbox"
             checked={vehicleReceived}
             onChange={(e) => setVehicleReceived(e.target.checked)}
-            className="mt-0.5 h-4 w-4"
+            className="mt-0.5 h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             data-testid="possession-vehicle-received"
           />
           <span>I have the vehicle.</span>
         </label>
-        <label className="flex items-start gap-3 text-sm text-al-text cursor-pointer">
+        <label className="flex items-start gap-3 text-sm text-al-text cursor-pointer min-h-11 py-1.5">
           <input
             type="checkbox"
             checked={vinMatch}
             onChange={(e) => setVinMatch(e.target.checked)}
-            className="mt-0.5 h-4 w-4"
+            className="mt-0.5 h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             data-testid="possession-vin-match"
           />
           <span>
@@ -150,12 +172,12 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
             {vin && <span className="block text-xs text-al-text-muted font-mono mt-0.5">{vin}</span>}
           </span>
         </label>
-        <label className="flex items-start gap-3 text-sm text-al-text cursor-pointer">
+        <label className="flex items-start gap-3 text-sm text-al-text cursor-pointer min-h-11 py-1.5">
           <input
             type="checkbox"
             checked={keysReceived}
             onChange={(e) => setKeysReceived(e.target.checked)}
-            className="mt-0.5 h-4 w-4"
+            className="mt-0.5 h-4 w-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             data-testid="possession-keys-received"
           />
           <span>I have all the keys and everything that was promised with the car.</span>
@@ -174,7 +196,7 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
             min={0}
             value={odometer}
             onChange={(e) => setOdometer(e.target.value)}
-            className="w-full border border-al-border rounded-al px-3 py-2 text-sm"
+            className="w-full border border-al-border rounded-al px-3 py-2.5 min-h-11 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             placeholder="e.g. 12480"
             data-testid="possession-odometer"
           />
@@ -188,7 +210,7 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
             rows={2}
             value={condition}
             onChange={(e) => setCondition(e.target.value)}
-            className="w-full border border-al-border rounded-al px-3 py-2 text-sm"
+            className="w-full border border-al-border rounded-al px-3 py-2.5 min-h-11 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             placeholder="Clean, as described — or anything you noticed."
             data-testid="possession-condition"
           />
@@ -202,27 +224,39 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
             rows={2}
             value={problem}
             onChange={(e) => setProblem(e.target.value)}
-            className="w-full border border-al-border rounded-al px-3 py-2 text-sm"
+            className="w-full border border-al-border rounded-al px-3 py-2.5 min-h-11 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
             placeholder="Tell us and we'll open a case with the dealership. Your deal stays open until it's sorted."
             data-testid="possession-problem"
           />
         </div>
       </div>
 
+      {/* TOKENS, NOT THE RAW PALETTE. `autolenis-ui-design-system` rule 2 — one green, one blue,
+          one red — exists to stop near-duplicate shades, and `amber-50/200/700` beside
+          `--al-warning-subtle` is exactly that. The buyer portal's own pages are already on the
+          token layer, so this component matching `FundingClearanceChecklist`'s legacy slate/amber
+          palette would have spread the split system rather than following it. */}
       {outcome?.kind === "blocked" && (
-        <div className="mb-5 border border-amber-200 bg-amber-50 rounded-al p-4" data-testid="possession-blocked">
-          <p className="text-sm text-slate-800 mb-3">
+        <div
+          className="mb-5 border border-al-warning/30 bg-al-warning-subtle rounded-al p-4"
+          role="status"
+          aria-live="polite"
+          data-testid="possession-blocked"
+        >
+          <p className="text-sm text-al-text mb-3">
             We&apos;ve recorded your confirmation. Before the deal can close, these are still
             outstanding:
           </p>
           <ul className="space-y-2">
             {outcome.outstanding.map((row) => (
               <li key={row.key} className="text-xs" data-testid={`possession-outstanding-${row.key}`}>
-                <span className="font-medium text-slate-800">{row.checkpoint}</span>
-                <span className="text-slate-600"> — {row.detail}</span>
-                <span className="block text-slate-500 mt-0.5">
+                <span className="font-medium text-al-text">{row.checkpoint}</span>
+                <span className="text-al-text-muted"> — {row.detail}</span>
+                <span className="block text-al-text-muted mt-0.5">
                   Waiting on:{" "}
-                  <span className={row.responsibleParty === "BUYER" ? "font-semibold text-amber-700" : "font-semibold text-slate-600"}>
+                  {/* The one row a buyer may have to act on is distinguished by WEIGHT AND WORDS
+                      as well as colour — rule 10: never encode status by colour alone. */}
+                  <span className={row.responsibleParty === "BUYER" ? "font-semibold text-al-warning-fg" : "font-semibold text-al-text"}>
                     {PARTY_LABEL[row.responsibleParty] ?? row.responsibleParty}
                   </span>
                 </span>
@@ -238,7 +272,7 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
         </p>
       )}
 
-      <Button onClick={submit} disabled={submitting} data-testid="possession-submit">
+      <Button type="submit" disabled={submitting} data-testid="possession-submit">
         {submitting ? (
           <>
             <Loader2 size={16} className="animate-spin mr-2" aria-hidden="true" /> Sending
@@ -256,6 +290,6 @@ export default function PickupPossessionForm({ dealId, vin }: { dealId: string; 
           Tick &ldquo;I have the vehicle&rdquo; to confirm — or tell us what&apos;s wrong and we&apos;ll open a case.
         </p>
       )}
-    </div>
+    </form>
   );
 }

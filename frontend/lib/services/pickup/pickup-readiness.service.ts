@@ -290,9 +290,17 @@ export async function enterPickupReadiness(
   const deal = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
   if (!deal) return { evaluation, entered: false, schedulable: false };
 
-  // Already past the gate: readiness was evaluated when it was entered, and re-evaluating is a
-  // read for display, not a reason to move anything.
-  if (deal.status === "PICKUP_READINESS") return { evaluation, entered: false, schedulable: true };
+  // Already past the gate. Re-evaluating is a read for display and not a reason to MOVE anything —
+  // but it IS a reason to refuse scheduling, which this branch used to get wrong.
+  //
+  // It returned `schedulable: true` unconditionally, so an item that became false AFTER the deal
+  // entered readiness — an exception raised, the dealership's vehicle hold lapsing — did not stop
+  // the handover being booked. §Stage 16 says "Nothing is scheduled while any item is unmet", and
+  // the state the deal happens to be in is not one of the thirteen items. Found by the Phase 9
+  // adversarial review.
+  if (deal.status === "PICKUP_READINESS") {
+    return { evaluation, entered: false, schedulable: evaluation.ready };
+  }
   if (deal.status === "PICKUP_SCHEDULED" || deal.status === "HANDOVER_PENDING" || deal.status === "COMPLETED") {
     return { evaluation, entered: false, schedulable: true };
   }

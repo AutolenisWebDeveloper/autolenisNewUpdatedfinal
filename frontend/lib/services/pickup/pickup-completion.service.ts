@@ -444,6 +444,30 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
     // §Stage 21 says obligations are tracked "without reopening or altering" the Deal. Nothing
     // here writes to the Deal; the rows are children of it.
     await openObligation({ dealId: input.dealId, type: "TITLE_AND_REGISTRATION", now }, tx);
+    // THE BUYER SAID SOMETHING WAS MISSING, AND UNTIL NOW NOTHING RECORDED IT. Found by the Phase
+    // 9 adversarial review: `keysAndAccessoriesReceived` was declared here, validated by the
+    // route, asked of the buyer on the form — and written to no column and read by no
+    // precondition. A buyer could leave "I have all the keys and everything that was promised"
+    // UNCHECKED, the deal would complete normally, and no trace would survive. The checkbox was
+    // theatre, which is worse than not asking: it teaches people the form does not matter.
+    //
+    // It is not a §Stage 20 precondition — a missing second key must not block a completed
+    // purchase — it is a §Stage 21 OBLIGATION, and `MISSING_ACCESSORIES` is the type the document
+    // names and the one type with no writer until now. The buyer's answer IS the report that
+    // opens it, and the obligation row is the record; no new column is needed for a fact that has
+    // a home.
+    if (!input.keysAndAccessoriesReceived) {
+      await openObligation(
+        {
+          dealId: input.dealId,
+          type: "MISSING_ACCESSORIES",
+          now,
+          notes: "The buyer reported at handover that keys or promised accessories were missing.",
+          evidence: { reportedBy: input.actor?.role ?? "BUYER", reportedAt: now.toISOString() },
+        },
+        tx,
+      );
+    }
     if (deal.tradeInSubmissions.some((t) => t.verifiedPayoffCents !== null && t.verifiedPayoffCents > 0)) {
       await openObligation({ dealId: input.dealId, type: "TRADE_PAYOFF", now }, tx);
     }
@@ -579,7 +603,12 @@ export async function completeJourneyPickup(
    * evidence is refused with that checkpoint named — which is the documented behaviour, not a
    * lost capability. A caller that HAS the facts passes them through.
    */
-  evidence: { odometerAtPossession?: number | null; conditionAsDelivered?: string | null } = {},
+  evidence: {
+    odometerAtPossession?: number | null;
+    conditionAsDelivered?: string | null;
+    /** Defaults TRUE: absent means Operations reported nothing missing, not that nobody asked. */
+    keysAndAccessoriesReceived?: boolean;
+  } = {},
 ): Promise<{ ok: true } | { ok: false; code: string; message: string; outstanding?: ClearanceItem[] }> {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -612,7 +641,7 @@ export async function completeJourneyPickup(
       vinMatch: true,
       odometerAtPossession: evidence.odometerAtPossession ?? null,
       conditionAsDelivered: evidence.conditionAsDelivered ?? null,
-      keysAndAccessoriesReceived: true,
+      keysAndAccessoriesReceived: evidence.keysAndAccessoriesReceived ?? true,
       actor,
     });
     if (!completed.ok) {
