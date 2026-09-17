@@ -93,7 +93,11 @@ const AUTOMATED: readonly TransactionActorRole[] = ["SYSTEM", "ADMIN"];
 export const DEAL_TRANSITION_ACTORS: Record<DealStatus, readonly TransactionActorRole[]> = {
   PENDING: AUTOMATED,
   ACTIVE: AUTOMATED,
-  FINANCING_PENDING: AUTOMATED,
+  // Stage 11's exit — `confirmRecap` passes `params.actor`, which is BUYER or DEALER.
+  // Distinct from FUNDING_PENDING below, and that near-collision is exactly how the
+  // first correction missed it: FUNDING_PENDING was fixed and this was not. The
+  // caller-derived gate caught the half-fix.
+  FINANCING_PENDING: ALL,
   // Money states are settled by Stripe through the webhook, never by a portal user.
   FEE_PENDING: AUTOMATED,
   FEE_PAID: AUTOMATED,
@@ -109,10 +113,27 @@ export const DEAL_TRANSITION_ACTORS: Record<DealStatus, readonly TransactionActo
   SIGNED: ["SYSTEM", "ADMIN", "BUYER"],
   // Stage 10 — the dealership reaffirms; Stage 14d — the dealership executes.
   DEALER_CONFIRMATION: ["SYSTEM", "ADMIN", "DEALER"],
-  RECAP_PENDING: AUTOMATED,
+  // JOINT-CONFIRMATION EDGES — both parties, and this is the correction the first
+  // independent review caught.
+  //
+  // These three were `AUTOMATED` on the reasoning that a platform driver moves them.
+  // That reasoning was wrong about this repository, and the matrix is a statement about
+  // this repository. Stage 10's exit fires when the dealership reaffirms AND the buyer
+  // acknowledges the disclosure — EITHER party's action can be the one that completes
+  // it, so `advanceIfExitSatisfied` is called with "DEALER" (`:692`) and with the
+  // buyer's id defaulting to "BUYER" (`:816`, `:880`). Stage 11's exit is the same
+  // shape: `confirmRecap` passes `params.actor`, which is BUYER or DEALER. Stage 16's
+  // readiness is entered from the pickup coordination path, which carries whichever
+  // party acted.
+  //
+  // Refusing them broke the spine outright: no deal could leave DEALER_CONFIRMATION or
+  // RECAP_PENDING at all, and the throw was unguarded so every reaffirmation would have
+  // 500'd. `advance-deal-status-actor-callers.test.ts` now derives the required actors
+  // from the CALL SITES so a matrix that contradicts the code cannot ship again.
+  RECAP_PENDING: ALL,
   DEALER_EXECUTED: ["SYSTEM", "ADMIN", "DEALER"],
-  FUNDING_PENDING: AUTOMATED,
-  PICKUP_READINESS: AUTOMATED,
+  FUNDING_PENDING: ALL,
+  PICKUP_READINESS: ALL,
   // Scheduling is a negotiation: either party can land the confirmed appointment.
   PICKUP_SCHEDULED: ALL,
   // The dealership's scan records the handover — that much IS its fact to state.

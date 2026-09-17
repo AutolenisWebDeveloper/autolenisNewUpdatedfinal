@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { advanceDealStatus, canTransition, cancelDeal } from "@/lib/services/deal/deal.service";
 import { PICKUP_SAFE_SELECT } from "@/lib/services/pickup/pickup-select";
+import { cancelTransaction } from "@/lib/services/transaction/cancellation.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -986,7 +987,23 @@ export async function cancelBuyerWorkflow(
   // The seam declines when a concurrent writer moved the deal first, so the
   // outcome is reported rather than assumed — an admin told "cancelled" about a
   // deal that is still live would act on a false state.
-  const cancelled = await cancelDeal(dealId, reason, { actorId: adminId, actorRole: "ADMIN" });
+  // PHASE 10, §24 — through the orchestration, for the reason the admin action route
+  // records: `cancelDeal` now REFUSES a post-execution cancellation, and leaving this
+  // second entry point on it would have thrown an unmapped ContractExecutedError
+  // while the replacement stayed unreachable. `cancelTransaction` performs the same
+  // guarded transition and additionally runs §24's stops.
+  const outcome = await cancelTransaction({
+    dealId,
+    reason,
+    actorId: adminId,
+    actorRole: "ADMIN",
+  });
+  // A FREEZE IS NOT A CANCELLATION, and `cancelled` must not say it was. An admin
+  // told "cancelled" about a deal that is frozen pending release would act on a false
+  // state — which is the same reasoning the comment above gives for reporting the
+  // seam's outcome rather than assuming it.
+  const cancelled = outcome.outcome === "CANCELLED";
+  const frozen = outcome.outcome === "FROZEN_PENDING_RELEASE";
 
   await prisma.adminAuditLog.create({
     data: {
@@ -998,11 +1015,11 @@ export async function cancelBuyerWorkflow(
       reason,
       // The attempt is audited either way; the outcome is recorded with it so a
       // declined cancellation is traceable rather than looking like a success.
-      metadata: { buyerId, previousStatus, cancelled },
+      metadata: { buyerId, previousStatus, cancelled, frozen, exceptionCode: outcome.exceptionCode ?? null },
     },
   });
 
-  return { cancelled };
+  return { cancelled, frozen, exceptionCode: outcome.exceptionCode };
 }
 
 export async function moveBuyerWorkflowStage(

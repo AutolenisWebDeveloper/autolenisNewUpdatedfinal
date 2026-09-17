@@ -71,7 +71,7 @@ import {
   type TransactionActorRole,
 } from "@/lib/services/deal/transition-authority";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
-import { cancelByKey } from "@/lib/services/comms/transactional-dispatcher.service";
+import { cancelPendingForTransaction } from "@/lib/services/comms/transactional-dispatcher.service";
 import { revokeReleaseToken } from "@/lib/services/pickup/release-token.service";
 import { transitionCase, SOURCING_CASE_STATUS } from "@/lib/services/sourcing/sourcing-case.service";
 
@@ -288,23 +288,22 @@ async function runStops(
 
   // ── Scheduled work closed ──────────────────────────────────────────────────
   //
-  // §27's cancellation rule, through the dispatcher's own `cancelByKey`: a pending row
-  // is cancelled, a SENT row is never touched. A message that has left cannot be
-  // unsent, and rewriting its status would make the delivery record lie.
-  const cancelKeys = [
-    refs.dealId ? `deal:${refs.dealId}` : null,
-    refs.vehicleRequestId ? `request:${refs.vehicleRequestId}` : null,
-    refs.auctionId ? `auction:${refs.auctionId}` : null,
-  ].filter((k): k is string => k !== null);
-
+  // §27's cancellation rule, by the REFS the outbox already stores rather than by
+  // reconstructed cancel keys. The first version of this stop built `deal:<id>` and
+  // friends, which match none of the six real key builders — so it cancelled nothing and
+  // reported `ok: true`, and a cancelled buyer would have kept receiving every queued
+  // reminder. See `cancelPendingForTransaction` for the full account.
+  //
+  // A SENT row is never touched.
   stops.push(
-    await runStop("SCHEDULED_COMMS", async () => {
-      let cancelled = 0;
-      for (const key of cancelKeys) {
-        cancelled += (await cancelByKey(key, `Transaction cancelled: ${reason}`)).cancelled;
-      }
-      return cancelled;
-    }),
+    await runStop("SCHEDULED_COMMS", async () =>
+      (
+        await cancelPendingForTransaction(
+          { dealId: refs.dealId, vehicleRequestId: refs.vehicleRequestId, auctionId: refs.auctionId },
+          `Transaction cancelled: ${reason}`,
+        )
+      ).cancelled,
+    ),
   );
 
   return stops;

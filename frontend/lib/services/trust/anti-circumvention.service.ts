@@ -103,7 +103,8 @@ export async function recordCircumventionAttempt(
     select: { id: true },
   });
 
-  // §13-D42 — counted, reported, NOT enforced here.
+  // §13-D42 — the REPORTING count, for the queue detail. The suspension uses the
+  // narrower in-scope count below; the two are deliberately different numbers.
   const dealerAttemptsInWindow = dealerId ? await countDealerAttemptsInWindow(dealerId) : 0;
 
   // §26 "Circumvention detected — Operations — Review; scorecard, suspension, or termination".
@@ -143,13 +144,12 @@ export async function recordCircumventionAttempt(
   // PENDING REVIEW, NOT TERMINAL. §26's required result is "Review; scorecard, suspension,
   // or termination" — termination is a human's, and this writes the reversible one. The
   // CIRCUMVENTION_DETECTED case raised above is where that review happens.
-  if (
-    dealerId &&
-    input.initiatorRole === "DEALER" &&
-    scope.afterPaidAuction === true &&
-    dealerAttemptsInWindow >= REPEAT_SUSPENSION_THRESHOLD
-  ) {
-    await suspendForCircumvention(dealerId, attempt.id, dealerAttemptsInWindow);
+  if (dealerId && input.initiatorRole === "DEALER" && scope.afterPaidAuction === true) {
+    // The IN-SCOPE count, not the reporting one. See `countInScopeAttemptsInWindow`.
+    const inScope = await countInScopeAttemptsInWindow(dealerId);
+    if (inScope >= REPEAT_SUSPENSION_THRESHOLD) {
+      await suspendForCircumvention(dealerId, attempt.id, inScope);
+    }
   }
 
   // The §8.4 mirror. Best-effort: the exception above is the store, and an admin surface losing
@@ -362,6 +362,35 @@ async function countDealerAttemptsInWindow(dealerId: string, now: Date = new Dat
   const since = new Date(now.getTime() - REPEAT_WINDOW_DAYS * 86_400_000);
   return prisma.circumventionAttempt.count({
     where: { dealerId, initiatorRole: "DEALER", detectedAt: { gte: since } },
+  });
+}
+
+/**
+ * Dealer-initiated attempts in the window that are ALSO in §25.2's violation scope.
+ *
+ * SEPARATE FROM THE REPORTING COUNT ABOVE, and the first independent review found why it
+ * has to be. The suspension predicate used the unfiltered count, so a dealership whose
+ * first attempt was OUTSIDE a paid auction — reviewable, explicitly not a breach — and
+ * whose second was inside one reached "2" and was SUSPENDED on its first in-scope
+ * offence. That contradicts the module's own text: "an approach outside a paid auction
+ * is reviewable, not a breach", and it is a commercial sanction on a first offence.
+ *
+ * The unfiltered count stays for the queue DETAIL, where "N dealer-initiated attempts in
+ * 90 days" is the right thing to tell a human. Only the sanction narrows.
+ *
+ * `afterPaidAuction` is nullable by design — NULL means the scope could not be
+ * determined — and `true` is required here rather than "not false", for the reason the
+ * queue detail already gives the operator: "Establish it before applying any consequence."
+ */
+async function countInScopeAttemptsInWindow(dealerId: string, now: Date = new Date()): Promise<number> {
+  const since = new Date(now.getTime() - REPEAT_WINDOW_DAYS * 86_400_000);
+  return prisma.circumventionAttempt.count({
+    where: {
+      dealerId,
+      initiatorRole: "DEALER",
+      afterPaidAuction: true,
+      detectedAt: { gte: since },
+    },
   });
 }
 

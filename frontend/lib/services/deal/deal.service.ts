@@ -535,7 +535,23 @@ export async function advanceDealStatus(
   // contract exists and one party cannot void it alone. The owner ruled the same
   // distinction on 2026-09-15 for the release gates: force may skip an ORDERING
   // constraint, never a FACT.
-  if (newStatus === DealStatus.CANCELLED && deal.dealerExecutedContractId) {
+  //
+  // WITH ONE EXEMPTION, added after the first independent review found the freeze was a
+  // DEAD END. A frozen deal has `dealerExecutedContractId` set BY CONSTRUCTION — that
+  // fact is why it was frozen — so this check refused the very transition that ENDS the
+  // coordination. `canTransition` allowed FROZEN → CANCELLED, the catalogue's required
+  // action says "complete the unwind (CANCELLED/REFUNDED)", and the fact check threw on
+  // every attempt. REFUNDED worked; CANCELLED never did.
+  //
+  // Leaving `from === FROZEN_PENDING_RELEASE` out is not a hole in §24. §24 forbids
+  // AutoLenis voiding an executed contract UNILATERALLY; a deal that reached the freeze
+  // has already been through the coordinated release, which is the opposite of
+  // unilateral. The freeze IS the gate, and a gate you cannot walk through is a wall.
+  if (
+    newStatus === DealStatus.CANCELLED &&
+    deal.dealerExecutedContractId &&
+    deal.status !== DealStatus.FROZEN_PENDING_RELEASE
+  ) {
     throw new ContractExecutedError(dealId);
   }
 

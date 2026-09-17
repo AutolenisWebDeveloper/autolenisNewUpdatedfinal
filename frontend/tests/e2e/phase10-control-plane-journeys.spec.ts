@@ -103,6 +103,30 @@ async function seedDeal(opts: { status: string; executed: boolean }) {
     },
   });
 
+  // Two outbox rows: one PENDING (must be cancelled) and one SENT (must not be touched).
+  // Without the sent row the "never unsend" rule would be untested, and without the
+  // pending row the cancel stop could report success against an empty set.
+  await prisma.commsOutbox.create({
+    data: {
+      channel: "email",
+      dedupKey: `p10-pending-${id}`,
+      status: "pending",
+      templateKey: "recap_ready",
+      dealId: deal.id,
+      payload: { email: `p10_${id}@example.invalid` },
+    },
+  });
+  await prisma.commsOutbox.create({
+    data: {
+      channel: "email",
+      dedupKey: `p10-sent-${id}`,
+      status: "sent",
+      templateKey: "recap_ready",
+      dealId: deal.id,
+      payload: { email: `p10_${id}@example.invalid` },
+    },
+  });
+
   if (opts.executed) {
     const contract = await prisma.contractVersion.create({
       data: {
@@ -186,6 +210,26 @@ test("§24: a cancellation before execution cancels, and stops the auction and i
     "every stop that can run in this harness must succeed",
   ).toBe(true);
 
+  // §24 "close scheduled work" — ASSERTED NON-ZERO AGAINST A SEEDED ROW.
+  //
+  // The first version of this stop built cancel keys (`deal:<id>`) that match none of
+  // the six real key builders, so it cancelled nothing and reported ok. `affected: 0` is
+  // a legitimate outcome when there is nothing queued, which is exactly what made the
+  // failure invisible — so the fixture queues a row and the assertion is that it moved.
+  const cancelledRows = await prisma.commsOutbox.findMany({
+    where: { dealId: f.deal.id, status: "cancelled" },
+  });
+  expect(
+    cancelledRows.length,
+    "the pending outbox row for this deal must be cancelled — a cancelled buyer must not keep receiving reminders",
+  ).toBeGreaterThan(0);
+  const commsStop = res.stops.find((s) => s.stop === "SCHEDULED_COMMS");
+  expect(commsStop?.affected ?? 0).toBeGreaterThan(0);
+
+  // And a SENT row is untouched: a message that has left cannot be unsent.
+  const sent = await prisma.commsOutbox.findFirst({ where: { dealId: f.deal.id, status: "sent" } });
+  expect(sent, "a sent message must keep its delivery record").toBeTruthy();
+
   // §28.3 #8 — the failed stop opened a case naming the subsystem, rather than vanishing.
   expect(res.exceptionCode).toBe("CANCELLATION_CLEANUP_INCOMPLETE");
   const cleanup = await prisma.queueItem.findFirst({
@@ -231,7 +275,30 @@ test("§24: a cancellation AFTER execution freezes instead, and opens the coordi
   const request = await prisma.vehicleRequest.findUniqueOrThrow({ where: { id: f.request.id } });
   expect(request.status).not.toBe("CANCELLED");
 
-  // And the direct route to CANCELLED is refused even when asked for explicitly.
+  // AND THE UNWIND COMPLETES — the freeze is a gate, not a wall.
+  //
+  // The first independent review found this was a DEAD END: the fact check refused
+  // CANCELLED whenever `dealerExecutedContractId` was set, which is true of every frozen
+  // deal by construction, so `REFUNDED` worked and `CANCELLED` never did — while the
+  // catalogue's required action says "complete the unwind (CANCELLED/REFUNDED)".
+  //
+  // §24 forbids AutoLenis voiding an executed contract UNILATERALLY. A deal that reached
+  // the freeze has been through the coordinated release, which is the opposite.
+  const unwound = await advanceDealStatus(f.deal.id, "CANCELLED" as never, {
+    actorRole: "ADMIN",
+    reason: "Documented release obtained from the buyer and the dealership",
+  });
+  expect(unwound, "a frozen deal must be able to complete its unwind").toBe(true);
+  const after = await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } });
+  expect(after.status).toBe("CANCELLED");
+});
+
+test("§24: an EXECUTED deal that is not yet frozen refuses a direct cancellation", async () => {
+  test.skip(!HAS_DB, "needs DATABASE_URL pointed at an isolated database");
+  // The boundary itself, asserted on the state it actually guards — before the freeze,
+  // not after it. `force` does not open it: §24 is a statement that a second party has
+  // signed, which is a FACT, and force overrides ordering only.
+  const f = await seedDeal({ status: "PICKUP_SCHEDULED", executed: true });
   await expect(
     advanceDealStatus(f.deal.id, "CANCELLED" as never, {
       actorRole: "ADMIN",
@@ -239,6 +306,8 @@ test("§24: a cancellation AFTER execution freezes instead, and opens the coordi
       force: true,
     }),
   ).rejects.toThrow(ContractExecutedError);
+  const unmoved = await prisma.deal.findUniqueOrThrow({ where: { id: f.deal.id } });
+  expect(unmoved.status).toBe("PICKUP_SCHEDULED");
 });
 
 // ── 3. §28.3 #1 — force is not a way round the rules that are not about ordering ──

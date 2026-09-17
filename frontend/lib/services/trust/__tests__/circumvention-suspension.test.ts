@@ -1,28 +1,43 @@
 // §25.2 / §13-D42 — PHASE 10 ENFORCES THE SUSPENSION.
 //
-// The owner's ruling, 2026-09-11: "ACCEPT, 90-day window. Record initiator_role on
-// every attempt; consequences apply only to dealer-initiated ones. Phase 5 records and
-// warns, Phase 10 enforces suspension."
+// Owner ruling, 2026-09-11: "ACCEPT, 90-day window. Record initiator_role on every
+// attempt; consequences apply only to dealer-initiated ones. Phase 5 records and warns,
+// Phase 10 enforces suspension."
 //
-// Three conditions, ALL required, and the ones that must NOT fire matter more than the
-// one that must. Suspending a dealership is a commercial sanction: it stops them being
-// invited to auctions and, through `validateRooftop`, stops them being sourced at all.
-// A rule that over-fires here costs a real business real money on a fact nobody
-// established.
+// ── THIS FILE'S FIRST VERSION WAS VACUOUS, AND THAT IS WHY IT LOOKS LIKE THIS ──
+//
+// It declared a local copy of the suspension predicate and asserted against the copy.
+// Every case passed whatever `recordCircumventionAttempt` actually did — deleting the
+// entire suspension block from the service would have left it green. It also cited a
+// test that did not exist in the file.
+//
+// The cost was not theoretical: the first independent review found a REAL defect the
+// file could not have caught. The predicate counted ALL dealer-initiated attempts in the
+// window, not just the in-scope ones, so a dealership whose first attempt was outside a
+// paid auction (reviewable, explicitly not a breach) and whose second was inside one
+// reached "2" and was SUSPENDED on its first in-scope offence.
+//
+// So this version drives `recordCircumventionAttempt` END TO END against a mocked
+// database and asserts the `dealer.updateMany` THE SERVICE issues. A copy of the rule
+// asserts nothing about the rule.
 //
 // Run: pnpm test:operations
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mock } from "node:test";
+import { mock, beforeEach } from "node:test";
 
 interface Ctrl {
-  dealerStatus: string;
-  updateManyCalls: { where: Record<string, unknown>; data: Record<string, unknown> }[];
-  auditCalls: Record<string, unknown>[];
-  exceptionCalls: Record<string, unknown>[];
-  attemptsInWindow: number;
-  afterPaidAuction: boolean | undefined;
+  /** What `circumventionAttempt.count` returns, keyed by whether the query is in-scope. */
+  allDealerAttempts: number;
+  inScopeAttempts: number;
+  dealerUpdates: { where: Record<string, unknown>; data: Record<string, unknown> }[];
+  audits: Record<string, unknown>[];
+  exceptions: Record<string, unknown>[];
+  countQueries: Record<string, unknown>[];
+  /** The scope the SERVICE will resolve — set per test, never passed in. */
+  threadHasDeal: boolean;
+  depositPaid: boolean;
 }
 
 let ctrl: Ctrl;
@@ -30,99 +45,198 @@ let ctrl: Ctrl;
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
-      dealer: {
-        updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-          ctrl.updateManyCalls.push(args);
-          return { count: ctrl.dealerStatus === "ACTIVE" ? 1 : 0 };
+      circumventionAttempt: {
+        create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "att_1", ...data }),
+        count: async ({ where }: { where: Record<string, unknown> }) => {
+          ctrl.countQueries.push(where);
+          // The service issues TWO different counts. Distinguishing them here is what
+          // makes the in-scope assertion below meaningful.
+          return where.afterPaidAuction === true ? ctrl.inScopeAttempts : ctrl.allDealerAttempts;
         },
       },
       adminAuditLog: {
         create: async ({ data }: { data: Record<string, unknown> }) => {
-          ctrl.auditCalls.push(data);
+          ctrl.audits.push(data);
           return data;
         },
       },
       platformAlert: { create: async () => ({}) },
+      // The scope is RESOLVED BY THE SERVICE from the thread, not taken from the input —
+      // which is why the first fixtures did not reach the suspension path at all, and why
+      // this mock has to model the real chain: thread → deal → settled deposit. Driving
+      // the service for real means supplying what the service actually reads.
+      messageThread: {
+        findUnique: async () => (ctrl.threadHasDeal ? { dealId: "deal_1", requestId: null } : null),
+      },
+      deal: {
+        findUnique: async () => ({
+          deposit: ctrl.depositPaid ? { status: "PAID", refundedAt: null } : { status: "PENDING", refundedAt: null },
+        }),
+      },
+      dealer: {
+        findFirst: async () => ({ id: "d1" }),
+        updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+          ctrl.dealerUpdates.push(args);
+          return { count: 1 };
+        },
+      },
+      message: { findUnique: async () => null },
     },
   },
 });
 
-/**
- * The suspension decision, restated from the service so this test can exercise the
- * PREDICATE without standing up the whole detection path (which needs a message
- * thread, a deal, an auction and a paid deposit).
- *
- * RESTATING A PREDICATE IN A TEST IS NORMALLY THE DEFECT — a copy that drifts from its
- * source. It is acceptable here for one reason and only one: the assertion below pins
- * the copy against the SERVICE'S OWN EXPORTED THRESHOLD, so the numeric rule cannot
- * drift silently. The structural rule (dealer + paid auction + repeat) is asserted
- * against the service's real behaviour in `suspends only on the third condition` below.
- */
-function shouldSuspend(
-  initiatorRole: string,
-  afterPaidAuction: boolean | undefined,
-  attemptsInWindow: number,
-  threshold: number,
-): boolean {
-  return initiatorRole === "DEALER" && afterPaidAuction === true && attemptsInWindow >= threshold;
+mock.module("@/lib/services/operations/queue-item.service", {
+  namedExports: {
+    raiseException: async (input: Record<string, unknown>) => {
+      ctrl.exceptions.push(input);
+      return { item: { id: "q1" }, created: true };
+    },
+  },
+});
+
+beforeEach(() => {
+  ctrl = {
+    allDealerAttempts: 0,
+    inScopeAttempts: 0,
+    dealerUpdates: [],
+    audits: [],
+    exceptions: [],
+    countQueries: [],
+    threadHasDeal: true,
+    depositPaid: true,
+  };
+});
+
+async function svc() {
+  return import("../anti-circumvention.service");
 }
 
-test("the threshold is the ruling's, read from the service and not restated", async () => {
-  const { REPEAT_SUSPENSION_THRESHOLD, REPEAT_WINDOW_DAYS } = await import("../anti-circumvention.service");
-  assert.equal(REPEAT_SUSPENSION_THRESHOLD, 2, "§13-D42: a SECOND attempt within the window warrants suspension");
-  assert.equal(REPEAT_WINDOW_DAYS, 90, "§13-D42: a 90-day window");
+/** The thresholds come from the service, never restated here. */
+async function thresholds() {
+  const { REPEAT_SUSPENSION_THRESHOLD, REPEAT_WINDOW_DAYS } = await svc();
+  return { REPEAT_SUSPENSION_THRESHOLD, REPEAT_WINDOW_DAYS };
+}
+
+test("the ruling's numbers are read from the service, not restated", async () => {
+  const { REPEAT_SUSPENSION_THRESHOLD, REPEAT_WINDOW_DAYS } = await thresholds();
+  assert.equal(REPEAT_SUSPENSION_THRESHOLD, 2, "§13-D42: a SECOND attempt within the window");
+  assert.equal(REPEAT_WINDOW_DAYS, 90);
 });
 
-test("a buyer-initiated attempt NEVER suspends anyone", async () => {
-  const { REPEAT_SUSPENSION_THRESHOLD: T } = await import("../anti-circumvention.service");
-  // §25.2: "Buyers are protected, not penalized, when the dealership initiates." The
-  // inverse is not a licence to penalise anyone either — a buyer who reaches out is
-  // redacted and flagged, never sanctioned, and no dealer consequence attaches.
-  for (const attempts of [1, 2, 5, 50]) {
-    assert.equal(shouldSuspend("BUYER", true, attempts, T), false, `buyer-initiated, ${attempts} attempts`);
-  }
-});
+test("§13-D42: the SUSPENSION count filters on afterPaidAuction; the REPORTING count does not", async () => {
+  // THE DEFECT THE FIRST VERSION OF THIS FILE COULD NOT SEE. One out-of-scope attempt
+  // plus one in-scope attempt must NOT suspend: the in-scope count is 1, a first offence.
+  ctrl.allDealerAttempts = 2; // one pre-auction, one in-auction
+  ctrl.inScopeAttempts = 1; // only the second is in §25.2's scope
+  const { recordCircumventionAttempt } = await svc();
 
-test("an UNDETERMINED paid-auction scope does not suspend — it is not a soft yes", async () => {
-  const { REPEAT_SUSPENSION_THRESHOLD: T } = await import("../anti-circumvention.service");
-  // The queue detail already instructs the operator to "Establish it before applying
-  // any consequence". Treating `undefined` as true would suspend a dealership on a fact
-  // nobody could determine — the exact opposite of that instruction, and the most
-  // likely way this rule would have gone wrong.
-  assert.equal(shouldSuspend("DEALER", undefined, 9, T), false, "undetermined scope, many attempts");
-  assert.equal(shouldSuspend("DEALER", false, 9, T), false, "explicitly not after a paid auction");
-  assert.equal(shouldSuspend("DEALER", true, 9, T), true, "established scope, repeat attempt");
-});
-
-test("a FIRST dealer attempt warns and records; the SECOND suspends", async () => {
-  const { REPEAT_SUSPENSION_THRESHOLD: T } = await import("../anti-circumvention.service");
-  assert.equal(shouldSuspend("DEALER", true, 1, T), false, "§13-D42: a first attempt warns and records");
-  assert.equal(shouldSuspend("DEALER", true, 2, T), true, "§13-D42: a second within the window warrants suspension");
-});
-
-test("the suspension write is CONDITIONAL and does not overwrite a terminated dealership", async () => {
-  // §28.3 #3. A dealership an admin already TERMINATED must not be quietly walked back
-  // to SUSPENDED by an automated rule — termination is a human's decision and this one
-  // is reversible by design.
-  const { recordCircumventionAttempt } = await import("../anti-circumvention.service");
-  assert.ok(typeof recordCircumventionAttempt === "function");
-
-  // The predicate the service uses, asserted directly against the guard shape: the
-  // update must name ACTIVE, so any other status is a no-op.
-  ctrl = {
-    dealerStatus: "TERMINATED",
-    updateManyCalls: [],
-    auditCalls: [],
-    exceptionCalls: [],
-    attemptsInWindow: 3,
+  await recordCircumventionAttempt({
+    threadId: "t1",
+    messageId: "m1",
+    flag: "CONTACT_ATTEMPT",
+    pattern: "phone",
+    initiatorRole: "DEALER",
+    dealerId: "d1",
     afterPaidAuction: true,
-  };
+  } as never).catch(() => {
+    /* the scope resolver may bail on the mocked thread; the counts are what matter */
+  });
 
-  const { prisma } = await import("@/lib/prisma");
-  const res = await (prisma as unknown as {
-    dealer: { updateMany: (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => Promise<{ count: number }> };
-  }).dealer.updateMany({ where: { id: "d1", status: "ACTIVE" }, data: { status: "SUSPENDED" } });
+  assert.deepEqual(
+    ctrl.dealerUpdates,
+    [],
+    "a dealership whose FIRST in-scope attempt this is must not be suspended — §25.2: an approach " +
+      "outside a paid auction is reviewable, not a breach",
+  );
 
-  assert.equal(res.count, 0, "a TERMINATED dealership is untouched");
-  assert.equal(ctrl.updateManyCalls[0]!.where.status, "ACTIVE", "the guard must name the status it expects");
+  // And the service really did ask both questions.
+  const askedInScope = ctrl.countQueries.some((q) => q.afterPaidAuction === true);
+  assert.ok(askedInScope, "the suspension must query the IN-SCOPE count, not the reporting one");
+});
+
+test("§13-D42: a SECOND in-scope attempt suspends, conditionally and reversibly", async () => {
+  ctrl.allDealerAttempts = 5;
+  ctrl.inScopeAttempts = 2;
+  const { recordCircumventionAttempt } = await svc();
+
+  await recordCircumventionAttempt({
+    threadId: "t1",
+    messageId: "m1",
+    flag: "EXTERNAL_DEAL",
+    pattern: "offsite",
+    initiatorRole: "DEALER",
+    dealerId: "d1",
+    afterPaidAuction: true,
+  } as never).catch(() => {});
+
+  assert.equal(ctrl.dealerUpdates.length, 1, "the second in-scope attempt suspends");
+  // §28.3 #3 — CONDITIONAL. A dealership an admin already TERMINATED must not be walked
+  // back to SUSPENDED by an automated rule.
+  assert.equal(ctrl.dealerUpdates[0]!.where.status, "ACTIVE");
+  assert.equal(ctrl.dealerUpdates[0]!.where.id, "d1");
+  assert.equal(ctrl.dealerUpdates[0]!.data.status, "SUSPENDED");
+  // And it is audited, because a sanction with no record is not reviewable.
+  assert.ok(
+    ctrl.audits.some((a) => a.action === "DEALER_SUSPENDED_CIRCUMVENTION"),
+    "the suspension must be audited",
+  );
+});
+
+test("a BUYER-initiated attempt never suspends, whatever the counts say", async () => {
+  // §25.2: "Buyers are protected, not penalized, when the dealership initiates." The
+  // inverse is not a licence to penalise anyone either.
+  ctrl.allDealerAttempts = 99;
+  ctrl.inScopeAttempts = 99;
+  const { recordCircumventionAttempt } = await svc();
+
+  await recordCircumventionAttempt({
+    threadId: "t1",
+    messageId: "m1",
+    flag: "CONTACT_ATTEMPT",
+    pattern: "phone",
+    initiatorRole: "BUYER",
+    dealerId: "d1",
+    afterPaidAuction: true,
+  } as never).catch(() => {});
+
+  assert.deepEqual(ctrl.dealerUpdates, [], "no dealer consequence attaches to a buyer-initiated attempt");
+});
+
+test("an UNDETERMINED paid-auction scope never suspends — it is not a soft yes", async () => {
+  // The queue detail instructs the operator to "Establish it before applying any
+  // consequence". Treating NULL as true would suspend on a fact nobody could determine.
+  // The thread resolves to nothing, which is how the service produces `null`.
+  ctrl.threadHasDeal = false;
+  ctrl.allDealerAttempts = 99;
+  ctrl.inScopeAttempts = 99;
+  const { recordCircumventionAttempt } = await svc();
+
+  await recordCircumventionAttempt({
+    threadId: "t1",
+    messageId: "m1",
+    flag: "CONTACT_ATTEMPT",
+    pattern: "phone",
+    initiatorRole: "DEALER",
+    dealerId: "d1",
+  } as never).catch(() => {});
+
+  assert.deepEqual(ctrl.dealerUpdates, [], "an undetermined scope must not produce a commercial sanction");
+});
+
+test("the test can actually fail — the suspension path is reachable from these fixtures", async () => {
+  // The anti-vacuity floor this file needed and did not have. If no arrangement of the
+  // fixtures ever produces a suspension, every assertion above is trivially satisfied.
+  ctrl.allDealerAttempts = 2;
+  ctrl.inScopeAttempts = 2;
+  const { recordCircumventionAttempt } = await svc();
+  await recordCircumventionAttempt({
+    threadId: "t1",
+    messageId: "m1",
+    flag: "EXTERNAL_DEAL",
+    pattern: "offsite",
+    initiatorRole: "DEALER",
+    dealerId: "d1",
+    afterPaidAuction: true,
+  } as never).catch(() => {});
+  assert.equal(ctrl.dealerUpdates.length, 1, "the suspension must be reachable, or nothing above means anything");
 });

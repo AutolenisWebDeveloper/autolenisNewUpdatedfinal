@@ -8,11 +8,13 @@ import { refundDepositCharge } from "@/lib/services/payment/refund.service";
 import {
   advanceDealStatus,
   cancelDeal,
+  ContractExecutedError,
   DealTransitionError,
   InsuranceRequiredError,
   ReleaseNotClearedError,
   TerminalDealError,
 } from "@/lib/services/deal/deal.service";
+import { cancelTransaction } from "@/lib/services/transaction/cancellation.service";
 import {
   sendDealerContractPendingEmail,
   sendDealCompleteEmail,
@@ -139,6 +141,14 @@ export async function POST(request: NextRequest, { params }: Props) {
         if (err instanceof TerminalDealError) {
           return adminError("DEAL_TERMINAL", err.message, 409);
         }
+        // §24. Reachable on a DEAL_STAGE_ADVANCED whose runtime target is CANCELLED on a
+        // deal whose contract is executed — the cancel action itself now routes through
+        // `cancelTransaction` and never raises this, but this route resolves its target
+        // from the request body, which is precisely how Phase 7 and Phase 9 each found a
+        // gate skippable by the surface most likely to skip it.
+        if (err instanceof ContractExecutedError) {
+          return adminError("CONTRACT_EXECUTED", err.message, 409);
+        }
         throw err;
       }
 
@@ -251,10 +261,46 @@ export async function POST(request: NextRequest, { params }: Props) {
       // `expectedFrom` pin is what stops a cancel racing a concurrent completion and
       // silently undoing a finished purchase. Calling the underlying advance here was
       // how this route came to have its own cancellation semantics in the first place.
-      const cancelled = await cancelDeal(dealId, reason, {
+      // PHASE 10, §24 — THROUGH THE ORCHESTRATION, and this is the correction the first
+      // independent review forced.
+      //
+      // Phase 10 made `cancelDeal` refuse a post-execution cancellation
+      // (`ContractExecutedError`) and built `cancelTransaction` to route that case to
+      // FROZEN_PENDING_RELEASE — but left THIS route, the only admin cancel path, still
+      // calling `cancelDeal`. The result was a capability REMOVED with its replacement
+      // unreachable: an operator cancelling an executed deal got an unmapped 500, and
+      // nothing anywhere could reach the freeze. The capability-preservation invariant
+      // exists for exactly that shape.
+      //
+      // `cancelTransaction` subsumes `cancelDeal`: it performs the same guarded
+      // transition (same `expectedFrom` pin, same single terminal path, still never
+      // refunds) and additionally runs §24's stops and picks the right target from the
+      // execution fact.
+      const outcome = await cancelTransaction({
+        dealId,
+        reason,
         actorId: admin.adminId,
         actorRole: "ADMIN",
       });
+
+      // A freeze is NOT a cancellation, and the response says so rather than reporting
+      // success on an action the operator did not take. §24: "a coordination state, not
+      // a cancellation."
+      if (outcome.outcome === "FROZEN_PENDING_RELEASE") {
+        return adminSuccess({
+          action,
+          frozen: true,
+          status: "FROZEN_PENDING_RELEASE",
+          exceptionCode: outcome.exceptionCode,
+          stageAtCancellation: outcome.stageAtCancellation,
+          message:
+            "The dealership has fully executed this contract, so it cannot be cancelled unilaterally (§24). " +
+            "The deal is frozen pending a coordinated release and an Operations case is open.",
+          stops: outcome.stops,
+        });
+      }
+
+      const cancelled = outcome.outcome === "CANCELLED";
       if (!cancelled) {
         return adminError(
           "INVALID_STATE",

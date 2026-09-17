@@ -740,7 +740,19 @@ export async function POST(request: NextRequest) {
             // cascaded to CONTRACT_PENDING back a stage, writing bogus history and
             // duplicate customer notifications.
             if (feeDeal.status === "FEE_PENDING" || feeDeal.status === "FEE_PAID") {
-              await advanceDealStatus(feeDeal.id, "FEE_PAID", { actorRole: "SYSTEM", force: true, data: feeData });
+              // PHASE 10 §28.3 #6 — THE LIVE FEE PATH. `service-fee.service.ts` got a reason
+              // in this phase and THIS did not, which is worse than either: the sibling that
+              // was fixed has no callers (its own comment says so) and this is the one Stripe
+              // actually reaches. Without a reason the forced advance throws AFTER the ledger
+              // row is written, the outer handler 500s, `paymentProviderEvent.processed` stays
+              // false, and Stripe retries the same failure for ever — money captured,
+              // `fee_paid_at` never set. Found by the first independent review.
+              await advanceDealStatus(feeDeal.id, "FEE_PAID", {
+                actorRole: "SYSTEM",
+                force: true,
+                reason: `Concierge fee settled by Stripe (${pi.id}) — a payment receipt is an authoritative fact, so the ladder is forced past the ordering gates`,
+                data: feeData,
+              });
             } else {
               // Before the fee stage, or already past insurance — record the fee
               // fields without touching status. The ladder settles it when the deal
