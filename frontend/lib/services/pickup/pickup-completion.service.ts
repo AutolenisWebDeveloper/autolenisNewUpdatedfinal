@@ -48,6 +48,7 @@ import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatc
 import { PHASE_9_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
 import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { consumeReleaseToken, revokeReleaseToken } from "./release-token.service";
+import { openObligation } from "@/lib/services/deal/post-completion-obligations.service";
 import { DEAL_COMPLETE_SUBJECT, renderDealCompleteEmail } from "@/lib/services/email/templates/deal-complete";
 import {
   DEALER_PICKUP_COMPLETED_SUBJECT,
@@ -357,6 +358,10 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
       select: {
         id: true, status: true, buyerId: true, completedAt: true,
         insuranceStatus: true, dealerExecutedContractId: true, fundingClearedAt: true,
+        // §Stage 21's two CONDITIONAL obligations read these. Selected in the same query the
+        // gates read, so the obligations opened below describe the same snapshot that completed.
+        tradeInSubmissions: { select: { verifiedPayoffCents: true } },
+        pickup: { select: { dueBillItems: true } },
       },
     });
     if (!deal) return { ok: false as const, reason: "deal_missing" as const };
@@ -420,6 +425,36 @@ export async function confirmPossession(input: PossessionInput): Promise<Possess
       where: { dealId: input.dealId },
       data: { status: "COMPLETED", completedAt: now },
     });
+
+    // §STAGE 21 — the obligations the completed deal already implies, opened IN THIS TRANSACTION.
+    //
+    // THREE OF THE FIVE ARE DERIVABLE HERE AND TWO ARE NOT, and the split is not arbitrary. Every
+    // vehicle purchase owes a title and a registration, so that one is unconditional. A trade
+    // payoff is owed only where there is a trade with a payoff, and due-bill repairs only where
+    // the dealership wrote some down — both are facts on the deal at this moment. Missing
+    // accessories and a document correction are REPORTS: nobody knows at handover that the second
+    // key is absent or the paperwork is wrong, so opening them here would create obligations that
+    // are satisfied on arrival and teach everyone to ignore the list.
+    //
+    // INSIDE THE TRANSACTION, so a completion that rolls back leaves no orphan obligations behind
+    // it — and AFTER the swap, because `openObligation` refuses a deal that is not COMPLETED.
+    // That refusal is the point: an obligation opened before completion is indistinguishable from
+    // one of §Stage 20's preconditions, and the two mean opposite things.
+    //
+    // §Stage 21 says obligations are tracked "without reopening or altering" the Deal. Nothing
+    // here writes to the Deal; the rows are children of it.
+    await openObligation({ dealId: input.dealId, type: "TITLE_AND_REGISTRATION", now }, tx);
+    if (deal.tradeInSubmissions.some((t) => t.verifiedPayoffCents !== null && t.verifiedPayoffCents > 0)) {
+      await openObligation({ dealId: input.dealId, type: "TRADE_PAYOFF", now }, tx);
+    }
+    if (Array.isArray(deal.pickup?.dueBillItems) && deal.pickup.dueBillItems.length > 0) {
+      await openObligation({
+        dealId: input.dealId,
+        type: "DUE_BILL_REPAIRS",
+        now,
+        evidence: deal.pickup.dueBillItems as Prisma.InputJsonValue,
+      }, tx);
+    }
 
     await tx.dealStatusHistory.create({
       data: {

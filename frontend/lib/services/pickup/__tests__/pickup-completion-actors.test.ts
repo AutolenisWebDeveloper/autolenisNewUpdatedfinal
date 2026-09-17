@@ -53,6 +53,7 @@ interface Ctrl {
    * update below merges into it, so the ordering is exercised rather than assumed.
    */
   pickupRow: Record<string, unknown>;
+  obligations: Array<Record<string, unknown>>;
   /** Set to make one of the fourteen false, to prove the gate is wired. */
   dealOverrides: Record<string, unknown>;
   statusHistory: Array<Record<string, unknown>>;
@@ -108,6 +109,10 @@ const dealRow = () => ({
   contractVersions: [{ id: "cv_1", version: 3 }],
   eSignEnvelopes: [{ signerKind: "BUYER", status: "COMPLETED", documentVersionId: "cv_1" }],
   pickup: ctrl.pickupRow,
+  // §Stage 21's two CONDITIONAL obligations read these. No trade and no due-bill items here, so
+  // completion opens exactly one — title and registration. The conditional pair is proved in
+  // `post-completion-obligations.test.ts`.
+  tradeInSubmissions: [],
   queueItems: [],
   ...ctrl.dealOverrides,
 });
@@ -151,6 +156,12 @@ const tx = {
   // Read by the real `signatureProgress`, which §Stage 20's tenth precondition uses and this
   // file does not mock — see `completion-preconditions.test.ts`.
   eSignEnvelope: { findMany: async () => [{ signerKind: "BUYER", status: "COMPLETED" }] },
+  // §Stage 21 opens obligations INSIDE the completion transaction, so they are part of what
+  // this file exercises rather than a separate concern.
+  postCompletionObligation: {
+    findFirst: async () => null,
+    create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.obligations.push(data); return data; },
+  },
 };
 
 mock.module("@/lib/prisma", {
@@ -201,6 +212,7 @@ beforeEach(() => {
       possessionDiscrepancy: null,
     },
     dealOverrides: {},
+    obligations: [],
     statusHistory: [],
     pickupUpdates: [],
     outbox: [],
@@ -367,4 +379,26 @@ test("the buyer's condition report no longer overwrites the dealership's", async
 
   assert.equal(ctrl.pickupRow.conditionAtRelease, "Two stone chips on the bonnet.", "the DEALERSHIP's record must survive");
   assert.equal(ctrl.pickupRow.conditionAtPossession, "Clean, as described.", "the BUYER's record is its own column");
+});
+
+test("completing the deal opens §Stage 21's unconditional obligation, and does not touch the Deal to do it", async () => {
+  await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
+
+  assert.deepEqual(
+    ctrl.obligations.map((o) => o.type),
+    ["TITLE_AND_REGISTRATION"],
+    "every vehicle purchase owes a title; the trade and due-bill obligations are conditional and this fixture has neither"
+  );
+  assert.equal(ctrl.obligations[0].ownerRole, "DEALERSHIP");
+  assert.equal(ctrl.obligations[0].status, "PENDING");
+});
+
+test("a BLOCKED completion opens no obligations", async () => {
+  // They are children of a completed deal. Opening one for a deal that did not complete would
+  // make §Stage 21's tracker disagree with §Stage 20's gate about whether the sale happened.
+  ctrl.dealOverrides = { recapConfirmedByDealerAt: null };
+
+  await (await service()).completeJourneyPickup("deal_1", "admin_1", EVIDENCE);
+
+  assert.deepEqual(ctrl.obligations, []);
 });

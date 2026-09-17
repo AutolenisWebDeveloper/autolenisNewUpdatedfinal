@@ -1230,3 +1230,52 @@ registerStateRecheck(
   PHASE_9_TEMPLATES.DEAL_COMPLETED,
   alwaysSend("This carries the executed contract, the receipt and the support route. It is the buyer's record of the transaction; a completed deal cannot un-complete."),
 );
+
+/**
+ * §Stage 21's two chase messages. Separate keys because they say opposite things to the two
+ * parties — the buyer is told they need do nothing, the dealership is told the entry lands on
+ * its scorecard — and §27 partitions rails by `template_key`, so one key for both would put a
+ * dealership's message on the buyer's rail.
+ */
+export const POST_COMPLETION_TEMPLATES = {
+  /** §Stage 21: "Overdue obligations notify the buyer …" */
+  OBLIGATION_OVERDUE_BUYER: "post_completion_obligation_overdue_buyer",
+  /** "… and the dealership" */
+  OBLIGATION_OVERDUE_DEALER: "post_completion_obligation_overdue_dealer",
+} as const;
+
+/**
+ * THE ONE PLACE IN PHASE 9 WHERE A RECHECK IS NOT `alwaysSend`, and the reason is the delay.
+ * The sweep marks a row OVERDUE and enqueues; the outbox drains some minutes later. A dealership
+ * that resolves the obligation inside that window would receive "this is overdue and registers
+ * on your scorecard" about something it has just fixed — the exact class of stale message §27's
+ * recheck exists to stop. Keyed on the OBLIGATION, not the deal, because a deal can carry several
+ * and resolving one says nothing about the others.
+ *
+ * THE ID TRAVELS IN THE PAYLOAD, and the alternative was worse. The obligation id is in the
+ * outbox row's `idempotency_key`, but `StateRecheckContext` does not carry it — reaching it would
+ * mean widening the claim query's RETURNING clause, the `ClaimedRow` type and the context, all in
+ * Phase 8's dispatcher, which every transactional message in the platform passes through. A
+ * documented key in the payload is a smaller change than editing that path for one recheck. The
+ * mail rail reads `email`, `subject` and `html` and ignores the rest.
+ *
+ * FAILS OPEN, not closed, on a missing id: a chase message that goes out when it need not have
+ * is an annoyance, while one suppressed because a key was renamed is an overdue obligation
+ * nobody is told about.
+ */
+const skipIfObligationResolved: StateRecheckFn = async (ctx) => {
+  const obligationId = typeof ctx.payload.obligationId === "string" ? ctx.payload.obligationId : null;
+  if (!obligationId) return { proceed: true };
+  const obligation = await ctx.db.postCompletionObligation.findUnique({
+    where: { id: obligationId },
+    select: { status: true },
+  });
+  if (!obligation) return { proceed: false, reason: "the obligation no longer exists" };
+  if (obligation.status === "RESOLVED") {
+    return { proceed: false, reason: "the dealership resolved the obligation before this was sent" };
+  }
+  return { proceed: true };
+};
+
+registerStateRecheck(POST_COMPLETION_TEMPLATES.OBLIGATION_OVERDUE_BUYER, skipIfObligationResolved);
+registerStateRecheck(POST_COMPLETION_TEMPLATES.OBLIGATION_OVERDUE_DEALER, skipIfObligationResolved);
