@@ -73,7 +73,6 @@ import {
 import { proposePickup, confirmPickup, counterAsDealer, MAX_PICKUP_COUNTERS } from "@/lib/services/pickup/pickup-coordination.service";
 import { reschedulePickup } from "@/lib/services/pickup/scheduling.service";
 import {
-  openObligation,
   sweepOverdueObligations,
   STAGE_21_OBLIGATION_TYPE_COUNT,
 } from "@/lib/services/deal/post-completion-obligations.service";

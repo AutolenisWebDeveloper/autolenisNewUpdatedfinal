@@ -140,28 +140,38 @@ export async function checkInPickup(dealId: string): Promise<void> {
   });
 }
 
-export async function completePickup(dealId: string): Promise<void> {
-  await prisma.pickup.update({
-    where: { dealId },
-    data: { status: PickupStatus.COMPLETED, completedAt: new Date() },
-  });
-
-  // Routes through the guarded seam — enforces the insurance gate before COMPLETED.
-  await advanceDealStatus(dealId, "COMPLETED", { actorRole: "SYSTEM" });
-
-  const deal = await prisma.deal.findUnique({ where: { id: dealId } });
-  if (deal) {
-    await prisma.notification.create({
-      data: {
-        buyerId: deal.buyerId,
-        title: "Pickup complete — congratulations!",
-        body: "Your vehicle has been delivered. Enjoy your new car!",
-        type: "PICKUP_READY",
-      },
-    }).catch(() => {});
-
-    await prisma.buyerActivityEvent.create({
-      data: { buyerId: deal.buyerId, eventType: "DEAL_COMPLETED", title: "Vehicle pickup complete", metadata: { dealId } },
-    }).catch(() => {});
-  }
+/**
+ * RETIRED AT PHASE 9, AND RETIRED BY REFUSING RATHER THAN BY DELETION.
+ *
+ * This was the fifth of §8.2 defect (4)'s five Deal-completion writers and the only one with no
+ * callers, which is exactly why it survived the first pass of the collapse — nothing broke when it
+ * was left alone, and a `grep` for callers finds none, so it reads as harmless.
+ *
+ * IT IS NOT HARMLESS ANY MORE, AND THIS PHASE IS WHAT MADE IT DANGEROUS. Its body wrote
+ * `pickups.status = COMPLETED` and then called `advanceDealStatus(dealId, "COMPLETED")`. Defect
+ * (8) inserted `HANDOVER_PENDING` into the ladder, so `PICKUP_SCHEDULED → COMPLETED` is no longer
+ * a legal transition — the Deal advance would now REFUSE while the Pickup write had already
+ * committed, leaving a pickup marked COMPLETED on a deal that is not. A torn state, produced by a
+ * function that used to work, caused by a change made three files away. That is the shape of thing
+ * an unused export exists to produce.
+ *
+ * It also bypassed every control this phase built: no release token, no identity check, no buyer
+ * confirmation, and none of §Stage 20's fourteen preconditions — an insurance gate alone, which
+ * §Stage 20 counts as one of fourteen.
+ *
+ * WHY IT THROWS INSTEAD OF DELEGATING. Delegating needs an actor and possession evidence that a
+ * `(dealId)` signature cannot supply, and inventing them would manufacture the record of who was
+ * standing at the car. Throwing is the honest answer to a caller that does not exist: the symbol
+ * stays (CLAUDE.md — dead code is REPORTED, never deleted), the hazard does not, and anything that
+ * calls it gets a sentence naming the replacement rather than a corrupt deal.
+ *
+ * REPORTED for an owner decision on removal. Not this phase's to delete.
+ */
+export async function completePickup(dealId: string): Promise<never> {
+  throw new Error(
+    `completePickup(${dealId}) is retired. §Stage 18/19/20 completion runs through ` +
+      "lib/services/pickup/pickup-completion.service.ts: recordDealerRelease() records the " +
+      "dealership's handover, and confirmPossession() completes the Deal against §Stage 20's " +
+      "fourteen preconditions. This function would leave the pickup COMPLETED and the Deal behind it.",
+  );
 }

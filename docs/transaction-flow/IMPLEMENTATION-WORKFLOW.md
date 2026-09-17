@@ -49,6 +49,33 @@ The two files were supplied as session uploads. The repository had no `docs/tran
 directory at `0cd399f`; the verified copies were placed at the canonical paths (byte-identical, hashes
 re-computed after the copy) and are committed with this document.
 
+**Re-pinned at the Phase 9 open (2026-09-17), by owner instruction, and NOT to the value the owner
+gave.** Phase 9's prompt pinned three hashes; two matched and `IMPLEMENTATION-WORKFLOW.md` did not.
+The mismatch was traced to `464fb5f` and the phase's governing text (§8.2 Phase 9, §8.1 row 9) was
+proved byte-identical across it, so the drift was benign and the owner ruled: re-pin to
+`7f137a5bd0437733cc20cce1de6348454df565831803b16a78b610832dc46e76`.
+
+That value is correct for the tree the owner read, at commit `85672f1`. **One further commit landed
+on the same branch afterwards** — `4325ba9`, 2026-09-16 21:01 UTC, sixteen minutes after the owner's
+20:45 UTC reading — adding §8.1h's eighth instance (the `[dealId]` git pathspec glob). It moved this
+file to `9ddea11c4fa4f2f59686b679013379f483ecc65a3576a22fefc3fc5ffc896020`.
+
+**So the pin records the observed value, not the instructed one, and says why.** Writing
+`7f137a5b…` here would pin a hash this file does not have, and the next session to check it would
+report a mismatch that is pure bookkeeping — recreating exactly the failure the pin exists to catch.
+The instructed value is kept above so the delta is auditable rather than silently absorbed. Both
+values, and the one commit between them, are the record.
+
+| File | Pinned from Phase 9 | Provenance |
+| --- | --- | --- |
+| `docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` | `9ddea11c4fa4f2f59686b679013379f483ecc65a3576a22fefc3fc5ffc896020` | observed at `4325ba9`; owner instructed `7f137a5b…` at `85672f1`, one commit earlier |
+| `docs/transaction-flow/AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | unchanged since the Phase 8 §34 correction |
+| `docs/transaction-flow/AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | unchanged since §1 |
+
+This document's own hash moves again with the Phase 9 close, for the same reason every prior phase
+records: the AS BUILT section below is written into it. The value above is the hash it carried when
+Phase 9 READ it, which is the claim §1 is making.
+
 Content markers required by the master prompt — **VERIFIED except one, which does not match**:
 
 | Marker | Where | Result |
@@ -4437,7 +4464,27 @@ on a month counter.
 - Gates: pickup suites incl. token single-use and concurrent completion attempts; Playwright: readiness →
   schedule → token → dealer scan → buyer confirms → completed once.
 
-- **Owner-gated:** No new owner decision blocks this phase; it consumes **§13-D4** (e-sign activation, for the executed artefact) and the Phase 1 wave objects this phase's facts live in.
+- **Owner-gated:** ~~No new owner decision blocks this phase~~ — **WRONG WHEN WRITTEN, AND CORRECTED
+  AT THE PHASE 9 CLOSE (2026-09-17) BY OWNER INSTRUCTION.** Phase 9's STOP 1 raised nine Q-items, and
+  four of them were owner decisions in substance: removing the admin force out of `COMPLETED`
+  (ruled: REMOVE, replaced by an append-only `DealCorrection`, recorded as a REMOVED capability),
+  the counter cap (ruled: keep `MAX_PICKUP_COUNTERS = 2`), and the re-pin of the governing-document
+  hash. The phase could not have been implemented without them.
+
+  **RECORDED AS A PATTERN, NOT AS ONE STALE LINE, WHICH IS THE OWNER'S EXPLICIT INSTRUCTION.** A
+  scope entry is written BEFORE the phase is investigated, so "no owner decision blocks this phase"
+  is a prediction, and a prediction stated as a fact in the document that governs the phase reads
+  to the next implementer as a finding. Every remaining phase in §8.2 carries the same sentence,
+  written the same way, at the same distance from the evidence. The class is: **a scope estimate
+  hardening into a stated fact once it is written down.** It is the same shape as the
+  "reported success while checking nothing" class in §8.1h — an artefact that cannot fail, read as
+  though it had passed — and the correction is the same: the line is a FORECAST until the phase's
+  own investigation confirms it, and the forecast must say so.
+
+  What the entry should have said, and what it now means: *no owner decision is KNOWN to block this
+  phase at the time of writing; the phase's STOP 1 establishes the real list.* Phase 9's real list
+  is above. This phase also consumes **§13-D4** (e-sign activation, for the executed artefact) and
+  the Phase 1 wave objects this phase's facts live in.
 - **Rollback:** The cryptographic token replaces the non-crypto nonce in one service; reverting restores the previous generator, and outstanding tokens are invalidated by the revoke-and-reissue path rather than by data rewrite. Completion becomes one atomic writer — reverting restores the previous writers, which is why the phase must not delete them until its Playwright journey is green.
 
 #### Phase 10 — Control-plane completion
