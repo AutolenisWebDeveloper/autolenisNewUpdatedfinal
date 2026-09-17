@@ -107,6 +107,19 @@ SELECT 'pickups carrying a token_hash (first writer ships with this migration)' 
 --    is the exact condition `CREATE UNIQUE INDEX` fails on, and a preflight that reasons "4
 --    implies 5" is a preflight that checked 4. NULLs are exempt from uniqueness and are
 --    excluded here for the same reason Postgres excludes them.
+--
+--    EXERCISED 2026-09-17, AND IT WAS NOT BEFORE. Against production's empty `pickups` this
+--    assertion reads 0 of 0 — it passed while checking nothing, which is §8.1h's class arriving
+--    in the file written to catch that class. Owner ruling: seed it or disclaim it, but do not
+--    leave it looking like coverage.
+--
+--    Seeded. Two pickups sharing `repeat('a',64)` on a throwaway loopback cluster: this assertion
+--    reported `1` and BLOCK, its sibling above reported `2` and BLOCK, and applying
+--    20261201000000 with the duplicate present died on
+--    `ERROR: could not create unique index "pickups_token_hash_key" / DETAIL: Key (token_hash)=
+--    (aaa...) is duplicated` — so what it guards is a migration that genuinely fails mid-chain,
+--    not a hypothetical. Removing the duplicate returned it to CHECKED and the migration applied.
+--    Recorded in proof-run.log under "THIRD RUN".
 SELECT 'duplicate token_hash values (what CREATE UNIQUE INDEX fails on)' AS assertion,
        count(*)::text AS detail,
        CASE WHEN count(*) = 0 THEN 'CHECKED' ELSE 'BLOCK' END AS verdict
