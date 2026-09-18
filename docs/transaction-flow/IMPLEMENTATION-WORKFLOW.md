@@ -2074,6 +2074,53 @@ truthiness. It produced **127 compile errors across 32 production sites**, and e
 re-derived by hand against `requiredSignersForDeal`. A silent `findFirst` was never possible,
 because no call site survived.
 
+#### A STALE RECORD GENERATING A FRESH ONE — the second named hazard class (added 2026-09-18, Phase 10, owner-instructed)
+
+Recorded here rather than in §8.1j because this section is where this programme keeps its hazard
+classes, and because the instance that named it is Phase 10's while the stale row is Phase 5's. It
+is the sibling of core rule 11 in reverse: same shape — a fact changes, nothing edits the code or
+prose that relied on it — with one difference that makes it worse.
+
+**The instance.** §8.4's first row carried the clause *"it stands down only while
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, **which it is not** — §8.1e finding 17"*. That was
+true when written and stopped being true on **2026-09-13**, when §13-D52 was actioned and the flag
+was flipped ON in production. **This same file recorded the flip twice on the day it happened** —
+§8.1e's deploy sequence step 8 (*"DONE 2026-09-13"*) and its close-out (*"§13-D52 IS ACTIONED.
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` IS ON IN PRODUCTION."*). The §8.4 row was never updated, so
+for five days the document asserted both.
+
+**What made it a class rather than an untidiness.** On 2026-09-17 Phase 10 answered the first
+review's question *"can a paused auction be silently resumed by the sourcing sweep?"* It traced the
+path correctly in five steps, then reached for the flag state, **cited the §8.4 row instead of
+measuring it**, and concluded *"LATENT, not live … §8.4 records that flag as off in production."*
+That sentence was written into §8.1j with 2026-09-17's date on it. The stale row had produced a
+**second** stale record — newer, more specific, and carrying the authority of a section titled AS
+BUILT. The owner caught it by knowing the production fact; nothing in the document would have.
+
+| | a stale record sitting there | **a stale record cited as evidence** |
+| --- | --- | --- |
+| How it is found | someone notices two rows disagree | it is not found — the citation LOOKS like the check |
+| What it produces | doubt about one row | a new row, correctly dated, that is wrong |
+| Blast radius | the row | every conclusion drawn from it, in sections that outlive it |
+| Who can catch it | anyone rereading | only someone holding the production fact |
+
+**The rule it yields, and it is narrow enough to follow.** *A claim about the CURRENT STATE of
+production is measured, never cited.* A row in this document is evidence of what was planned,
+decided or built — it is not evidence of what is true of production right now. Flag states,
+row counts, applied migrations and enabled features are read from production (or from the owner,
+who runs it), and the reading is quoted with its date. Where a phase must state a production fact it
+did not measure, it says so in those words rather than footnoting a row.
+
+That rule would have caught this: Phase 10 had no way to read the flag and should have written
+*"flag state NOT MEASURED — §8.4 says off, §8.1e says on, these disagree"*, which is the finding,
+rather than picking one and moving on.
+
+**What it cost, and what was done.** The §8.4 row is corrected (this commit). §8.1j's answer is
+corrected and its trace revised in both directions — the reach was overstated (the sweep's
+case-status filter is a second gate the trace omitted) and the gate was understated (the flag is
+open). The residue is a real, narrow window, opened as **§13-D61** with its fix named. No production
+change followed from the wrong sentence, because the owner ruled on it before anything ran.
+
 #### The owner's rulings, as built
 
 §13-D4, D28, D29, D30, D31, D32, D33 and D34 are each recorded on their own §13 row. Two of those
@@ -3107,7 +3154,7 @@ demonstrably sending. Element access is now parsed and the real call site pins t
 completeness rule with false positives is worse than a loose one: its output stops being read, and
 the real gaps in the same list go with it.*
 
-#### One §27.1 row is REPORTED, not migrated — an owner decision
+#### One §27.1 row STAYS on the direct rail — OWNER-RULED 2026-09-18 (option A)
 
 `prequal_declined` is the FCRA §615 adverse-action notice and **it is sent today**; the gap is the
 rail, not the message. `sendAdverseActionEmail` returns an `EmailSendOutcome` discriminant that four
@@ -3120,18 +3167,115 @@ inside a control-plane batch would weaken it by accident.
 
 It is recorded in `lib/services/comms/__tests__/register-discharge-ledger.ts` with its reason, its
 current sender and the follow-up that would discharge it; the ceiling is pinned at one and the gate
-fails if the key ever gains an enqueue site. **This needs an owner-approved compliance batch.**
+fails if the key ever gains an enqueue site.
 
-#### REPORTED, never deleted — `closeAuction` has no callers
+**OWNER RULING, 2026-09-18 — OPTION A: it stays on the direct rail, ledgered, and §8.4's target is
+restated.** The reasoning is the ruling: everything the specification requires is built and provable
+**synchronously** — the classification happens in the same call stack as the decision, so *"was the
+notice delivered"* is a fact at decision time rather than an eventual one. Migrating trades that for
+an eventual fact, and a compliance change wearing a plumbing change's clothes, inside a
+control-plane batch, is precisely how a safeguard gets weakened by accident. **§8.4's direct-send
+target is therefore "zero §27.1 transactional traffic WITHOUT A DOCUMENTED REASON", not literal
+zero** — this entry has one, and the ceiling and the gate are what keep it the only one.
+
+**The requirement, cited precisely, because the earlier record cited it wrongly.** It is **Stage 3
+L394** ("decline with applicable adverse-action information") and **L398** ("delivery outcome is
+recorded as sent, duplicate, or failed **[BUILT]**"), the **§26 register L1243**, and **§29**'s
+"adverse-action outcomes distinguished". **It is not §12**, which is financing checkpoints (12a–12d).
+
+**OPEN QUESTION, RECORDED AND NOT RULED — by anyone.** Whether an *enqueued* notice may ever be
+recorded as discharging §615, and what timing obligation attaches, is a legal question about the
+platform's own obligations. **Counsel settles it before any migration is attempted**, because the
+answer decides whether a synchronous `ENQUEUED` compliance row is a legitimate artefact or a
+statement that a notice was sent when none was. Neither this programme nor the owner has ruled it,
+and neither should: recorded here so that a future batch finds the question rather than assuming it
+was answered.
+
+#### `closeAuction` had no callers — RULED 2026-09-18, and it has one now (§28.3 #3, fourth instance)
 
 `lib/services/auction/auction.service.ts:153`. This phase HARDENED it (§28.3 #3 — it would have
-overwritten a CANCELLED auction) and then found that nothing in `app/`, `lib/` or `tests/` calls it,
-not even a test. Auction closing runs through `app/api/cron/auction-close` → `postCloseClaimWon`.
+overwritten a CANCELLED auction) and then found that nothing in `app/`, `lib/` or `tests/` called
+it, not even a test. It was REPORTED per CLAUDE.md rather than deleted.
 
-Per CLAUDE.md — "anything that looks obsolete, duplicated, unfinished, misleading, or dead gets
-REPORTED for an owner decision, never deleted" — it is left in place. It is a correct,
-concurrency-safe helper; it is either a missing caller or a redundant export, and which of the two
-is not this phase's call to make.
+**The owner's question was the right one: if `closeAuction` has no callers, what closes auctions?**
+Measured rather than recalled — four live writers of `CLOSED`, and the dead function is not among
+them:
+
+| Path | Guard | Verdict |
+| --- | --- | --- |
+| `closeExpiredAuctions()` — the 5-minute cron (`auction.service.ts:923-930` ← `app/api/cron/auction-close/route.ts`) | `updateMany where status: ACTIVE, endsAt ≤ now` — a true CAS | sound |
+| Buyer selects an offer (`select-offer.service.ts:245`) | `update` by id, inside the selection transaction, stamps `postCloseProcessedAt` itself | acceptable — the selection is CAS'd upstream |
+| Concierge conversion (`concierge-conversion.service.ts:256`) | in-transaction | not this phase's |
+| **Buyer declines all offers (`app/api/buyer/auctions/[auctionId]/decline/route.ts`)** | **read → 409 → `update` by id: a CHECK-THEN-ACT** | **the defect, live** |
+
+So §29's exactly-once close was never weakened BY `closeAuction` — it cannot be, having no callers.
+**The weakening was one file over.** The decline route is the same unconditional auction-status write
+as the admin action, pause and resume that §28.3 #3 already covered in this phase: it reads the
+status, refuses a CLOSED or CANCELLED auction with 409, then writes by id alone. A §24 cancellation
+landing between the read and the write is silently rewritten as an ordinary end-of-auction — the
+dealership's history then says the auction ran its course when AutoLenis withdrew it, which is the
+exact vocabulary collapse the `CANCELLED` label added by this phase's first migration exists to
+prevent.
+
+**OWNER RULING 2026-09-18 — OPTION C, and it ships in Phase 10:** *"Finding another instance of the
+defect you were already fixing is not scope creep."* The route now calls `closeAuction`, which
+guards on `status IN (PENDING, ACTIVE)` and returns whether THIS call closed it; a lost race answers
+the same 409 the read-side check does. Routing through it rather than copying its predicate is the
+point — §29's exactly-once close is a property of there being ONE implementation, and a fourth
+open-coded close is how that erodes. The dead function is now the canonical one, which answers the
+concern in the direction that strengthens the safeguard rather than deleting the evidence of it.
+
+Proven failing-first: the two new assertions in
+`app/api/buyer/auctions/__tests__/decline-no-refund.test.ts` fail against the old route (2 failed /
+5 passed) and pass with it (7/7). The regression guard is that `prisma.auction.update` must stay
+uncalled on this path — a revert to the unconditional write fails the suite rather than passing
+quietly.
+
+**AND THE FIRST REVIEW OF THAT FIX CAUGHT A CAPABILITY REMOVAL, before it shipped.** `closeAuction`
+guarded on a hand-written `[PENDING, ACTIVE]`. `AuctionStatus` has a third live label — **REOPENED**,
+written by a live admin action (`app/api/admin/auctions/[auctionId]/action/route.ts:301`) — and the
+literal omits it. The old unconditional write closed a reopened auction; the guard would have
+answered 409 instead. **A buyer would have lost the ability to decline a reopened auction, removed
+silently by a guard added to fix something else** — which is exactly what the
+capability-preservation invariant forbids, and the sort of thing a predicate change hides because
+nothing about it looks like a deletion.
+
+It is the same omission this repository has already recorded once: `app/api/admin/auctions/route.ts:44-50`
+says *"The literal list omitted REOPENED — an auction that is unambiguously still running — so a
+buyer whose auction had been reopened passed this guard. **One list, owned by `deposit-auction.ts`,
+is what keeps the four readers of 'is this auction still live?' from disagreeing.**"* `closeAuction`
+was the fifth reader, written with the same literal and the same omission.
+
+Corrected at the cause rather than in the route: `closeAuction` now guards on
+`LIVE_AUCTION_STATUSES` (`deposit-auction.ts:36-40`), the list that owns the question. The refusal
+that the §24 protection depends on is unchanged, because `TERMINAL_AUCTION_STATUSES` — CLOSED,
+EXPIRED, CANCELLED — are not in it. Three tests hold the line: the predicate must BE the owned list,
+a REOPENED auction must still decline (200, offers declined), and no terminal status may appear in
+the predicate.
+
+**REPORTED, not fixed — a PRE-EXISTING defect on the same route, found by the second review.** The
+decline path closes the auction without stamping `postCloseProcessedAt`, and it declines every
+`SUBMITTED` offer. The auction-close cron then selects exactly
+`{ status: CLOSED, postCloseProcessedAt: null }` (`app/api/cron/auction-close/route.ts`), claims it,
+and runs `processAuctionClose` — which counts only offers matching `qualifiedOfferWhere`
+(`offer-validity.ts:52-58`, `status: LIVE_OFFER_STATUS`). Every offer is now `DECLINED`, so the
+count is zero and the auction takes the **zero-offer** branch: the §26 zero-offer case is opened and
+the buyer is told no dealership offered, minutes after they declined offers that did exist.
+`select-offer.service.ts:245-258` already solved this for its own path and says so in its comment —
+it stamps `postCloseProcessedAt` itself *"WITHOUT THIS, an early accept left the marker NULL and the
+auction-close reconciler claimed it on the next tick and emitted the full post-close side effects"*.
+The decline route is the same shape and did not get the same treatment. **It is older than this
+phase and outside the ruled scope of the decline-route change** (which was the unconditional write,
+nothing else), so it is reported here rather than fixed in passing. The likely fix is the one next
+door: stamp the marker in the same call, because declining every offer IS this auction's post-close
+processing.
+
+**REPORTED, not fixed — a gap in the guard that caught this.** `scripts/parity-ledger.mjs --check`
+validates the parity totals and the §10 headings but **never computes the decision triage**;
+`calculateDecisionTriage` runs only under `--write`. So a §13 row added by hand with an
+unrecognised triage cell passes `--check` and fails only in `pnpm test:parity-ledger` — which is
+how the D61 row above was caught, one gate later than it should have been. The two guards disagree
+about what they cover.
 
 #### The SECOND independent review — one blocker, five majors, and what each one cost
 
@@ -3276,16 +3420,42 @@ DEFECT — REPORTED, not fixed here.** Traced end to end:
 | 4 | `launch-readiness.service.ts:560-569` | The refusal is `existing.status === "ACTIVE"` only. A PENDING row falls through to `auctionId = existing.id`. |
 | 5 | `launch-readiness.service.ts:685-688` | Step 3 flips `status: "PENDING"` → `ACTIVE` with a **fresh `endsAt`** and re-issues invitations. |
 
-The admin's pause is undone, the 48-hour window restarts, and dealerships are re-invited. It is
-**LATENT, not live**: `sweepSourcingCases` stands down entirely while
-`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is off (`sourcing-driver.service.ts:755-764`), and §8.4
-records that flag as off in production. It becomes live the moment §13-D52 is ruled and the flag
-flips.
+The admin's pause is undone, the 48-hour window restarts, and dealerships are re-invited.
 
-Not fixed here because the fix is not local: PENDING carries two meanings — "launching, not yet
-started" and "deliberately held" — and separating them needs either a column or a reading of the
-admin audit log, in Phase 5's launch path. **That is an owner decision about the Phase 5 ladder,
-and §13-D52 is where it belongs.**
+**CORRECTED TWICE ON 2026-09-18, BEFORE IT WAS RULED. The paragraph that stood here was wrong in
+both directions and is replaced rather than amended.**
+
+It said *"LATENT, not live: `sweepSourcingCases` stands down entirely while
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is off, and §8.4 records that flag as off in production."*
+
+1. **The gate was understated.** The sweep stands down when the flag is **OFF**
+   (`sourcing-driver.service.ts:754-764`), so flag **ON ⇒ the sweep RUNS** — and the flag has been
+   ON in production since **2026-09-13**, recorded twice in this file (§8.1e step 8 and its
+   close-out) on the day it happened. The §8.4 row this paragraph cited was five days stale. Citing
+   a document row for a production fact instead of measuring it is recorded as a named hazard class
+   in **§8.1h**.
+2. **The reach was overstated.** There is a second gate the trace above omits: `sweepSourcingCases`
+   selects only cases in `ACTIVE_SOURCING` / `READY_TO_LAUNCH` / `RADIUS_AUTHORIZATION_REQUIRED`
+   (`sourcing-driver.service.ts:766-775`), and a successful launch moves the case to `LAUNCHED`
+   (`launch-readiness.service.ts:731-741`), whose only onward edge is `CLOSED`
+   (`sourcing-case.service.ts:219`). A pause requires the auction to be `ACTIVE`, which only happens
+   after the launch flip — so the **ordinary** paused auction sits under a `LAUNCHED` case and the
+   sweep never re-selects it.
+
+**The net fact: LIVE, but conditional on a half-completed launch.** The flip to `ACTIVE`
+(`launch-readiness.service.ts:680-690`, inside `$transaction`) and the case transition to `LAUNCHED`
+(`:731-741`, outside it, with a network dispatch between them) are two writes; if the second never
+lands the auction is `ACTIVE` under a still-swept case, and nothing reconciles the mismatch.
+
+**And the fix IS local — that claim was wrong too.** This paragraph said separating `PENDING`'s two
+meanings "needs either a column or a reading of the admin audit log". `Auction.startedAt` already
+discriminates them: it is written only where an auction goes ACTIVE and by no `auction.create` site,
+so `PENDING` + `startedAt IS NOT NULL` means it ran and is now held. The codebase already uses it
+that way at `auction-invitation.service.ts:1125`.
+
+**OWNER RULING 2026-09-18: guard on `startedAt` in `launchAuction`, in its own batch, NOT in Phase
+10** — making the two writes atomic reorders a live launch path and belongs with the Phase 5 ladder.
+Opened as **§13-D61** with the trace, both corrections, the cause and the fix.
 
 **2. Can a BUYER drive a post-execution freeze? Answered: NO, and `AUTOMATED` is correct — but the
 question found a second cancellation writer, which IS fixed here.**
@@ -3324,8 +3494,18 @@ in the interim — but it ships in the same wave and in the same order.
 - `resolveObligation` has no route; `identityVerified: true` is still hard-coded on both admin
   release paths.
 - R18.10 / R18.17 (the trade appraisal at handover), which the register discharge above names.
-- The `prequal_declined` compliance migration above.
-- CI has not run this branch at the time of writing.
+- **§13-D61** — the `startedAt` guard in `launchAuction`. Owner-ruled 2026-09-18 as its own batch,
+  explicitly NOT Phase 10, so it is out of scope here by instruction rather than by omission.
+- The `prequal_declined` migration is **NOT outstanding work**: owner-ruled 2026-09-18 as a
+  documented exception that stays on the direct rail, with a legal prerequisite recorded before any
+  future batch may attempt it. It is listed here only so that a reader looking for it finds the
+  ruling instead of a gap.
+
+**All three of the owner decisions this section opened were ruled on 2026-09-18**, and each is
+recorded where it belongs rather than only here: `prequal_declined` in the §27.1 section above and
+in §8.4; the paused-auction re-entry as **§13-D61**; `closeAuction` in its own section above, where
+the ruling gave it a caller and closed a live defect one file over. CI was red on this branch at the
+time the list above was first written and is green now — see the phase report.
 
 ### 8.2 Phase scopes
 
@@ -5284,10 +5464,10 @@ the register has at least one enqueue/raise site.
 
 | Legacy path | Phase that neutralises new writes | Compatibility kept for | Removal |
 | --- | --- | --- | --- |
-| Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, which it is not — §8.1e finding 17**) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
+| Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON — §8.1e finding 17.** *STALE CLAUSE CORRECTED 2026-09-18, owner-ruled.* This cell read "which it is not" from the day it was written until today, and that stopped being true on **2026-09-13**, when §13-D52 was actioned and the flag was flipped ON in production — recorded in this same file at §8.1e's deploy sequence step 8 ("**DONE 2026-09-13**") and again in its close-out ("**§13-D52 IS ACTIONED. SOURCING_CASE_REPLACES_AUCTION_LAUNCH IS ON IN PRODUCTION.**"). **The flag is ON. The reconciler's `close` branch therefore STANDS DOWN**, and Phase 5's readiness hold owns that decision (`deposit-activation.service.ts:229-244`). The cost of the two days this row disagreed with its own document is recorded as a hazard class in §8.1h) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
 | `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them. **OWNER RULING 2026-09-13: KEEP, and make the clock EVIDENCE-DRIVEN rather than calendar-driven.** Closing a capability in order to start a 30-day timer is the wrong trade; instead a write counter records when the path actually goes quiet, and the window starts from measured silence. **The §8.4 30-day zero-write window has NOT started.** *Write-site inventory corrected the same day — the list above names the admin ROUTES and is incomplete.* Measured: `app/api/admin/offers/route.ts:194,206` (update + create), `app/api/public/outside-dealer-offer/[token]/route.ts:90,116` (the outside dealer's OWN submission — the atomic `respondedAt` claim, then the offer write-back) and `lib/services/auction/outside-invite.service.ts:148` (the mint the admin routes call). Four writes across three files. The public token route is the half the earlier list missed, and it is the half with no rail equivalent — which is what makes KEEP the right call rather than a deferral. **THE RULING WAS MADE ON THE CORRECTED LIST, and that is load-bearing:** a list naming only the admin routes makes CLOSE look cheap, because every site on it has a rail equivalent. The outside dealer's own submission path does not, and it is the one the incomplete list omitted. Had the ruling been taken on the old list it would likely have gone the other way, and closed a capability no rail can yet replace |
 | `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI; the canonical-`offers` write-through is **BLOCKED (owner-accepted 2026-09-14)** — `Offer.auction_id` is required and these models carry no auction binding | keep as intake; no drop |
-| Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
+| Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero **without a documented reason**) | **the FCRA §615 adverse-action sender, permanently until a separate compliance batch** — `sendAdverseActionEmail` and its four call sites (`prequal.service.ts`, `admin-prequal.service.ts`, `app/api/admin/prequal/[id]/decide/route.ts`, `app/api/admin/buyers/[buyerId]/prequal/manual-override/route.ts`) | **TARGET RESTATED BY OWNER RULING, 2026-09-18: zero §27.1 transactional traffic WITHOUT A DOCUMENTED REASON, not literal zero.** One entry has a reason and it is ledgered, with the ceiling pinned at one and the §8.3 gate failing if it gains an enqueue site: `prequal_declined`, the §615 adverse-action notice. **Requirement, cited precisely:** Stage 3 **L394** ("decline with applicable adverse-action information") and **L398** ("delivery outcome is recorded as sent, duplicate, or failed **[BUILT]**"), the §26 register **L1243**, and **§29**'s "adverse-action outcomes distinguished". *It is NOT §12, which is financing checkpoints (12a–12d) — the mis-citation is corrected here rather than repeated.* **Why it stays:** everything those lines require is built and provable SYNCHRONOUSLY — `sendAdverseActionEmail` returns an `EmailSendOutcome` discriminant that `classifyAdverseActionDelivery` (`lib/services/prequal/adverse-action-outcome.ts:48-60`) turns into one of three `compliance_events` types in the same call stack as the decision, and `raiseAdverseActionFollowUp` opens a §26 `PREQUAL_DECLINE` row on anything that is not a confirmed delivery. `enqueueTransactional` returns an ENQUEUE, so migrating trades a fact at decision time for an eventual one, and §29 forbids weakening exactly that. **OPEN QUESTION, NOT OURS TO RULE:** whether an enqueued notice may ever be recorded as discharging §615, and what timing obligation attaches, is a legal question. Counsel settles it BEFORE any migration is attempted, because the answer decides whether a synchronous `ENQUEUED` compliance row is a legitimate artefact or a false statement that a notice was sent. Neither the owner nor this programme has ruled it. Ledger: `lib/services/comms/__tests__/register-discharge-ledger.ts` |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |
 | In-app credit application route/UI (`credit_applications`) | **0** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410 in the pre-schema security correction — §8.2 Phase 0, §8.2a), then **7** (corrected to **4** — §8.1a; the twelve-file figure was grep-derived and counted prose, and under the AST walk exactly four files held a real reference) for the remaining read paths (buyer financing page, the model's own service, the dormant orchestrator, the review queue). **AS BUILT (Phase 7): all four removed, allowlist at ZERO** | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
 | Non-crypto pickup QR nonce | 9 | none | removed in phase |
@@ -7948,10 +8128,10 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
 | BLOCKING A NAMED LATER PHASE | **45** |
-| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **9** |
-| **Total** | **60** |
+| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **10** |
+| **Total** | **61** |
 
-Decisions in the table: **60**. Categories sum to **60**. Unclassified: **0**.
+Decisions in the table: **61**. Categories sum to **61**. Unclassified: **0**.
 
 **BLOCKING PHASE 1 — these, and only these, must be answered before the Phase 1 wave is authored and deployed:**
 
@@ -8029,6 +8209,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D58 | `Deal.dealerId` has no writer at claim completion — §13-D20 depends on one | DECISION | **dealer-recruitment area** (the claim / verification / agreement sequence) | **RULED 2026-09-14 — NOT PHASE 7'S, AND NOT PHASE 8'S BY DEFAULT.** §13-D20 states that `Offer.dealerId` stays on the outside-dealer placeholder permanently and that `Deal.dealerId` is set to the claimed Dealer **when the claim, verification and agreement sequence completes**. That write does not exist. The only production writer of the field is `lib/services/deal/select-offer.service.ts:158`, which sets it to `offer.dealerId` at deal creation — the *shared system placeholder* for an outside winner, not null. **The exact write owed:** on completion of the claim sequence, set `deals.dealer_id` to the claimed, verified, agreement-signed `Dealer.id` for every Deal whose `offer.rooftop_id` matches the claimed rooftop and whose `offer.dealer.is_system_placeholder` is true. **Consequence while it is missing:** `outsideWinnerGate` (`lib/services/deal/dealer-reaffirmation.service.ts`) can never be satisfied, so `submitReaffirmation` refuses every outside winner and the deal cannot leave `DEALER_CONFIRMATION`. **Phase 7 must NOT build a second writer to compensate** — owner-ruled, parallel-system rule. What Phase 7 does instead is refuse to *penalise* the blocked dealership: `returnToRemainingOffers` gates the SLA and scorecard attribution on `dealershipWasBlocked` and opens an Operations row instead, so no outside winner accrues a rooftop SLA violation for a sequence it cannot complete. That guard is not a workaround and does not become dead when this row is built — a dealership mid-claim, suspended, or with a lapsed agreement is blocked by the same gate for the same reason. | BLOCKING A NAMED LATER PHASE (the dealer-recruitment claim sequence — §10b cannot complete end to end until it lands) |
 | D59 | Two Deals can exist for ONE Vehicle Request — no database constraint, and the auction path has no guard | DECISION (data integrity) | **Phase 10** (the control-plane phase that makes every status write conditional, §28.3 #3) | **REGISTERED 2026-09-16, found while auditing the readers of `deals.funding_cleared_at` before P9-00 gave it a writer.** The audit asked whether `upgrade-window.service.ts:113` — which closes the $400 Premium window on `findFirst({ vehicleRequestId, fundingClearedAt: { not: null } })`, matching on `vehicleRequestId` ALONE — would misfire once a deal could actually clear. **RULED 2026-09-16: the reader is RIGHT and stays as it is.** §23.2 closes the window because the REQUEST is ending, not because one deal among several cleared. *What is wrong is that two deals per request can exist at all*, and that is this row. **The evidence, each checked rather than inferred.** (1) `deals.vehicle_request_id` carries only `deals_vehicle_request_id_idx` — a grep of every `migration.sql` for a UNIQUE index on that column returns nothing. (2) `VehicleRequest.deals Deal[]` and `VehicleRequest.auctions Auction[]` are both one-to-many, and `auctions.vehicle_request_id` is non-unique too, so a request can carry several auctions and therefore several selections. (3) The **concierge** path DOES guard it — `app/api/buyer/requests/[requestId]/offer/respond/route.ts:71-86`, whose own comment names the case it exists to prevent: *"it did nothing about accepting a DIFFERENT offer on the same request, which is the case that produced two competing Deals"* — but the check is a `prisma.deal.findFirst` **outside** the `$transaction` that creates the Deal, so it is open to the very race it was written for. (4) The **auction** path has no such guard at all: `commitOfferSelection` (`lib/services/deal/select-offer.service.ts:82-92`) locks the AUCTION row `FOR UPDATE` and re-checks for an `ACCEPTED` offer on **that auction**; neither is a check on the request, and a grep of that file for `deal.findFirst` / `existingDeal` returns nothing. **Proposed:** a partial unique index making one live Deal per Vehicle Request a database fact, with the terminal statuses excluded so a cancelled deal does not bar a legitimate re-selection, and the concierge pre-check moved inside its transaction. Whether a cancelled or refunded deal should free the request is the business half of this decision and is the owner's. **Verify after:** two concurrent selections on one request, one through each path, produce exactly one Deal and one typed refusal — a destructive-concurrency test in the style of `select-offer-concurrency.test.ts`. **THE APPLICATION GUARD IS BUILT HERE; THE DATABASE CONSTRAINT IS NOT.** Owner ruling, 2026-09-16: *"record-don't-build because the real fix is a database constraint like Phase 1's one-open-request partial index, and I didn't want that scoped mid-phase. A four-line application guard alongside the §13 row is fine."* So `commitOfferSelection` now refuses inside its own transaction when the request already holds a Deal, returning the existing lost-race signal (`OfferSelectionRaceLostError`) rather than inventing a second refusal shape; null lineage is skipped deliberately, because `findFirst({ vehicleRequestId: null })` would match the first lineage-less deal in the table and refuse every later selection. Proved failing-first: without the guard the second Deal is created and two of the four cases go red. **STILL OPEN FOR PHASE 10, and this row stays open until both land:** (a) the partial unique index that makes it a database fact, with terminal statuses excluded so a cancelled deal does not bar a legitimate re-selection — and whether a cancelled or refunded deal frees the request is the business half, the owner's; (b) the CONCIERGE pre-check, which still sits OUTSIDE its transaction and is therefore still open to the race it was written for. An application guard on one of two paths is a mitigation, not the fix. Nothing was broken in the meantime: production holds zero deals, and P9-00's writer is scoped `{ id: dealId, fundingClearedAt: null }` so it cannot stamp the wrong deal. | BLOCKING A NAMED LATER PHASE (Phase 10) |
 | D60 | `PostCompletionObligation` idempotency is enforced by a SINGLE WRITER, not by the database — the constraint is owed BEFORE a second writer exists | DECISION (data integrity) | **Before any second caller of `openObligation`** — §Stage 21's resolution control is the nearest candidate | **REGISTERED 2026-09-17, from the second independent Phase 9 review. OWNER-RULED THE SAME DAY: NOT A THIRD MIGRATION — keep the count at two.** `openObligation` (`lib/services/deal/post-completion-obligations.service.ts`) documents itself as IDEMPOTENT PER (deal, type) and implements that as a `findFirst` then `create`. There is **no unique constraint behind it**: `PostCompletionObligation` carries only `@@index([dealId])`. Two concurrent callers would produce two PENDING rows for the same (deal, type) and **double-count on the dealership scorecard** — which is the harm the function's own comment names. **Not reachable today**, and that is the whole reason this is a row rather than a defect: the only caller runs inside the completion CAS's winning transaction, so no second caller can interleave. **Why the index was NOT added now.** Owner ruling, 2026-09-17: *"An index added now guards nothing and a §13 row naming the precondition guards the future."* Same shape as **§13-D59**'s record-don't-build ruling, and with a second reason specific to this phase: the owner had been given the migration count (**two**) before running the production sequence, and a third directory appearing after that number was quoted is the out-of-band-DDL shape §8.1a catalogues. **What WAS done instead:** the function's doc comment no longer claims a guarantee the schema does not keep — it now states that the idempotency is held by the single writer, that no constraint exists, and that this row is the precondition for a second writer. That correction is the control until the index lands. **The exact constraint owed:** a partial unique index on `(deal_id, type) WHERE status <> 'RESOLVED'` — partial, so a RESOLVED obligation does not bar a legitimately recurring one, which is the same carve-out reasoning §13-D59 applies to terminal deal statuses. **Verify after:** two concurrent `openObligation` calls for one (deal, type) produce exactly one row and one typed refusal — a destructive-concurrency test in the style of `select-offer-concurrency.test.ts`. **This row stays open until the index lands OR a second writer is proposed, whichever comes first — and a second writer proposed before the index is a BLOCK, not a sequencing preference.** | DEFAULT AND PROCEED UNLESS OVERRIDDEN — the single writer holds the invariant today, so the default is to proceed without the index; the OVERRIDE is a second caller of `openObligation` (§Stage 21's resolution control, currently unbuilt), and proposing one before the index lands is a BLOCK rather than a sequencing preference |
+| D61 | A PAUSED AUCTION CAN BE SILENTLY RESUMED BY THE SOURCING SWEEP — `PENDING` carries two meanings and the launch path cannot tell them apart | DECISION (operational integrity) — **OWNER-RULED 2026-09-18: OPTION B, in its own batch, NOT in Phase 10** | Before the Phase 5 ladder is extended; the guard may ship at any time and is independent of §13-D52 | **REGISTERED 2026-09-18, from the first independent Phase 10 review's third question, and CORRECTED TWICE before it was ruled.** **The path.** (1) `admin-buyer-command-center.service.ts:906-910` — a pause writes `ACTIVE → PENDING`; there is no paused column, `PENDING` *is* a paused auction. (2) `app/api/cron/coverage-hold-reconcile/route.ts:46` → `sweepSourcingCases` → `driveSourcing` → `launchAuction`, every 15 minutes. (3) `deposit-auction.ts:36-40,91` — `LIVE_AUCTION_STATUSES` INCLUDES `PENDING`, so `findLiveAuctionForDeposit` returns the paused auction. (4) `launch-readiness.service.ts:560-569` — the refusal is `existing.status === "ACTIVE"` only, so a `PENDING` row falls through to `auctionId = existing.id`. (5) `:685-690` — step 3 flips it back to `ACTIVE` with a **fresh `endsAt`** and re-issues invitations. The administrator's pause is undone, the 48-hour window restarts, and dealerships are re-invited. **FIRST CORRECTION — the gate was understated.** Phase 10 first recorded this as *"LATENT, not live … the flag is off in production"*, citing the §8.4 row. **The flag has been ON since 2026-09-13** (§13-D52 actioned; §8.1e's own close-out says so), and the sweep stands down only when it is OFF (`sourcing-driver.service.ts:754-764`). Flag ON ⇒ the sweep RUNS. That mis-citation is recorded as a hazard class in §8.1h. **SECOND CORRECTION — the reach was overstated.** There is a second gate the original trace omitted: `sweepSourcingCases` selects only cases in `ACTIVE_SOURCING` / `READY_TO_LAUNCH` / `RADIUS_AUTHORIZATION_REQUIRED` (`sourcing-driver.service.ts:766-775`), and a successful launch moves the case to `LAUNCHED` (`launch-readiness.service.ts:731-741`), whose only onward edge is `CLOSED` (`sourcing-case.service.ts:219`). A pause requires the auction to be `ACTIVE`, which only happens after the launch flip — so the ORDINARY paused auction sits under a `LAUNCHED` case and the sweep never re-selects it. **The net fact is therefore: LIVE, but conditional on a half-completed launch**, not "any paused auction". **THE CAUSE, recorded because the eventual fix is about it.** The flip to `ACTIVE` (`launch-readiness.service.ts:680-690`, inside `$transaction`) and the case transition to `LAUNCHED` (`:731-741`, **outside** it, with a network dispatch between them) are TWO WRITES. If the second never lands — `transitionCase` throws, the invocation dies or times out — the auction is `ACTIVE` under a still-swept case. Nothing reconciles that mismatch: `LAUNCHED` is read in only two places and neither repairs it. **THE FIX, as ruled: OPTION B — guard on `Auction.startedAt`.** `startedAt` is written only where an auction goes ACTIVE (`auction.service.ts:104`, `launch-readiness.service.ts:688`, `deposit-activation.service.ts:289`, `app/api/admin/auctions/route.ts:103`, `admin-buyer-command-center.service.ts:940`) and by no `auction.create` site, so **`PENDING` + `startedAt IS NOT NULL` ⟺ it ran and is now held**, and `PENDING` + `startedAt IS NULL` ⟺ never launched. `launchAuction` refuses the fall-through in the first case and holds with a blocker. One predicate, one existing column, no new migration — and the precedent is already in the codebase at `auction-invitation.service.ts:1125`, which uses `startedAt: { not: null }` as exactly this discriminator. **Phase 10's earlier claim that the fix "needs either a column or a reading of the admin audit log" was wrong and is corrected here.** **NOT IN PHASE 10, owner-ruled:** option C (making the flip and the case transition atomic) reorders a live launch path and belongs with the Phase 5 ladder under §13-D52, where it can be seen against the rest of that ladder; Phase 10 is green and about to merge, and widening it is how a batch doubles. **Verify after:** a paused auction (`PENDING`, `startedAt` set) under a `READY_TO_LAUNCH` case survives a sweep tick unchanged — same `endsAt`, no new invitations — and a never-launched `PENDING` auction still launches normally. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — **owner-ruled 2026-09-18 as OPTION B, in its own batch**, so nothing waits on it: the window needs a launch that half-completed AND an administrator's pause on the same request, and the guard is correct whatever caused the mismatch. The OVERRIDE is evidence the window has been hit — a `READY_TO_LAUNCH` case sitting under an `ACTIVE` or `PENDING` auction in production — at which point the guard ships before any further Phase 5 ladder work, ahead of option C |
 
 
 ## §14 Out-of-scope findings (reported, not implemented)

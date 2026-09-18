@@ -37,6 +37,16 @@ export interface RegisterDischargeEntry {
   readonly sentBy: string;
   /** What would discharge it properly, named so this is a tracked item and not an excuse. */
   readonly followUp: string;
+  /**
+   * The question that must be answered BEFORE the follow-up is attempted, and by whom — or the
+   * explicit statement that there is none.
+   *
+   * Required, not optional, and the reason is the entry below: its follow-up is a compliance
+   * migration whose correctness turns on a legal question this programme has no standing to
+   * answer. A ledger that recorded only the follow-up would read as a work item somebody could
+   * simply pick up. Naming the prerequisite is what stops that.
+   */
+  readonly openQuestion: string;
 }
 
 export const REGISTER_DISCHARGE_LEDGER: readonly RegisterDischargeEntry[] = [
@@ -44,6 +54,13 @@ export const REGISTER_DISCHARGE_LEDGER: readonly RegisterDischargeEntry[] = [
     constantName: "PREQUAL_DECLINED",
     templateKey: "prequal_declined",
     reason:
+      // THE REQUIREMENT, CITED PRECISELY. An earlier framing of this entry reached for §12, which is
+      // financing checkpoints (12a–12d) and has nothing to do with adverse action. The governing
+      // lines are Stage 3 L394 and L398, the §26 register L1243, and §29 — corrected here rather
+      // than repeated.
+      "Required by Stage 3 L394 ('decline with applicable adverse-action information') and L398 " +
+      "('delivery outcome is recorded as sent, duplicate, or failed [BUILT]'), the §26 register " +
+      "L1243, and §29's 'adverse-action outcomes distinguished'. NOT §12. " +
       "This is the FCRA §615 adverse-action notice, and it is SENT TODAY — the gap is the rail, " +
       "not the message. Moving it to the outbox is not a plumbing change: `sendAdverseActionEmail` " +
       "returns an `EmailSendOutcome` discriminant that four call sites feed to " +
@@ -65,8 +82,24 @@ export const REGISTER_DISCHARGE_LEDGER: readonly RegisterDischargeEntry[] = [
       "feeds the outbox's delivery result back into `compliance_events`, replacing the synchronous " +
       "`EmailSendOutcome` classification without losing the three outcomes §29 requires to stay " +
       "distinguishable. The register row and the direct sender both stay until then.",
+    openQuestion:
+      "WHETHER AN ENQUEUED NOTICE MAY EVER BE RECORDED AS DISCHARGING §615, AND WHAT TIMING " +
+      "OBLIGATION ATTACHES. This is a legal question about the platform's own obligations, and " +
+      "neither this programme nor the owner has ruled it — deliberately, and it was declined in " +
+      "those words on 2026-09-18. COUNSEL SETTLES IT BEFORE THE FOLLOW-UP IS ATTEMPTED, because " +
+      "the answer decides whether a synchronous ENQUEUED compliance row is a legitimate artefact " +
+      "or a statement that a notice was sent when none was. A migration written before that answer " +
+      "would be choosing one of those two by accident.",
   },
 ];
 
-/** How many rows may be ledgered. Pinned so a second cannot appear unnoticed. */
+/**
+ * How many rows may be ledgered. Pinned so a second cannot appear unnoticed.
+ *
+ * OWNER RULING 2026-09-18 (option A): the entry below is not a deferral — it is a DOCUMENTED
+ * EXCEPTION, and §8.4's direct-send target was restated to match it: "zero §27.1 transactional
+ * traffic WITHOUT A DOCUMENTED REASON", not literal zero. The ceiling and the
+ * gains-an-enqueue-site check in `communications-register-completeness.test.ts` are what keep the
+ * exception singular; raising this number is a decision about what §27.1 means, not a refactor.
+ */
 export const MAX_LEDGERED_ROWS = 1;
