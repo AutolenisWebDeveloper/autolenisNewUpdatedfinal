@@ -3101,7 +3101,7 @@ reachability analysis from the cron and route entry points, which is not built h
 header records the limit. **A gate whose boundary is undocumented is how the first nine instances
 of this class survived.**
 
-#### Migrations — authored and proven, NOT applied
+#### Migrations — APPLIED to production 2026-09-18 02:36 UTC, and the proof package that did not exist
 
 `20261215000000_phase10_cancellation_vocabulary` (the `CANCELLED` labels
 `AuctionInvitationStatus` and `PickupStatus` lacked — `EXPIRED` would tell a dealership it missed a
@@ -3114,6 +3114,54 @@ not CI's 17.6** — no Docker daemon in the environment. CI's `migrations` job r
 
 §13-D60 is discharged by the index landing. The resolve-only route it was written about is **not
 built** — see below — so the "second writer" override was never triggered.
+
+**APPLIED, AND VERIFIED INDEPENDENTLY BY THE OWNER at 02:36 UTC on 2026-09-18.** Ledger 123 rows /
+121 distinct / 2 rolled back / 0 stuck; both `20261215` rows finished at `applied_steps_count` 1;
+`AuctionInvitationStatus` and `PickupStatus` both carry `CANCELLED`; and
+`post_completion_obligations_open_deal_type_key` is UNIQUE `(deal_id, type) WHERE status <>
+'RESOLVED'`. §13-D60 is closed.
+
+**AND IT RAN WITHOUT A PREFLIGHT, BECAUSE THERE WAS NOTHING TO RUN.** There was no
+`docs/transaction-flow/phase-10-proof/` on the branch. Phase 1, phases 3 through 9 and
+migration-110 all ship a proof package; Phase 10 did not, and neither migration directory held a
+`rollback.sql` either. The STOP 2 report *described* the sequence — "preflight.sql in full before,
+`prisma migrate status` to show what will apply, and both verification halves after" — and the
+files behind that sentence were never written. **The owner named the shape: Phase 7, where the
+package was described as done and the artefacts were missing.** It is the same failure, and the
+second time it has happened in this programme.
+
+Written as an owner-instructed follow-up on 2026-09-18, in the phase-9-proof shape:
+`phase-10-proof/preflight.sql` (20 assertions, 15 block-capable), `verify.sql` (20 assertions, 14
+physical and 5 ledger, both halves), `proof-run.log`, and a `rollback.sql` in each migration
+directory. `frontend/prisma/__tests__/phase10-proof-sql.test.ts` checks the expected-migration list
+against the directories on disk, refuses a hardcoded count beside it, computes the terminal-row
+figures rather than trusting them, and — new for this phase — **fails if the package or either
+`rollback.sql` is missing at all**, which is the gap that produced this paragraph.
+
+**THE PREFLIGHT IS WRITTEN AGAINST THE PRE-DEPLOY STATE AND SAYS SO IN ITS OWN HEADER.** Run today
+it BLOCKs, correctly, on "already applied" and on a chain that has moved from 119 distinct names to
+121. A preflight rewritten to pass against the post-deploy database would be a different file
+pretending to be this one, and a preflight that claims to have guarded a run it never saw is worse
+than none.
+
+Both files were exercised in BOTH directions on a throwaway loopback cluster and the run is recorded
+in `proof-run.log`: preflight **all 20 CHECKED** against a rebuilt pre-state whose ledger read 119
+distinct — production's exact pre-deploy count; verify **10 MISSING** against that same pre-state,
+naming precisely the objects the migrations create; then, with two open obligations seeded on one
+`(deal_id, type)`, preflight **BLOCK** and the migration failing for real on
+`23505 could not create unique index … Key (deal_id, type)=(d_p10proof, TEMP_TAG) is duplicated`,
+which left the chain genuinely stuck and made **six distinct BLOCK conditions** fire; and after
+recovery, verify **all 19 PRESENT**. Four absence assertions were not exercised and the log names
+them rather than implying coverage.
+
+**ONE READING WORTH RECORDING ON ITS OWN.** Production's `AuctionStatus` reads PENDING, ACTIVE,
+CLOSED, EXPIRED, CANCELLED, **REOPENED** — owner-confirmed, and independently confirmed here
+against a database built from the committed chain. The first independent review of the
+decline-route change caught `closeAuction` guarding on a hand-written `[PENDING, ACTIVE]` that
+omitted REOPENED, and would have removed a buyer's ability to decline a reopened auction. **That
+review was right against the database, not merely against the code** — the label is live, an admin
+action writes it, and `LIVE_AUCTION_STATUSES` (which the guard now uses) is the list that owns the
+question.
 
 #### §8.3 completeness — how the two registers were actually closed
 
