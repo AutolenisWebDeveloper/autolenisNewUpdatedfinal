@@ -67,6 +67,23 @@ function addr(tag: string): string {
   return `formwalk-${tag}-${PROJECT}-${RUN_ID}-${seq}@example.test`;
 }
 
+/**
+ * A throwaway password for the one surface that requires one, DERIVED rather than
+ * literal.
+ *
+ * The first version hard-coded a password string here. It was not a real credential —
+ * it registers a throwaway affiliate against the local `autolenis_e2e` database and
+ * nothing else — but GitGuardian flagged it on the pull request, and it was right to:
+ * a credential-shaped literal in a committed file is a credential-shaped literal, and
+ * a scanner that waved this one through would wave the next one through too.
+ *
+ * Deriving it from the run id keeps the value unique per run, satisfies the complexity
+ * rule the registration endpoint enforces, and leaves no literal to flag.
+ */
+function throwawayPassword(): string {
+  return `Aa1!${RUN_ID}${PROJECT}${seq}`;
+}
+
 // ── The walk table ───────────────────────────────────────────────────────────
 //
 // `lane` is what §34 means by "lands in its correct lane": which store the
@@ -286,7 +303,12 @@ const SURFACES: readonly Surface[] = [
     endpoint: "/api/affiliate/register",
     lane: "affiliate",
     expectReachable: true,
-    body: () => ({ email: addr("aff"), firstName: "Form", lastName: "Walk", password: "Str0ng!Passw0rd1" }),
+    body: () => ({
+      email: addr("aff"),
+      firstName: "Form",
+      lastName: "Walk",
+      password: throwawayPassword(),
+    }),
   },
   // ── The three the CSRF gate refuses ───────────────────────────────────────
   {
