@@ -837,7 +837,7 @@ block. This rule is about reviews already running.
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Schema foundation & enforcement objects** (additive migration wave) | §4, §32, §28.1–28.2, §6.2, §12b, §4.6, §22a candidate model, comms_outbox shape | none (no UI) | 1 (schema half of), 10 (schema half), 18 (schema half), 23 (table), 26 (table), 28 (schema half) | — |
 | 2 | **Operational writers + Lane 1 intake, identity, Stages 1–3** (also §3 orphan rule, §30 responsible-party registry, and the §2 / §35 build rules — §11.5) | §5, §6.1–6.5, §7–§9, Stage 1, Stage 2, Stage 3, §26 rows for those stages, §27 dispatcher rules, §27.1 rows for those stages | LANES; S[0..2]; “Buyer sees” copy for Stages 1–3 | 2, 23 (writer), 24 (dispatcher) | 1 |
-| 3 | **Payment gate, money model, plans, settlement → sourcing case** — **AS BUILT 2026-09-10; record at `docs/transaction-flow/phase-3-proof/AS-BUILT.md`, not in this file (§8.1k, F6)** | Stage 5 (5a–5d), §22, §22.1, §23 (all), Stage 6 entry, §26 payment/plan rows, §27.1 payment/plan rows | S[4]; MONEY/MONEY_PANELS; PLAN_* | 1 (deposit attach), 3, 4, 5, 6, 11, 15 | 2 |
+| 3 | **Payment gate, money model, plans, settlement → sourcing case** — **AS BUILT 2026-09-10, §8.1c** (written into this file 2026-09-18; the contemporaneous original is `docs/transaction-flow/phase-3-proof/AS-BUILT.md`) | Stage 5 (5a–5d), §22, §22.1, §23 (all), Stage 6 entry, §26 payment/plan rows, §27.1 payment/plan rows | S[4]; MONEY/MONEY_PANELS; PLAN_* | 1 (deposit attach), 3, 4, 5, 6, 11, 15 | 2 |
 | 4 | **Inventory, qualified results, shortlist candidates, co-buyer, trade packet** | Stage 4 (4a–4c), §22a (all), §6.1 inventory/detail/shortlist/find-one-like-this/trade surfaces, Appendix (re-verified), §26 inventory rows | S[3]; INV; QUAL; BUDGET; FINDINGS | 28, 30, 31, (18 co-buyer record) | 1 (2 for intake handler; 3 not required) |
 | 5 | **Dealer sourcing ladder, validation, invitations, launch readiness; identity firewall** (built here; the *lift* at reaffirmation is Phase 7 — §11.6) | Stage 6 (6a–6c), Stage 7, §25, §26 sourcing/invitation rows, §27.1 sourcing/auction rows | S[5..6]; MONEY_PANELS “Identity and circumvention” | 7, 8, 9, 29 | 3, 4 |
 | 6 | **Offers, validation, ranking, close, selection, Deal lineage, Premium invitation** — **AS BUILT 2026-09-14, §8.1f** | Stage 8 (8a–8c), Stage 9 (9a), §22a ranking rows, §23.2a touchpoints 2–4, §26 offer/selection rows, §27.1 offer/selection rows | S[7..8]; PLAN_SEQ rows 2–4 | 10, 12 (Deal creation half), 15 (touchpoints) | 5 |
@@ -1044,6 +1044,93 @@ labels added to pre-existing types survive, because PostgreSQL has no `ALTER TYP
 **Not applicable to this phase, stated rather than skipped.** Playwright, visual regression and any
 browser or UI check: the phase changes no route, component or rendered surface. Impeccable's UI
 review likewise has no surface to review.
+
+### 8.1c Phase 3 — Payment gate, money model, plans, settlement → sourcing case — AS BUILT (2026-09-10)
+
+**Written into this document 2026-09-18 by Phase 11 (§8.1k, F6).** Phase 3 shipped on
+`claude/txflow-03-payment` from base `8fb9fd84` and produced a full contemporaneous record — it was
+simply the only phase whose record never reached this file, so a reader of the workflow alone
+concluded Phase 3 had none. That is exactly what happened to Phase 11's own STOP 1 analysis, and to
+the framing "§8.1a through §8.1j are the AS BUILT records for Phases 1 through 10" (§8.1b and §8.1d
+do not exist either; Phase 2's record is at L4132 and Phase 4's at L4957, both inside §8.2).
+
+**The canonical record is `docs/transaction-flow/phase-3-proof/AS-BUILT.md` (204 lines) with
+`CAPABILITY-MAP.md` (70 lines) beside it.** This section is the in-document record, transcribed from
+those files rather than re-derived. Where the two ever disagree, the proof-directory files are the
+contemporaneous originals and win — a second, divergent account of one phase would be worse than the
+gap this section closes.
+
+#### The sequencing guard, first — because it is the load-bearing fact
+
+**Phase 3 must not reach production before Phase 5.** It removes the only path that invites dealers,
+and the replacement does not exist until Phase 5. So the legacy behaviour is kept **by default**
+behind `SOURCING_CASE_REPLACES_AUCTION_LAUNCH`, and every settlement that takes it writes a
+`LEGACY_PATH_WRITE` row. Registered as §13-D52; Phase 5 flips it. Flipping it early gives every
+paying buyer an open sourcing case and no dealer — silently, with no failed job.
+
+The default is not trusted, it is asserted: `settlement-effects.test.ts` fails if the flag defaults
+on, if anything but the exact string `"true"` turns it on, or if the value is captured at module load
+rather than read at call time.
+
+#### What was built, by §
+
+| § | Built | Where |
+| --- | --- | --- |
+| §5a | Seven-condition eligibility recheck, each failure naming the exact missing item, and the `PAYMENT_REQUIRED` transition it gates | `lib/services/payment/deposit-eligibility.ts`, `app/api/buyer/deposit/create-intent/route.ts` |
+| §5a | The code→step map, so a named failure routes the buyer to the step that fixes it | `ELIGIBILITY_STEP`, `app/buyer/deposit/page.tsx` |
+| §5b | All seven disclosures, rendered before the card form, versioned, acceptance stored, gating the intent rather than the transition | `lib/payments/deposit-disclosures.ts`, `app/buyer/deposit/page.tsx` |
+| §5c | The six-touch series on `comms_outbox`, keyed to the request, every-minute drain, with a state recheck that reads the request as well as the money | `lib/services/payment/deposit-reminder.service.ts`, `lib/services/comms/state-recheck-registry.ts` |
+| §5d | Settlement: record, unlock, open the sourcing case with its checkpoints, bind the plan snapshot — atomically | `lib/services/payment/settlement-effects.service.ts` |
+| §5d/§26 | Dispute and refund hold fulfilment and stop all unsent outreach on both rails; a won dispute lifts the hold and closes the Finance exception; a lost one refunds and keeps the hold | `lib/services/payment/fulfillment-hold.service.ts` |
+| §26/§13-D12 | One rail for webhook gaps: the duplicate detector folded onto `raiseException`, keyed on the PaymentIntent | `lib/services/monitoring/health.service.ts`, `lib/services/payment/deposit-settlement.service.ts` |
+| §22.1 | One refund primitive; never labels a no-charge record as refunded; refunds stay manual | `lib/services/payment/refund.service.ts` |
+| §23.1 | Plan elected per request; election and entitlement separated | `lib/services/buyer/plan-snapshot.service.ts` |
+| §23.2 | The upgrade window (open at settlement, shut on a broken credit basis, shut at funding clearance) and the $499-less-$99 quote from the settled ledger | `lib/services/plan/upgrade-window.service.ts` |
+| §23.2a | Touchpoint 1 on the receipt and the sourcing-started screen | `lib/services/email/templates/deposit-confirmation.tsx`, `app/buyer/deposit/success/page.tsx` |
+| §23.2b | The four guardrails this phase owns | `lib/services/plan/upgrade-suppression.service.ts` |
+| §23.3 | Downgrade before and after settlement, concierge release, ownership back to the pool | `lib/services/plan/plan-change.service.ts` |
+| §23.5 | Fee reconciliation from the ledger of settled payments | `lib/services/deal/service-fee.service.ts` |
+| §11.6 4–5 | The commission ledger shape, asserted rather than asserted-about | `lib/services/affiliate/__tests__/commission-ledger-shape.test.ts` |
+
+#### The four money-path defects it fixed
+
+1. **A card decline made `FAILED` terminal while the intent stayed live at Stripe.** `FAILED` now
+   means the intent is DEAD; only `payment_intent.canceled` writes it. A retry on a live intent
+   settles, and the reconciler sweeps `SETTLE_FROM` rather than `PENDING` alone.
+2. **`buyer.plan` was a free flag that gated money.** Election and entitlement are now two functions
+   with two names, and entitlement reads the ledger.
+3. **`REFUND_TRIGGERED` advanced a deal to `REFUNDED` on a no-charge record, and `DEAL_CANCELLED`
+   auto-refunded.** Split onto the `cancelDeal` seam and one refund primitive.
+4. **Admin create-intent and send-link could issue a second $99 to a buyer who had already paid.**
+   The provider-side obligation check now covers all three paths, request-scoped.
+
+#### Capability map — the counts reconcile
+
+16 routes and pages · 14 services · 3 jobs/crons · 6 workflows = **39 entries**.
+**KEPT 14 · MOVED 4 · REGROUPED 5 · PROGRESSIVE 8 · RENAMED 0 · REMOVED 2.**
+14 + 4 + 5 + 8 + 0 + 2 = 39.
+
+Both `REMOVED` entries are **authorised by name** in §8.2's Phase 3 bullet, money-path defect 3:
+`DEAL_CANCELLED` no longer auto-refunds, and `REFUND_TRIGGERED` no longer advances a deal to
+`REFUNDED` when the refund primitive reports `NO_CHARGE`. Cancelling and refunding remain available
+as separate actions, which is §22.1's rule. Full table in `phase-3-proof/CAPABILITY-MAP.md`.
+
+#### Verification, as recorded at the time
+
+| Gate | Result |
+| --- | --- |
+| `pnpm typecheck` | 0 errors |
+| `pnpm lint` | 0 errors (warnings only, none introduced) |
+| `pnpm test:coverage-check` | green |
+| `pnpm test:all` | **exit 0 — 69 of 69 suites, 4,108 tests, zero failures** |
+| `next build` | exit 0 |
+| `prisma migrate deploy` (throwaway loopback PG 17.6) | full chain applied to an empty database; re-apply reports no pending migrations |
+| `pnpm db:check-drift` | no functional drift; structural drift at baseline |
+| `phase-3-proof/run-proof.sh` | PASSED, exit 0 |
+
+**BROWSER-VERIFIED was read-only and unauthenticated only**; no authenticated page was exercised in a
+browser. That limit is the same one Phase 11 reports for the buyer portal, for the same reason.
+
 
 ### 8.1e Phase 5 — AS BUILT (2026-09-11)
 
@@ -2436,12 +2523,18 @@ Failing closed was the correct interim.
 
 #### THE DEFECT CLASS THIS PROGRAMME KEEPS PRODUCING — name it, and test for it
 
-**Something reported success while checking nothing.** Eight instances, across nine phases, in
-four different layers. Naming it here because the sixth was found the same way as the first,
+**Something reported success while checking nothing.** **TWELVE instances, across eleven phases, in
+six different layers.** Naming it here because the sixth was found the same way as the first,
 which means it is a class and not a run of bad luck; because the seventh is a guard built to
-catch this class that nearly fell to it; and because the eighth moved the class into a layer the
+catch this class that nearly fell to it; because the eighth moved the class into a layer the
 first seven never touched — the *investigation* that establishes what is true before any code is
-written:
+written; and because **#11 and #12 were committed by Phase 11, the acceptance phase whose entire
+purpose was to measure this class.** The instrument caught the disease it was built to diagnose.
+
+*Extended 2026-09-18 by Phase 11: #10 promoted from the prose above into the table, #11 and #12
+added. The counts in this paragraph are maintained by hand and were stale before this edit — they
+read "eight instances, across nine phases, in four layers" above a table of nine rows. That is a
+small instance of the same class and is noted rather than silently fixed.*
 
 | # | Phase | Where | What reported success | What it had actually checked |
 | --- | --- | --- | --- | --- |
@@ -2453,6 +2546,9 @@ written:
 | 6 | 8 | the record itself | *"the capability … is preserved through the correct predecessor"* | **nothing** — a claim about the transition graph that was never checked against the graph. `PICKUP_SCHEDULED` had zero inbound edges |
 | 7 | 8 (#435) | **the guard written for this class** | two passing comparisons in `phase8-proof-sql.test.ts`, the drift guard added *because of* this table | **nothing** — the first draft filtered on `/^2026111700\d{2}_phase8_/`, **ten digits against a fourteen-digit stamp**, so `onDisk` and `named` were both empty and both tests passed by comparing nothing to nothing |
 | 8 | 9 (#440) | **the investigation**, and then the record built on it | three `git log` searches returning no commits, reported to the owner as *"that path never existed in this repository"* — in the PR body, in a test comment, and in a capability map the owner was asked to sign | **nothing** — `[dealId]` is a **glob** in a git pathspec, matching one character from `{d,e,a,l,I}`, so every search silently addressed a path no file has ever had. `:(literal)` returns the route's whole history: added `f9ee800`, removed `89abb18`, both 2026-09-01 |
+| 10 | 10 | **the record citing itself** | *"LATENT, not live … §8.4 records that flag as off in production"*, written into §8.1j with 2026-09-17's date on it | **nothing about production.** The flag state was CITED from a §8.4 row instead of measured. A stale row produced a second, newer, more specific stale record carrying the authority of a section titled AS BUILT. Only someone holding the production fact could catch it. Full account above; the rule it yields is *a claim about the CURRENT STATE of production is measured, never cited* |
+| **11** | **11** | **a verdict table — the phase's own** | `CI: PASS on 7821b3b (run 1192)` in the Phase 11 STOP 2 report | **the workflow run, not the pull request.** Run 1192's five jobs were genuinely green, so the sentence was true of what it named — and `GitGuardian Security Checks` was *already failing* on the same PR, outside that run. The status was read at the wrong SCOPE: a check the run did not contain could not appear in it, and its absence read as its success |
+| **12** | **11** | **the vacuity check itself** | `ASSERTION DISCRIMINATION: 3 of 3 proven to fail on a reintroduced defect` — the line that warranted every other assertion in the acceptance package | **1 of 3.** Two of the three seeded cases in `parity.itest.ts` built their own object literals and re-did the comparison inline instead of calling `divergences()`. Proven by the second independent review: hard-coding both agreement flags destroyed the real comparison, the measurement went GREEN — exactly how a resolved F4 would look — and the test named *"the parity comparison is discriminating"* stayed green |
 | 9 | 9 (#441) | **a test, written by the round that was looking for this class** | `completion-preconditions.test.ts:215` — *"a concierge deal has no auction and no sourcing case, and completes anyway"*, asserting `complete === true` and green on every run | **the opposite of the truth.** It nulled `offerId`, `offer`, `auctionId` and `auction` to simulate a concierge deal, and left `dealerId: "dlr_1"`, `dealer`, and a CONFIRMED `dealerReaffirmations` row in the fixture — the exact three facts a concierge deal **cannot** have. `Deal.dealerId` is nullable and has **no writer anywhere in this repository**; `openReaffirmationWindow` returns `{created:false}` for a deal with no offer. The real shape was **uncompletable**, permanently, and the test asserting it completes is what let that ship |
 
 **The four layers matter.** #1 and #2 are runtime; #3, #4, #5, #7 and #9 are the tests and
@@ -2483,11 +2579,30 @@ carve-out covered two of the three links while the test hid the third.
 | --- | --- |
 | #8 | A search that returns nothing has proved nothing until you have proved the search itself addresses a real target. `git log -- '[dealId]'` is a glob; `:(literal)` is the query you meant. Anti-vacuity applies to *searches*, not only to assertions. |
 | #9 | **When a test nulls fields to simulate a shape, ask which OTHER fields that shape also cannot have.** Nulling is a claim about the whole record, not about the fields you touched. Blocker 1b is what happens when you null three and leave three — and the three left behind were each individually sufficient to make the test green and the world wrong. |
+| #11 | **A status is read at a SCOPE, and the scope is part of the claim.** "CI passed" is not a fact about a pull request; it is a fact about whatever set of checks you actually queried. A check the query did not contain cannot fail inside it, so its absence is indistinguishable from its success. Name the scope in the claim — *"the five jobs of workflow run 1192 passed"* — or query the PR's full check set, which is the scope the word "CI" implies to every reader. **This is the same defect as a scan matching nothing: a query whose reach is narrower than the claim built on it.** |
+| #12 | **A vacuity check must call the code it certifies, not re-implement it.** A seeded case that builds its own inputs and repeats the comparison inline proves only that `assert.deepEqual(["x"], [])` throws. The mechanical form: ONE function computes the result, the measurement calls it, and every seeded case calls *the same function* with perturbed input — so breaking the comparison breaks the proof. Verify it the way the reviewer did: **neutralise the real comparison and confirm the discrimination test goes RED.** If it stays green, it was never wired. |
 
 The #9 check has a mechanical form worth preferring where it is available: **derive the fixture from
 the shape's constructor rather than editing a happy-path fixture toward it.** A concierge deal built
 by the code that really creates one cannot carry a `dealerId`, because nothing writes it. A concierge
 deal built by deleting four fields from an auction fixture can carry anything the editor forgot.
+
+**#12 IS THE ONE THAT MATTERS MOST, AND IT IS DIFFERENT IN KIND.**
+
+Every other instance is an artefact that failed to check the thing it named. #12 is the artefact
+whose entire job was to certify that the other artefacts were not vacuous — and it was vacuous. That
+inverts the usual blast radius: a vacuity check that is itself vacuous does not merely fail to catch
+one defect, **it licenses every assertion it guards.** The line `3 of 3` was the sentence that said
+*this is not the eleventh instance*; it was the warrant for the whole acceptance package, and it was
+wrong by two.
+
+It is also not a slip but a **pattern inside the instrument**, and the evidence is that it shipped in
+the same commit as a second one of identical shape: a test named *"the four scenarios ran the SAME
+spine"* that asserted `SCENARIOS.length === 4` and `new Set(names).size === 4` over a `const` literal
+declared a hundred lines above it in its own file. It touched no production module. No change to the
+code it claimed to be about could make it fail. Two artefacts, one commit, both asserting over inputs
+they authored themselves — which is the signature of the class, arriving in the phase built to name
+it.
 
 **AND THE ROUND THAT PRODUCED #9 COULD NOT HAVE CAUGHT IT.** Two of the second review's three
 blockers were **created or left open by the first review's own fixes** — #2's harmful ordering was
@@ -2498,6 +2613,26 @@ It is structural: *a reviewer cannot audit the round it participated in.* Its fi
 unreviewed code, and it carries the reasoning that produced them — which is exactly the context that
 makes a defect invisible. The second review must read the final code from a clean context, with the
 first round's fixes explicitly in scope, or the fixes ship unreviewed by anyone.
+
+**PHASE 11 IS THE SECOND PROOF OF THAT RULE, AND IT IS STRONGER THAN THE FIRST.** The standing
+two-review gate is recorded here as a REASON rather than an outcome, because the outcome could be
+mistaken for luck and the reason cannot:
+
+> *A reviewer cannot audit the round it participated in.*
+
+In Phase 9 the second review found three blockers, two of them created by the first review's own
+fixes. In Phase 11 the split was sharper still. The first review read the diff and found five major
+and twelve minor issues — all real, all fixed — and **did not find #12**, because it was reviewing
+the diff rather than interrogating the assertions. The author did not find it either, having written
+the line. It took a second review pointed *at the assertions rather than at the application*, running
+the one experiment that can settle it — neutralise the comparison, watch what stays green — to find
+that the phase's own warrant was false.
+
+So the gate is not "review twice in case the first reviewer was weak". It is: **the author and the
+first round share the context that made the defect invisible, and a claim about whether a check
+checks anything cannot be audited by anyone who has already accepted it.** Phase 11 ends by having
+proved its own standing rule on itself, which is the only form of proof this class of defect
+respects.
 
 **#7 is the most persuasive of the first seven.** The other six were written by
 someone not thinking about this class. #7 was not. It is a guard built *specifically* to catch
@@ -3605,20 +3740,22 @@ after driving the suites. A code counts only because a production raise site wro
 
 `ACCEPTANCE-REPORT.md` §8 carries each with `file:line` and severity. In brief:
 
-| # | Finding | Severity |
-|---|---|---|
-| F1 | `contract_approved` is discharged by an unintended literal match — a `triggerEvent` string, in a file whose `templateKey` is something else | HIGH |
-| F2a | Three public POST surfaces return 403, including the co-buyer signing ceremony (§34 scenario B) | HIGH |
-| F2b | The CSRF mechanism has **no token issuer** — the control is dead and blocks only legitimate traffic | HIGH |
-| F3 | G35-01's root-level CI step does not exist | MEDIUM |
-| F4 | Cross-portal parity is 2 of 3 — `audience: "OPS"` has no production caller | HIGH |
-| F5 | `scope-guard.test.ts` is stale at `CURRENT_PHASE = 8` and has no non-vacuity floor | MEDIUM |
-| F6 | Phase 3's AS BUILT record is the only one NOT in this document — it is at `docs/transaction-flow/phase-3-proof/AS-BUILT.md`, and §8.1 row 3 was unmarked | LOW |
-| F7 | `INVENTORY_SELECTION` has no production writer; §34's "Selected inventory" entry form is not recorded | MEDIUM |
-| F8 | `trade_in_submissions.verified_payoff_cents` has no writer, and it is the sole gate on `TRADE_PAYOFF` | HIGH |
-| F9 | The auction path never advances the Vehicle Request to `DEAL_CREATED` | MEDIUM |
-| F10 | One endpoint accepts SMS consent under two different key names | LOW |
-| F11 | CLAUDE.md's measured counts have drifted again — 79 `test:*` scripts on this branch, a 70-segment chain | LOW |
+| # | Finding | `file:line` | Severity |
+| --- | --- | --- | --- |
+| F1 | `contract_approved` is counted wired by an unintended literal match: the string occurs as a **`triggerEvent`** on a call whose `templateKey` is `SIGNATURE_REQUIRED`, and the constant's only reference is inside the file the scan excludes. The message rides the direct Resend rail — no durable retry, no state recheck, no suppression check, no cancel-by-key | `state-recheck-registry.ts:992`, `:1154`; `esign/open-signing.service.ts:157-158`; `email/resend.service.ts:1027`; `contract-shield.service.ts:703`; `admin/contract-shield/[reviewId]/route.ts:154` | **HIGH** |
+| F2a | Three public POST surfaces return 403 before reaching a handler, **including the co-buyer signing ceremony §34 scenario B requires** | `app/api/leads/lead-magnet/route.ts`; `app/api/tools/dealer-fee-lead/route.ts`; `app/api/esign/invited/[token]/route.ts`; gate at `proxy.ts:443-451` | **HIGH** |
+| F2b | The CSRF mechanism **has no token issuer**. `X-CSRF-Token` / `csrf-token` appear nowhere but the check itself, so the first-party client never sends one and the control refuses only legitimate traffic. Widening the skip-list would widen a dead control | `proxy.ts:318-325` (the only two occurrences repo-wide) | **HIGH** |
+| F3 | G35-01's root-level CI step does not exist. The scope guard is reachable only through the `ci` job, which sets `working-directory: frontend`, so the second HTTP surface stays invisible to CI | `.github/workflows/ci.yml:16`; `backend/server.py:1-97`; guard at `lib/__tests__/scope-guard.test.ts` | MEDIUM |
+| F4 | Cross-portal parity is 2 of 3. `audience: "OPS"` has **no production caller**; the Operations queue reads raw `queue_items` columns and renders them itself, so it shows an enum where the other two show a sentence | `app/admin/queues/page.tsx:53-66`, `:205-238`; `exception-lineage.service.ts:77`, `:196`; false claim at `components/buyer/TransactionExceptionPanel.tsx:20` and §8.1j L3080-3084 | **HIGH** |
+| F5 | The scope guard is stale at `CURRENT_PHASE = 8` — Phases 9 and 10 were never declared to it — and has **no non-vacuity floor**: it imports only `read`, never `assertScanned`, and `dirsIn()` returns `[]` for a missing path, so four of its seven tests pass on an empty scan. Its own comment records this happening before at `CURRENT_PHASE = 4` | `lib/__tests__/scope-guard.test.ts:38`, `:45`, `:113`, `:193`, `:207` | MEDIUM |
+| F6 | Phase 3's AS BUILT record is the only one not in this document. **RETRACTED from its original form** — the first statement claimed Phase 3 had no record at all, which is false | `docs/transaction-flow/phase-3-proof/AS-BUILT.md` (204 lines), `CAPABILITY-MAP.md` (70 lines); §8.1 row 3 | LOW |
+| F7 | `VehicleRequestEntryType.INVENTORY_SELECTION` has **zero production writers**, and `vehicle_requests.inventory_item_id` has none either — so §34's "Selected inventory" entry form is not recorded on the Vehicle Request at all | `prisma/schema.prisma:6925-6928`; the only writers are `app/api/public/request-vehicle/route.ts:245`, `:493` (both the literal `"CUSTOM_REQUEST"`) and the pass-through `unified-buyer-intake.service.ts:668` | MEDIUM |
+| F8 | `trade_in_submissions.verified_payoff_cents` has **13 readers and zero writers**, and is the sole gate on the `TRADE_PAYOFF` post-completion obligation with no fallback — unlike three sibling readers that fall back to `loanBalanceCents`. **§34 scenario D's post-completion clause is therefore unreachable** | gate `pickup-completion.service.ts:559`; siblings `funding-clearance.service.ts:206`, `contract-comparison.service.ts:331`, `deal-recap.service.ts:317`; sole write is migration `20261106000100_transaction_spine_foundation/migration.sql:395` | **HIGH** |
+| F9 | The auction path never advances the Vehicle Request to `DEAL_CREATED`; only a manual admin action does. After a real auction-driven Deal the request still counts as OPEN, which interacts with Phase 1's one-open-request partial unique index | `deal/select-offer.service.ts:156-164` (reads, never updates); only writer `app/api/admin/requests/[requestId]/route.ts:47`; open-set at `vehicle-request/vehicle-request.service.ts:23` | MEDIUM |
+| F10 | One endpoint accepts SMS consent under two different key names — `consentSms` on the draft branch, `consent_sms` on the full branch. Nothing is broken today; a client sending the wrong casing for its branch loses consent silently. *Adjacent, pre-existing:* the SEO landing form hard-codes `consent_sms: true` with no checkbox | `app/api/public/request-vehicle/route.ts:149`, `:196`; `components/seo/landing/VehicleRequestForm.tsx:129` | LOW |
+| F11 | CLAUDE.md's measured counts have drifted again — 79 `test:*` scripts on this branch (78 on `main`), a 70-segment `test:all`, five CI jobs, against CLAUDE.md's 75 / 67 / 5. *The first statement of this finding was itself off by one, having not counted this phase's own `package.json` change* | `CLAUDE.md`; `frontend/package.json` | LOW |
+
+**None of the eleven is fixed.** §8.2's constraint is not a description.
 
 **F1 is the twelfth instance of this programme's recurring defect, and it sits inside the gate Phase 10
 built to prevent the eleventh.** The implied check, recorded so the next gate does not repeat it:
@@ -3652,7 +3789,16 @@ stale.
 - **§8.1b / §8.1c / §8.1d do not exist.** Phase 2's AS BUILT record is at L4132 and Phase 4's at L4957,
   both inside §8.2. Phase 3 had none at all; it is written below.
 
-#### Phase 3 — where its AS BUILT record actually is (corrected 2026-09-18)
+#### Phase 3 — its record is now in this document (§8.1c)
+
+**Owner instruction, 2026-09-18: "Phase 3's missing AS BUILT record — write it, since this is the
+last phase and the only one without one."** Discharged as §8.1c, with one correction stated rather
+than absorbed: the premise is not quite right, and Phase 11 had already retracted its own version of
+it. Phase 3 is not without a record — it has a full contemporaneous one. What it lacked was a record
+*in this document*, which is what §8.1c now is: transcribed from the originals, citing them as
+canonical, so there are not two divergent accounts of one phase.
+
+The original, superseded wording of this subsection follows, kept because the retraction is the point:
 
 **This section originally announced a retrospective reconstruction of Phase 3's AS BUILT record. That
 was wrong, and the correction is recorded rather than silently applied.** Phase 3 has a full record and
@@ -3670,6 +3816,51 @@ always did — it is simply the only one not in this document:
 It is the only `phase-*-proof/AS-BUILT.md` in the tree; every other phase's record is a section of this
 file. **§8.1 row 3 is marked accordingly by this phase.** No second account of Phase 3 is written here:
 two divergent records of one phase would be worse than the pointer that was missing.
+
+#### §26 coverage is REACHED, not SITE-EXISTS — and the difference is the whole point
+
+The two numbers are not two measurements of one thing. They are two different claims, and conflating
+them is what let a dead code path count as satisfied for an entire phase:
+
+| Claim | Who proves it | Phase 11 result |
+| --- | --- | --- |
+| **A raise site EXISTS** for every registered code | §8.3's Phase-10 table-driven gate (`exception-register-completeness.test.ts`) — ran here, 8/8 green, and genuinely vacuity-proof: five non-emptiness floors plus two mutation tests | **55 of 55** wired (58 catalogued − 3 discharged) |
+| **A raise site is REACHED** — production code actually wrote a row | Driving the scenarios, then `SELECT DISTINCT exception_code FROM queue_items` | **7 of 55** |
+
+**THE PRECEDENT THAT NAMES WHY THIS MATTERS.** `PICKUP_MISSED` counted as satisfied throughout
+Phase 9. It was registered, it had a raise site in `flagSuspectedNoShows` — exported, tested,
+documented — and that function **had no caller anywhere in the repository**. The §8.3 gate was
+correct and the code was dead. Phase 10 found it by hand and wired it; §8.1j records the limit in its
+own words: *"§8.3's rules prove a code HAS a raise site. They do NOT prove anything CALLS it."*
+
+So Phase 11's coverage number is deliberately the smaller, harsher one. It is measured from the
+database rather than the source tree, and it is produced by the suite itself
+(`tests/scenarios/coverage.itest.ts`) as a **ratchet** — floors of 7 and 20, so a fall is a failure
+that names itself. It was hand-transcribed from an ad-hoc query until the second review found that
+the two functions implementing this rule had zero callers.
+
+**It is also a LOWER BOUND, stated rather than buried:** several E2E specs delete their own rows in
+teardown, so a code raised and then cleaned up is not counted. Closing that needs capture at raise
+time, which this phase did not build. The honest reading is *at most 7 of 55 §26 codes are
+demonstrably reachable end-to-end today, and nothing in this programme pins the figure higher.*
+
+#### Predicted before the run, beside what happened
+
+Recorded at STOP 1, before a line of test code was written, so a green result could not quietly
+absorb them and a red one could not be read as a surprise:
+
+| # | Predicted | Actual |
+| --- | --- | --- |
+| 1 | Scenario B's co-buyer signing leg fails (CSRF) | **CONFIRMED** — 403 proven against the running app, with a discriminating control (F2a) |
+| 2 | §26 coverage will not reach 55 of 55 | **CONFIRMED** — 7 of 55 reached |
+| 3 | §27.1 will not reach 79 | **CONFIRMED** — 20 of 79 |
+| 4 | Cross-portal parity is at risk | **CONFIRMED** — 2 of §34's 4 fields diverge, measured (F4) |
+| 5 | The form walk will not be 104 of 104 in the browser | **CONFIRMED** — 18 public surfaces walked; 63 authenticated surfaces not browser-reachable |
+| 6 | BROWSER-VERIFIED will not cover the buyer portal | **CONFIRMED** — Supabase Auth; Ops and dealer reachable, buyer not |
+
+**Not predicted, found by execution: F7, F8, F9, F10** — and F7 indicted this phase's own first draft.
+**Predicted and wrong: none.** The value of the list is not its accuracy; it is that it was fixed in
+advance, so neither a green nor a red result could be narrated after the fact.
 
 #### The two independent reviews found the same defect class in this phase's OWN suite
 

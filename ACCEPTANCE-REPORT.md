@@ -65,6 +65,8 @@ Every command below ran in this session and its output was read. Nothing is clai
 | Preview isolation | `scripts/preview-isolation-preflight.ts` | **PASS** (exit 0; 7 PASS, 3 NOT VERIFIED, each named) |
 | Build | `pnpm build` | **PASS** — `BUILD_ID X88cK05DOxitFIxDnNwAN` |
 | Acceptance suite | `pnpm test:scenarios` | **13 of 14** — the one red is finding **F4**, by design |
+| CI (PR #443, head `e8c81e8`) | all five GitHub Actions jobs | **PASS** — typecheck/lint/matrix/build, E2E (all 8 phase journeys), migration chain, phase-1 proof, dependency audit |
+| CI — GitGuardian | `GitGuardian Security Checks` | **FAIL** — a password literal in three historical commits; removed at HEAD. See §20 |
 | Form walk | `playwright test form-walk` | **66 / 66 PASS** (desktop + mobile) |
 | E2E estate | 13 spec files, mirroring CI's per-spec invocation | 12 green; `phase6` journey 1 environment-dependent (§7) |
 
@@ -434,7 +436,7 @@ What *is* solid: the migration chain applies cleanly from empty, the money path 
 
 | File | At Phase 11 opening | At Phase 11 close |
 |---|---|---|
-| `IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` (MATCH) | `5448533d3b5d2e45d5856535715dae4c8557e0537bd11950e49afee27dae54b3` |
+| `IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` (MATCH) | `b222afaddb7b7f8478b794cd468a8f321a030e6e848b22f7663364b11c10f293` |
 | `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` (MATCH) | **unchanged** |
 | `AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` (MATCH) | **unchanged** |
 
@@ -512,3 +514,50 @@ Parity row **T1** (workflow L7480) specifies more than the suite: *"script `test
 **Why it was not built:** adding a CI job is a change to the repository's build behaviour, which §8.2's "no new capability" constraint puts outside this phase, and the parity suite is deliberately red on F4 — chaining it would turn one finding into a permanently red gate for unrelated work. **That is the owner's call, not this phase's.**
 
 **What it costs, stated plainly:** the entire Phase 11 output is unguarded. Every vacuity corrected in §18 can be reintroduced, or these files deleted outright, with CI green. This is the same defect class as F3 and F5, and it is recorded here for the same reason — so it is a decision rather than an omission.
+
+
+---
+
+## 20. THE CI ROW I GOT WRONG — recorded as instance #11
+
+My STOP 2 verdict table read:
+
+> `CI: PASS on 7821b3b (run 1192). Run 1193 IN PROGRESS on the head.`
+
+Run 1192's five jobs **were** green, so the sentence was true of what it named. It was also wrong as
+an answer to "did CI pass on this PR", because `GitGuardian Security Checks` was **already failing on
+the same pull request**, outside that workflow run.
+
+**The status was read at the wrong SCOPE.** A check the query did not contain cannot fail inside it,
+so its absence read as its success. That is the same defect as a scan matching nothing — a query
+whose reach is narrower than the claim built on it — and it happened inside the verdict table of the
+phase that spent its whole length cataloguing exactly that class.
+
+It is recorded in §8.1h as **instance #11** of the running enumeration, with the check it implies:
+*name the scope in the claim, or query the scope the word implies.* `CI` implies the pull request's
+full check set, not one workflow run.
+
+The corrected rows are in §2 above. The honest verdict is **CI: five jobs PASS, GitGuardian FAIL**,
+and GitGuardian's failure is the historical-commit finding that no push to this branch can clear.
+
+---
+
+## 21. WHY THE SECOND REVIEW IS A STANDING GATE — the reason, not the outcome
+
+Recorded as a reason because an outcome can be mistaken for luck:
+
+> **A reviewer cannot audit the round it participated in.**
+
+In Phase 9 the second review found three blockers, two of them created by the first review's own
+fixes. In Phase 11 the split was sharper. The first review read the diff and found five major and
+twelve minor issues — all real, all fixed — and **did not find the discrimination defect**, because it
+was reviewing the diff rather than interrogating the assertions. The author did not find it either,
+having written the line that claimed it.
+
+It took a second review pointed *at the assertions rather than at the application*, running the one
+experiment that settles the question — neutralise the comparison and watch what stays green — to
+establish that this phase's own warrant was false.
+
+So the gate is not "review twice in case the first reviewer was weak". It is that **the author and the
+first round share the context that made the defect invisible**, and a claim about whether a check
+checks anything cannot be audited by anyone who has already accepted it.
