@@ -42,7 +42,7 @@ Three live-only facts, none fixable here, all of which independently block a rea
 | **§27.1 COVERAGE** | **20 of 79 enqueued** |
 | **FORM WALK** | **18 of 18 walked**, 64/64 assertions green; 3 surfaces proven BROKEN |
 | **CROSS-PORTAL PARITY** | **FAIL** — 2 of §34's 4 fields diverge, measured |
-| **§13 RECONCILIATION** | PASS WITH FINDINGS |
+| **§13 RECONCILIATION** | **PASS WITH CONDITIONS** — the register was counted and the Phase-11-owned rows dispositioned; 31 rows carrying no explicit marker were **not** individually adjudicated, and that is stated rather than implied (§9) |
 | **§35 SCOPE (G35-01)** | **FAIL** — the acceptance gate it mandates does not exist |
 | **ASSERTION DISCRIMINATION** | 3 of 3 proven to fail on a reintroduced defect |
 | **ACCEPTANCE VERDICT** | ## NOT ACCEPTED |
@@ -252,9 +252,19 @@ Root cause and measurement in §7 above. `audience: "OPS"` has no production cal
 
 The file's own comment at `:113` records this happening once before at `CURRENT_PHASE = 4`. **Twice is a pattern, not an oversight.**
 
-### F6 — Phase 3 has no AS BUILT record · **LOW (documentation)**
+### F6 — Phase 3's AS BUILT record is the only one not in the workflow document · **LOW (documentation)**
 
-`grep -n "AS BUILT"` returns records for Phases 1, 2, 4, 5, 6, 7, 8, 9, 10 — and none for Phase 3. There is no `§8.1b/c/d`. Phase 3 shipped (scope section at L4848, `phase-3-proof/` on disk, its scope declared live at `scope-guard.test.ts:59-82`); the record was never written. **It is the only phase in the programme with no record.** Written into §8.1k by this phase.
+**Corrected during this phase's own review — the first statement of this finding was overstated and is retracted here rather than quietly amended.**
+
+The claim was "Phase 3 has no AS BUILT record". That is wrong. Phase 3 has a substantial one: `docs/transaction-flow/phase-3-proof/AS-BUILT.md` (204 lines) with `CAPABILITY-MAP.md` (70 lines) beside it — including the §13-D52 sequencing guard that keeps the legacy path default-on until Phase 5.
+
+The accurate finding is narrower and still real:
+
+- Every other phase's AS BUILT record lives in `IMPLEMENTATION-WORKFLOW.md` (§8.1a, §8.1e–§8.1j, and `#### Phase 2 / Phase 4 — AS BUILT` at L4132 / L4957). **Phase 3's is the only one that does not**, and it is the only `phase-*-proof/AS-BUILT.md` in the tree.
+- **§8.1 row 3 carries no AS BUILT marker**, unlike rows 6, 7 and 8.
+- So a reader of the workflow document alone concludes Phase 3 has no record. That is exactly what happened to this phase's own STOP 1 analysis, and to the framing "§8.1a through §8.1j are the AS BUILT records for Phases 1 through 10" — §8.1b, §8.1c and §8.1d do not exist.
+
+**Disposition:** §8.1k now points at the existing record and §8.1 row 3 is marked, rather than a duplicate record being written. A second, divergent account of the same phase would be worse than the gap.
 
 ### F7 — `INVENTORY_SELECTION` has no production writer · **MEDIUM** — and it caught this report's own first draft
 
@@ -294,14 +304,27 @@ CLAUDE.md states 75 `test:*` scripts, a 67-segment `test:all`, five CI jobs. Mea
 
 ## 9. MASTER §13 RECONCILIATION
 
-The register holds **61 decisions (D1–D61)**. Every one was read against the code. Dispositions:
+The register holds **61 decisions (D1–D61)**. Dispositions, **counted mechanically** over the register
+rows rather than estimated — the method is stated so the figures are reproducible, and because a
+confident-looking breakdown nobody counted is exactly the kind of claim this phase exists to catch:
 
-| Class | Count | Notes |
-|---|---|---|
-| RULED and AS BUILT, code matches | 34 | verified against the artifacts each names |
-| RULED, gated on a later phase or an owner action outside this branch | 12 | |
-| Registered, evidence-supported default, not yet ruled | 14 | none blocks Phase 11 |
-| **D15 — ruled CLOSED-UNVERIFIED by this phase** | 1 | §10 below |
+| Measured | Count |
+|---|---|
+| Master §13 rows (`D1`–`D61`, typed ACTION / DECISION / ACKNOWLEDGEMENT) | **61** |
+| Rows carrying an explicit **RULED** marker | **30** |
+| Rows carrying an explicit **AS BUILT** marker (all 30 ⊇ these 10) | **10** |
+| Rows carrying neither marker | **31** |
+
+**What "neither marker" does and does not mean.** It is a count of the literal markers, not of
+unresolved decisions. Several rows in that set carry their resolution in prose without the marker —
+`D50` ("ANSWERED BY THE PHASE 7 BUILD"), `D51` ("RESOLVED WITHOUT READING THE SECRET"), `D52` and `D53`
+(both "Registered" with an evidence-supported default). A decision-by-decision adjudication of those 31
+was **not** performed by this phase and is not claimed. What was verified is that **none of the 31
+blocks Phase 11**, and that the rows Phase 11 owns are dispositioned below.
+
+| Phase-11-owned | Disposition |
+|---|---|
+| **D15** | **RULED CLOSED-UNVERIFIED** by this phase — §10 |
 
 **Findings inside the register**
 
@@ -410,12 +433,12 @@ What *is* solid: the migration chain applies cleanly from empty, the money path 
 
 | File | At Phase 11 opening | At Phase 11 close |
 |---|---|---|
-| `IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` (MATCH) | `3d069db69d7e134914237add6a8027a00a0cdf04ff2dcb1d50343bb59abb804c` |
+| `IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` (MATCH) | `993ca3702ae7435aa65119f59466e965343e41001661af1f3a387b0471b43a8b` |
 | `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` (MATCH) | **unchanged** |
 | `AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` (MATCH) | **unchanged** |
 
 All three matched the instructed values at the opening. The workflow's hash moves because §8.1k, the
-Phase 3 retrospective record and the §8.3 / §8.1-row-11 corrections are written into it. **The two
+the Phase 3 pointer (F6) and the §8.3 / §8.1 row-3 and row-11 corrections are written into it. **The two
 governing documents are not edited by this phase** — acceptance measures the implementation against the
 specification; it does not amend the specification.
 

@@ -837,7 +837,7 @@ block. This rule is about reviews already running.
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Schema foundation & enforcement objects** (additive migration wave) | §4, §32, §28.1–28.2, §6.2, §12b, §4.6, §22a candidate model, comms_outbox shape | none (no UI) | 1 (schema half of), 10 (schema half), 18 (schema half), 23 (table), 26 (table), 28 (schema half) | — |
 | 2 | **Operational writers + Lane 1 intake, identity, Stages 1–3** (also §3 orphan rule, §30 responsible-party registry, and the §2 / §35 build rules — §11.5) | §5, §6.1–6.5, §7–§9, Stage 1, Stage 2, Stage 3, §26 rows for those stages, §27 dispatcher rules, §27.1 rows for those stages | LANES; S[0..2]; “Buyer sees” copy for Stages 1–3 | 2, 23 (writer), 24 (dispatcher) | 1 |
-| 3 | **Payment gate, money model, plans, settlement → sourcing case** | Stage 5 (5a–5d), §22, §22.1, §23 (all), Stage 6 entry, §26 payment/plan rows, §27.1 payment/plan rows | S[4]; MONEY/MONEY_PANELS; PLAN_* | 1 (deposit attach), 3, 4, 5, 6, 11, 15 | 2 |
+| 3 | **Payment gate, money model, plans, settlement → sourcing case** — **AS BUILT 2026-09-10; record at `docs/transaction-flow/phase-3-proof/AS-BUILT.md`, not in this file (§8.1k, F6)** | Stage 5 (5a–5d), §22, §22.1, §23 (all), Stage 6 entry, §26 payment/plan rows, §27.1 payment/plan rows | S[4]; MONEY/MONEY_PANELS; PLAN_* | 1 (deposit attach), 3, 4, 5, 6, 11, 15 | 2 |
 | 4 | **Inventory, qualified results, shortlist candidates, co-buyer, trade packet** | Stage 4 (4a–4c), §22a (all), §6.1 inventory/detail/shortlist/find-one-like-this/trade surfaces, Appendix (re-verified), §26 inventory rows | S[3]; INV; QUAL; BUDGET; FINDINGS | 28, 30, 31, (18 co-buyer record) | 1 (2 for intake handler; 3 not required) |
 | 5 | **Dealer sourcing ladder, validation, invitations, launch readiness; identity firewall** (built here; the *lift* at reaffirmation is Phase 7 — §11.6) | Stage 6 (6a–6c), Stage 7, §25, §26 sourcing/invitation rows, §27.1 sourcing/auction rows | S[5..6]; MONEY_PANELS “Identity and circumvention” | 7, 8, 9, 29 | 3, 4 |
 | 6 | **Offers, validation, ranking, close, selection, Deal lineage, Premium invitation** — **AS BUILT 2026-09-14, §8.1f** | Stage 8 (8a–8c), Stage 9 (9a), §22a ranking rows, §23.2a touchpoints 2–4, §26 offer/selection rows, §27.1 offer/selection rows | S[7..8]; PLAN_SEQ rows 2–4 | 10, 12 (Deal creation half), 15 (touchpoints) | 5 |
@@ -3613,7 +3613,7 @@ after driving the suites. A code counts only because a production raise site wro
 | F3 | G35-01's root-level CI step does not exist | MEDIUM |
 | F4 | Cross-portal parity is 2 of 3 — `audience: "OPS"` has no production caller | HIGH |
 | F5 | `scope-guard.test.ts` is stale at `CURRENT_PHASE = 8` and has no non-vacuity floor | MEDIUM |
-| F6 | Phase 3 had no AS BUILT record — written below | LOW |
+| F6 | Phase 3's AS BUILT record is the only one NOT in this document — it is at `docs/transaction-flow/phase-3-proof/AS-BUILT.md`, and §8.1 row 3 was unmarked | LOW |
 | F7 | `INVENTORY_SELECTION` has no production writer; §34's "Selected inventory" entry form is not recorded | MEDIUM |
 | F8 | `trade_in_submissions.verified_payoff_cents` has no writer, and it is the sole gate on `TRADE_PAYOFF` | HIGH |
 | F9 | The auction path never advances the Vehicle Request to `DEAL_CREATED` | MEDIUM |
@@ -3651,30 +3651,24 @@ stale.
 - **§8.1b / §8.1c / §8.1d do not exist.** Phase 2's AS BUILT record is at L4132 and Phase 4's at L4957,
   both inside §8.2. Phase 3 had none at all; it is written below.
 
-#### Phase 3 — AS BUILT (2026-09-10, recorded retrospectively 2026-09-18)
+#### Phase 3 — where its AS BUILT record actually is (corrected 2026-09-18)
 
-Recorded here because Phase 3 is the only phase in the programme with no AS BUILT record, and Phase 11
-is the last opportunity to write one (F6). This is a retrospective reconstruction from the artifacts on
-disk, not a contemporaneous record, and is labelled as such.
+**This section originally announced a retrospective reconstruction of Phase 3's AS BUILT record. That
+was wrong, and the correction is recorded rather than silently applied.** Phase 3 has a full record and
+always did — it is simply the only one not in this document:
 
-Phase 3's scope section is at L4848 ("Payment gate, money model, plans, settlement opens the sourcing
-case"). Verified present in the tree:
+- `docs/transaction-flow/phase-3-proof/AS-BUILT.md` — 204 lines, implementing §8.2 "#### Phase 3 —
+  Payment gate, money model, plans, settlement opens the sourcing case", on branch
+  `claude/txflow-03-payment` from base `8fb9fd84`. It opens with the §13-D52 sequencing guard: Phase 3
+  must not reach production before Phase 5, because it removes the only path that invites dealers and
+  the replacement does not exist until Phase 5, so `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` keeps the
+  legacy behaviour default-on and every settlement taking it writes a `LEGACY_PATH_WRITE` row.
+- `docs/transaction-flow/phase-3-proof/CAPABILITY-MAP.md` — 70 lines, the before → after accounting
+  CLAUDE.md requires.
 
-- `frontend/lib/services/sourcing/` and `frontend/lib/services/plan/` — both declared to the scope guard
-  for Phase 3 at `lib/__tests__/scope-guard.test.ts:59-82`, and both exist.
-- `docs/transaction-flow/phase-3-proof/` — the proof package, on disk.
-- `applySettlementEffects` (`lib/services/payment/settlement-effects.service.ts:115`) — the settlement
-  side effect that opens the sourcing case. Exercised end-to-end by all four §34 scenarios in this phase,
-  including the replay case.
-- `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` — the cutover flag, read at
-  `deposit-settlement.service.ts:308`, `settlement-effects.service.ts:24`,
-  `deposit-activation.service.ts:229,244`, `rooftop-sourcing.service.ts:21`.
-- A hash re-verification paragraph for Phase 3 exists at L4426, inside the Phase 2 AS BUILT section —
-  which is why the omission was not visible: Phase 3 left a trace in someone else's record.
-
-**Capability map:** no capability was removed in Phase 3. The legacy settlement → immediate-auction
-branch was NEUTRALISED behind the `LEGACY_PATH_WRITE` adapter, not deleted, and its removal remains
-owner-gated (§8.4, C7/I-02).
+It is the only `phase-*-proof/AS-BUILT.md` in the tree; every other phase's record is a section of this
+file. **§8.1 row 3 is marked accordingly by this phase.** No second account of Phase 3 is written here:
+two divergent records of one phase would be worse than the pointer that was missing.
 
 #### What the next phase — or the next reader — needs to know
 
