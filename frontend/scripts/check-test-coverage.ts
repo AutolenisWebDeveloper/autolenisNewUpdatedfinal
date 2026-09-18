@@ -130,6 +130,13 @@ if (orphans.length > 0) {
 const CHAIN_EXEMPT: Record<string, string> = {
   "test:coverage-check": "this guard itself; it is not a suite",
   "test:integration": "needs a real database",
+  "test:scenarios":
+    "the §34 acceptance suite (Phase 11). It needs a real migrated database, and — unlike every " +
+    "other suite here — it REPORTS rather than gates: its cross-portal parity case is red on " +
+    "purpose because the Operations queue does not read `exceptionLineage` (ACCEPTANCE-REPORT.md, " +
+    "finding F4). Chaining it into test:all would turn that finding into a permanently red gate " +
+    "for unrelated work, which is the owner's call to make, not this phase's. Run it directly: " +
+    "pnpm test:scenarios",
   "test:e2e": "needs a running app; CI runs it in the E2E job",
   "test:e2e-autopilot": "needs a running app; CI runs it in the E2E job",
   "test:visual": "needs a browser; CI runs it in its own job",
