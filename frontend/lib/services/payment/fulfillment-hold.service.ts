@@ -206,7 +206,97 @@ export async function applyFulfillmentHold(
     logger.error(`[fulfillment-hold] exception raise failed for deposit ${input.depositId}:`, err);
   }
 
+  // 4. §26 "The $99 is charged back after a Premium upgrade | Finance | entitlement holds
+  //    under review; never a silent downgrade" — PHASE 10, the raise site this register
+  //    row never had.
+  //
+  // WHY IT IS ITS OWN ROW AND NOT A SENTENCE IN THE ONE ABOVE. The row above is about the
+  // TRANSACTION: fulfilment is on hold, sourcing must not resume. This one is about an
+  // ENTITLEMENT, and the two resolve independently — Finance can win the dispute and the
+  // entitlement question never arises, or lose it and have to decide what a buyer who
+  // upgraded on a credit that has been reversed is entitled to. §26 gives it FINANCE and
+  // forty-eight hours for that decision.
+  //
+  // WHY THE $99 AND THE $400 ARE ENTANGLED AT ALL. `settledDepositCentsForRequest` is the
+  // credit basis for the Premium upgrade: the $99 counts toward the $499, so the buyer paid
+  // $400 to upgrade. A chargeback on the $99 reverses part of what was paid for an
+  // entitlement the platform has already granted and staffed with a named concierge.
+  // §23.4's rule is that the entitlement is REVIEWED, never silently withdrawn — a buyer
+  // waking up demoted, with their concierge gone and no message, is the outcome this row
+  // exists to prevent.
+  //
+  // DISPUTES ONLY. An admin-issued refund on the $99 is a deliberate act by someone who
+  // can see the plan; a chargeback is the buyer's bank reversing it with nobody here in the
+  // loop, and §23.4 names that case.
+  //
+  // `buyerVisibleStatus` for this code is deliberately null (§26) — the buyer is not told
+  // their entitlement is under review while Finance decides, because the answer is usually
+  // "nothing changes".
+  if (input.trigger === "dispute") {
+    try {
+      const premium = await isPremiumEntitled(input, db);
+      if (premium.premium) {
+        await raiseException(
+          {
+            code: "DEPOSIT_CHARGEBACK_AFTER_UPGRADE",
+            buyerId: input.buyerId,
+            depositId: input.depositId,
+            vehicleRequestId: input.vehicleRequestId ?? null,
+            // Keyed on the dispute, like the row above: a Stripe redelivery collapses
+            // onto one row rather than opening a second Finance review of the same money.
+            idempotencyKey: `DEPOSIT_CHARGEBACK_AFTER_UPGRADE:${input.providerRef}`,
+            detail:
+              `Deposit ${input.depositId} is disputed (${input.providerRef}) and this buyer holds a ` +
+              `PREMIUM entitlement (${premium.reason}). The $99 is part of the credit basis for the ` +
+              `upgrade. Review the entitlement — it is NOT withdrawn automatically, and the buyer has ` +
+              `not been told anything about it.`,
+          },
+          db,
+        );
+      }
+    } catch (err) {
+      // Same posture as the raise above: never fail an acknowledged webhook over an
+      // alerting write. The hold itself has already been recorded.
+      logger.error(`[fulfillment-hold] premium-entitlement check failed for deposit ${input.depositId}:`, err);
+    }
+  }
+
   return { disputed, touchesCancelled, outboxCancelled };
+}
+
+/**
+ * Does this buyer hold a live Premium entitlement at the moment their $99 is disputed?
+ *
+ * Prefers the REQUEST-level answer, because entitlement is per-request: `entitledPlanForRequest`
+ * derives it from settled money (§23.1, PAY-57) rather than from the elected flag, so a buyer
+ * who elected Premium and never paid the balance is correctly Standard and no review is opened.
+ *
+ * Falls back to `buyers.plan` only when the deposit carries no request — the one case where the
+ * request-level derivation has nothing to read. That column is the coarser answer and is used as
+ * a backstop rather than a source of truth, which is why the reason string says which one
+ * answered.
+ */
+async function isPremiumEntitled(
+  input: ApplyHoldInput,
+  db: Db,
+): Promise<{ premium: boolean; reason: string }> {
+  if (input.vehicleRequestId) {
+    const { entitledPlanForRequest } = await import("@/lib/services/buyer/plan-snapshot.service");
+    const entitled = await entitledPlanForRequest(input.vehicleRequestId, db);
+    return {
+      premium: entitled.plan === "PREMIUM",
+      reason: `request ${input.vehicleRequestId}: ${entitled.reason}`,
+    };
+  }
+
+  const buyer = await db.buyer.findUnique({
+    where: { id: input.buyerId },
+    select: { plan: true, planUpgradedAt: true },
+  });
+  return {
+    premium: buyer?.plan === "PREMIUM",
+    reason: `buyers.plan = ${buyer?.plan ?? "unknown"}${buyer?.planUpgradedAt ? `, upgraded ${buyer.planUpgradedAt.toISOString()}` : ""} (no vehicle request on the deposit)`,
+  };
 }
 
 /**

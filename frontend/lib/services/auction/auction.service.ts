@@ -9,6 +9,7 @@ import { releaseAuctionLoad } from "@/lib/services/auction/dealer-invitation.ser
 import { rankOffers, getPersistedRanking } from "@/lib/services/offer/best-price.service";
 import { sendDealerAuctionClosedNoWinnerEmail } from "@/lib/services/email/resend.service";
 import { qualifiedOfferWhere, lapsedOfferWhere } from "@/lib/services/offer/offer-validity";
+import { LIVE_AUCTION_STATUSES } from "@/lib/services/auction/deposit-auction";
 import {
   enqueueTransactional,
   raiseNoDeliverableChannel,
@@ -138,21 +139,67 @@ export async function launchAuction(auctionId: string) {
   return auction;
 }
 
-export async function closeAuction(auctionId: string) {
-  return prisma.auction.update({
-    where: { id: auctionId },
+/**
+ * §28.3 #3 — CONDITIONAL, where it used to be unconditional.
+ *
+ * This wrote `CLOSED` against the id alone. A CANCELLED auction — §24's cancellation
+ * orchestration writes exactly that — would be silently re-opened into CLOSED by a
+ * close sweep that ran afterwards, rewriting a deliberate operational decision as an
+ * ordinary end-of-auction. Anti-snipe already had this right
+ * (`anti-snipe.service.ts:57-63`); close did not.
+ *
+ * Returns whether THIS call closed it, so a caller cannot report a close a concurrent
+ * writer performed — the same contract `postCloseClaimWon` relies on downstream.
+ *
+ * THE PREDICATE IS `LIVE_AUCTION_STATUSES`, NOT A LITERAL LIST — corrected 2026-09-18 by the
+ * first review of the decline-route change, before that route became this function's first
+ * caller. The literal here was `[PENDING, ACTIVE]`, which **omits REOPENED**, and that is the
+ * defect `app/api/admin/auctions/route.ts:44-50` already names in its own words: *"The literal
+ * list omitted REOPENED — an auction that is unambiguously still running — so a buyer whose
+ * auction had been reopened passed this guard. One list, owned by `deposit-auction.ts`, is what
+ * keeps the four readers of 'is this auction still live?' from disagreeing."* This was the fifth
+ * such reader, written with the same literal and the same omission.
+ *
+ * It is not academic: `AUCTION_REOPENED` is a live admin action
+ * (`app/api/admin/auctions/[auctionId]/action/route.ts:301`). Had this shipped with the literal,
+ * a buyer declining every offer on a reopened auction would have met a 409 where the old
+ * unconditional write closed it — a capability removed silently by a guard, which is exactly what
+ * the capability-preservation invariant forbids.
+ *
+ * The refusal that matters is unchanged: `TERMINAL_AUCTION_STATUSES` (CLOSED, EXPIRED, CANCELLED)
+ * are not in the list, so a §24 cancellation still cannot be rewritten as an ordinary close.
+ */
+export async function closeAuction(auctionId: string): Promise<boolean> {
+  const res = await prisma.auction.updateMany({
+    where: { id: auctionId, status: { in: LIVE_AUCTION_STATUSES } },
     data: { status: AuctionStatus.CLOSED, closedAt: new Date() },
   });
+  return res.count === 1;
 }
 
+/**
+ * §28.3 #3 — the admin extension, made conditional on the deadline it was computed from.
+ *
+ * This read the auction, computed `endsAt + hours`, then updated by id. Two admins
+ * extending at once both read the same `endsAt` and the second write LOST the first
+ * extension rather than compounding it — the auction ended hours earlier than the
+ * audit log said it should. `maybeExtendForAntiSnipe` guards on the exact observed
+ * `endsAt` for precisely this reason; the manual path did not.
+ *
+ * Returns null when the guard did not match, so the caller can re-read and retry
+ * rather than report an extension that did not happen.
+ */
 export async function extendAuction(auctionId: string, hours: number, extendedBy: string, reason: string) {
   const auction = await prisma.auction.findUnique({ where: { id: auctionId } });
   if (!auction || !auction.endsAt) throw new Error("Auction not found or not active");
-  const newEnd = new Date(auction.endsAt.getTime() + hours * 3600000);
-  return prisma.auction.update({
-    where: { id: auctionId },
+  const observedEndsAt = auction.endsAt;
+  const newEnd = new Date(observedEndsAt.getTime() + hours * 3600000);
+  const res = await prisma.auction.updateMany({
+    where: { id: auctionId, status: AuctionStatus.ACTIVE, endsAt: observedEndsAt },
     data: { endsAt: newEnd, extendedAt: new Date(), extendedBy, extendReason: reason },
   });
+  if (res.count !== 1) return null;
+  return prisma.auction.findUnique({ where: { id: auctionId } });
 }
 
 // F-001 — a post-close claim is "won" only when exactly one auction row flipped

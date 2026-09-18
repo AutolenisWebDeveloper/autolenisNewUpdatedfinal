@@ -1,0 +1,225 @@
+Phase 10 proof run — 2026-09-18, AFTER the production deploy.
+================================================================================
+
+WHAT THIS IS, AND WHAT IT IS NOT
+
+  The owner applied 20261215000000_phase10_cancellation_vocabulary and
+  20261215000100_phase10_obligation_unique to production at 02:36 UTC on 2026-09-18
+  WITHOUT a preflight, because there was no docs/transaction-flow/phase-10-proof/ on
+  the branch to run one from. Phase 1, phases 3-9 and migration-110 all ship a proof
+  package. Phase 10 did not. The STOP 2 report described the sequence — "preflight.sql
+  in full before, prisma migrate status to show what will apply, and both verification
+  halves after" — and the files behind that sentence were never written.
+
+  THIS LOG THEREFORE RECORDS AN EXERCISE, NOT A DEPLOY. Nothing here ran against
+  production. Everything below ran against a throwaway loopback PostgreSQL 16.13
+  cluster at 127.0.0.1:5432, database `txflowpre`, built for this purpose.
+
+  DEGRADED, and stated rather than skipped: the server available here is PostgreSQL
+  16.13, not CI's 17.6 (no Docker daemon in this environment). CI's `migrations` job
+  remains the authority for chain replay, and it passed on this branch.
+
+--------------------------------------------------------------------------------
+BUILDING THE PRE-DEPLOY STATE
+--------------------------------------------------------------------------------
+
+  The two Phase 10 migration directories were moved aside, `prisma migrate deploy`
+  was run against an empty `txflowpre`, and they were moved back. `git status` on
+  frontend/prisma/migrations was clean afterwards — the directories are byte-identical
+  to HEAD and nothing in the chain was edited.
+
+  THE RESULT MATCHES THE OWNER'S PRODUCTION CENSUS, taken immediately before the run:
+
+    ledger                      119 distinct applied      (production: 121 rows /
+                                                           119 distinct / 2 rolled
+                                                           back / 0 stuck — the two
+                                                           extra ROWS are retry
+                                                           history from an earlier
+                                                           phase, which is why every
+                                                           assertion counts finished,
+                                                           non-rolled-back rows)
+    AuctionInvitationStatus     10 labels: QUEUED, SENT, DELIVERED, OPENED, BOUNCED,
+                                DECLINED, RESPONDED, OFFER_SUBMITTED, EXPIRED,
+                                REPLACED                  — no CANCELLED
+    PickupStatus                10 labels: NOT_SCHEDULED, PROPOSED, DEALER_COUNTERED,
+                                SCHEDULED, CHECKED_IN, COMPLETED, RESCHEDULED,
+                                EXCEPTION, NO_SHOW, RELEASED
+                                                          — no CANCELLED
+    post_completion_obligations post_completion_obligations_pkey,
+                                post_completion_obligations_deal_id_idx
+                                                          — the partial unique absent
+
+  AND ONE READING THE OWNER ASKED TO BE RECORDED:
+
+    AuctionStatus               PENDING, ACTIVE, CLOSED, EXPIRED, CANCELLED, REOPENED
+
+    REOPENED IS A REAL LIVE LABEL. The first independent review of the decline-route
+    change caught `closeAuction` guarding on a hand-written [PENDING, ACTIVE] that
+    omitted it; this is that catch confirmed against a database built from the
+    committed chain, and the owner confirmed the same six labels in production. The
+    review was right against the schema, not only against the code.
+
+--------------------------------------------------------------------------------
+FIRST RUN — preflight.sql against the PRE-deploy state
+--------------------------------------------------------------------------------
+
+  psql -X -P pager=off -v ON_ERROR_STOP=1 --single-transaction \
+       -c "SET TRANSACTION READ ONLY" -f preflight.sql
+
+  ALL 20 ROWS CHECKED. No BLOCK. The chain assertion read
+
+    chain is at the verified pre-state (119 distinct applied names)
+      | 119 distinct / 119 rows / 0 rolled back | CHECKED
+
+  which is production's pre-deploy distinct-applied count exactly. Had this file
+  existed at 02:36, it would have passed cleanly and the run would have proceeded —
+  that is the point of writing it against the pre-state rather than the state
+  production is in now.
+
+--------------------------------------------------------------------------------
+SECOND RUN — verify.sql against the PRE-deploy state (the NEGATIVE direction)
+--------------------------------------------------------------------------------
+
+  A verify file that cannot fail is the defect phase-8's shipped with: every row it
+  printed was true and it would have reported a clean deploy with half the migrations
+  missing. So verify.sql was run BEFORE the migrations, where every object it asserts
+  is absent.
+
+  10 of 19 assertions reported MISSING, and they are exactly the created objects:
+
+    MISSING   AuctionInvitationStatus carries CANCELLED
+    MISSING   PickupStatus carries CANCELLED
+    MISSING   index post_completion_obligations_open_deal_type_key
+    MISSING   ...is VALID and UNIQUE
+    MISSING   ...predicate is the partial carve-out §13-D60 ruled
+    MISSING   ...is keyed on (deal_id, type)
+    MISSING   ledger 20261215000000_phase10_cancellation_vocabulary
+    MISSING   ledger 20261215000100_phase10_obligation_unique
+    MISSING   ledger has exactly one applied row per phase 10 migration
+    MISSING   chain is at the phase 10 post-state (121 distinct applied names)
+
+  PRESENT    the three pre-existing columns, the pre-existing deal_id index, the
+             three contrast labels (EXPIRED / NOT_SCHEDULED / RESCHEDULED), the
+             duplicate check, and "no stuck migrations"
+
+  Every assertion that SHOULD fail failed, and every assertion about something that
+  pre-dates the phase held. The file discriminates.
+
+--------------------------------------------------------------------------------
+THIRD RUN — the duplicate, and the migration failing on it for real
+--------------------------------------------------------------------------------
+
+  Phase 9's equivalent assertion shipped reading "0 of 0" — it passed while checking
+  nothing, which is §8.1h's class arriving inside the file written to catch it. So
+  this one was exercised against real rows.
+
+  Seeded on the loopback cluster (users -> buyers -> vehicle_requests ->
+  vehicle_request_offers -> deals -> obligations; `deals` carries a CHECK that
+  requires an offer lineage, which is why the fixture goes through a vehicle-request
+  offer):
+
+    o_p10proof_1  d_p10proof  TEMP_TAG  PENDING
+    o_p10proof_2  d_p10proof  TEMP_TAG  PENDING     <- two OPEN rows, one (deal, type)
+
+  preflight.sql then reported:
+
+    duplicate OPEN (deal_id, type) pairs (what CREATE UNIQUE INDEX fails on)
+      | 1 | BLOCK
+    post_completion_obligations rows | 2 total, 2 open | CHECKED
+
+  AND THE MIGRATION GENUINELY FAILED ON IT, which is what makes the assertion worth
+  having rather than a hypothesis:
+
+    Applying migration `20261215000000_phase10_cancellation_vocabulary`
+    Applying migration `20261215000100_phase10_obligation_unique`
+    Error: P3018 ... Database error code: 23505
+    ERROR: could not create unique index
+           "post_completion_obligations_open_deal_type_key"
+    DETAIL: Key (deal_id, type)=(d_p10proof, TEMP_TAG) is duplicated.
+
+  Note what that left behind: the FIRST migration applied and the second did not, so
+  the chain was genuinely stuck mid-phase. Running preflight.sql against that state
+  produced SIX distinct BLOCK conditions, every one of them a real fault rather than a
+  contrived one:
+
+    BLOCK   AuctionInvitationStatus does not already carry CANCELLED
+              | ALREADY PRESENT — added out of band?
+    BLOCK   PickupStatus does not already carry CANCELLED
+              | ALREADY PRESENT — added out of band?
+    BLOCK   duplicate OPEN (deal_id, type) pairs | 1
+    BLOCK   ledger: 20261215000000_... not yet applied | ALREADY APPLIED
+    BLOCK   stuck migrations | 20261215000100_phase10_obligation_unique
+    BLOCK   chain is at the verified pre-state (119 distinct applied names)
+              | 121 distinct / 121 rows / 0 rolled back
+
+  NOT EXERCISED, and named rather than implied: the four assertions that fire when an
+  object is ABSENT — the two enum TYPES, the obligations table, its three columns, and
+  the RESOLVED label on PostCompletionObligationStatus — were not exercised, because
+  removing them means dismantling a schema the rest of the chain depends on. They are
+  structural existence checks of the same shape as the ones that DID fire, and they
+  are the four this log cannot claim to have watched fail.
+
+--------------------------------------------------------------------------------
+FOURTH RUN — recovery, and verify.sql against the POST-deploy state
+--------------------------------------------------------------------------------
+
+  Recovery followed the path an operator would take:
+
+    UPDATE post_completion_obligations SET status='RESOLVED' WHERE id='o_p10proof_2';
+    prisma migrate resolve --rolled-back 20261215000100_phase10_obligation_unique
+    prisma migrate deploy                     -> All migrations have been successfully
+                                                 applied.
+
+  ALL 19 ASSERTIONS PRESENT. No MISSING.
+
+  AND THE LEDGER SHAPE IS PRODUCTION'S. The rolled-back marker from the recovery left
+  the loopback at
+
+    122 rows / 121 distinct / 1 rolled back
+
+  against production's
+
+    123 rows / 121 distinct / 2 rolled back
+
+  — different row counts, same distinct-applied count, and BOTH read PRESENT. That is
+  the "retry history is not a fault" rule doing its job: the ledger assertions count
+  finished, non-rolled-back rows, so a rolled-back row sitting beside a success does
+  not read as a missing migration. The exercise produced that shape by accident and it
+  is the most useful thing in this log.
+
+--------------------------------------------------------------------------------
+FIFTH RUN — the index's SEMANTICS, not just its existence
+--------------------------------------------------------------------------------
+
+  §13-D60 ruled a PARTIAL unique "so a RESOLVED obligation does not bar a legitimately
+  recurring one". verify.sql asserts the predicate is present; that is not the same as
+  asserting it behaves. Three inserts against the post-state:
+
+    (a) a SECOND open obligation on the same (deal, type)
+          -> REFUSED
+             ERROR: duplicate key value violates unique constraint
+                    "post_completion_obligations_open_deal_type_key"
+             DETAIL: Key (deal_id, type)=(d_p10proof, TEMP_TAG) already exists.
+
+    (b) resolve the live one, then insert a recurring obligation on the SAME pair
+          -> ALLOWED (INSERT 0 1)
+
+    (c) a SECOND RESOLVED row on the same (deal, type)
+          -> ALLOWED (INSERT 0 1)
+
+  Idempotency is enforced where the ruling said, and the carve-out is real: a full
+  unique would have refused (b) and (c) and made a second temp tag on one deal
+  impossible for ever.
+
+--------------------------------------------------------------------------------
+WHAT THIS PACKAGE DOES NOT CLAIM
+--------------------------------------------------------------------------------
+
+  - It did not gate the production run. Nothing here did. The production apply at
+    02:36 UTC was verified by the owner independently, and those readings are what
+    verify.sql asserts.
+  - It ran on PostgreSQL 16.13, not production's server version.
+  - The four absence assertions named under THIRD RUN were never watched to fail.
+  - `rollback.sql` in each migration directory is a DOCUMENTED REVERSE, not a tested
+    one: the enum half cannot be reversed at all (PostgreSQL cannot drop an enum
+    label) and says so in the file rather than pretending otherwise.

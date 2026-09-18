@@ -34,6 +34,9 @@ interface Ctrl {
   refundCalls: number;
   cancelDealCalls: Array<{ dealId: string; reason: string }>;
   cancelDealResult: boolean;
+  /** PHASE 10 §24: the route now routes through the orchestration, which subsumes cancelDeal. */
+  cancelTransactionCalls: Array<{ dealId?: string; reason: string; actorRole: string }>;
+  cancelTransactionOutcome: "CANCELLED" | "FROZEN_PENDING_RELEASE" | "NOT_MOVED";
   advances: Array<{ dealId: string; status: string }>;
   notifications: Array<Record<string, unknown>>;
   audits: Array<Record<string, unknown>>;
@@ -84,6 +87,21 @@ mock.module("@/lib/services/deal/deal.service", {
     },
     DealTransitionError: class extends Error {},
     InsuranceRequiredError: class extends Error {},
+    ContractExecutedError: class extends Error {},
+  },
+});
+
+mock.module("@/lib/services/transaction/cancellation.service", {
+  namedExports: {
+    cancelTransaction: async (input: { dealId?: string; reason: string; actorRole: string }) => {
+      ctrl.cancelTransactionCalls.push(input);
+      return {
+        outcome: ctrl.cancelTransactionOutcome,
+        stageAtCancellation: "Deal CONTRACT_PENDING",
+        stops: [],
+        dealId: input.dealId,
+      };
+    },
   },
 });
 
@@ -116,6 +134,8 @@ beforeEach(() => {
     refundCalls: 0,
     cancelDealCalls: [],
     cancelDealResult: true,
+    cancelTransactionCalls: [],
+    cancelTransactionOutcome: "CANCELLED",
     advances: [],
     notifications: [],
     audits: [],
@@ -137,21 +157,50 @@ test("DEFECT 3: DEAL_CANCELLED does NOT refund the deposit", async () => {
   );
 });
 
-test("DEAL_CANCELLED routes through the cancelDeal seam, not a direct status advance", async () => {
+test("DEAL_CANCELLED routes through the §24 ORCHESTRATION, not a direct status advance", async () => {
+  // PHASE 10 — the pin moved one level out, and the contract got stronger rather than
+  // weaker. This asserted `cancelDeal`; the route now calls `cancelTransaction`, which
+  // performs the SAME guarded transition (same expectedFrom pin, same single terminal
+  // path, still never refunds) and additionally runs §24's stops and picks CANCELLED or
+  // FROZEN_PENDING_RELEASE from the execution fact.
+  //
+  // Leaving the route on `cancelDeal` was a real defect the first independent review
+  // found: `cancelDeal` now REFUSES a post-execution cancellation, so this route — the
+  // only admin cancel path — would have 500'd while the freeze stayed unreachable.
   const POST = await loadPOST();
   await POST(req("DEAL_CANCELLED"), { params });
 
-  assert.deepEqual(ctrl.cancelDealCalls, [{ dealId: "deal_1", reason: "buyer asked to stop" }]);
+  assert.equal(ctrl.cancelTransactionCalls.length, 1, "exactly one orchestrated cancellation");
+  assert.equal(ctrl.cancelTransactionCalls[0]!.dealId, "deal_1");
+  assert.equal(ctrl.cancelTransactionCalls[0]!.reason, "buyer asked to stop");
+  assert.equal(ctrl.cancelTransactionCalls[0]!.actorRole, "ADMIN");
+  assert.deepEqual(ctrl.cancelDealCalls, [], "the route must not reach past the orchestration");
   assert.equal(
     ctrl.advances.filter((a) => a.status === "CANCELLED").length,
     0,
-    "cancelDeal is the ONE terminal cancellation path; calling advanceDealStatus directly " +
-      "skips its expectedFrom pin, which is what stops a cancel clobbering a concurrent completion",
+    "and never calls advanceDealStatus directly — that skips the expectedFrom pin that stops " +
+      "a cancel clobbering a concurrent completion",
   );
 });
 
+test("§24: an executed deal FREEZES, and the response does not call that a cancellation", async () => {
+  // The other half of the boundary at the route level. Reporting `cancelled: true` for a
+  // deal that is frozen pending release would tell an operator the transaction is over
+  // when a dealership still holds an executed contract.
+  ctrl.cancelTransactionOutcome = "FROZEN_PENDING_RELEASE";
+  const POST = await loadPOST();
+  const res = (await POST(req("DEAL_CANCELLED"), { params })) as unknown as {
+    __kind: string;
+    data?: { frozen?: boolean; status?: string };
+  };
+
+  assert.equal(res.__kind, "success");
+  assert.equal(res.data?.frozen, true);
+  assert.equal(res.data?.status, "FROZEN_PENDING_RELEASE");
+});
+
 test("a cancellation that lost the race is reported, not reported as success", async () => {
-  ctrl.cancelDealResult = false;
+  ctrl.cancelTransactionOutcome = "NOT_MOVED";
   const POST = await loadPOST();
   const res = (await POST(req("DEAL_CANCELLED"), { params })) as unknown as { __kind: string; code: string };
 

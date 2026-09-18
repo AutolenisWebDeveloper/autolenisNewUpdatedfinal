@@ -3,6 +3,8 @@ import Link from "next/link";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgradeCard";
+import TransactionExceptionPanel from "@/components/buyer/TransactionExceptionPanel";
+import { exceptionLineage, hasOpenException, type ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
@@ -39,6 +41,51 @@ const TOTAL_STEPS = 14;
 
 export default async function BuyerDashboard() {
   const buyer = await requireBuyer();
+
+  // §8.2 Phase 10 defect (8) — THE BUYER-FACING EXCEPTION SURFACE.
+  //
+  // One lineage, shared with the dealer portal and the Ops queue, so the three
+  // surfaces cannot describe the same checkpoint differently.
+  //
+  // The failure is CAPTURED, not swallowed. `exceptionLineage` throws on a read
+  // failure by design — an empty list reads as "nothing is wrong", which is the most
+  // expensive possible lie to tell a buyer whose deal is stuck — so the catch records
+  // that the read failed and the panel renders that honestly instead of rendering
+  // nothing.
+  let openExceptions: ExceptionLineage[] = [];
+  let exceptionsUnavailable = false;
+  try {
+    openExceptions = await exceptionLineage({ audience: "BUYER", buyerId: buyer.id });
+  } catch {
+    exceptionsUnavailable = true;
+  }
+
+  // §26: "Upgrade prompt fires during an open exception | Operations | Suppress;
+  // never upsell a buyer whose deal is stalled."
+  //
+  // THE SAME PREDICATE THE SERVER ENFORCES, not a second answer derived from the read
+  // above. `exceptionLineage({ audience: "BUYER" })` is a RENDERING projection: it drops
+  // every row whose `buyerVisibleStatus` is null, because §26 has rows a buyer is
+  // deliberately never shown. Deciding suppression from it meant a buyer held by an
+  // ops-only exception saw the card, clicked it, and met a 409 from
+  // `POST /api/buyer/plan/upgrade`, which asks `hasOpenException` — a dead end created by
+  // two surfaces answering one question differently. Found by the first independent review.
+  //
+  // A second query, and deliberately so: it is a `count` with `take: 1`, and the
+  // alternative — a predicate derived from a projection built for rendering — is how the
+  // two drifted in the first place.
+  //
+  // FAILS CLOSED on either read. A buyer whose state could not be established is treated
+  // as possibly-stalled and the prompt is suppressed; failing open would turn a read error
+  // into an upsell to someone whose purchase is blocked, which is the exact outcome the
+  // rule exists to prevent.
+  let stalled = true;
+  try {
+    stalled = await hasOpenException(buyer.id);
+  } catch {
+    stalled = true;
+  }
+  const suppressUpgradePrompt = exceptionsUnavailable || stalled;
   const prequal = buyer?.preQualification ?? null;
   const firstName = buyer?.firstName ?? "there";
   // Use the shared validity helper so the dashboard's prequal gating can never
@@ -230,6 +277,13 @@ export default async function BuyerDashboard() {
 
   return (
     <PageContainer testId="buyer-dashboard">
+
+      {/* §26 — what is holding this buyer's transaction, before anything else on the
+          page. A buyer whose deal is stuck should not have to scroll past their
+          journey ladder to find out why. */}
+      <div data-testid="buyer-exception-panel" className="mb-6 empty:mb-0">
+        <TransactionExceptionPanel exceptions={openExceptions} unavailable={exceptionsUnavailable} />
+      </div>
 
       {/* Feature 16 — Proactive Nudges (only shows real state-driven nudges) */}
       {nudges.length > 0 && (
@@ -613,11 +667,33 @@ export default async function BuyerDashboard() {
 
         {/* PlanUpgradeCard — keep existing component */}
         <div data-testid="dashboard-plan-section">
-          <PlanUpgradeCard
-            plan={buyerPlan}
-            depositStatus={depositStatus}
-            planUpgradedAt={buyer.planUpgradedAt?.toISOString() ?? null}
-          />
+          {/* §26 — suppressed while an exception is open. The card is the upsell, so
+              suppressing the card IS the rule; rendering a disabled one would still
+              be an upsell to a buyer whose deal is stalled. */}
+          {suppressUpgradePrompt ? (
+            <div className={`${CARD} p-5 sm:p-6`} data-testid="plan-upgrade-suppressed">
+              <p className={EYEBROW}>Your plan</p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                {buyerPlan === "PREMIUM" ? "Premium" : "Standard"}
+              </p>
+              {/* "The item above" was only true when the blocking exception happened to be
+                  one the buyer can see. `hasOpenException` deliberately counts the rows with
+                  no buyer-visible status — a deal blocked by an infrastructure condition is
+                  still blocked — and `TransactionExceptionPanel` drops exactly those, so a
+                  buyer held by one saw an empty page top and a sentence pointing at nothing.
+                  Found by the second independent review. The wording is now true in both
+                  cases, and says nothing about a row §26 keeps ops-only. */}
+              <p className="mt-1.5 text-sm text-slate-600">
+                We are holding off on plan changes until an open item on your purchase is resolved.
+              </p>
+            </div>
+          ) : (
+            <PlanUpgradeCard
+              plan={buyerPlan}
+              depositStatus={depositStatus}
+              planUpgradedAt={buyer.planUpgradedAt?.toISOString() ?? null}
+            />
+          )}
         </div>
 
         {/* How It Works — dark premium card */}

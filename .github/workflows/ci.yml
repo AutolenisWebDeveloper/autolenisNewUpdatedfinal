@@ -553,6 +553,23 @@ jobs:
           NODE_OPTIONS: --conditions=react-server
         run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/phase9-pickup-journeys.spec.ts
 
+      # Phase 10 — the §24 cancellation orchestration and §28.3's atomicity proof.
+      #
+      # NAMED HERE BECAUSE A SPEC THAT IS NOT NAMED HERE IS A SPEC CI NEVER RUNS, as the
+      # comment above says. Both files existed and passed locally for a full phase before this
+      # step was added, which is exactly the gap that comment describes.
+      #
+      # The atomicity spec forces a real foreign-key violation inside a `$transaction` and
+      # asserts the status change rolls back — a property of the DATABASE, so it needs a real
+      # one and cannot be asserted against a mock.
+      - name: E2E — Phase 10 control-plane journeys
+        env:
+          NODE_OPTIONS: --conditions=react-server
+        run: |
+          pnpm exec playwright test --config playwright.e2e.config.ts \
+            tests/e2e/phase10-control-plane-journeys.spec.ts \
+            tests/e2e/advance-deal-status-atomicity.spec.ts
+
       - name: Upload the trace on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

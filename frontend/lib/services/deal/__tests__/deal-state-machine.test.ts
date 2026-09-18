@@ -103,15 +103,72 @@ test("completion is reachable ONLY from HANDOVER_PENDING (and the retired legacy
   }
 });
 
-test("cancellation is reachable from any non-terminal state, never from terminal", () => {
-  for (const from of [
-    "PENDING", "ACTIVE", "FINANCING_PENDING", "CONTRACT_APPROVED", "SIGNED", "PICKUP_SCHEDULED",
-  ] as DealStatus[]) {
+// §24, PHASE 10 — THE EXECUTION BOUNDARY. This test previously asserted that
+// cancellation was reachable from "any non-terminal state", and listed SIGNED and
+// PICKUP_SCHEDULED among the states it should be allowed from. That was the defect,
+// pinned: §24 says "After the dealership contract is fully executed, AutoLenis cannot
+// unilaterally void it. The Deal moves to FROZEN_PENDING_RELEASE."
+//
+// The capability MOVED rather than disappearing, and both halves are asserted below:
+// a post-execution state can no longer reach CANCELLED, and it CAN reach
+// FROZEN_PENDING_RELEASE. A test that only checked the refusal would be satisfied by
+// a build where a post-execution deal can go nowhere at all.
+test("cancellation is reachable before execution, and never from a terminal state", () => {
+  for (const from of ["PENDING", "ACTIVE", "FINANCING_PENDING", "CONTRACT_APPROVED", "SIGNED"] as DealStatus[]) {
     assert.equal(canTransition(from, "CANCELLED"), true, `${from} → CANCELLED should be allowed`);
   }
   assert.equal(canTransition("COMPLETED", "CANCELLED"), false);
   assert.equal(canTransition("CANCELLED", "CANCELLED"), false);
   assert.equal(canTransition("REFUNDED", "CANCELLED"), false);
+});
+
+test("§24: a post-execution deal cannot be cancelled, and reaches the coordination state instead", () => {
+  const postExecution = [
+    "DEALER_EXECUTED", "FUNDING_PENDING", "PICKUP_READINESS", "PICKUP_SCHEDULED",
+    "HANDOVER_PENDING", "PICKUP_COMPLETE",
+  ] as DealStatus[];
+
+  for (const from of postExecution) {
+    assert.equal(
+      canTransition(from, "CANCELLED"),
+      false,
+      `${from} → CANCELLED must be refused: the dealership contract is executed and §24 forbids a unilateral void`,
+    );
+    assert.equal(
+      canTransition(from, "FROZEN_PENDING_RELEASE"),
+      true,
+      `${from} → FROZEN_PENDING_RELEASE must be allowed: the capability moved here, it did not disappear`,
+    );
+  }
+
+  // SIGNED is deliberately NOT in that list. The buyer has signed; the dealership has
+  // not executed. §13-D29 is explicit that "the transaction is not contract-executed
+  // merely because the buyer signed", so cancellation is still the buyer's to make.
+  assert.equal(canTransition("SIGNED", "CANCELLED"), true);
+});
+
+test("§24: the coordination state resolves — it is not a dead end", () => {
+  // A documented release unwinds the transaction...
+  assert.equal(canTransition("FROZEN_PENDING_RELEASE", "CANCELLED"), true);
+  assert.equal(canTransition("FROZEN_PENDING_RELEASE", "REFUNDED"), true);
+  // ...and "other resolution" returns the deal to where it was frozen from.
+  for (const back of [
+    "DEALER_EXECUTED", "RECAP_PENDING", "FUNDING_PENDING", "PICKUP_READINESS",
+    "PICKUP_SCHEDULED", "HANDOVER_PENDING",
+  ] as DealStatus[]) {
+    assert.equal(
+      canTransition("FROZEN_PENDING_RELEASE", back),
+      true,
+      `a frozen deal must be able to resume to ${back}`,
+    );
+  }
+  // But it never completes straight out of the freeze — the resumed deal walks the
+  // same gates as everyone else.
+  assert.equal(canTransition("FROZEN_PENDING_RELEASE", "COMPLETED"), false);
+  // And a terminal deal is never frozen: there is nothing left to coordinate.
+  for (const from of ["COMPLETED", "CANCELLED", "REFUNDED"] as DealStatus[]) {
+    assert.equal(canTransition(from, "FROZEN_PENDING_RELEASE"), false, `${from} must not be freezable`);
+  }
 });
 
 test("refund is reachable from CANCELLED and from non-terminal states", () => {

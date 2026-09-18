@@ -901,6 +901,9 @@ async function notifyRecapReady(
     where: { id: dealId },
     select: {
       buyerId: true,
+      // §23.2a touchpoint 5 is REQUEST-scoped (§23.4 gives a second request its own election),
+      // so the ask below needs the request, not just the deal.
+      vehicleRequestId: true,
       buyer: { select: { firstName: true, user: { select: { email: true } } } },
       dealerId: true,
       offer: {
@@ -951,6 +954,35 @@ async function notifyRecapReady(
         "parties to confirm before the deal moves, so an unsent recap is a deal that stops here " +
         "with nobody able to tell why.",
     });
+  }
+
+  // §23.2a TOUCHPOINT 5 — "Email at dealer reaffirmation or recap. The second and final ask."
+  //
+  // PHASE 10. The recap is the moment §23.2a names, and the last one: the numbers are agreed,
+  // the coordination ahead of the buyer is exactly what a concierge does, and after this
+  // AutoLenis stops asking. `sendFinalPremiumAsk` owns the whole §23.2b decision — this service
+  // does arithmetic and notices, and must not acquire an opinion about upselling.
+  //
+  // NOT enqueued beside the recap and not gated on it: a buyer whose recap notice failed is
+  // still owed the same suppression decision, and a suppressed ask is the ordinary case rather
+  // than a failure. It never throws into the recap path.
+  if (deal.buyerId && deal.vehicleRequestId) {
+    try {
+      const { sendFinalPremiumAsk } = await import("@/lib/services/plan/upgrade-touchpoint.service");
+      const ask = await sendFinalPremiumAsk({
+        buyerId: deal.buyerId,
+        vehicleRequestId: deal.vehicleRequestId,
+        dealId,
+      });
+      if (!ask.sent) {
+        logger.info("[recap] final premium ask not sent", { dealId, reason: ask.reason });
+      }
+    } catch (err) {
+      logger.error("[recap] final premium ask failed", {
+        dealId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   const dealerEmail = deal.offer?.dealer?.isSystemPlaceholder

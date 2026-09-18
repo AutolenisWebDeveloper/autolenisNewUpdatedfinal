@@ -5,7 +5,6 @@ import { ensurePrismaUser, recordAffiliateAttribution } from "@/lib/auth/actions
 import { getSafeBuyerRedirect } from "@/lib/auth/urls";
 import { UserRole, BuyerPlan } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendEmailVerifiedEmail } from "@/lib/services/email/resend.service";
 import { ContactService } from "@/lib/services/contact.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 
@@ -181,7 +180,77 @@ async function trySendEmailVerified(supabaseId: string, email: string): Promise<
     if (alreadySent) return;
 
     const firstName = buyer.firstName ?? email.split("@")[0];
-    await sendEmailVerifiedEmail({ to: email, firstName });
+
+    // §27.1 "Verification completed → Buyer" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
+    //
+    // TWO GUARDS, AND NEITHER IS THE OTHER'S SPARE. The `AdminAuditLog` row above is written
+    // after a successful ENQUEUE — not after a successful send, which is what an earlier
+    // version of this comment claimed and the second independent review corrected. So a
+    // message the outbox later terminal-fails leaves the audit row present and the next
+    // callback visit a no-op; the outbox's own terminal-failure exception is what covers that
+    // case, not a retry from here. The outbox key covers what the audit row cannot: two
+    // callback visits racing before either has written it.
+    const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+    const { PHASE_2_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
+    const { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } = await import(
+      "@/lib/services/email/templates/email-verified"
+    );
+    const { renderOnboardingIncomplete } = await import("@/lib/services/comms/phase2-email-content");
+    await enqueueTransactional({
+      triggerEvent: "auth.verification_completed",
+      templateKey: PHASE_2_TEMPLATES.VERIFICATION_COMPLETED,
+      channel: "email",
+      recipientKind: "buyer",
+      recipientId: buyer.id,
+      to: email,
+      idempotencyKey: `${PHASE_2_TEMPLATES.VERIFICATION_COMPLETED}:${buyer.id}`,
+      payload: {
+        email,
+        subject: EMAIL_VERIFIED_SUBJECT(firstName),
+        html: renderEmailVerifiedEmail({
+          firstName,
+          // The same URL `sendEmailVerifiedEmail` built (`resend.service.ts:984`), read from
+          // the same variable rather than re-derived, so the link does not change with the rail.
+          prequalUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/prequal`,
+        }),
+      },
+    });
+
+    // §27.1 "Onboarding incomplete → Buyer" — PHASE 10, the enqueue site this register row
+    // never had. `skipIfOnboardingComplete` was registered in Phase 2 and nothing ever
+    // produced a row for it to check.
+    //
+    // ONE NUDGE, NOT A SEQUENCE. §27.1 registers a single key, and the buyer has just proved
+    // they read their email — a person who verifies and then stops has made a decision, and
+    // chasing it three times is how a transactional rail turns into a drip campaign.
+    //
+    // Scheduled a day out and re-checked at send: the ordinary path is that the buyer
+    // completes onboarding in the next few minutes, `skipIfOnboardingComplete` sees it, and
+    // this row is never sent. It exists for the person who does not.
+    //
+    // Enqueued in the same block as the verification notice and guarded by the same audit
+    // row, so a repeated callback visit cannot schedule a second one.
+    await enqueueTransactional({
+      triggerEvent: "auth.onboarding_incomplete",
+      templateKey: PHASE_2_TEMPLATES.ONBOARDING_INCOMPLETE,
+      channel: "email",
+      recipientKind: "buyer",
+      recipientId: buyer.id,
+      to: email,
+      idempotencyKey: `${PHASE_2_TEMPLATES.ONBOARDING_INCOMPLETE}:${buyer.id}`,
+      runAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      payload: {
+        email,
+        ...renderOnboardingIncomplete({
+          firstName,
+          onboardingUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/onboarding`,
+        }),
+      },
+    }).catch((err) => {
+      // The verification notice above is the one this visit owes; a nudge that could not be
+      // scheduled must not cost it, and must not stop the audit row being written.
+      logger.error("[auth/callback] onboarding nudge not scheduled:", err);
+    });
 
     // Record the send so future callback visits are no-ops
     await prisma.adminAuditLog.create({

@@ -828,7 +828,7 @@ block. This rule is about reviews already running.
 | 7 | **Dealer reaffirmation, vehicle hold, disclosure, material changes, outside-winner verification, deal recap, financing checkpoints, `credit_applications` freeze** — **AS BUILT 2026-09-14, §8.1g** | Stage 10 (10a–10c), Stage 11 (11a–11b), Stage 12 (12a–12d), §23.2a touchpoint 5, §26 rows, §27.1 rows | S[9..11]; FIN_CP; FIN_PANELS | 12, 13, 14, 27 (reaffirmation consequences) | 6 |
 | 8 | **Contract request, Contract Shield, buyer + co-buyer signing, dealer execution, financing completion & funding clearance, insurance review** — **AS BUILT 2026-09-15, §8.1h** | Stage 13 (14a–14d), Stage 14, Stage 15, §26 rows, §27.1 rows | S[12..14] | 16, 17, 18, 19 (activation owner-gated), 20 | 7 |
 | 9 | **Pickup readiness, scheduling, release token, reminders, handover, possession, atomic completion, post-completion obligations** | Stage 16–21, §26 rows, §27.1 rows | S[15..20] | 21, 22, 26, 27 (no-show/overdue consequences) | 8 |
-| 10 | **Control-plane completion: cancellation orchestration, exception register, communications register, legacy neutralisation, cross-portal parity** | §24, §26 (all 48 rows wired), §27.1 (all 76 rows wired), §28.3, §29 (re-verified), §25.2 consequences | EXC; SAFE; TRANSITION; every portal status surface | 25, 27, 23/24 (completeness) | 9 |
+| 10 | **Control-plane completion: cancellation orchestration, exception register, communications register, legacy neutralisation, cross-portal parity** | §24, §26 (all 48 rows wired), §27.1 (all 77 rows wired), §28.3, §29 (re-verified), §25.2 consequences | EXC; SAFE; TRANSITION; every portal status surface | 25, 27, 23/24 (completeness) | 9 |
 | 11 | **Acceptance** (no new capability) | §34, §35, master §13 | ACCEPT | — | 10 |
 
 ### 8.1a Phase 1 — AS BUILT (2026-09-07)
@@ -2074,6 +2074,53 @@ truthiness. It produced **127 compile errors across 32 production sites**, and e
 re-derived by hand against `requiredSignersForDeal`. A silent `findFirst` was never possible,
 because no call site survived.
 
+#### A STALE RECORD GENERATING A FRESH ONE — the second named hazard class (added 2026-09-18, Phase 10, owner-instructed)
+
+Recorded here rather than in §8.1j because this section is where this programme keeps its hazard
+classes, and because the instance that named it is Phase 10's while the stale row is Phase 5's. It
+is the sibling of core rule 11 in reverse: same shape — a fact changes, nothing edits the code or
+prose that relied on it — with one difference that makes it worse.
+
+**The instance.** §8.4's first row carried the clause *"it stands down only while
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, **which it is not** — §8.1e finding 17"*. That was
+true when written and stopped being true on **2026-09-13**, when §13-D52 was actioned and the flag
+was flipped ON in production. **This same file recorded the flip twice on the day it happened** —
+§8.1e's deploy sequence step 8 (*"DONE 2026-09-13"*) and its close-out (*"§13-D52 IS ACTIONED.
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` IS ON IN PRODUCTION."*). The §8.4 row was never updated, so
+for five days the document asserted both.
+
+**What made it a class rather than an untidiness.** On 2026-09-17 Phase 10 answered the first
+review's question *"can a paused auction be silently resumed by the sourcing sweep?"* It traced the
+path correctly in five steps, then reached for the flag state, **cited the §8.4 row instead of
+measuring it**, and concluded *"LATENT, not live … §8.4 records that flag as off in production."*
+That sentence was written into §8.1j with 2026-09-17's date on it. The stale row had produced a
+**second** stale record — newer, more specific, and carrying the authority of a section titled AS
+BUILT. The owner caught it by knowing the production fact; nothing in the document would have.
+
+| | a stale record sitting there | **a stale record cited as evidence** |
+| --- | --- | --- |
+| How it is found | someone notices two rows disagree | it is not found — the citation LOOKS like the check |
+| What it produces | doubt about one row | a new row, correctly dated, that is wrong |
+| Blast radius | the row | every conclusion drawn from it, in sections that outlive it |
+| Who can catch it | anyone rereading | only someone holding the production fact |
+
+**The rule it yields, and it is narrow enough to follow.** *A claim about the CURRENT STATE of
+production is measured, never cited.* A row in this document is evidence of what was planned,
+decided or built — it is not evidence of what is true of production right now. Flag states,
+row counts, applied migrations and enabled features are read from production (or from the owner,
+who runs it), and the reading is quoted with its date. Where a phase must state a production fact it
+did not measure, it says so in those words rather than footnoting a row.
+
+That rule would have caught this: Phase 10 had no way to read the flag and should have written
+*"flag state NOT MEASURED — §8.4 says off, §8.1e says on, these disagree"*, which is the finding,
+rather than picking one and moving on.
+
+**What it cost, and what was done.** The §8.4 row is corrected (this commit). §8.1j's answer is
+corrected and its trace revised in both directions — the reach was overstated (the sweep's
+case-status filter is a second gate the trace omitted) and the gate was understated (the flag is
+open). The residue is a real, narrow window, opened as **§13-D61** with its fix named. No production
+change followed from the wrong sentence, because the owner ruled on it before anything ran.
+
 #### The owner's rulings, as built
 
 §13-D4, D28, D29, D30, D31, D32, D33 and D34 are each recorded on their own §13 row. Two of those
@@ -2968,6 +3015,545 @@ The remaining six were resolved as proposed and are recorded here as **stated as
   the authority.
 - **The duplicate-hash assertion in `verify.sql`** read 0 of 0 on the proof fixture — falsifiable in
   principle, not falsified there. Stated rather than glossed.
+
+### 8.1j Phase 10 — AS BUILT (2026-09-17)
+
+Implemented on `claude/txflow-10-control-plane` from `8f58a151`. This section records what was
+actually built, what was measured rather than recalled, and what is not done, because a section that
+described the plan would be the drift it exists to prevent.
+
+**Both §8.3 completeness gates are now GREEN, and `pnpm test:all` passes: 70 segments, 5,216 tests,
+5,215 passed, 0 failed, 1 skipped** (the concurrency claim that needs a scratch Postgres and says so
+in its own skip message). An earlier draft of this section said the chain "stops at the first
+failure — segment 46" and quoted 3,524 tests across 46 suites as an explicitly-not-a-pass figure;
+that was true when written and is superseded here.
+
+#### The two owner rulings this phase turns on
+
+**§13-D14 is UNSATISFIED, and the §8.2 rollback sentence was CORRECTED rather than inherited.** The
+counter was read from the right table for the first time (owner-run census, 2026-09-17 17:00 UTC):
+12 rows, every one `DIRECT_TRANSACTIONAL_SEND`, the most recent 3.2 days old; `QSTASH_PRODUCER` 0
+and never fired. An earlier reading of 0 came from `admin_audit_logs`, a DIFFERENT table from the
+`audit_logs` that `recordLegacyPathWrite` writes — structurally always empty for that label, so it
+reads as a clean zero for ever. **Zero-by-disuse and zero-by-retirement are different facts and
+only one satisfies D14.** This phase therefore DELETES NOTHING. Full detail in the §13-D14 row and
+in §8.2 Phase 10's Rollback.
+
+**The direct-send allowlist target is "zero §27.1 transactional traffic", not literal zero** — ruled
+by the owner at STOP 1. `comms-providers.ts` and `resend.service.ts` are the §27 rail itself and
+cannot scan clean by construction; `twilio-verify.ts`, `call-transfer.service.ts` and
+`handle-turn.ts` are real-time voice, and an OTP that waits for a drain is not an OTP. **The
+reclassification and its test change are NOT DONE** — see *Not done* below.
+
+#### §27.1 is 77 rows, not 76
+
+Counted, not recalled: 79 pipe lines between the header and §28, minus header and separator, all
+distinct events, no duplicates. Corrected in **both** places the document said otherwise — §8.1 row
+10 and §8.3.
+
+#### What was built
+
+- **§24, one cancellation orchestration** — `lib/services/transaction/cancellation.service.ts`. It
+  COMPOSES the stops that already existed and that nothing called from a cancellation:
+  `voidEnvelopeInternal`, `revokeReleaseToken` (whose own docstring already named "Phase 10's
+  cancellation orchestration" as its intended caller), `cancelByKey`, `transitionCase` → CLOSED,
+  the auction and invitation writes, the pickup, and the vehicle request.
+- **The execution boundary keys on a FACT, not a status list.** `Deal.dealerExecutedContractId` is
+  non-null exactly when a fully executed dealership contract exists. A status list cannot work:
+  `RECAP_PENDING` sits on BOTH sides of execution. `canTransition` additionally refuses CANCELLED
+  from the post-execution statuses, which is the half a pure function can enforce.
+- **`FROZEN_PENDING_RELEASE` gained edges and a writer.** It had an empty exit list and no writer
+  since Phase 1; `Deal.frozenAt` / `frozenReason` existed and were READ by two release gates and
+  written by nothing. A freeze now writes them, so it bites immediately.
+- **§28.3 #1** — `DEAL_TRANSITION_ACTORS` in `lib/services/deal/transition-authority.ts`.
+  `actorRole` was an unconstrained `string` and had ALREADY DRIFTED: eleven `"BUYER"` against one
+  `"buyer"` (`app/api/public/request-vehicle/complete/route.ts:305`). §Stage 19's "never on the
+  dealer's word alone" is now enforced at the authorization layer, where `force` cannot reach it.
+- **§28.3 #3** — conditional writes on pause/resume, `closeAuction` and `extendAuction`. The last
+  two were NOT on §8.2's defect list and are real: `closeAuction` would overwrite a CANCELLED
+  auction, and `extendAuction` lost a concurrent extension while `AuctionExtensionLog` recorded
+  both as having happened.
+- **§28.3 #4** — the CAS and its `DealStatusHistory` row now commit in ONE transaction. The history
+  write sat outside it and ended `.catch(() => {})`.
+- **§28.3 #6** — every history row carries a reason; a forced transition must supply one. This
+  surfaced a real gap: `service-fee.service.ts` forced with no reason at all.
+- **Cross-portal parity** — `lib/services/operations/exception-lineage.service.ts`. The lineage
+  already existed in `queue_items` and NOTHING READ IT: `buyer_visible_status` was written for all
+  58 catalogued exceptions and had zero readers outside the catalogue and its own writer. Buyer
+  panel, dealer notice and the existing Ops queue now read one projection; the dealer view is a
+  fail-closed ALLOWLIST held server-side, so a §26 row added later is silent to dealers until
+  someone decides otherwise.
+- **`makeFmt` — the parity defect in miniature, and it HAD ALREADY DRIFTED.** Buyer: `weekday
+  "long", month "long"`. Dealer: `"short"`/`"short"`. The same appointment rendered differently to
+  the two people who have to meet at it. One formatter now, density as a parameter.
+- **§25.2 / §13-D42 suspension** — dealer-initiated, after a paid auction, second attempt in 90
+  days. `undefined` scope does NOT suspend: the queue row already says "Establish it before
+  applying any consequence".
+- **A Phase 9 sweep that was never called.** `flagSuspectedNoShows` was exported, tested,
+  documented, raising §26's `PICKUP_MISSED` — and had NO CALLER. It is now wired, alongside the new
+  `sweepReleasedNotConfirmed`.
+
+#### A limit in this phase's own gate, stated rather than left to be found
+
+§8.3's rules prove a code HAS a raise site. They do NOT prove anything CALLS it — `PICKUP_MISSED`
+counted as satisfied for the whole time its only raiser was unreachable. Closing that needs
+reachability analysis from the cron and route entry points, which is not built here. The gate's
+header records the limit. **A gate whose boundary is undocumented is how the first nine instances
+of this class survived.**
+
+#### Migrations — APPLIED to production 2026-09-18 02:36 UTC, and the proof package that did not exist
+
+`20261215000000_phase10_cancellation_vocabulary` (the `CANCELLED` labels
+`AuctionInvitationStatus` and `PickupStatus` lacked — `EXPIRED` would tell a dealership it missed a
+deadline it never missed) and `20261215000100_phase10_obligation_unique` (§13-D60's partial unique).
+
+Proven on a disposable loopback PostgreSQL restored from the committed baseline: full chain applied,
+both halves verified, re-applied as a no-op. The index's semantics were proved in all five
+directions, including that a RESOLVED row does not bar a recurring obligation. **DEGRADED: 16.13,
+not CI's 17.6** — no Docker daemon in the environment. CI's `migrations` job remains the authority.
+
+§13-D60 is discharged by the index landing. The resolve-only route it was written about is **not
+built** — see below — so the "second writer" override was never triggered.
+
+**APPLIED, AND VERIFIED INDEPENDENTLY BY THE OWNER at 02:36 UTC on 2026-09-18.** Ledger 123 rows /
+121 distinct / 2 rolled back / 0 stuck; both `20261215` rows finished at `applied_steps_count` 1;
+`AuctionInvitationStatus` and `PickupStatus` both carry `CANCELLED`; and
+`post_completion_obligations_open_deal_type_key` is UNIQUE `(deal_id, type) WHERE status <>
+'RESOLVED'`. §13-D60 is closed.
+
+**AND IT RAN WITHOUT A PREFLIGHT, BECAUSE THERE WAS NOTHING TO RUN.** There was no
+`docs/transaction-flow/phase-10-proof/` on the branch. Phase 1, phases 3 through 9 and
+migration-110 all ship a proof package; Phase 10 did not, and neither migration directory held a
+`rollback.sql` either. The STOP 2 report *described* the sequence — "preflight.sql in full before,
+`prisma migrate status` to show what will apply, and both verification halves after" — and the
+files behind that sentence were never written. **The owner named the shape: Phase 7, where the
+package was described as done and the artefacts were missing.** It is the same failure, and the
+second time it has happened in this programme.
+
+Written as an owner-instructed follow-up on 2026-09-18, in the phase-9-proof shape:
+`phase-10-proof/preflight.sql` (20 assertions, 15 block-capable), `verify.sql` (20 assertions, 14
+physical and 5 ledger, both halves), `proof-run.log`, and a `rollback.sql` in each migration
+directory. `frontend/prisma/__tests__/phase10-proof-sql.test.ts` checks the expected-migration list
+against the directories on disk, refuses a hardcoded count beside it, computes the terminal-row
+figures rather than trusting them, and — new for this phase — **fails if the package or either
+`rollback.sql` is missing at all**, which is the gap that produced this paragraph.
+
+**THE PREFLIGHT IS WRITTEN AGAINST THE PRE-DEPLOY STATE AND SAYS SO IN ITS OWN HEADER.** Run today
+it BLOCKs, correctly, on "already applied" and on a chain that has moved from 119 distinct names to
+121. A preflight rewritten to pass against the post-deploy database would be a different file
+pretending to be this one, and a preflight that claims to have guarded a run it never saw is worse
+than none.
+
+Both files were exercised in BOTH directions on a throwaway loopback cluster and the run is recorded
+in `proof-run.log`: preflight **all 20 CHECKED** against a rebuilt pre-state whose ledger read 119
+distinct — production's exact pre-deploy count; verify **10 MISSING** against that same pre-state,
+naming precisely the objects the migrations create; then, with two open obligations seeded on one
+`(deal_id, type)`, preflight **BLOCK** and the migration failing for real on
+`23505 could not create unique index … Key (deal_id, type)=(d_p10proof, TEMP_TAG) is duplicated`,
+which left the chain genuinely stuck and made **six distinct BLOCK conditions** fire; and after
+recovery, verify **all 19 PRESENT**. Four absence assertions were not exercised and the log names
+them rather than implying coverage.
+
+**ONE READING WORTH RECORDING ON ITS OWN.** Production's `AuctionStatus` reads PENDING, ACTIVE,
+CLOSED, EXPIRED, CANCELLED, **REOPENED** — owner-confirmed, and independently confirmed here
+against a database built from the committed chain. The first independent review of the
+decline-route change caught `closeAuction` guarding on a hand-written `[PENDING, ACTIVE]` that
+omitted REOPENED, and would have removed a buyer's ability to decline a reopened auction. **That
+review was right against the database, not merely against the code** — the label is live, an admin
+action writes it, and `LIVE_AUCTION_STATUSES` (which the guard now uses) is the list that owns the
+question.
+
+#### §8.3 completeness — how the two registers were actually closed
+
+**Six §26 codes gained a real raise site** at the point the condition is detected:
+`CONTRACT_EXTRACTION_FAILURE` (the `scanContractVersion` catch — "retryable" was true of the ROW and
+of nobody's attention), `CONTRACT_MISMATCH` (the agreed-terms comparison; the HOLD worked, the OWNER
+did not exist), `TRADE_PAYOFF_QUOTE_STALE` (`clearFunding`'s refusal, as a second row because it is
+OPERATIONS' work where `FUNDING_NOT_CLEARED` is FINANCE's), `PREQUAL_PROVIDER_DELAY`
+(`recordProviderFailure`), `DEPOSIT_CHARGEBACK_AFTER_UPGRADE` (a dispute on a $99 that is the credit
+basis for a live Premium entitlement) and `CANDIDATE_STALE_MID_AUCTION` (the stale sweep, which is
+the instant the platform learns a listing has gone — and which also supplies the missing caller for
+`revalidateRequestCandidates`, dead since Phase 4).
+
+**Three §26 rows cannot be discharged by a raise site, and now say so IN THE REGISTER.** A new
+`dischargedBy` field on `ExceptionDefinition` carries the reason with the row rather than in an
+allowlist inside the test, and the gate enforces it in both directions — a discharged row that
+GAINS a raise site fails, a `BEHAVIOUR` discharge whose proving test is deleted fails, and the
+count is pinned at three:
+
+| Row | Kind | Why |
+| --- | --- | --- |
+| `NO_IN_RADIUS_INVENTORY` | BEHAVIOUR | §26 owner SYSTEM, no deadline, required result is a rendering rule ("lead with the custom request, never present an empty grid"). `gateCatalogue`/`inRadiusCount` implement it. A queue row would be a work item with no owner raised for every buyer browsing outside a market — and `hasOpenException` would then suppress their upgrade prompt indefinitely. |
+| `NO_STORED_LOCATION_ON_INVENTORY` | BEHAVIOUR | Same shape. Not knowing where a browsing visitor lives is the ordinary state of an inventory page, not an exception an operator works. |
+| `TRADE_APPRAISAL_CHANGED_AT_HANDOVER` | UNBUILT | The trigger does not exist: `trade_in_submissions.final_allowance_cents` and `preliminary_allowance_cents` have NO WRITER anywhere, so the Contract Shield trade comparison is vacuous today. §10 rows **R18.10** and **R18.17** are still TO IMPLEMENT and are **Phase 9's**. A raise site keyed to the buyer's own packet edit would make the register report an exception the document does not describe. |
+
+**Seven §27.1 template keys were wired**, four of them to content and rechecks written in earlier
+phases that nothing ever called: `registration_submitted` and `verification_completed` (migrated off
+the direct rail), `prequal_provider_delay`, `guest_capture_claim` with
+`verification_reminder_1h/24h/72h`, `onboarding_incomplete`, `prequal_expiring`, `prequal_expired`,
+`dealer_invitation_bounced`, `contract_revision_required` (which reached the BUYER only —- the
+dealership, whose contract it is, got nothing from the automatic scan) and `premium_follow_up_final`
+(§23.2a's last ask, never made, so §23.2b's `MAX_UPGRADE_EMAILS = 2` was a ceiling one ask below
+the floor).
+
+**The comms gate had a false positive of its own.** It read `PropertyAccessExpression` only, so the
+two invitation-reminder keys chosen through `PHASE_5_TEMPLATES[expr]` were reported unwired while
+demonstrably sending. Element access is now parsed and the real call site pins the branch. *A
+completeness rule with false positives is worse than a loose one: its output stops being read, and
+the real gaps in the same list go with it.*
+
+#### One §27.1 row STAYS on the direct rail — OWNER-RULED 2026-09-18 (option A)
+
+`prequal_declined` is the FCRA §615 adverse-action notice and **it is sent today**; the gap is the
+rail, not the message. `sendAdverseActionEmail` returns an `EmailSendOutcome` discriminant that four
+call sites feed to `classifyAdverseActionDelivery`, which writes `ADVERSE_ACTION_NOTICE_SENT` /
+`_SUPPRESSED_DUPLICATE` / `_SEND_FAILED` to `compliance_events`, and anything that is not a confirmed
+delivery opens a §26 row. `enqueueTransactional` returns an ENQUEUE, not a delivery, so a faithful
+migration must carry the outbox's eventual result back into the compliance record — and **§29 lists
+"adverse-action outcomes distinguished" among the safeguards that must not be weakened.** Doing that
+inside a control-plane batch would weaken it by accident.
+
+It is recorded in `lib/services/comms/__tests__/register-discharge-ledger.ts` with its reason, its
+current sender and the follow-up that would discharge it; the ceiling is pinned at one and the gate
+fails if the key ever gains an enqueue site.
+
+**OWNER RULING, 2026-09-18 — OPTION A: it stays on the direct rail, ledgered, and §8.4's target is
+restated.** The reasoning is the ruling: everything the specification requires is built and provable
+**synchronously** — the classification happens in the same call stack as the decision, so *"was the
+notice delivered"* is a fact at decision time rather than an eventual one. Migrating trades that for
+an eventual fact, and a compliance change wearing a plumbing change's clothes, inside a
+control-plane batch, is precisely how a safeguard gets weakened by accident. **§8.4's direct-send
+target is therefore "zero §27.1 transactional traffic WITHOUT A DOCUMENTED REASON", not literal
+zero** — this entry has one, and the ceiling and the gate are what keep it the only one.
+
+**The requirement, cited precisely, because the earlier record cited it wrongly.** It is **Stage 3
+L394** ("decline with applicable adverse-action information") and **L398** ("delivery outcome is
+recorded as sent, duplicate, or failed **[BUILT]**"), the **§26 register L1243**, and **§29**'s
+"adverse-action outcomes distinguished". **It is not §12**, which is financing checkpoints (12a–12d).
+
+**OPEN QUESTION, RECORDED AND NOT RULED — by anyone.** Whether an *enqueued* notice may ever be
+recorded as discharging §615, and what timing obligation attaches, is a legal question about the
+platform's own obligations. **Counsel settles it before any migration is attempted**, because the
+answer decides whether a synchronous `ENQUEUED` compliance row is a legitimate artefact or a
+statement that a notice was sent when none was. Neither this programme nor the owner has ruled it,
+and neither should: recorded here so that a future batch finds the question rather than assuming it
+was answered.
+
+#### `closeAuction` had no callers — RULED 2026-09-18, and it has one now (§28.3 #3, fourth instance)
+
+`lib/services/auction/auction.service.ts:153`. This phase HARDENED it (§28.3 #3 — it would have
+overwritten a CANCELLED auction) and then found that nothing in `app/`, `lib/` or `tests/` called
+it, not even a test. It was REPORTED per CLAUDE.md rather than deleted.
+
+**The owner's question was the right one: if `closeAuction` has no callers, what closes auctions?**
+Measured rather than recalled — four live writers of `CLOSED`, and the dead function is not among
+them:
+
+| Path | Guard | Verdict |
+| --- | --- | --- |
+| `closeExpiredAuctions()` — the 5-minute cron (`auction.service.ts:923-930` ← `app/api/cron/auction-close/route.ts`) | `updateMany where status: ACTIVE, endsAt ≤ now` — a true CAS | sound |
+| Buyer selects an offer (`select-offer.service.ts:245`) | `update` by id, inside the selection transaction, stamps `postCloseProcessedAt` itself | acceptable — the selection is CAS'd upstream |
+| Concierge conversion (`concierge-conversion.service.ts:256`) | in-transaction | not this phase's |
+| **Buyer declines all offers (`app/api/buyer/auctions/[auctionId]/decline/route.ts`)** | **read → 409 → `update` by id: a CHECK-THEN-ACT** | **the defect, live** |
+
+So §29's exactly-once close was never weakened BY `closeAuction` — it cannot be, having no callers.
+**The weakening was one file over.** The decline route is the same unconditional auction-status write
+as the admin action, pause and resume that §28.3 #3 already covered in this phase: it reads the
+status, refuses a CLOSED or CANCELLED auction with 409, then writes by id alone. A §24 cancellation
+landing between the read and the write is silently rewritten as an ordinary end-of-auction — the
+dealership's history then says the auction ran its course when AutoLenis withdrew it, which is the
+exact vocabulary collapse the `CANCELLED` label added by this phase's first migration exists to
+prevent.
+
+**OWNER RULING 2026-09-18 — OPTION C, and it ships in Phase 10:** *"Finding another instance of the
+defect you were already fixing is not scope creep."* The route now calls `closeAuction`, which
+guards on `status IN (PENDING, ACTIVE)` and returns whether THIS call closed it; a lost race answers
+the same 409 the read-side check does. Routing through it rather than copying its predicate is the
+point — §29's exactly-once close is a property of there being ONE implementation, and a fourth
+open-coded close is how that erodes. The dead function is now the canonical one, which answers the
+concern in the direction that strengthens the safeguard rather than deleting the evidence of it.
+
+Proven failing-first: the two new assertions in
+`app/api/buyer/auctions/__tests__/decline-no-refund.test.ts` fail against the old route (2 failed /
+5 passed) and pass with it (7/7). The regression guard is that `prisma.auction.update` must stay
+uncalled on this path — a revert to the unconditional write fails the suite rather than passing
+quietly.
+
+**AND THE FIRST REVIEW OF THAT FIX CAUGHT A CAPABILITY REMOVAL, before it shipped.** `closeAuction`
+guarded on a hand-written `[PENDING, ACTIVE]`. `AuctionStatus` has a third live label — **REOPENED**,
+written by a live admin action (`app/api/admin/auctions/[auctionId]/action/route.ts:301`) — and the
+literal omits it. The old unconditional write closed a reopened auction; the guard would have
+answered 409 instead. **A buyer would have lost the ability to decline a reopened auction, removed
+silently by a guard added to fix something else** — which is exactly what the
+capability-preservation invariant forbids, and the sort of thing a predicate change hides because
+nothing about it looks like a deletion.
+
+It is the same omission this repository has already recorded once: `app/api/admin/auctions/route.ts:44-50`
+says *"The literal list omitted REOPENED — an auction that is unambiguously still running — so a
+buyer whose auction had been reopened passed this guard. **One list, owned by `deposit-auction.ts`,
+is what keeps the four readers of 'is this auction still live?' from disagreeing.**"* `closeAuction`
+was the fifth reader, written with the same literal and the same omission.
+
+Corrected at the cause rather than in the route: `closeAuction` now guards on
+`LIVE_AUCTION_STATUSES` (`deposit-auction.ts:36-40`), the list that owns the question. The refusal
+that the §24 protection depends on is unchanged, because `TERMINAL_AUCTION_STATUSES` — CLOSED,
+EXPIRED, CANCELLED — are not in it. Three tests hold the line: the predicate must BE the owned list,
+a REOPENED auction must still decline (200, offers declined), and no terminal status may appear in
+the predicate.
+
+**REPORTED, not fixed — a PRE-EXISTING defect on the same route, found by the second review.** The
+decline path closes the auction without stamping `postCloseProcessedAt`, and it declines every
+`SUBMITTED` offer. The auction-close cron then selects exactly
+`{ status: CLOSED, postCloseProcessedAt: null }` (`app/api/cron/auction-close/route.ts`), claims it,
+and runs `processAuctionClose` — which counts only offers matching `qualifiedOfferWhere`
+(`offer-validity.ts:52-58`, `status: LIVE_OFFER_STATUS`). Every offer is now `DECLINED`, so the
+count is zero and the auction takes the **zero-offer** branch: the §26 zero-offer case is opened and
+the buyer is told no dealership offered, minutes after they declined offers that did exist.
+`select-offer.service.ts:245-258` already solved this for its own path and says so in its comment —
+it stamps `postCloseProcessedAt` itself *"WITHOUT THIS, an early accept left the marker NULL and the
+auction-close reconciler claimed it on the next tick and emitted the full post-close side effects"*.
+The decline route is the same shape and did not get the same treatment. **It is older than this
+phase and outside the ruled scope of the decline-route change** (which was the unconditional write,
+nothing else), so it is reported here rather than fixed in passing. The likely fix is the one next
+door: stamp the marker in the same call, because declining every offer IS this auction's post-close
+processing.
+
+**REPORTED, not fixed — a gap in the guard that caught this.** `scripts/parity-ledger.mjs --check`
+validates the parity totals and the §10 headings but **never computes the decision triage**;
+`calculateDecisionTriage` runs only under `--write`. So a §13 row added by hand with an
+unrecognised triage cell passes `--check` and fails only in `pnpm test:parity-ledger` — which is
+how the D61 row above was caught, one gate later than it should have been. The two guards disagree
+about what they cover.
+
+#### The SECOND independent review — one blocker, five majors, and what each one cost
+
+The second review read the final implementation from a clean context, as
+`autolenis-code-verification` STEP 6 requires, and found that the first round of fixes had
+introduced problems of its own. Every finding below was verified against the code before it
+was acted on.
+
+**BLOCKER — the migration off the direct rail was a REGRESSION in the dimension its own
+comments claimed to improve.** `deliverEmail` picks the suppression tier from the payload:
+`suppressionTier ?? (payload.type === "transactional" ? "hard" : "full")`
+(`comms-outbox.service.ts:220-222`). Every one of the ten enqueue sites this phase added
+omitted `type`, so each got the MARKETING tier — `isEmailSuppressed`, which is soft+hard AND
+**fails closed on a lookup error** (`suppression.service.ts:24-27` returns `true`). `SUPPRESSED`
+is terminal: no retry, no `COMMS_TERMINAL_FAILURE`, nothing said.
+
+Concretely: a person who had ever unsubscribed from marketing, or who signed up during one
+Supabase blip, would silently never receive their sign-up verification link — and
+`users.email` is UNIQUE, so they could not try again with the same address. The direct rail
+this replaced applied hard-only (`resend.service.ts:156-174`).
+
+Fixed on the RAIL, not in a convention: `enqueueTransactional` now stamps
+`type: "transactional"` when the payload does not set one. A payload on the transactional rail
+that is not transactional is a contradiction, and "remember to add `type`" is precisely the
+failure mode that produced ten instances. The two callers that deliberately want the marketing
+tier pass `suppressionTier: "full"` explicitly and are untouched.
+
+**MAJOR — the guest claim credential was addressed from the REQUEST BODY.** `looksGuest`
+checks whose account; it does not check where the mail goes. A caller holding a leaked
+single-use claim token could present it with an address of their own: the intake CONSUMES the
+token (so `findLiveClaimToken` finds nothing), `looksGuest` passes, and a fresh five-day
+credential is minted for the guest and mailed to the attacker — a one-shot leak converted into
+a renewable one, delivered to a mailbox the guest does not control. Delivery now uses
+`users.email`, and a supplied address that disagrees is refused **before** the mint.
+
+**MAJOR — a lost CAS cancelled the request anyway.** `advanceDealStatus` returns `false`
+without throwing when its compare-and-swap matches nothing, and the stops take real time (two
+DocuSign voids), so the window is seconds wide. A deal that advanced during the stops left a
+LIVE deal progressing toward signing attached to a CANCELLED vehicle request. The request stop
+is now gated on the deal having moved.
+
+**MAJOR — the terminal-deal refusal broke the register's own remediation.**
+`CANCELLATION_CLEANUP_INCOMPLETE`'s `returnPoint` reads "re-run the failed stop; the
+orchestration is idempotent", and the first cut of that guard refused CANCELLED too — so an
+operator following the instruction got a no-op and the live envelope could only be cleaned by
+hand. Split on a principle rather than compromised: the stops UNDO a transaction, so
+COMPLETED and REFUNDED are refused before the first destructive act, and CANCELLED re-runs
+them, which is exactly the retry the register promises.
+
+**MAJOR — the dealer surface was half inert, in two ways reading could not show.** Two of the
+six allowlisted keys were **not exception codes at all** (`CONTRACT_FAIL` is a `QueueItemType`;
+`DEALER_REAFFIRMATION_OVERDUE` does not exist), so `findException` dropped those rows. And a
+code that IS in the list still reaches nobody unless its raise site sets `dealer_id`, because
+`listOpen` ANDs its filters — `DEAL_FROZEN_PENDING_RELEASE`, the one line that says *"do not
+release the vehicle"*, was raised with no dealer reference at all, and so were
+`SIGNATURE_NOT_COMPLETED`, `CONTRACT_OVERDUE_FROM_DEALER` and `DEALER_DOES_NOT_EXECUTE`. All
+four now carry it, the two dead keys are replaced with the codes the register really has, and
+two new gates assert both directions against the real catalogue and the real raise sites.
+
+**MAJOR — `PAYMENT_FAILURE` was a permanent upgrade lockout.** It has `deadlineHours: null`
+and was resolved by nothing. Elements retries on the same intent, so the ordinary sequence is:
+card declines → row opens → buyer retries → payment succeeds → **the row stays open for ever**.
+From then on `hasOpenException` is true, the dashboard hides the upgrade card and
+`POST /api/buyer/plan/upgrade` answers 409 permanently, while the exception panel keeps saying
+"your payment did not go through" about a paid deposit. Card decline rates are a few percent,
+so this is the ordinary path. `payment_intent.succeeded` now closes the row keyed on that
+intent — the same auto-resolution `closeDisputeException` performs, and defensible for the same
+reason: the condition is settled by the provider, not by judgement.
+
+**Minors, all fixed:** the contract-revision notices keyed on `max(version)` read separately
+from the scan that produced them (now the scan ROW's id, which is unique by construction, so
+two concurrent scans cannot collide); `expiringNotified` counted deduped enqueues; the
+`PREQUAL_EXPIRING` payload omitted `prequalExpiresAt`, making its registered recheck silently
+inert; `LOCATION_UNUSABLE` used an explicit once-ever key, so a second bad ZIP after the first
+was resolved raised nothing; the suppressed-upgrade card said "the item above" when the
+blocking row is one §26 keeps ops-only; and two load-bearing comments no longer described the
+code — including "a caller holding either end reaches the same stops", which was false for the
+request end. That last one is now TRUE rather than corrected: a request-side cancellation
+resolves its live auction AND its live deal.
+
+**And the tightened gate found one more.** Acting on the review's note that both §8.3 rules
+count a MENTION rather than a call, the scans were narrowed to files that actually call
+`raiseException` / `enqueueTransactional` — and `prequal_approved` immediately went red. It was
+in the same position as `prequal_declined`: sent every day on a rail with no retry and no
+terminal-failure alert, and discharged in the register by a coincidence of naming. Unlike the
+declined notice it carries no FCRA outcome machinery, so it was migrated rather than ledgered.
+**The loose gate was hiding a real gap, which is the argument for the tightening.**
+
+#### AND CI FOUND WHAT NEITHER REVIEW DID — an infrastructure row read as a transactional hold
+
+The second review asked, as a QUESTION rather than a finding: *"`emitDealStatusComms` now fails
+closed when the Supabase pair is absent. Is that pair guaranteed present in every runtime that
+reaches this path? If not, every deal transition opens a `COMMS_GUARD_UNAVAILABLE` row, which
+then feeds `hasOpenException` and blocks upgrades."*
+
+**CI answered it, and the blast radius was larger than the question supposed.** Eight Phase 9
+pickup journeys went red with
+`preconditions_unmet … "1 open exception(s) must be resolved: COMMS_GUARD_UNAVAILABLE"`. The
+rows did not merely block upgrades — §Stage 20's `NO_HOLD_OR_DISCREPANCY` precondition reads
+EVERY open `queue_items` row on the deal, so **no deal could complete at all**.
+
+The chain is worth stating plainly, because every link in it was individually right:
+
+1. Phase 10 defect (5) made the comms idempotency guard fail CLOSED. Correct — it had been
+   fail-open in three places, and sending a transaction message unguarded is worse.
+2. Failing closed raises `COMMS_GUARD_UNAVAILABLE`, an Operations row. Correct — §28.3 #8:
+   every failure has an owner.
+3. In any runtime without a reachable guard store, that fires on EVERY deal transition.
+4. `NO_HOLD_OR_DISCREPANCY` and `hasOpenException` both read every open row on the deal.
+5. So a comms-plumbing outage stopped a buyer completing a purchase they had paid for, taken
+   delivery of and confirmed.
+
+**Fixed at the cause, and as a class.** Whether an open row HOLDS A TRANSACTION is a property
+of the row, so it is recorded with the row: `blocksTransaction: false` on the register entry,
+with its reason in prose. Five rows carry it — the three `COMMS_EXCEPTION` codes, the inventory
+provider budget ceiling, and `UPGRADE_PROMPT_DURING_OPEN_EXCEPTION` (already exempted by the
+first review's fix, now part of the same class). `NON_BLOCKING_EXCEPTION_CODES` is DERIVED from
+the register, and all three gates read it: the upgrade suppression, §Stage 20's completion
+precondition, and pickup readiness.
+
+That last point is the lesson rather than the fix. The answer lived in three places and was
+wrong in two of them, and the reason the first review's `SUPPRESSION_EXEMPT_CODES` did not
+prevent this is that it was a LOCAL list — it fixed one reader of a question three readers ask.
+The gate pins the count at five and refuses any non-blocking row that carries buyer-facing
+copy: a row the buyer is shown is a row about their transaction.
+
+**The Phase 10 journeys were also not in CI.** `ci.yml` names each phase's spec individually —
+its own comment says "a spec that is not named HERE is a spec CI never runs" — and no step
+existed for `phase10-control-plane-journeys.spec.ts` or `advance-deal-status-atomicity.spec.ts`.
+Both passed locally for the whole phase. A step now runs them.
+
+#### The first review's three open questions, answered
+
+**1. A PAUSED AUCTION CAN BE SILENTLY RESUMED BY THE SOURCING SWEEP. Answered, and it is a
+DEFECT — REPORTED, not fixed here.** Traced end to end:
+
+| # | Where | What happens |
+| --- | --- | --- |
+| 1 | `admin-buyer-command-center.service.ts:907-909` | Pause writes `auction.status ACTIVE → PENDING`. There is no "paused" column; PENDING *is* what a paused auction is, which that code says explicitly. |
+| 2 | `app/api/cron/coverage-hold-reconcile/route.ts:46` | → `sweepSourcingCases` → `driveSourcing` → `launchAuction`. |
+| 3 | `deposit-auction.ts:36-40, 91` | `LIVE_AUCTION_STATUSES` **includes PENDING**, so `findLiveAuctionForDeposit` returns the paused auction. |
+| 4 | `launch-readiness.service.ts:560-569` | The refusal is `existing.status === "ACTIVE"` only. A PENDING row falls through to `auctionId = existing.id`. |
+| 5 | `launch-readiness.service.ts:685-688` | Step 3 flips `status: "PENDING"` → `ACTIVE` with a **fresh `endsAt`** and re-issues invitations. |
+
+The admin's pause is undone, the 48-hour window restarts, and dealerships are re-invited.
+
+**CORRECTED TWICE ON 2026-09-18, BEFORE IT WAS RULED. The paragraph that stood here was wrong in
+both directions and is replaced rather than amended.**
+
+It said *"LATENT, not live: `sweepSourcingCases` stands down entirely while
+`SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is off, and §8.4 records that flag as off in production."*
+
+1. **The gate was understated.** The sweep stands down when the flag is **OFF**
+   (`sourcing-driver.service.ts:754-764`), so flag **ON ⇒ the sweep RUNS** — and the flag has been
+   ON in production since **2026-09-13**, recorded twice in this file (§8.1e step 8 and its
+   close-out) on the day it happened. The §8.4 row this paragraph cited was five days stale. Citing
+   a document row for a production fact instead of measuring it is recorded as a named hazard class
+   in **§8.1h**.
+2. **The reach was overstated.** There is a second gate the trace above omits: `sweepSourcingCases`
+   selects only cases in `ACTIVE_SOURCING` / `READY_TO_LAUNCH` / `RADIUS_AUTHORIZATION_REQUIRED`
+   (`sourcing-driver.service.ts:766-775`), and a successful launch moves the case to `LAUNCHED`
+   (`launch-readiness.service.ts:731-741`), whose only onward edge is `CLOSED`
+   (`sourcing-case.service.ts:219`). A pause requires the auction to be `ACTIVE`, which only happens
+   after the launch flip — so the **ordinary** paused auction sits under a `LAUNCHED` case and the
+   sweep never re-selects it.
+
+**The net fact: LIVE, but conditional on a half-completed launch.** The flip to `ACTIVE`
+(`launch-readiness.service.ts:680-690`, inside `$transaction`) and the case transition to `LAUNCHED`
+(`:731-741`, outside it, with a network dispatch between them) are two writes; if the second never
+lands the auction is `ACTIVE` under a still-swept case, and nothing reconciles the mismatch.
+
+**And the fix IS local — that claim was wrong too.** This paragraph said separating `PENDING`'s two
+meanings "needs either a column or a reading of the admin audit log". `Auction.startedAt` already
+discriminates them: it is written only where an auction goes ACTIVE and by no `auction.create` site,
+so `PENDING` + `startedAt IS NOT NULL` means it ran and is now held. The codebase already uses it
+that way at `auction-invitation.service.ts:1125`.
+
+**OWNER RULING 2026-09-18: guard on `startedAt` in `launchAuction`, in its own batch, NOT in Phase
+10** — making the two writes atomic reorders a live launch path and belongs with the Phase 5 ladder.
+Opened as **§13-D61** with the trace, both corrections, the cause and the fix.
+
+**2. Can a BUYER drive a post-execution freeze? Answered: NO, and `AUTOMATED` is correct — but the
+question found a second cancellation writer, which IS fixed here.**
+`DEAL_TRANSITION_ACTORS.FROZEN_PENDING_RELEASE` is `["SYSTEM", "ADMIN"]`, and the only
+buyer-initiated cancellation surface is `POST /api/buyer/requests/[requestId]/cancel`, which accepts
+`SUBMITTED` / `INTAKE` / `ACTIVE_SOURCING` — all pre-deal. A buyer therefore cannot reach
+`cancellationTargetFor`'s freeze branch, and §24's "AutoLenis cannot unilaterally void it" is not
+weakened by excluding them.
+
+What that route DID do was write `vehicleRequest.update({ status: CANCELLED })` directly — the
+identical second-writer shape this phase removed from the admin command centre, with the identical
+consequence: none of §24's stops ran, so a buyer cancelling at ACTIVE_SOURCING left the sourcing
+case OPEN for `sweepSourcingCases` to keep driving, left queued comms queued, and recorded no
+reason. **It now delegates to `cancelTransaction`.** Its own precondition stays FIRST and unchanged:
+the orchestration's stop accepts a wider set of statuses, and delegating without that check would
+have handed buyers a capability by refactor.
+
+**3. Migration ordering. Answered: BOTH migrations MUST be applied BEFORE the application deploy,
+and the ordering is load-bearing rather than conventional.** The cancellation orchestration writes
+`auction_invitations.status = 'CANCELLED'` and `pickups.status = 'CANCELLED'`; those enum labels do
+not exist until `20261215000000_phase10_cancellation_vocabulary` is applied. An application deploy
+that preceded it would not fail at start-up — it would fail at the first cancellation, inside a
+§24 stop, which `runStop` catches and reports as an incomplete cleanup. The transaction would
+cancel with its dealerships still invited and an exception nobody could act on.
+`IMPLEMENTATION-WORKFLOW.md` §8.1a.2 already states "step 4 precedes the application deploy"; this
+is the concrete reason for this wave. `20261215000100_phase10_obligation_unique` has no such
+coupling — it is a constraint, and applying it after the deploy would only leave §13-D60 unenforced
+in the interim — but it ships in the same wave and in the same order.
+
+#### Not done, and not implied to be
+
+- The direct-send allowlist reclassification and its test change (`removalPhase === 10` for every
+  entry is now false). The pinned count moved **94 → 93** as `app/auth/callback/route.ts` left the
+  list entirely; the reclassification the owner ruled on at STOP 1 is still outstanding.
+- §8.2 defect (6) — the losing-offer dispatcher's 7-day window and 4-attempt abandon.
+- `resolveObligation` has no route; `identityVerified: true` is still hard-coded on both admin
+  release paths.
+- R18.10 / R18.17 (the trade appraisal at handover), which the register discharge above names.
+- **§13-D61** — the `startedAt` guard in `launchAuction`. Owner-ruled 2026-09-18 as its own batch,
+  explicitly NOT Phase 10, so it is out of scope here by instruction rather than by omission.
+- The `prequal_declined` migration is **NOT outstanding work**: owner-ruled 2026-09-18 as a
+  documented exception that stays on the direct rail, with a legal prerequisite recorded before any
+  future batch may attempt it. It is listed here only so that a reader looking for it finds the
+  ruling instead of a gap.
+
+**All three of the owner decisions this section opened were ruled on 2026-09-18**, and each is
+recorded where it belongs rather than only here: `prequal_declined` in the §27.1 section above and
+in §8.4; the paused-auction re-entry as **§13-D61**; `closeAuction` in its own section above, where
+the ruling gave it a caller and closed a live defect one file over. CI was red on this branch at the
+time the list above was first written and is green now — see the phase report.
 
 ### 8.2 Phase scopes
 
@@ -3917,6 +4503,31 @@ below because "the specification did not move" has been true for every prior pha
 the next phase must not inherit that assumption by default. **§1's expected value for the Markdown
 is superseded from this commit forward**; §1's table carries both.
 
+**Re-verified at the close of Phase 10 (2026-09-17).** `sha256sum` over both governing files at the
+Phase 10 close commit:
+
+| File | Expected (post-Phase-8) | Observed at the Phase 10 close | Result |
+| --- | --- | --- | --- |
+| `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | **MATCH** |
+| `AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | **MATCH** |
+
+Neither specification moved while this phase was implemented, so every §-citation in the Phase 10
+record refers to hash-verified text — including the §34 clause Phase 8 corrected, which is inside the
+Markdown's current hash rather than beside it.
+
+**There is no Phase 9 block in this list, and that is a gap rather than a claim.** Phase 9 closed
+without adding one; this phase did not reconstruct it, because a re-verification recorded after the
+fact by a different session is a statement about the file today, not about what Phase 9 read. What
+CAN be said is that the two values above are the ones §1 and the Phase 8 block record, so the file
+has not moved at any point between the Phase 8 close and this one.
+
+**This document's own hash** cannot live inside it. At the Phase 10 close commit — the commit that
+contains this block — `sha256sum docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` is reported in the
+phase report and the pull request, and the next phase verifies against that value before reading
+further. This document DID change during Phase 10, in the places the phase was authorised to
+correct: §8.1 row 10 and §8.3 (76 → 77), §8.2 Phase 10's Rollback and the §13-D14 row (the counter
+measurement and the UNSATISFIED ruling), the new §8.1j AS BUILT section, and this block.
+
 This document itself also changed during Phase 8, deliberately and only where the phase was
 authorised to correct it:
 
@@ -4818,7 +5429,39 @@ on a month counter.
   with the plan snapshot in Phase 3 and is exercised at funding clearance in Phase 8.
 
 - **Owner-gated:** **§13-D14** (physical removal of legacy paths, only after 30 days of zero `LEGACY_PATH_WRITE` in production) and **§13-D23** (QStash dependency, routes and env names deleted here).
-- **Rollback:** This phase mostly deletes: every deletion reverts by reverting the commit, and nothing it removes has carried production traffic for the 30 days the counter proves. The cancellation orchestration is new code behind the existing `cancelDeal` seam.
+- **Rollback:** **THIS PHASE DELETES NOTHING, and the sentence that used to stand here was wrong.**
+  It read "every deletion reverts by reverting the commit, and nothing it removes has carried production
+  traffic for the 30 days the counter proves" — an argument that rests entirely on the counter being real.
+  It is not. **Owner-run census, 2026-09-17 17:00 UTC**, `audit_logs WHERE action = 'LEGACY_PATH_WRITE'`
+  grouped by `metadata->>'kind'`:
+
+  | Kind | Rows | Window | Days since last |
+  | --- | --- | --- | --- |
+  | `DIRECT_TRANSACTIONAL_SEND` | 12 | 2026-09-08 23:40 → 2026-09-14 13:00 | 3.2 |
+  | `QSTASH_PRODUCER` | 0 | — | never fired |
+  | `SETTLEMENT_AUCTION_LAUNCH` | 0 | — | never fired |
+  | *(all other kinds)* | 0 | — | never fired |
+
+  **The two zeros and the twelve mean opposite things, and conflating them is how a live path gets
+  deleted.** `QSTASH_PRODUCER` is zero **by disuse** — the wrapper has never fired, so no amount of
+  waiting converts that silence into evidence of retirement; thirty days of a path nobody exercised
+  proves only that nobody exercised it. `DIRECT_TRANSACTIONAL_SEND` is the opposite: **twelve writes,
+  the most recent three days ago — that legacy path is live in production right now**, which is the one
+  place the thirty-day clock would measure something real, and it has not started because the writes
+  have not stopped.
+
+  **§13-D14 IS THEREFORE UNSATISFIED and this phase performs no physical removal.** It migrates and
+  neutralises: callers move onto the §27 rail, the direct-send allowlist reaches zero §27.1 traffic, and
+  every wrapper, route, dependency and env name stays exactly where it is. Rollback is correspondingly
+  ordinary — the cancellation orchestration is new code behind the existing `cancelDeal` seam, the
+  §26/§27.1 wiring is additive, and the three migrations are additive enum labels and one partial unique
+  index. Nothing reverts by restoring a deleted capability, because nothing is deleted.
+
+  **Earliest reconsideration.** `DIRECT_TRANSACTIONAL_SEND`: thirty days after its last write, so
+  **2026-10-14 at the earliest**, and only if the count stays flat — each new write restarts the window.
+  `QSTASH_PRODUCER`: **no date**. A counter that has never been non-zero cannot go quiet, so §13-D23's
+  deletion needs a different argument than §8.4's clock (the four importers named in §8.1j must be
+  relocated first regardless).
 
 #### Phase 11 — Acceptance
 - §13 reconciliation, form walk, four scenarios and every branch, `ACCEPTANCE-REPORT.md`, live-only
@@ -4861,7 +5504,7 @@ this subsection.
 
 ### 8.3 Communications and exceptions by phase
 
-Every one of the 76 §27.1 rows and 48 §26 rows is assigned to the phase that owns its trigger in §10;
+Every one of the 77 §27.1 rows and 48 §26 rows is assigned to the phase that owns its trigger in §10;
 Phase 10 asserts completeness by a table-driven test that every `template_key` and `exception_code` in
 the register has at least one enqueue/raise site.
 
@@ -4869,10 +5512,10 @@ the register has at least one enqueue/raise site.
 
 | Legacy path | Phase that neutralises new writes | Compatibility kept for | Removal |
 | --- | --- | --- | --- |
-| Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON, which it is not — §8.1e finding 17**) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
+| Deposit settlement → immediate auction create + invite (webhook + activation reconciler) | 3 | historical auctions with `vehicle_request_id` NULL; reconciler `close` branch retired (**conditional as built: it stands down only while `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` is ON — §8.1e finding 17.** *STALE CLAUSE CORRECTED 2026-09-18, owner-ruled.* This cell read "which it is not" from the day it was written until today, and that stopped being true on **2026-09-13**, when §13-D52 was actioned and the flag was flipped ON in production — recorded in this same file at §8.1e's deploy sequence step 8 ("**DONE 2026-09-13**") and again in its close-out ("**§13-D52 IS ACTIONED. SOURCING_CASE_REPLACES_AUCTION_LAUNCH IS ON IN PRODUCTION.**"). **The flag is ON. The reconciler's `close` branch therefore STANDS DOWN**, and Phase 5's readiness hold owns that decision (`deposit-activation.service.ts:229-244`). The cost of the two days this row disagreed with its own document is recorded as a hazard class in §8.1h) | after zero `LEGACY_PATH_WRITE` for 30 days of production traffic **on non-concierge settlements** — the concierge conversion is outside the flip and never writes one, so counting concierge deposits into the window would show zero writes from a path still creating auctions at settlement (§13-D52 precondition (b), owner ruling 2026-09-11; named guard `CONCIERGE_IS_OUTSIDE_SOURCING_CASE_FLAG` in `lib/services/concierge/concierge-conversion.service.ts`) |
 | `outside_auction_invites` (tokenised outside invites with embedded offer fields) | 5 | reads of the 2 historical rows; public token route resolves both tables; `countReachedInvitations` counts them toward an auction's reach (defect 6) | owner-gated drop after zero writes. **AS BUILT (Phase 5) — NOT STOPPED, CORRECTED 2026-09-12 after the independent review.** `issueInvitations` is the only writer on the NEW path and targets `auction_invitations`, but three pre-existing admin write sites remain live: `app/api/admin/buyers/[buyerId]/launch-auction`, `app/api/admin/buyers/[buyerId]/invite-outside-dealers` and `app/api/admin/offers`. Closing them removes three admin capabilities, which needs owner sign-off, so it is REPORTED rather than done — and the 30-day zero-write window therefore has NOT started. Reads of the two historical rows are kept either way; `countReachedInvitations` sums both pools, so a rooftop invited through both rails counts twice, which is the cost of leaving both open and the reason to close them. **OWNER RULING 2026-09-13: KEEP, and make the clock EVIDENCE-DRIVEN rather than calendar-driven.** Closing a capability in order to start a 30-day timer is the wrong trade; instead a write counter records when the path actually goes quiet, and the window starts from measured silence. **The §8.4 30-day zero-write window has NOT started.** *Write-site inventory corrected the same day — the list above names the admin ROUTES and is incomplete.* Measured: `app/api/admin/offers/route.ts:194,206` (update + create), `app/api/public/outside-dealer-offer/[token]/route.ts:90,116` (the outside dealer's OWN submission — the atomic `respondedAt` claim, then the offer write-back) and `lib/services/auction/outside-invite.service.ts:148` (the mint the admin routes call). Four writes across three files. The public token route is the half the earlier list missed, and it is the half with no rail equivalent — which is what makes KEEP the right call rather than a deferral. **THE RULING WAS MADE ON THE CORRECTED LIST, and that is load-bearing:** a list naming only the admin routes makes CLOSE look cheap, because every site on it has a rail equivalent. The outside dealer's own submission path does not, and it is the one the incomplete list omitted. Had the ruling been taken on the old list it would likely have gone the other way, and closed a capability no rail can yet replace |
 | `vehicle_offers` / `dealer_offer_submissions` as parallel offer models | 6 | staff intake UI; the canonical-`offers` write-through is **BLOCKED (owner-accepted 2026-09-14)** — `Offer.auction_id` is required and these models carry no auction binding | keep as intake; no drop |
-| Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero) | none after Phase 10 | remove wrappers when allowlist is empty |
+| Direct Resend/Twilio sends in transaction code | 2 (allowlist) → 10 (zero **without a documented reason**) | **the FCRA §615 adverse-action sender, permanently until a separate compliance batch** — `sendAdverseActionEmail` and its four call sites (`prequal.service.ts`, `admin-prequal.service.ts`, `app/api/admin/prequal/[id]/decide/route.ts`, `app/api/admin/buyers/[buyerId]/prequal/manual-override/route.ts`) | **TARGET RESTATED BY OWNER RULING, 2026-09-18: zero §27.1 transactional traffic WITHOUT A DOCUMENTED REASON, not literal zero.** One entry has a reason and it is ledgered, with the ceiling pinned at one and the §8.3 gate failing if it gains an enqueue site: `prequal_declined`, the §615 adverse-action notice. **Requirement, cited precisely:** Stage 3 **L394** ("decline with applicable adverse-action information") and **L398** ("delivery outcome is recorded as sent, duplicate, or failed **[BUILT]**"), the §26 register **L1243**, and **§29**'s "adverse-action outcomes distinguished". *It is NOT §12, which is financing checkpoints (12a–12d) — the mis-citation is corrected here rather than repeated.* **Why it stays:** everything those lines require is built and provable SYNCHRONOUSLY — `sendAdverseActionEmail` returns an `EmailSendOutcome` discriminant that `classifyAdverseActionDelivery` (`lib/services/prequal/adverse-action-outcome.ts:48-60`) turns into one of three `compliance_events` types in the same call stack as the decision, and `raiseAdverseActionFollowUp` opens a §26 `PREQUAL_DECLINE` row on anything that is not a confirmed delivery. `enqueueTransactional` returns an ENQUEUE, so migrating trades a fact at decision time for an eventual one, and §29 forbids weakening exactly that. **OPEN QUESTION, NOT OURS TO RULE:** whether an enqueued notice may ever be recorded as discharging §615, and what timing obligation attaches, is a legal question. Counsel settles it BEFORE any migration is attempted, because the answer decides whether a synchronous `ENQUEUED` compliance row is a legitimate artefact or a false statement that a notice was sent. Neither the owner nor this programme has ruled it. Ledger: `lib/services/comms/__tests__/register-discharge-ledger.ts` |
 | Deposit-reminder direct producer | 3 | none | remove with allowlist |
 | In-app credit application route/UI (`credit_applications`) | **0** for the one write path (`POST /api/buyer/financing/apply` → bodyless 410 in the pre-schema security correction — §8.2 Phase 0, §8.2a), then **7** (corrected to **4** — §8.1a; the twelve-file figure was grep-derived and counted prose, and under the AST walk exactly four files held a real reference) for the remaining read paths (buyer financing page, the model's own service, the dormant orchestrator, the review queue). **AS BUILT (Phase 7): all four removed, allowlist at ZERO** | table retained (0 rows) pending retention sign-off | owner-gated drop (§13-D9, D25) |
 | Non-crypto pickup QR nonce | 9 | none | removed in phase |
@@ -7533,10 +8176,10 @@ no category, or in two, fails `pnpm test:parity-ledger`.
 | --- | --- |
 | BLOCKING PHASE 1 | **6** |
 | BLOCKING A NAMED LATER PHASE | **45** |
-| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **9** |
-| **Total** | **60** |
+| DEFAULT AND PROCEED UNLESS OVERRIDDEN | **10** |
+| **Total** | **61** |
 
-Decisions in the table: **60**. Categories sum to **60**. Unclassified: **0**.
+Decisions in the table: **61**. Categories sum to **61**. Unclassified: **0**.
 
 **BLOCKING PHASE 1 — these, and only these, must be answered before the Phase 1 wave is authored and deployed:**
 
@@ -7567,7 +8210,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D11 | `QueueItemType` extension approach and `queue_items` shape | DECISION | Phase 1 | **RULED 2026-09-05: option A — keep the 8 existing labels, add broad category labels, carry the §26 row identity in TEXT `exception_code`.** One-label-per-row (48+) is rejected: the register is demonstrably unsettled (MD §26 48 rows, HTML EXC 49, parity 54 identifiers), the repo reserves enums for closed vocabularies and uses free text with an inline comment for open ones (`AdminAuditLog.action`, `PlatformAlert.source`), and `FinancingReviewTask` — the shape this table reuses — already made exactly this choice. Reversal is asymmetric in A's favour: `ADD VALUE IF NOT EXISTS` is one idempotent line, while an unwanted label can never be dropped (repo doctrine leaves it inert, `20261001000000_pickup_confirm_roundtrip/migration.sql:23-24`), so B's real cost is ~50 dead labels pinned permanently by the hard-zero functional drift gate. **SHAPE SENT BACK FOR CORRECTION — ALL SIX CORRECTIONS APPLIED TO THE PROOF DDL 2026-09-06.** Each is recorded below as *finding → resolution*, and each resolution is asserted by `phase-1-proof/verify.sql`, so a later edit that undoes one fails the `phase1-proof` CI job rather than reaching production. (1) **`assigned_admin_id` FK target was wrong.** D11's prose and the proof DDL named `users`, but the admin actor id everywhere is `Admin.id` (`lib/auth/admin-session.ts:18-19`, `lib/auth/admin-api.ts:23`, both resolving the JWT's `adminId` through `prisma.admin.findUnique({ where: { id } })`), and `Admin.id` ≠ `Admin.userId` (`schema.prisma:270-271`). **RESOLVED:** both `queue_items.assigned_admin_id` and `vehicle_requests.assigned_admin_id` now key to `admins(id)` `ON DELETE SET NULL`; `verify.sql` asserts the FK *target*, not merely the constraint name, because a key onto `users` carries the same name and would otherwise pass. This is a **correctness defect rather than a data backlog** — `vehicle_requests.assigned_admin_id` held **0 non-NULL rows** when read on 2026-09-05 (§5.7, read directly from `aieybibvewmvrubcpthm` by read-only query in the review session), so nothing has yet been written against the wrong parent; left uncorrected it would have rejected every future assignment at runtime with a 23503. **That zero is not the deploy-safety argument, and an earlier draft of this row wrongly used it as one.** It is a point-in-time measurement, the deploy is later, and `ADD CONSTRAINT` validates existing data: a single admin assignment in between makes the statement fail, and Prisma runs the file in one transaction, so the whole wave rolls back. Safety comes from a deploy-time assertion instead — `docs/transaction-flow/phase-1-proof/preflight.sql`, in the same pattern §13-D2 already uses for the unique index, returns one `BLOCK` row per `vehicle_requests` row whose non-NULL `assigned_admin_id` does not resolve in `admins(id)`, and a non-zero result stops the deploy for owner-run reconciliation. `queue_items` needs no such assertion: the table does not exist in production (§5.2), so the wave creates it empty and its FK validates an empty set by construction. (2) `owner_role` was `TEXT` in the proof DDL but an enum in D11's prose. **RESOLVED: enum**, because §26 is a closed vocabulary — the register names an owner for every one of its 48 rows and no row invents one. (3) The proposed `QueueOwnerRole` members could not express the register: `SUPPORT` and `CONCIERGE` appeared in **zero** §26 Owner cells, while Buyer (7), Buyer/Operations (4), System (4) and Buyer/Dealer (1) — 16 rows — had no member. **RESOLVED** by a membership rule rather than a list: exactly one member per **distinct** §26 Owner cell, and no member without a cell — `OPERATIONS` (23), `BUYER` (7), `FINANCE` (6), `SYSTEM` (4), `BUYER_OPERATIONS` (4), `COMPLIANCE` (2), `OPERATIONS_FINANCE` (1), `BUYER_DEALER` (1), summing to the register's 48. `SUPPORT` and `CONCIERGE` are dropped and `verify.sql` fails if either reappears (an enum label cannot be dropped once shipped). The three composite cells keep their own members rather than collapsing to a first-named owner, because the register means **shared** ownership there and resolving it to one side would discard the fact the column exists to record. This duplicates no part of `AdminRole` (`schema.prisma:1466-1472`), which is RBAC over admin *accounts* and cannot express `BUYER`, `SYSTEM` or a shared owner at all — the two vocabularies share no member, so golden rule 1 is satisfied. (4) `buyer_visible_status` could not be "taken verbatim from the §26 column" — §26 is three columns (`Exception` / `Owner` / `Required result`) and none of them is a buyer-facing string; 48+ such strings must be **authored**, which is unbudgeted work on the Phase 1 critical path. **RESOLVED with a defined source:** a catalogue keyed by `exception_code`, authored and owned by `lib/services/operations/queue-item.service.ts` in **Phase 2** — the phase that owns every writer of this table (C14, L3-01) — and stamped onto the row at raise time. Phase 1 lands the column nullable with **no** CHECK; a CHECK here would pin a vocabulary Phase 2 has not written. (5) The additive label count is **12, not 11**: `LINEAGE_ORPHAN` is required by L3-01 and appeared in neither the §8.2 list nor the proof DDL. **RESOLVED:** the label is in directory 1 and `QueueItemType` now holds **20** (8 + 12), which is what R36 asserts. (6) `owner_role` had no index though the table's entire premise is per-owner queues. **RESOLVED:** `queue_items_owner_role_status_idx` on `(owner_role, status)`, following the `@@index([status, taskType])` precedent on `FinancingReviewTask`, the shape this table reuses. **Still owner-gated:** the corrections settle the shape; authorising Phase 1 to begin, and promoting these directories into `frontend/prisma/migrations/`, remains the owner's (§13-D13). | BLOCKING PHASE 1 |
 | D12 | Enable the Stripe payment settlement reconciler in production | ACTION (money path) | Phase 3 acceptance | `DEPOSIT_SETTLEMENT_RECONCILE_ENABLED="true"` (default off; `lib/services/payment/deposit-settlement.service.ts:74-76`); the reconciler also carries a hard-coded excluded production deposit id (`:69-71`) that Phase 3 removes. Enable only after the recovered-gap alert is verified in preview, after the excluded deposit `77934f10-…` is resolved by hand, and after choosing **one** alert rail: Phase 3 folds the duplicate read-only detector (`health.service.checkDepositProviderEvidence` via `sla-check`) into `raiseException` (recommended) rather than keeping two rails. **Verify after (added 2026-09-09 — §13's preamble requires a post-completion check and this row, the only money-touching gate in the phase, had none).** Within one hour of setting the variable: (a) the cron reports it is live rather than skipped — `SELECT result->'settlement'->>'skipped' FROM cron_job_logs WHERE cron_name='deposit-activation-reconcile' ORDER BY started_at DESC LIMIT 1` returns NULL, not `deposit_settlement_reconciler_disabled` (the route returns `{settlement, activation}`, so a top-level `result->>'skipped'` reads NULL whatever the flag says and would pass this check while the reconciler was still off — corrected 2026-09-10); (b) `SELECT count(*) FROM deposits WHERE status='PENDING' AND stripe_payment_intent_id IS NOT NULL AND created_at < now() - interval '1 hour'` is non-increasing across two consecutive runs; (c) every settlement the reconciler performs has exactly **one** open `queue_items` row — `SELECT deposit_id, count(*) FROM queue_items WHERE exception_code='PAYMENT_WEBHOOK_MISSED' AND status='OPEN' GROUP BY 1 HAVING count(*) > 1` returns no rows, which is what proves the fold to one rail held; and (d) no `SYSTEM_ALERT` notification is raised for a deposit the reconciler settled. Any of (a)–(d) failing is an unset-the-flag, not a fix-forward. | BLOCKING A NAMED LATER PHASE (Phase 3) |
 | D13 | Production deploy of the Phase 1 migration wave | ACTION | end of Phase 1 | Order: D1 (**all six rows** — ruled 2026-09-05, §13-D1) → D2 → **`preflight.sql` read-only against production, in the same maintenance window, returning no `BLOCK` row** → `prisma migrate deploy` → verify physical schema (information_schema/pg_indexes/pg_trigger) **and** ledger. The preflight step is not optional and is not satisfied by §5's readings: those are point-in-time, and two statements in the wave validate against DATA rather than schema — the `vehicle_requests_one_open_per_buyer_key` unique index and the `assigned_admin_id → admins(id)` foreign key. Both are inside `prisma migrate deploy`'s single transaction, so either one failing rolls the entire wave back. The order is forced, not preferred: the wave creates `vehicle_requests_one_open_per_buyer_key` and the deploy does not run until §5.6's violator query returns zero. **Precondition the order does not state:** the wave does not yet exist in the chain — `frontend/prisma/migrations/` ends at `20261105000000` and there is no `20261106*` directory; both files live under `docs/transaction-flow/phase-1-proof/` and say so in their own headers. Authoring and promoting those two directories is Phase 1 implementation work and is gated on §13-D5, §13-D11 (including its six shape corrections) and §13-D24 being answered first; until then `prisma migrate deploy` would apply nothing. **RULED 2026-09-07 and codified as a runbook at §8.1a.2, which is authoritative for the order — including the requirement that step 4 precede the application deploy, and the `42703` window between merge and step 4.** **Reversal:** enum labels cannot be dropped, so no wave that adds one is fully reversible (§8.2); `rollback.sql` is now **AUTHORED and proven by round trip** (4,729 objects identical to the untouched baseline; only the 41 enum labels remain, as PostgreSQL has no DROP VALUE). **STATUS 2026-09-07: both directories are PROMOTED** — `frontend/prisma/migrations/` now carries `20261106000000_transaction_spine_enums` and `20261106000100_transaction_spine_foundation`, so `prisma migrate deploy` has something to apply. The preflight now asserts **7** preconditions, not 2: the original two plus orphan checks for the four guarded keys added to live tables (`buyer_opportunity_id`, `external_pre_approval_documents.pre_approval_id`, `deal_status_history.deal_id`, `shortlist_items.inventory_item_id`) and the R30 `deals` lineage CHECK. | BLOCKING PHASE 1 |
-| D14 | Legacy path physical removal (`§8.4`) | ACTION | after 30 days of zero `LEGACY_PATH_WRITE` rows in production | Each path listed with its counter; preview traffic never counts. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — gated on 30 days of production evidence, not on an answer; no phase waits for it |
+| D14 | Legacy path physical removal (`§8.4`) | ACTION | after 30 days of zero `LEGACY_PATH_WRITE` rows in production | Each path listed with its counter; preview traffic never counts. **MEASURED AND RULED UNSATISFIED, 2026-09-17 17:00 UTC (owner-run census, Phase 10 STOP 1).** The counter was read correctly for the first time: `SELECT metadata->>'kind', count(*), max(created_at) FROM audit_logs WHERE action='LEGACY_PATH_WRITE' GROUP BY 1`. **Total 12 — every one of them `DIRECT_TRANSACTIONAL_SEND`**, window 2026-09-08 23:40 → 2026-09-14 13:00, most recent **3.2 days** before the census, 12 of them inside the last 30 days. `QSTASH_PRODUCER` **0**. `SETTLEMENT_AUCTION_LAUNCH` **0**. **An earlier reading of 0 came from `admin_audit_logs`, which is a DIFFERENT TABLE** (`AdminAuditLog.action` is a plain `String` mapped to `admin_audit_logs`, schema.prisma:1818,1821,1835) from the one `recordLegacyPathWrite` writes (`prisma.auditLog.create` → `AuditLog.action AdminActionType` → `audit_logs`, schema.prisma:3180,3184,3194). Querying `admin_audit_logs` for this label is syntactically valid and structurally always empty, so it reads as a clean zero forever. **The 12 and the 0s mean opposite things.** Zero-by-disuse (`QSTASH_PRODUCER` — the wrapper has never fired) is not evidence of retirement and never becomes so by waiting. Twelve writes ending three days ago means the direct-send path is **live in production**, so its 30-day window has not started. **Phase 10 therefore deletes nothing** (§8.2 Phase 10, Rollback — the prior rollback sentence was corrected rather than inherited). **Earliest reconsideration: `DIRECT_TRANSACTIONAL_SEND` 2026-10-14**, and only on a flat count — each new write restarts the window. **`QSTASH_PRODUCER`: no date**; §13-D23 needs an argument other than §8.4's clock. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — gated on 30 days of production evidence, not on an answer; no phase waits for it. **As of 2026-09-17 the gate is CLOSED and Phase 10 proceeded without any deletion.** |
 | D15 | Real provider delivery verification (Resend, Twilio, Stripe settlement, MicroBilt returns, e-sign evidence storage, MarketCheck live queries) | ACTION | Phase 11 | Live-only; remains UNVERIFIED until run under owner authorisation. | BLOCKING A NAMED LATER PHASE (Phase 11) |
 | D16 | Approved-amount filtering on the buyer search | DECISION | Phase 4 | Today `/api/buyer/search` hard-filters listings to `price ≤ approved amount` and the detail page disables shortlisting above budget (§10 area *inventory*). §22a says filter generously and enforce the ceiling only at offer validation, selection and contract request. Proposed: follow §22a (headroom filter, no hard cut) — this is a case where existing code is stricter than the spec but contradicts a stated rule, so the spec wins unless the owner overrides. | BLOCKING A NAMED LATER PHASE (Phase 4) |
 | D17 | Existing tests that encode rules the spec replaces | ACKNOWLEDGEMENT | Phases 3–5 | `app/api/buyer/plan/__tests__/upgrade.test.ts` ("upgrade succeeds with NO charge"), `lib/services/shortlist/__tests__/shortlist-radius.test.ts` (100-mile ceiling), `lib/services/vehicle-request/__tests__/request-progression.test.ts` (sourcing side effects before payment), `lib/services/deal/__tests__/service-fee.test.ts` ($0 Standard fee) will be rewritten, not weakened, in the phase that changes the rule; each rewrite is called out in that phase's report. | BLOCKING A NAMED LATER PHASE (Phases 3–5) |
@@ -7614,6 +8257,7 @@ that proceeds unless the owner overrides it. A later-phase decision never blocks
 | D58 | `Deal.dealerId` has no writer at claim completion — §13-D20 depends on one | DECISION | **dealer-recruitment area** (the claim / verification / agreement sequence) | **RULED 2026-09-14 — NOT PHASE 7'S, AND NOT PHASE 8'S BY DEFAULT.** §13-D20 states that `Offer.dealerId` stays on the outside-dealer placeholder permanently and that `Deal.dealerId` is set to the claimed Dealer **when the claim, verification and agreement sequence completes**. That write does not exist. The only production writer of the field is `lib/services/deal/select-offer.service.ts:158`, which sets it to `offer.dealerId` at deal creation — the *shared system placeholder* for an outside winner, not null. **The exact write owed:** on completion of the claim sequence, set `deals.dealer_id` to the claimed, verified, agreement-signed `Dealer.id` for every Deal whose `offer.rooftop_id` matches the claimed rooftop and whose `offer.dealer.is_system_placeholder` is true. **Consequence while it is missing:** `outsideWinnerGate` (`lib/services/deal/dealer-reaffirmation.service.ts`) can never be satisfied, so `submitReaffirmation` refuses every outside winner and the deal cannot leave `DEALER_CONFIRMATION`. **Phase 7 must NOT build a second writer to compensate** — owner-ruled, parallel-system rule. What Phase 7 does instead is refuse to *penalise* the blocked dealership: `returnToRemainingOffers` gates the SLA and scorecard attribution on `dealershipWasBlocked` and opens an Operations row instead, so no outside winner accrues a rooftop SLA violation for a sequence it cannot complete. That guard is not a workaround and does not become dead when this row is built — a dealership mid-claim, suspended, or with a lapsed agreement is blocked by the same gate for the same reason. | BLOCKING A NAMED LATER PHASE (the dealer-recruitment claim sequence — §10b cannot complete end to end until it lands) |
 | D59 | Two Deals can exist for ONE Vehicle Request — no database constraint, and the auction path has no guard | DECISION (data integrity) | **Phase 10** (the control-plane phase that makes every status write conditional, §28.3 #3) | **REGISTERED 2026-09-16, found while auditing the readers of `deals.funding_cleared_at` before P9-00 gave it a writer.** The audit asked whether `upgrade-window.service.ts:113` — which closes the $400 Premium window on `findFirst({ vehicleRequestId, fundingClearedAt: { not: null } })`, matching on `vehicleRequestId` ALONE — would misfire once a deal could actually clear. **RULED 2026-09-16: the reader is RIGHT and stays as it is.** §23.2 closes the window because the REQUEST is ending, not because one deal among several cleared. *What is wrong is that two deals per request can exist at all*, and that is this row. **The evidence, each checked rather than inferred.** (1) `deals.vehicle_request_id` carries only `deals_vehicle_request_id_idx` — a grep of every `migration.sql` for a UNIQUE index on that column returns nothing. (2) `VehicleRequest.deals Deal[]` and `VehicleRequest.auctions Auction[]` are both one-to-many, and `auctions.vehicle_request_id` is non-unique too, so a request can carry several auctions and therefore several selections. (3) The **concierge** path DOES guard it — `app/api/buyer/requests/[requestId]/offer/respond/route.ts:71-86`, whose own comment names the case it exists to prevent: *"it did nothing about accepting a DIFFERENT offer on the same request, which is the case that produced two competing Deals"* — but the check is a `prisma.deal.findFirst` **outside** the `$transaction` that creates the Deal, so it is open to the very race it was written for. (4) The **auction** path has no such guard at all: `commitOfferSelection` (`lib/services/deal/select-offer.service.ts:82-92`) locks the AUCTION row `FOR UPDATE` and re-checks for an `ACCEPTED` offer on **that auction**; neither is a check on the request, and a grep of that file for `deal.findFirst` / `existingDeal` returns nothing. **Proposed:** a partial unique index making one live Deal per Vehicle Request a database fact, with the terminal statuses excluded so a cancelled deal does not bar a legitimate re-selection, and the concierge pre-check moved inside its transaction. Whether a cancelled or refunded deal should free the request is the business half of this decision and is the owner's. **Verify after:** two concurrent selections on one request, one through each path, produce exactly one Deal and one typed refusal — a destructive-concurrency test in the style of `select-offer-concurrency.test.ts`. **THE APPLICATION GUARD IS BUILT HERE; THE DATABASE CONSTRAINT IS NOT.** Owner ruling, 2026-09-16: *"record-don't-build because the real fix is a database constraint like Phase 1's one-open-request partial index, and I didn't want that scoped mid-phase. A four-line application guard alongside the §13 row is fine."* So `commitOfferSelection` now refuses inside its own transaction when the request already holds a Deal, returning the existing lost-race signal (`OfferSelectionRaceLostError`) rather than inventing a second refusal shape; null lineage is skipped deliberately, because `findFirst({ vehicleRequestId: null })` would match the first lineage-less deal in the table and refuse every later selection. Proved failing-first: without the guard the second Deal is created and two of the four cases go red. **STILL OPEN FOR PHASE 10, and this row stays open until both land:** (a) the partial unique index that makes it a database fact, with terminal statuses excluded so a cancelled deal does not bar a legitimate re-selection — and whether a cancelled or refunded deal frees the request is the business half, the owner's; (b) the CONCIERGE pre-check, which still sits OUTSIDE its transaction and is therefore still open to the race it was written for. An application guard on one of two paths is a mitigation, not the fix. Nothing was broken in the meantime: production holds zero deals, and P9-00's writer is scoped `{ id: dealId, fundingClearedAt: null }` so it cannot stamp the wrong deal. | BLOCKING A NAMED LATER PHASE (Phase 10) |
 | D60 | `PostCompletionObligation` idempotency is enforced by a SINGLE WRITER, not by the database — the constraint is owed BEFORE a second writer exists | DECISION (data integrity) | **Before any second caller of `openObligation`** — §Stage 21's resolution control is the nearest candidate | **REGISTERED 2026-09-17, from the second independent Phase 9 review. OWNER-RULED THE SAME DAY: NOT A THIRD MIGRATION — keep the count at two.** `openObligation` (`lib/services/deal/post-completion-obligations.service.ts`) documents itself as IDEMPOTENT PER (deal, type) and implements that as a `findFirst` then `create`. There is **no unique constraint behind it**: `PostCompletionObligation` carries only `@@index([dealId])`. Two concurrent callers would produce two PENDING rows for the same (deal, type) and **double-count on the dealership scorecard** — which is the harm the function's own comment names. **Not reachable today**, and that is the whole reason this is a row rather than a defect: the only caller runs inside the completion CAS's winning transaction, so no second caller can interleave. **Why the index was NOT added now.** Owner ruling, 2026-09-17: *"An index added now guards nothing and a §13 row naming the precondition guards the future."* Same shape as **§13-D59**'s record-don't-build ruling, and with a second reason specific to this phase: the owner had been given the migration count (**two**) before running the production sequence, and a third directory appearing after that number was quoted is the out-of-band-DDL shape §8.1a catalogues. **What WAS done instead:** the function's doc comment no longer claims a guarantee the schema does not keep — it now states that the idempotency is held by the single writer, that no constraint exists, and that this row is the precondition for a second writer. That correction is the control until the index lands. **The exact constraint owed:** a partial unique index on `(deal_id, type) WHERE status <> 'RESOLVED'` — partial, so a RESOLVED obligation does not bar a legitimately recurring one, which is the same carve-out reasoning §13-D59 applies to terminal deal statuses. **Verify after:** two concurrent `openObligation` calls for one (deal, type) produce exactly one row and one typed refusal — a destructive-concurrency test in the style of `select-offer-concurrency.test.ts`. **This row stays open until the index lands OR a second writer is proposed, whichever comes first — and a second writer proposed before the index is a BLOCK, not a sequencing preference.** | DEFAULT AND PROCEED UNLESS OVERRIDDEN — the single writer holds the invariant today, so the default is to proceed without the index; the OVERRIDE is a second caller of `openObligation` (§Stage 21's resolution control, currently unbuilt), and proposing one before the index lands is a BLOCK rather than a sequencing preference |
+| D61 | A PAUSED AUCTION CAN BE SILENTLY RESUMED BY THE SOURCING SWEEP — `PENDING` carries two meanings and the launch path cannot tell them apart | DECISION (operational integrity) — **OWNER-RULED 2026-09-18: OPTION B, in its own batch, NOT in Phase 10** | Before the Phase 5 ladder is extended; the guard may ship at any time and is independent of §13-D52 | **REGISTERED 2026-09-18, from the first independent Phase 10 review's third question, and CORRECTED TWICE before it was ruled.** **The path.** (1) `admin-buyer-command-center.service.ts:906-910` — a pause writes `ACTIVE → PENDING`; there is no paused column, `PENDING` *is* a paused auction. (2) `app/api/cron/coverage-hold-reconcile/route.ts:46` → `sweepSourcingCases` → `driveSourcing` → `launchAuction`, every 15 minutes. (3) `deposit-auction.ts:36-40,91` — `LIVE_AUCTION_STATUSES` INCLUDES `PENDING`, so `findLiveAuctionForDeposit` returns the paused auction. (4) `launch-readiness.service.ts:560-569` — the refusal is `existing.status === "ACTIVE"` only, so a `PENDING` row falls through to `auctionId = existing.id`. (5) `:685-690` — step 3 flips it back to `ACTIVE` with a **fresh `endsAt`** and re-issues invitations. The administrator's pause is undone, the 48-hour window restarts, and dealerships are re-invited. **FIRST CORRECTION — the gate was understated.** Phase 10 first recorded this as *"LATENT, not live … the flag is off in production"*, citing the §8.4 row. **The flag has been ON since 2026-09-13** (§13-D52 actioned; §8.1e's own close-out says so), and the sweep stands down only when it is OFF (`sourcing-driver.service.ts:754-764`). Flag ON ⇒ the sweep RUNS. That mis-citation is recorded as a hazard class in §8.1h. **SECOND CORRECTION — the reach was overstated.** There is a second gate the original trace omitted: `sweepSourcingCases` selects only cases in `ACTIVE_SOURCING` / `READY_TO_LAUNCH` / `RADIUS_AUTHORIZATION_REQUIRED` (`sourcing-driver.service.ts:766-775`), and a successful launch moves the case to `LAUNCHED` (`launch-readiness.service.ts:731-741`), whose only onward edge is `CLOSED` (`sourcing-case.service.ts:219`). A pause requires the auction to be `ACTIVE`, which only happens after the launch flip — so the ORDINARY paused auction sits under a `LAUNCHED` case and the sweep never re-selects it. **The net fact is therefore: LIVE, but conditional on a half-completed launch**, not "any paused auction". **THE CAUSE, recorded because the eventual fix is about it.** The flip to `ACTIVE` (`launch-readiness.service.ts:680-690`, inside `$transaction`) and the case transition to `LAUNCHED` (`:731-741`, **outside** it, with a network dispatch between them) are TWO WRITES. If the second never lands — `transitionCase` throws, the invocation dies or times out — the auction is `ACTIVE` under a still-swept case. Nothing reconciles that mismatch: `LAUNCHED` is read in only two places and neither repairs it. **THE FIX, as ruled: OPTION B — guard on `Auction.startedAt`.** `startedAt` is written only where an auction goes ACTIVE (`auction.service.ts:104`, `launch-readiness.service.ts:688`, `deposit-activation.service.ts:289`, `app/api/admin/auctions/route.ts:103`, `admin-buyer-command-center.service.ts:940`) and by no `auction.create` site, so **`PENDING` + `startedAt IS NOT NULL` ⟺ it ran and is now held**, and `PENDING` + `startedAt IS NULL` ⟺ never launched. `launchAuction` refuses the fall-through in the first case and holds with a blocker. One predicate, one existing column, no new migration — and the precedent is already in the codebase at `auction-invitation.service.ts:1125`, which uses `startedAt: { not: null }` as exactly this discriminator. **Phase 10's earlier claim that the fix "needs either a column or a reading of the admin audit log" was wrong and is corrected here.** **NOT IN PHASE 10, owner-ruled:** option C (making the flip and the case transition atomic) reorders a live launch path and belongs with the Phase 5 ladder under §13-D52, where it can be seen against the rest of that ladder; Phase 10 is green and about to merge, and widening it is how a batch doubles. **Verify after:** a paused auction (`PENDING`, `startedAt` set) under a `READY_TO_LAUNCH` case survives a sweep tick unchanged — same `endsAt`, no new invitations — and a never-launched `PENDING` auction still launches normally. | DEFAULT AND PROCEED UNLESS OVERRIDDEN — **owner-ruled 2026-09-18 as OPTION B, in its own batch**, so nothing waits on it: the window needs a launch that half-completed AND an administrator's pause on the same request, and the guard is correct whatever caused the mismatch. The OVERRIDE is evidence the window has been hit — a `READY_TO_LAUNCH` case sitting under an `ACTIVE` or `PENDING` auction in production — at which point the guard ships before any further Phase 5 ladder work, ahead of option C |
 
 
 ## §14 Out-of-scope findings (reported, not implemented)

@@ -72,6 +72,21 @@ mock.module("@/lib/prisma", {
       },
       dealStatusHistory: { create: async (a: { data: Record<string, unknown> }) => { ctrl.historyCreates.push(a.data); } },
       buyerActivityEvent: { create: async () => {} },
+      // PHASE 10 — §28.3 #4. The guarded swap and its `DealStatusHistory` row now
+      // commit in ONE interactive transaction, so the mock has to model one. It hands
+      // the callback the same mocked client, which is the right fidelity for these
+      // tests: every assertion below is about WHAT was written and in what order, and
+      // the real client's `tx` exposes the same model methods.
+      //
+      // What this mock deliberately does NOT simulate is rollback. A test that needs
+      // to prove the status change is undone when the history write fails cannot use
+      // this fake — it is in `tests/e2e/advance-deal-status-atomicity.spec.ts`, against a
+      // REAL database, because atomicity is a property of the database and asserting it
+      // against a mock that cannot roll back would assert nothing.
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        const self = (await import("@/lib/prisma")).prisma;
+        return fn(self);
+      },
     },
   },
 });
@@ -289,7 +304,9 @@ test("arriving at FEE_PAID with the fee already recorded continues to CONTRACT_P
   ctrl.deal.feePaidAt = new Date();
   ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
   const { advanceDealStatus } = await load();
-  await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", force: true });
+  // PHASE 10 §28.3 #6: a force now carries a reason. The override is the point of
+  // the audit row, and an override with no stated why records nothing worth reading.
+  await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", force: true, reason: "fee receipt is authoritative" });
   assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "a paid fee must not strand the deal at FEE_PAID — and §13-D28 moved the ladder's last rung off INSURANCE_PENDING");
 });
 
@@ -336,7 +353,11 @@ test("a CAS loser whose winner CASCADED past the target no-ops instead of throwi
   ctrl.deal.feePaidAt = new Date();
   ctrl.raceTo = "INSURANCE_PENDING"; // winner cascaded well past FEE_PENDING
   const { advanceDealStatus } = await load();
-  const moved = await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "BUYER" });
+  // SYSTEM, not BUYER. Phase 7 REMOVED buyer self-advance of financing (§8.4: "Buyer
+  // self-advance of financing … advancement only through the checkpoint service"), and
+  // Phase 10's actor matrix now enforces what that removal intended. The subject of this
+  // test is the CASCADED-race no-op, which the actor was never part of.
+  const moved = await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
   assert.equal(moved, false, "the race loser reports it did not move the deal");
   assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "and must not drag the deal backwards");
 });
@@ -419,7 +440,11 @@ test("COMPLETED is refused when the dealership's executed contract is not on fil
   ctrl.deal.dealerExecutedContractId = null;
   const { advanceDealStatus, ReleaseNotClearedError } = await load();
   await assert.rejects(
-    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER" }),
+    // ADMIN, not DEALER. §Stage 19 — "the Deal never completes automatically on the
+    // dealer's word alone" — is now enforced at the authorization layer, so a DEALER
+    // actor is refused BEFORE the release gates and this test would assert the wrong
+    // refusal. The gate under test is the executed contract; the actor is incidental.
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "ADMIN" }),
     (err: unknown) => err instanceof ReleaseNotClearedError && /executed contract/.test((err as Error).message),
     "a buyer's signature is not execution — a vehicle is not released against a half-signed contract",
   );
@@ -429,7 +454,7 @@ test("COMPLETED is refused when funding has not cleared — THE hard rule", asyn
   ctrl.deal.fundingClearedAt = null;
   const { advanceDealStatus, ReleaseNotClearedError } = await load();
   await assert.rejects(
-    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER" }),
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "ADMIN" }),
     (err: unknown) => err instanceof ReleaseNotClearedError && /funding has not been cleared/.test((err as Error).message),
     "no conditional delivery, no spot delivery — never on the expectation that financing completes later",
   );
@@ -442,7 +467,11 @@ test("both new gates are overridable only by an audited force, like the insuranc
   // `force` is the documented admin override and is recorded in DealStatusHistory. It is the
   // difference between an override and a gap, and it must still work — a release that can
   // never be unblocked by a human is its own failure mode.
-  await advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "ADMIN", force: true });
+  await advanceDealStatus("d1", DealStatus.COMPLETED, {
+    actorRole: "ADMIN",
+    force: true,
+    reason: "release gates cleared out of band; documented by Operations",
+  });
   assert.equal(ctrl.deal.status, DealStatus.COMPLETED);
 });
 
@@ -486,4 +515,87 @@ test("a COMPLETED deal may be re-advanced to COMPLETED — replay is not a move"
   const { advanceDealStatus } = await import("../deal.service");
   ctrl.deal.status = "COMPLETED";
   await assert.doesNotReject(() => advanceDealStatus("d1", "COMPLETED", { actorRole: "SYSTEM" }));
+});
+
+
+// ── PHASE 10 — §28.3 #1 and #6, pinned ──────────────────────────────────────────────────────
+//
+// These assert the NEW guarantees rather than merely accommodating them. Each one
+// would have passed before this phase, which is exactly why it needs a test now.
+
+test("§Stage 19: a DEALER actor cannot complete a deal, forced or not", async () => {
+  const { advanceDealStatus } = await load();
+  ctrl.deal.status = "HANDOVER_PENDING";
+
+  await assert.rejects(
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER" }),
+    (err: unknown) => (err as { code?: string }).code === "ACTOR_NOT_PERMITTED",
+    "the dealership cannot assert the buyer took possession — that is not its fact to state",
+  );
+
+  // AND force does not open it. `force` overrides ORDERING; who may act is not an
+  // ordering question, and a forced dealer completion is precisely what §Stage 19
+  // forbids arrived at through the override instead of through an edge.
+  await assert.rejects(
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER", force: true, reason: "x" }),
+    (err: unknown) => (err as { code?: string }).code === "ACTOR_NOT_PERMITTED",
+    "force must not be a way round the actor matrix",
+  );
+
+  assert.equal(ctrl.deal.status, "HANDOVER_PENDING", "and the deal must not have moved");
+});
+
+test("§28.3 #6: a forced transition without a reason is refused", async () => {
+  const { advanceDealStatus } = await load();
+  ctrl.deal.status = "FEE_PENDING";
+  await assert.rejects(
+    () => advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", force: true }),
+    (err: unknown) => (err as { code?: string }).code === "REASON_REQUIRED",
+    "an override whose audit row cannot say why is not an override, it is a gap with a flag set",
+  );
+  assert.equal(ctrl.deal.status, "FEE_PENDING");
+});
+
+test("§28.3 #6: every history row carries a reason, derived where none is required", async () => {
+  const { advanceDealStatus } = await load();
+  ctrl.deal.status = "CONTRACT_APPROVED";
+  ctrl.historyCreates.length = 0;
+  await advanceDealStatus("d1", "SIGNING_PENDING", { actorRole: "BUYER" });
+  const row = ctrl.historyCreates.at(-1);
+  assert.ok(row, "a transition must write history");
+  assert.ok(
+    typeof row.reason === "string" && (row.reason as string).length > 0,
+    `reason must never be null — §28.3 #6 requires it recorded. Got: ${String(row.reason)}`,
+  );
+});
+
+test("§28.3 #4: the history row is written inside the same transaction as the swap", async () => {
+  // The mock routes $transaction back to the same client, so this asserts the CALL
+  // SHAPE rather than rollback — the rollback proof needs a real database and lives
+  // in `tests/e2e/advance-deal-status-atomicity.spec.ts`. What it does catch is a regression to the old shape, where
+  // the history write moved back outside the transaction and swallowed its own error.
+  const { advanceDealStatus } = await load();
+  ctrl.deal.status = "CONTRACT_APPROVED";
+  ctrl.historyCreates.length = 0;
+  ctrl.updateManyCalls.length = 0;
+  await advanceDealStatus("d1", "SIGNING_PENDING", { actorRole: "BUYER" });
+  assert.equal(ctrl.updateManyCalls.length, 1, "exactly one guarded swap");
+  assert.equal(ctrl.historyCreates.length, 1, "exactly one history row, written with it");
+});
+
+
+test("§28.3 #1: the actor gate is checked BEFORE the idempotent no-op writes anything", async () => {
+  // The no-op path is not a no-op: it merges `opts.data` and runs the arrival hooks. With
+  // the authorization check after it, a DEALER actor could ask for a state the deal was
+  // ALREADY in and write through the gate. Found by the first independent review.
+  const { advanceDealStatus } = await load();
+  ctrl.deal.status = "COMPLETED";
+  ctrl.updateCalls.length = 0;
+
+  await assert.rejects(
+    () => advanceDealStatus("d1", DealStatus.COMPLETED, { actorRole: "DEALER", data: { vin: "SNEAKY" } }),
+    (err: unknown) => (err as { code?: string }).code === "ACTOR_NOT_PERMITTED",
+    "an actor the matrix refuses must not reach the data merge by naming the current state",
+  );
+  assert.equal(ctrl.updateCalls.length, 0, "and nothing may be written");
 });

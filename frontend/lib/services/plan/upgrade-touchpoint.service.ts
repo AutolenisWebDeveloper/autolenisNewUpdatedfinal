@@ -27,7 +27,7 @@ import { logger } from "@/lib/logger";
 // From the LEAF module, never from `upgrade-suppression.service` — that file is in an import
 // cycle with `plan-snapshot.service`, and joining it from here put the constants in their temporal
 // dead zone at run time while `tsc` stayed perfectly happy.
-import { EMAIL_TOUCHPOINTS, type UpgradeTouchpoint } from "./upgrade-touchpoints";
+import { EMAIL_TOUCHPOINTS, UPGRADE_TOUCHPOINTS, type UpgradeTouchpoint } from "./upgrade-touchpoints";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -180,4 +180,107 @@ export async function upgradeAskCounts(
     emailsSent: impressions.filter((r) => r.touchpoint && emailTouchpoints.has(r.touchpoint)).length,
     declines: dismissals.length,
   };
+}
+
+/**
+ * §23.2a TOUCHPOINT 5 — "Email at dealer reaffirmation or recap. The second and final ask."
+ *
+ * PHASE 10, the enqueue site `PHASE_7_TEMPLATES.PREMIUM_FOLLOW_UP_FINAL` never had.
+ * `renderPremiumFollowUpFinal` and the template's registry entry were both written in Phase 7 —
+ * the entry even carries a note explaining that its `alwaysSend` recheck is safe *because
+ * suppression is evaluated here, before the row is enqueued*. That note described a caller that
+ * did not exist, so the last ask §23.2a promises was never made, and `MAX_UPGRADE_EMAILS = 2`
+ * was a ceiling one ask below the floor.
+ *
+ * ── WHERE THE SUPPRESSION DECISION LIVES, AND WHY IT IS HERE ────────────────
+ *
+ * §23.2b's rules are a property of the PLAN area: two emails then silence, two declines then
+ * silence, and never during a cancellation, a chargeback or an open exception. Putting this in
+ * the recap service would put that policy in a service whose job is arithmetic, and the next
+ * caller would either duplicate it or forget it. The recap service calls this; it does not
+ * decide anything.
+ *
+ * ── WHY THE IMPRESSION IS RECORDED BEFORE THE ENQUEUE ───────────────────────
+ *
+ * `upgradeAskCounts` counts IMPRESSIONS of email touchpoints, and that count is what stops a
+ * third ask. Recording after a successful enqueue would be the obvious order and is the wrong
+ * one: `recordImpression` is also the once-per-touchpoint guard, so a crash between the enqueue
+ * and the record would leave a sent email with no impression — and the NEXT recap version would
+ * ask again, under a ceiling that could not see the first. Recording first can at worst cost a
+ * buyer an ask they were entitled to, which §23.2b names as the safe direction.
+ *
+ * Returns why nothing was sent, so a caller can log a reason rather than a silence.
+ */
+export async function sendFinalPremiumAsk(
+  input: { buyerId: string; vehicleRequestId: string; dealId: string },
+  db: Db = prisma,
+): Promise<{ sent: boolean; reason: string }> {
+  const { isUpgradePromptSuppressed } = await import("./upgrade-suppression.service");
+  const counts = await upgradeAskCounts(input.buyerId, input.vehicleRequestId, db);
+
+  const decision = await isUpgradePromptSuppressed(
+    {
+      vehicleRequestId: input.vehicleRequestId,
+      buyerId: input.buyerId,
+      touchpoint: UPGRADE_TOUCHPOINTS.REAFFIRMATION_EMAIL,
+      emailsSent: counts.emailsSent,
+      declines: counts.declines,
+    },
+    db,
+  );
+  if (decision.suppressed) return { sent: false, reason: decision.reason };
+
+  // Once per request. A recap that is superseded and re-published is the same transaction and
+  // the same ask; §23.4 gives a SECOND vehicle request its own election, and the touchpoint
+  // record is request-scoped, so that one is asked afresh.
+  const first = await recordImpression(
+    {
+      buyerId: input.buyerId,
+      vehicleRequestId: input.vehicleRequestId,
+      touchpoint: UPGRADE_TOUCHPOINTS.REAFFIRMATION_EMAIL,
+      detail: { dealId: input.dealId },
+    },
+    db,
+  );
+  if (!first) return { sent: false, reason: "already_asked" };
+
+  const buyer = await db.buyer.findUnique({
+    where: { id: input.buyerId },
+    select: { firstName: true, user: { select: { email: true } } },
+  });
+  const email = buyer?.user?.email;
+  if (!email) return { sent: false, reason: "no_email" };
+
+  const { quotePremiumBalance } = await import("./upgrade-window.service");
+  const quote = await quotePremiumBalance(input.vehicleRequestId, db);
+  // A zero or negative balance is not an upsell — there is nothing to buy. Reached when the
+  // credit already covers the fee, and quoting "$0 for a concierge" would be nonsense.
+  if (quote.dueCents <= 0) return { sent: false, reason: "nothing_due" };
+
+  const { renderPremiumFollowUpFinal } = await import("@/lib/services/comms/phase7-email-content");
+  const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+  const { PHASE_7_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
+
+  const content = renderPremiumFollowUpFinal({
+    firstName: buyer?.firstName ?? "there",
+    balanceCents: quote.dueCents,
+    dealId: input.dealId,
+  });
+  const key = `${PHASE_7_TEMPLATES.PREMIUM_FOLLOW_UP_FINAL}:email:${input.vehicleRequestId}`;
+  await enqueueTransactional(
+    {
+      triggerEvent: "plan.premium_final_ask",
+      templateKey: PHASE_7_TEMPLATES.PREMIUM_FOLLOW_UP_FINAL,
+      channel: "email",
+      recipientKind: "buyer",
+      recipientId: input.buyerId,
+      to: email,
+      vehicleRequestId: input.vehicleRequestId,
+      dealId: input.dealId,
+      idempotencyKey: key,
+      payload: { email, subject: content.subject, html: content.html, text: content.text },
+    },
+    db,
+  );
+  return { sent: true, reason: "enqueued" };
 }

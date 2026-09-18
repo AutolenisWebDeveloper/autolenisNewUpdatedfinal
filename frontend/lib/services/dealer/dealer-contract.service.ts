@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { scanContract } from "@/lib/services/contract-shield/contract-shield.service";
 import { extractContractText } from "@/lib/services/contract-shield/extract-text";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 /** Thrown when a dealer attempts to act on a deal that is not their own win. */
 export class DealOwnershipError extends Error {
@@ -285,6 +286,34 @@ export async function scanContractVersion(contractVersionId: string): Promise<vo
     await prisma.contractVersion
       .update({ where: { id: cv.id }, data: { status: "UPLOADED" } })
       .catch(() => {});
+
+    // §26 "Contract extraction failure | Operations | Retry; never treat as approval"
+    // — PHASE 10, the raise site this register row never had.
+    //
+    // "Retryable" was true of the ROW and of nobody's attention. The cron re-reads
+    // UPLOADED versions, so a document that can never be parsed — an image-only scan,
+    // a storage object that 404s — retried silently every pass, for ever, with the
+    // buyer told "we are still reviewing your contract" and no owner anywhere. §26
+    // gives the row OPERATIONS and twelve hours precisely so that loop terminates in
+    // a person rather than in a log line.
+    //
+    // Keyed on the VERSION, not the deal: a corrected re-upload is a different
+    // document and deserves its own row if it fails too, while the cron's repeated
+    // passes over the SAME unreadable version collapse onto one.
+    await raiseException({
+      code: "CONTRACT_EXTRACTION_FAILURE",
+      dealId: cv.dealId,
+      dealerId: cv.deal.offer?.dealerId ?? null,
+      detail:
+        `Contract version ${cv.id} (v${cv.version}) could not be read or scanned: ` +
+        `${err instanceof Error ? err.message : String(err)}. The version is left UPLOADED so the ` +
+        `cron retries it; it has NOT been approved and must never be.`,
+      idempotencyKey: `CONTRACT_EXTRACTION_FAILURE:${cv.id}`,
+    }).catch((raiseErr) => {
+      // Never masks the scan failure above — the reset is the fail-closed act and it
+      // has already happened.
+      logger.error(`[contract-shield] could not raise the extraction-failure exception for ${cv.id}:`, raiseErr);
+    });
   }
 }
 

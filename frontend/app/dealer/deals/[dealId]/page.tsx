@@ -12,6 +12,8 @@ import { ReaffirmationForm } from "@/components/dealer/ReaffirmationForm";
 import { DealerRecapPanel } from "@/components/dealer/DealerRecapPanel";
 import { currentRecap } from "@/lib/services/deal/deal-recap.service";
 import { secureHandoffPacket } from "@/lib/services/deal/identity-firewall.service";
+import { DealExceptionNotice } from "@/components/dealer/DealExceptionNotice";
+import { exceptionLineage, type ExceptionLineage } from "@/lib/services/operations/exception-lineage.service";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +61,22 @@ export default async function DealerDealDetailPage({ params }: Props) {
   if (!deal) notFound();
 
   const currentStageIndex = STAGES.indexOf(deal.status as typeof STAGES[number]);
+
+  // §8.1 row 10 — the dealer half of the ONE lineage. Same service, same checkpoint
+  // and deadline as the buyer's panel and the Ops queue; the audience decides only
+  // what may be disclosed, and the allowlist lives server-side so a buyer-owned
+  // exception never reaches this page's props at all (§25.1).
+  //
+  // Scoped to BOTH the deal and this dealer. `getDealerDealById` has already asserted
+  // ownership, and passing `dealerId` as well means a row mis-attached to another
+  // dealership cannot surface here even if the deal reference were wrong.
+  let dealExceptions: ExceptionLineage[] = [];
+  let dealExceptionsUnavailable = false;
+  try {
+    dealExceptions = await exceptionLineage({ audience: "DEALER", dealId: deal.id, dealerId: dealer.id });
+  } catch {
+    dealExceptionsUnavailable = true;
+  }
 
   // §Stage 10 — the confirmation form, shown only while the window is genuinely open. A form on a
   // stage the deal has left is a dead end, and a dealership that submits into one gets a 409 it
@@ -139,6 +157,14 @@ export default async function DealerDealDetailPage({ params }: Props) {
       >
         <ArrowLeft size={15} /> Back to Deals
       </Link>
+
+      {/* Holds on this deal, above the stage rail — a dealership reading a progress
+          bar that has stopped moving needs the reason in the same glance. */}
+      {(dealExceptions.length > 0 || dealExceptionsUnavailable) && (
+        <div className="mb-6">
+          <DealExceptionNotice exceptions={dealExceptions} unavailable={dealExceptionsUnavailable} />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight">Deal Progress</h1>

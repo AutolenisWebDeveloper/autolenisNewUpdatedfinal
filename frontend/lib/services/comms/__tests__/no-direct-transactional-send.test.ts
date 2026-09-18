@@ -169,7 +169,15 @@ test("the allowlist shrinks, never grows, without a deliberate edit", () => {
     //     path. The scan no longer completes anything; the buyer's possession-confirmation
     //     request and the completion mail are written to `comms_outbox` inside the transaction
     //     that records the handover, so they survive a crash and retry on their own.
-    94,
+    //
+    // 94 → 93 in Phase 10 (§8.3 / §27.1 rows 1-2). ONE FILE LEFT THE LIST ENTIRELY:
+    //   · app/auth/callback/route.ts — `sendEmailVerifiedEmail` was the file's only provider
+    //     call, and it now enqueues `PHASE_2_TEMPLATES.VERIFICATION_COMPLETED`.
+    // `lib/auth/actions.ts` also lost `sendWelcomeEmail` to
+    // `PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED`, but the file STAYS on the list: it still
+    // sends the password reset directly, and that message has no §27.1 register row. The
+    // entry's `senders` shrank instead, which is what the previous assertion checks.
+    93,
     "The direct-send count changed. Going DOWN is the goal — update this number and say which path was migrated. " +
       "Going UP means a new direct send was added and needs justifying."
   );
@@ -217,5 +225,61 @@ test("the rule detects a real violation — proved against planted source", () =
     reasonsFor("app/api/buyer/ok2/route.ts", plantedMigratedSender, direct),
     [],
     "a sender already routed through the dispatcher must not trip the rule"
+  );
+});
+
+// ── THE OUTBOX PAYLOAD IS NOT A READABLE SURFACE ────────────────────────────
+//
+// Raised as a question by the SECOND independent review, and it is the right question:
+// Phase 10 moved the sign-up verification link and the guest claim token ONTO the durable
+// outbox, so `comms_outbox.payload` now holds rendered HTML containing live credentials,
+// at rest, for as long as the row is retained. The direct rail never persisted them.
+//
+// The answer today is that nothing reads it — the one admin query over `commsOutbox`
+// (`app/api/admin/sourcing/[caseId]/limited-auction/route.ts:98`) selects `{id, status}` to
+// prove a disclosure happened, and no admin page lists the outbox at all. But "no reader
+// exists" is an accident of history, not a control, and the next operations screen that
+// wants to show why a message did not send is one `payload: true` away from putting a live
+// claim link on an admin page.
+//
+// So it is a rule. The dispatcher and the drain are the two places that legitimately handle
+// a payload — they write it and they render it — and everywhere else must not select it.
+
+test("nothing outside the dispatcher and the drain reads comms_outbox.payload", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { sourceFiles, assertScanned } = await import("@/lib/testing/source-scan");
+
+  const ROOT = process.cwd();
+  // The rail itself: the writer, the drain's own service, and the delivery function.
+  const OWNERS = new Set([
+    "lib/services/comms/transactional-dispatcher.service.ts",
+    "lib/services/comms/comms-outbox.service.ts",
+  ]);
+
+  const files = sourceFiles(ROOT, ["app", "lib"]).filter((f) => !OWNERS.has(f));
+  assertScanned(files, 800, "no-outbox-payload-readers");
+
+  const offenders: string[] = [];
+  for (const file of files) {
+    const src = readFileSync(`${ROOT}/${file}`, "utf8");
+    if (!src.includes("commsOutbox")) continue;
+    // A `select`/`include` naming `payload` inside a commsOutbox query. Deliberately coarse
+    // — a false positive here is a comment away from being allowlisted, and a false negative
+    // is a credential on a screen.
+    for (const m of src.matchAll(/commsOutbox\.(?:findFirst|findMany|findUnique|findUniqueOrThrow)\s*\(\s*\{([\s\S]{0,700}?)\}\s*\)/g)) {
+      if (/\bpayload\s*:\s*true\b/.test(m[1]!)) {
+        offenders.push(`${file}:${src.slice(0, m.index).split("\n").length}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    "`comms_outbox.payload` holds rendered message bodies, and since Phase 10 those include " +
+      "live credentials — the Supabase verification `action_link` and the guest claim token. " +
+      "A surface that selects it can put a working credential on a page. If a surface genuinely " +
+      "needs to show why a message failed, project the fields it needs rather than the payload. " +
+      `Offenders: ${offenders.join(", ")}`
   );
 });

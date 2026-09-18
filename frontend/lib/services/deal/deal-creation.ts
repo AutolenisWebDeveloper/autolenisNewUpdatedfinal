@@ -23,6 +23,7 @@
 import { DealStatus, type BuyerPlan, type Prisma } from "@prisma/client";
 import { recordDealPlanSnapshot } from "@/lib/services/buyer/plan-snapshot.service";
 import type { PlanTouchpoint } from "@/lib/services/buyer/plan-snapshot.service";
+import type { TransactionActorRole } from "./transition-authority";
 
 type Tx = Prisma.TransactionClient;
 
@@ -33,7 +34,7 @@ export interface DealCreationRecordParams {
   plan: BuyerPlan;
   vehicleRequestId?: string | null;
   /** Who acted. `BUYER` on both selection paths; §9 admits no other actor. */
-  actorRole?: string;
+  actorRole?: TransactionActorRole;
   /** Why, in the timeline's own words. */
   reason: string;
   entryStatus?: DealStatus;

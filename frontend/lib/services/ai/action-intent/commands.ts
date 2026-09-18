@@ -98,9 +98,19 @@ export const COMMANDS: Record<string, CommandFn> = {
     const { DealStatus } = await import("@prisma/client");
     const target = DealStatus[params.newStatus as keyof typeof DealStatus];
     if (!target) return fail(`Unknown deal status ${String(params.newStatus)}.`);
+    // §28.3 #1. `authenticatedRole` spans every portal, AFFILIATE included, and a
+    // deal transition has no affiliate actor — `deal_status_history.actor_role` would
+    // have recorded one, and the per-transition matrix could not have judged it.
+    // Refused here, where the approving human is known, rather than normalised into
+    // something plausible.
+    const { normaliseActorRole } = await import("@/lib/services/deal/transition-authority");
+    const actorRole = normaliseActorRole(actor.authenticatedRole);
+    if (!actorRole) {
+      return fail(`A ${actor.authenticatedRole} actor cannot drive a deal transition.`);
+    }
     await advanceDealStatus(String(params.dealId), target, {
       actorId: actor.actorId,
-      actorRole: actor.authenticatedRole,
+      actorRole,
       reason: (params.reason as string | undefined) ?? "AI-proposed, human-approved transition",
     });
     return ok({ dealId: params.dealId, newStatus: params.newStatus });

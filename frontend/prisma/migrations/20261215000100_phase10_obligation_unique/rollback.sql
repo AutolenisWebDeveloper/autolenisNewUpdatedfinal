@@ -1,0 +1,32 @@
+-- Rollback for 20261215000100_phase10_obligation_unique.
+--
+-- NOT run by Prisma. This file is the documented reverse, kept beside the migration the way
+-- eighteen other directories in this chain do, for an owner who needs to undo it by hand.
+--
+-- THIS ONE IS GENUINELY REVERSIBLE, unlike its sibling. The migration creates exactly one object
+-- and drops nothing, so dropping that object restores the prior schema completely:
+-- `post_completion_obligations` carried only its primary key and `..._deal_id_idx` before, and
+-- both are untouched by the forward migration.
+--
+-- SAFE UNCONDITIONALLY, and that is worth stating because the analogous rollback next door
+-- (20261114000000_invitation_replacement_partial_unique) is NOT — that one restores a constraint
+-- and can fail with 23505 on data the forward migration exists to permit. Here the direction is
+-- the other way: dropping a unique index can never fail on data. It only removes a guarantee.
+--
+-- WHAT YOU LOSE BY RUNNING IT. §13-D60's whole point: without this index `openObligation`'s
+-- documented "idempotent per (deal, type)" is held by a `findFirst` then `create` with nothing
+-- behind it, so two concurrent callers produce two PENDING rows for one (deal, type) and
+-- double-count on the dealership scorecard. That was acceptable while the function had a single
+-- writer running inside the completion CAS's winning transaction; the §13-D60 row records that
+-- a second writer proposed before the index lands is a BLOCK. Dropping the index re-opens that
+-- precondition, so the row re-opens with it.
+--
+-- The ledger row must be retired separately and deliberately — dropping the object does not
+-- unwrite `_prisma_migrations`:
+--
+--   pnpm exec prisma migrate resolve --rolled-back 20261215000100_phase10_obligation_unique
+--
+-- and that is an owner-approved operation under CLAUDE.md's per-run protocol, not part of this
+-- file.
+
+DROP INDEX IF EXISTS "post_completion_obligations_open_deal_type_key";

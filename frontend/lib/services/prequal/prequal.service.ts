@@ -22,14 +22,17 @@ import {
 import { createAlertOnce } from "@/lib/services/monitoring/health-alert.service";
 import { PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import {
-  sendPrequalApprovedEmail,
   sendAdverseActionEmail,
-  sendPrequalUnderReviewEmail,
+  // `sendPrequalUnderReviewEmail` is GONE from this file — PHASE 10 moved that notice
+  // onto the §27 rail. The export itself stays in resend.service for now: §13-D14 is
+  // unsatisfied, so this phase deletes nothing, and an unused export is inert where a
+  // deleted one would be a capability removed without the counter to justify it.
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 import { classifyAdverseActionDelivery, raiseAdverseActionFollowUp, type AdverseActionDelivery } from "@/lib/services/prequal/adverse-action-outcome";
 import { enqueueTransactional } from "@/lib/services/comms/transactional-dispatcher.service";
 import { PHASE_2_TEMPLATES } from "@/lib/services/comms/state-recheck-registry";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 import { renderPrequalAdminReceipt } from "@/lib/services/comms/phase2-email-content";
 
 // ── Provider-failure observability ──────────────────────────────────────────
@@ -123,6 +126,37 @@ async function recordProviderFailure(args: {
     );
   } catch (err) {
     logger.error("[prequal] failed to raise provider-failure operational alert:", err);
+  }
+
+  // §26 "Prequalification provider delay | System | Retry and notify; honest processing
+  // notice" — PHASE 10, the raise site this register row never had.
+  //
+  // WHY A QUEUE ROW WHEN A PlatformAlert ALREADY FIRES. The alert above is a PAGE: it
+  // says the integration is unwell and it is addressed to whoever is on call. It is not
+  // attached to the buyer, carries no deadline, and nothing sweeps it — so the individual
+  // application that got no answer had no record anyone works from. §26 gives this row
+  // twenty-four hours and a buyer-visible status for exactly that: the outage is one
+  // problem and each stranded application is another, and clearing the outage does not
+  // clear the applications it stranded.
+  //
+  // Keyed on the APPLICATION, so retries of the same prequal collapse onto one row while
+  // a genuinely new application gets its own.
+  try {
+    const { raiseException } = await import("@/lib/services/operations/queue-item.service");
+    await raiseException({
+      code: "PREQUAL_PROVIDER_DELAY",
+      buyerId: args.buyerId,
+      // PRIVACY, as above: the operational reason and opaque ids only. No name, no
+      // score, no part of the consumer report.
+      detail:
+        `Prequalification ${args.prequalId} got no usable answer from the provider ` +
+        `(reason: ${args.reason}, class: ${failureClass}). The decision is held at ` +
+        `${args.decision} — fail-closed, no approval issued — and the buyer has been sent ` +
+        `the honest processing-delay notice.`,
+      idempotencyKey: `PREQUAL_PROVIDER_DELAY:${args.prequalId}`,
+    });
+  } catch (err) {
+    logger.error("[prequal] failed to raise the provider-delay exception:", err);
   }
 }
 
@@ -599,17 +633,49 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     const decisionDate = new Date();
     const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
+    // §27.1 "Prequalification approved → Buyer" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
+    //
+    // FOUND BY TIGHTENING THE §8.3 GATE, not by reading. The first cut of the completeness
+    // rule counted a template key named ANYWHERE in `app/`/`lib/`, and `prequal_approved`
+    // was discharged by a coincidence of naming rather than by an enqueue site — the second
+    // independent review flagged the shape, and restricting the scan to files that actually
+    // call the dispatcher turned the row red. It was the same situation as `prequal_declined`
+    // one branch down: sent every day, on a rail with no retry and no terminal-failure
+    // alert, and unrepresented in the outbox the register describes.
+    //
+    // UNLIKE `prequal_declined`, THIS ONE IS SAFE TO MOVE. The declined notice is the FCRA
+    // §615 adverse-action notice and its synchronous `EmailSendOutcome` drives a compliance
+    // record §29 forbids weakening. The approval notice has no such machinery: the compliance
+    // event below records that a decision was made and notified, and is written whether or
+    // not the provider accepted the message — which is exactly the claim the outbox makes
+    // true rather than assumed.
+    //
+    // Keyed per APPLICATION, not per day. The direct rail keyed on
+    // `to + decisionDate.slice(0,10)`, so a buyer who applied twice in one day got one email
+    // for two decisions.
     try {
-      await sendPrequalApprovedEmail({
+      const { prequalApprovedHtml } = await import("@/lib/services/email/templates/prequal-approved");
+      await enqueueTransactional({
+        triggerEvent: "prequal.approved",
+        templateKey: PHASE_2_TEMPLATES.PREQUAL_APPROVED,
+        channel: "email",
+        recipientKind: "buyer",
+        recipientId: buyer.id,
         to: buyer.user.email,
-        firstName: input.firstName,
-        maxOtdAmountCents: result.maxOtdAmountCents,
-        tier: result.tier,
-        decisionDate,
-        expiryDate,
+        idempotencyKey: `${PHASE_2_TEMPLATES.PREQUAL_APPROVED}:${prequal.id}`,
+        payload: {
+          email: buyer.user.email,
+          subject: `You're Pre-Qualified — Here's Your Buying Power, ${input.firstName}`,
+          html: prequalApprovedHtml({
+            firstName: input.firstName,
+            maxOtdAmountCents: result.maxOtdAmountCents,
+            tier: result.tier,
+            expiryDate,
+          }),
+        },
       });
     } catch (emailErr) {
-      logger.error("[prequal] Failed to send approval email:", emailErr);
+      logger.error("[prequal] Failed to enqueue the approval email:", emailErr);
     }
 
     try {
@@ -701,17 +767,82 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     finalDecision === PreQualDecision.OFAC_REVIEW ||
     finalDecision === PreQualDecision.OFAC_ESCALATED;
 
+  // WHY THIS IS CLASSIFIED HERE AND NOT FIFTY LINES DOWN WHERE IT USED TO BE.
+  //
+  // A MicroBilt failure and a compliance hold both land at MANUAL_REVIEW, and the block
+  // below tells the buyer which one it is. It told every one of them the same thing:
+  // "one of our team is looking at it now". For a provider failure that is false —
+  // nobody is looking, because the provider returned nothing to look at. The buyer was
+  // given a reassuring account of a state that did not exist, which is the §22a mistake
+  // ("a provider failure is never shown as an empty market") one surface over.
+  //
+  // §27.1 has always had a separate row for it (`prequal_provider_delay`) and the
+  // registry has always had its recheck. Nothing enqueued it.
+  const isProviderError = isProviderErrorReason(result.reason);
+
   if (needsReview) {
+    // §27 + §27.1 "Prequalification under review | Buyer | Honest status and expected
+    // follow-up" — PHASE 10, MIGRATED OFF THE DIRECT RAIL.
+    //
+    // This was `sendPrequalUnderReviewEmail`, a direct Resend call wrapped in a
+    // try/catch that logged and moved on. §27: "No page request determines whether a
+    // transaction communication survives." A buyer whose credit application has gone
+    // to a human is exactly who must not be left in silence because one HTTP call
+    // failed — and the old shape had no retry, no send-time recheck and no
+    // terminal-failure alert, so that silence was invisible too.
+    //
+    // The recheck registered for this key is `alwaysSend("an honest status notice
+    // about a review that has begun")`: the review DID begin, so a later decision does
+    // not make the notice untrue, and it must not be cancelled by one.
     try {
-      await sendPrequalUnderReviewEmail({
+      const { renderPrequalUnderReview, renderPrequalProviderDelay } = await import(
+        "@/lib/services/comms/phase2-email-content"
+      );
+      const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/buyer/dashboard`;
+      // ONE notice, not two. A provider failure gets the delay notice INSTEAD of the
+      // review notice — sending both would have the platform tell the same buyer, in the
+      // same minute, that a person is reviewing their file and that nobody has looked at
+      // it yet.
+      const templateKey = isProviderError
+        ? PHASE_2_TEMPLATES.PREQUAL_PROVIDER_DELAY
+        : PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW;
+      const content = isProviderError
+        ? renderPrequalProviderDelay({ firstName: input.firstName, dashboardUrl })
+        : renderPrequalUnderReview({ firstName: input.firstName, dashboardUrl });
+      await enqueueTransactional({
+        triggerEvent: isProviderError ? "prequal.provider_delay" : "prequal.under_review",
+        templateKey,
+        channel: "email",
+        recipientKind: "buyer",
+        recipientId: buyer.id,
         to: buyer.user.email,
-        firstName: input.firstName,
-        prequalApplicationId: prequal.id,
-        decisionTimestamp: prequal.updatedAt.toISOString(),
+        payload: { email: buyer.user.email, subject: content.subject, html: content.html, text: content.text },
+        // Per APPLICATION. A re-decision on the same application is the same review;
+        // a new application is a new one. The key carries the template, so an
+        // application that failed at the provider and was later held for review does
+        // get the second, different notice — they are different facts.
+        idempotencyKey: `${templateKey}:${prequal.id}`,
       });
     } catch (emailErr) {
-      logger.error("[prequal] Failed to send under-review email:", emailErr);
+      logger.error("[prequal] Failed to enqueue the under-review notice:", emailErr);
     }
+
+    // §26 — "Prequalification needs manual or OFAC review | Operations". The
+    // compliance event below RECORDS that the buyer was notified; it is not a work
+    // item and nothing sweeps it. This is the row an operator actually works from,
+    // with the owner and deadline §26 gives it.
+    //
+    // The decision is NOT in the detail. A queue row naming OFAC_ESCALATED would put
+    // the screening outcome on a surface that is read more widely than the compliance
+    // log, and §Stage 3 keeps that narrow.
+    await raiseException({
+      code: "PREQUAL_MANUAL_OR_OFAC_REVIEW",
+      buyerId: buyer.id,
+      detail: `Prequalification ${prequal.id} requires a manual decision. The buyer has been told a review is under way and that no action is needed from them.`,
+      idempotencyKey: `PREQUAL_MANUAL_OR_OFAC_REVIEW:${prequal.id}`,
+    }).catch((err) => {
+      logger.error("[prequal] Failed to raise the manual-review exception:", err);
+    });
     try {
       await prisma.complianceEvent.create({
         data: {
@@ -735,7 +866,6 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   // only that an integration outage is now recorded as one and raises an
   // operational exception, instead of being indistinguishable from a buyer who
   // is legitimately held for compliance review.
-  const isProviderError = isProviderErrorReason(result.reason);
   if (isProviderError && result.reason) {
     await recordProviderFailure({
       buyerId: buyer.id,

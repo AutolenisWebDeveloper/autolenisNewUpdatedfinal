@@ -9,6 +9,8 @@ import type { UpgradeTouchpoint } from "@/lib/services/plan/upgrade-suppression.
 import { recordConversion } from "@/lib/services/plan/upgrade-touchpoint.service";
 import { findOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
 import { isUpgradeWindowOpen, quotePremiumBalance } from "@/lib/services/plan/upgrade-window.service";
+import { hasOpenException } from "@/lib/services/operations/exception-lineage.service";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 // POST /api/buyer/plan/upgrade
 // Upgrades an authenticated Standard buyer to Premium.
@@ -42,6 +44,35 @@ export async function POST(request: NextRequest) {
 
   if (buyer.plan === "PREMIUM") {
     return successResponse({ plan: "PREMIUM", alreadyUpgraded: true });
+  }
+
+  // §26 — "Upgrade prompt fires during an open exception | Operations | Suppress;
+  // never upsell a buyer whose deal is stalled."
+  //
+  // THE SERVER IS WHERE THIS HAS TO HOLD. The dashboard already hides the card while
+  // an exception is open, but a hidden card is UX: this route is reachable directly,
+  // from a stale page, or from any surface that has not been taught the rule yet.
+  // Server-side authorization always (CLAUDE.md golden rule 3).
+  //
+  // AND THE ATTEMPT IS THE EXCEPTION, which is why the raise site is here and not on
+  // the render. Raising on every dashboard paint would flood the queue with a row per
+  // page view and say nothing; a buyer who actually reached the upgrade action while
+  // their transaction is held is one occurrence, worth one Operations row, and names
+  // the surface that offered it.
+  if (await hasOpenException(buyer.id)) {
+    await raiseException({
+      code: "UPGRADE_PROMPT_DURING_OPEN_EXCEPTION",
+      buyerId: buyer.id,
+      detail: `Upgrade attempted from ${convertedFrom ?? "self-service"} while an exception was open. The upgrade was refused.`,
+    }).catch(() => {
+      // The refusal stands whether or not the case opens. Failing the upgrade because
+      // the queue write failed would punish the buyer for our bookkeeping.
+    });
+    return errorResponse(
+      "EXCEPTION_OPEN",
+      "Your purchase has an open item that needs resolving before plan changes. We will let you know as soon as it clears.",
+      409,
+    );
   }
 
   // Abuse guard on the self-service mutation (fails OPEN on store outage).

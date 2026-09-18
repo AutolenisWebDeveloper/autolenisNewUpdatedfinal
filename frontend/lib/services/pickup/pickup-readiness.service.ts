@@ -27,6 +27,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { INSURANCE_SATISFIED } from "@/lib/services/deal/deal.service";
+import type { TransactionActorRole } from "@/lib/services/deal/transition-authority";
+import { NON_BLOCKING_EXCEPTION_CODES } from "@/lib/services/operations/exception-catalogue";
 
 /** Same four parties as Stage 14's clearance list — one vocabulary across both checklists. */
 export type ReadinessOwner = "FINANCE" | "DEALERSHIP" | "BUYER" | "OPERATIONS";
@@ -124,8 +126,19 @@ export async function evaluatePickupReadiness(dealId: string): Promise<Readiness
         take: 1,
         select: { titleInHand: true, payoffGoodThroughDate: true, verifiedPayoffCents: true },
       },
+      // Same exclusion as §Stage 20's `NO_HOLD_OR_DISCREPANCY`, and for the same reason: a row
+      // about AutoLenis's own plumbing (`blocksTransaction: false` in the register) is
+      // Operations work, not a reason to refuse to SCHEDULE a handover. Answering this
+      // question differently from the completion gate is how a deal becomes schedulable and
+      // then uncompletable.
       queueItems: {
-        where: { status: "OPEN" },
+        where: {
+          status: "OPEN",
+          OR: [
+            { exceptionCode: null },
+            { exceptionCode: { notIn: [...NON_BLOCKING_EXCEPTION_CODES] } },
+          ],
+        },
         select: { id: true, exceptionCode: true },
       },
     },
@@ -283,7 +296,7 @@ export const STAGE_16_ITEM_COUNT = 13;
  */
 export async function enterPickupReadiness(
   dealId: string,
-  actor: { actorId?: string | null; actorRole?: string } = {},
+  actor: { actorId?: string | null; actorRole?: TransactionActorRole } = {},
 ): Promise<{ evaluation: ReadinessEvaluation; entered: boolean; schedulable: boolean }> {
   const evaluation = await evaluatePickupReadiness(dealId);
 

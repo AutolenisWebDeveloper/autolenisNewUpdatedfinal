@@ -55,6 +55,14 @@ export const REMINDER_LEAD_HOURS = { first: 24, second: 2 } as const;
  */
 export const NO_SHOW_GRACE_HOURS = 4;
 
+/**
+ * How long a released-but-unconfirmed handover waits before it becomes an Operations
+ * case. Longer than the no-show grace because the vehicle HAS moved: the buyer is
+ * driving it, and a case opened an hour later would mostly catch people who simply
+ * have not opened the app yet.
+ */
+export const RELEASED_UNCONFIRMED_GRACE_HOURS = 24;
+
 export interface ReminderSweepResult {
   reminded24h: number;
   reminded2h: number;
@@ -350,6 +358,68 @@ export async function flagSuspectedNoShows(now: Date = new Date()): Promise<{ fl
     }
   }
   return { flagged, failed };
+}
+
+/**
+ * §26 — "Dealer released, buyer has not confirmed | Operations | Remind buyer; never
+ * complete automatically."
+ *
+ * The other half of `flagSuspectedNoShows`. That one catches an appointment where
+ * NOTHING happened; this catches the one where the dealership released the vehicle and
+ * the buyer never confirmed possession — the deal sits at `HANDOVER_PENDING` and,
+ * because §Stage 19 forbids completing on the dealership's word alone, it will sit
+ * there for ever unless someone looks.
+ *
+ * THE RULE THIS DOES NOT BREAK. "Never complete automatically" means exactly that: this
+ * raises an exception and reminds, and never advances the deal. Phase 9 removed the
+ * `PICKUP_SCHEDULED → COMPLETED` edge precisely so a dealer scan could not complete a
+ * deal; a sweep that completed one after a timeout would reintroduce the same defect
+ * with a clock attached.
+ */
+export async function sweepReleasedNotConfirmed(
+  now: Date = new Date(),
+): Promise<{ raised: number; failed: number }> {
+  const cutoff = new Date(now.getTime() - RELEASED_UNCONFIRMED_GRACE_HOURS * 3600_000);
+
+  const stale = await prisma.pickup.findMany({
+    where: {
+      dealerReleasedAt: { not: null, lt: cutoff },
+      // The deal has not completed. `confirmPossession` is what moves it off
+      // HANDOVER_PENDING, so this IS "the buyer has not confirmed".
+      deal: { status: "HANDOVER_PENDING" },
+    },
+    take: BATCH_LIMIT,
+    select: {
+      dealId: true,
+      dealerReleasedAt: true,
+      deal: { select: { buyerId: true, dealerId: true, offer: { select: { dealerId: true } } } },
+    },
+  });
+
+  let raised = 0;
+  let failed = 0;
+  for (const p of stale) {
+    try {
+      await raiseException({
+        code: "RELEASED_BUT_NOT_CONFIRMED",
+        dealId: p.dealId,
+        buyerId: p.deal?.buyerId ?? null,
+        dealerId: p.deal?.dealerId ?? p.deal?.offer?.dealerId ?? null,
+        // Per RELEASE. A deal released once produces one case however many times the
+        // sweep runs; a re-release after a reversal is genuinely a second occurrence.
+        idempotencyKey: `RELEASED_BUT_NOT_CONFIRMED:${p.dealId}:${p.dealerReleasedAt?.toISOString() ?? "unknown"}`,
+        detail:
+          `The dealership recorded the release at ${p.dealerReleasedAt?.toISOString() ?? "an unrecorded time"} ` +
+          `and the buyer has not confirmed possession. Contact the buyer. The deal must NOT be completed ` +
+          `on the dealership's word alone (§Stage 19).`,
+      });
+      raised += 1;
+    } catch (e) {
+      failed += 1;
+      logger.error(`[pickup-reminders] released-not-confirmed raise failed deal=${p.dealId}:`, e);
+    }
+  }
+  return { raised, failed };
 }
 
 export type NoShowParty = "BUYER" | "DEALERSHIP" | "BOTH" | "UNDETERMINED";

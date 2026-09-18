@@ -123,8 +123,13 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "app/api/twilio/voice/transfer-status/route.ts", reasons: ["twilio-sdk"], senders: [], removalPhase: 10 },
   { file: "app/api/webhooks/stripe/route.ts", reasons: ["direct-sender"], senders: ["sendAuctionActivatedEmail", "sendConciergeFeeConfirmationEmail", "sendDepositConfirmationEmail", "sendRefundConfirmationEmail"], removalPhase: 10 },
   { file: "app/api/webhooks/twilio/inbound/route.ts", reasons: ["twilio-sdk"], senders: [], removalPhase: 10 },
-  { file: "app/auth/callback/route.ts", reasons: ["direct-sender"], senders: ["sendEmailVerifiedEmail"], removalPhase: 10 },
-  { file: "lib/auth/actions.ts", reasons: ["direct-sender"], senders: ["sendPasswordResetEmail", "sendWelcomeEmail"], removalPhase: 10 },
+  // DELISTED IN PHASE 10 (§8.3 / §27.1 "Verification completed"). `sendEmailVerifiedEmail`
+  // moved onto the dispatcher; the route reaches no provider at all now.
+  // Phase 10: `sendWelcomeEmail` migrated to the §27 dispatcher
+  // (PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED). The password-reset send is NOT a §27.1
+  // transaction communication — it is an account-security message with no register row — so
+  // it stays on the direct rail and this entry stays with the one sender it really has.
+  { file: "lib/auth/actions.ts", reasons: ["direct-sender"], senders: ["sendPasswordResetEmail"], removalPhase: 10 },
   { file: "lib/qstash/notify.ts", reasons: ["resend-sdk", "twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   // DELISTED IN PHASE 5 (§13-D44, RETIRE OUTRIGHT). `notifyActiveDealersOfOpportunity` emailed
   // the first twenty ACTIVE dealers with no radius and no invitation, from the public request
@@ -145,7 +150,14 @@ export const DIRECT_SEND_ALLOWLIST: readonly DirectSendAllowlistEntry[] = [
   { file: "lib/services/esign/buyer-signing.service.ts", reasons: ["direct-sender"], senders: ["sendContractSignedEmail"], removalPhase: 10 },
   { file: "lib/services/notifications/acquisition-comms.ts", reasons: ["sms"], senders: [], removalPhase: 10 },
   { file: "lib/services/prequal/admin-prequal.service.ts", reasons: ["direct-sender"], senders: ["sendAdminPrequalAlertEmail", "sendAdverseActionEmail", "sendPrequalApprovedEmail", "sendPrequalUnderReviewEmail"], removalPhase: 10 },
-  { file: "lib/services/prequal/prequal.service.ts", reasons: ["direct-sender"], senders: ["sendAdminPrequalAlertEmail", "sendAdverseActionEmail", "sendPrequalApprovedEmail", "sendPrequalUnderReviewEmail"], removalPhase: 10 },
+  // Phase 10: `sendPrequalUnderReviewEmail` migrated to the §27 dispatcher
+  // (PHASE_2_TEMPLATES.PREQUAL_UNDER_REVIEW), and `sendPrequalApprovedEmail` followed it
+  // (PHASE_2_TEMPLATES.PREQUAL_APPROVED) once the tightened §8.3 gate showed that row was
+  // discharged by a coincidence of naming rather than by an enqueue site. TWO direct senders
+  // remain: the admin alert, which wants a human NOW rather than on the next drain tick, and
+  // the FCRA §615 adverse-action notice, whose synchronous delivery outcome drives a
+  // compliance record §29 forbids weakening (see `register-discharge-ledger.ts`).
+  { file: "lib/services/prequal/prequal.service.ts", reasons: ["direct-sender"], senders: ["sendAdminPrequalAlertEmail", "sendAdverseActionEmail"], removalPhase: 10 },
   { file: "lib/services/sms/crm-sms.ts", reasons: ["twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   { file: "lib/services/sms/twilio.service.ts", reasons: ["twilio-sdk", "sms"], senders: [], removalPhase: 10 },
   { file: "lib/social/creator-package.generator.ts", reasons: ["direct-sender"], senders: ["sendCreatorPackageEmail"], removalPhase: 10 },

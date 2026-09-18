@@ -38,6 +38,7 @@ import {
   shortlistGate, distanceMilesBetween, freshnessOf, SHORTLIST_RADIUS_MILES,
 } from "./shortlist-radius";
 import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
+import { raiseException } from "@/lib/services/operations/queue-item.service";
 
 /** Why a candidate can no longer be auctioned. Distinct from a fact that merely CHANGED. */
 export type CandidateDropReason =
@@ -224,6 +225,104 @@ export async function revalidateRequestCandidates(vehicleRequestId: string, now:
     }
   }
   return out;
+}
+
+/**
+ * §22a / §26 "Shortlisted candidate goes stale or sells mid-auction" — the raise site this
+ * register row never had.
+ *
+ * ── WHY THIS FUNCTION EXISTS, AND WHY IT IS HERE ────────────────────────────
+ *
+ * §26 gives the row OPERATIONS, four hours, and the required result "drop the candidate, tell
+ * the buyer, and let the auction run on the remaining candidates". Every one of those three
+ * things was already possible and none of them happened: `revalidateCandidate` drops
+ * correctly, `buyer_visible_status` carries the buyer's line, and the auction has never cared
+ * how many candidates it has. What was missing is the TRIGGER — nothing re-checked a candidate
+ * once an auction was running.
+ *
+ * `revalidateRequestCandidates` was written in Phase 4 for this and, like `flagSuspectedNoShows`
+ * before it, had ZERO CALLERS. So this is not a new mechanism; it is the missing caller, scoped
+ * to the one moment the platform actually learns a listing has gone: the stale sweep.
+ *
+ * ── WHY THE SWEEP IS THE RIGHT TRIGGER ──────────────────────────────────────
+ *
+ * `inventory_items.last_seen_at` is written by ingestion and by nothing else, and the sweep is
+ * what turns "not seen for 48 hours" into `is_active = false`. That flip is the exact instant
+ * the fact becomes known, and the sweep already holds the list of ids it flipped. Polling every
+ * running auction on a timer would re-derive the same fact later, more expensively, and would
+ * still be wrong for the 12 hours between ticks.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO ────────────────────────────────────────
+ *
+ * It does not cancel or shorten the auction, and it does not touch the other candidates. §22a
+ * is explicit that the auction runs on: a buyer who shortlisted five cars and lost one still
+ * has an auction. It also never drops a candidate itself — `revalidateCandidate` owns that
+ * decision, applies the same gate the shortlist applied at add time, and is the only writer of
+ * `candidate_status`.
+ *
+ * Returns counts so the cron can report what it did rather than claiming a number it assumed.
+ */
+export async function dropStaleCandidatesMidAuction(
+  inventoryItemIds: readonly string[],
+  now: Date = new Date(),
+): Promise<{ checked: number; dropped: number; raised: number }> {
+  if (inventoryItemIds.length === 0) return { checked: 0, dropped: 0, raised: 0 };
+
+  // MID-AUCTION means exactly that: an auction that is still taking offers. A candidate on a
+  // CLOSED, EXPIRED or CANCELLED auction going stale is not an exception — the auction is over
+  // and the buyer is looking at offers, not at listings. PENDING is included because §22a's
+  // harm (dealers invited to bid on a car that is gone) begins at invitation, not at the first
+  // offer.
+  const rows = await prisma.auctionVehicle.findMany({
+    where: {
+      inventoryItemId: { in: [...inventoryItemIds] },
+      candidateStatus: "ACTIVE",
+      auction: { status: { in: ["PENDING", "ACTIVE", "REOPENED"] } },
+    },
+    select: {
+      id: true,
+      auctionId: true,
+      vehicleRequestId: true,
+      auction: { select: { buyerId: true } },
+    },
+  });
+
+  let dropped = 0;
+  let raised = 0;
+  for (const row of rows) {
+    let verdict: RevalidationVerdict;
+    try {
+      verdict = await revalidateCandidate(row.id, now);
+    } catch (err) {
+      // One unreadable candidate must not stop the rest — the same isolation
+      // `revalidateRequestCandidates` applies, and for the same reason.
+      logger.warn(`[candidates] mid-auction revalidation failed for ${row.id}:`, err);
+      continue;
+    }
+    if (verdict.status !== "DROPPED") continue;
+    dropped++;
+
+    // Keyed on the CANDIDATE, so a sweep that re-observes the same dead listing tomorrow
+    // finds the open row rather than opening a second one, while a different candidate on
+    // the same auction gets its own — each is a separate car the buyer chose.
+    try {
+      await raiseException({
+        code: "CANDIDATE_STALE_MID_AUCTION",
+        auctionId: row.auctionId,
+        vehicleRequestId: row.vehicleRequestId ?? null,
+        buyerId: row.auction?.buyerId ?? null,
+        detail:
+          `Candidate ${row.id} was dropped mid-auction (${verdict.dropReason ?? "unavailable"}). ` +
+          `The auction continues on its remaining candidates.`,
+        idempotencyKey: `CANDIDATE_STALE_MID_AUCTION:${row.id}`,
+      });
+      raised++;
+    } catch (err) {
+      logger.error(`[candidates] could not raise the stale-candidate exception for ${row.id}:`, err);
+    }
+  }
+
+  return { checked: rows.length, dropped, raised };
 }
 
 export interface PromotionResult {

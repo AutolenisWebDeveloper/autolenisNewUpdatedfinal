@@ -1,0 +1,48 @@
+-- Rollback for 20261215000000_phase10_cancellation_vocabulary.
+--
+-- NOT run by Prisma. This file is the documented reverse, kept beside the migration the way
+-- eighteen other directories in this chain do, for an owner who needs to undo it by hand.
+--
+-- ┌────────────────────────────────────────────────────────────────────────────────────────┐
+-- │ THERE IS NO REVERSE. POSTGRESQL CANNOT DROP AN ENUM LABEL.                              │
+-- └────────────────────────────────────────────────────────────────────────────────────────┘
+--
+-- `ALTER TYPE ... ADD VALUE` is one-way. There is no `DROP VALUE`, and the usual workaround —
+-- create a new type without the label, rewrite every dependent column to it, drop the old type —
+-- is not a rollback. It rewrites `auction_invitations.status` and `pickups.status` in place, takes
+-- an ACCESS EXCLUSIVE lock on both tables for the duration, and FAILS OUTRIGHT if any row already
+-- holds 'CANCELLED', which is precisely the state a rollback would be reaching for. This file
+-- refuses to write that out as though it were a step, because a rollback script that can destroy
+-- the rows it is meant to preserve is worse than an honest note that no rollback exists.
+--
+-- The chain's own convention says the same thing in the words of
+-- 20261017000000_migration_chain_functional_reconciliation's rollback: "Enum values are
+-- deliberately not reversed: postgres cannot drop an enum value, and they are additive by the
+-- chain's own convention."
+--
+-- WHAT TO DO INSTEAD — and it is genuinely enough.
+--
+-- An unused enum label is INERT. It occupies a row in pg_enum, it is not a column, it constrains
+-- nothing, and no query behaves differently for its existence. Reverting the Phase 10 application
+-- code leaves two labels nothing writes:
+--
+--   · `AuctionInvitationStatus.CANCELLED` is written only by the AUCTION/INVITATIONS stops of
+--     `lib/services/transaction/cancellation.service.ts`;
+--   · `PickupStatus.CANCELLED` only by its PICKUP stop.
+--
+-- Revert that service and the labels stop being reachable. The correct "rollback" for this
+-- migration is therefore an application rollback, and the ledger row stays — which is truthful,
+-- because the labels really are still there.
+--
+-- IF ROWS ALREADY CARRY 'CANCELLED' the decision is a business one, not a schema one: those rows
+-- record that AutoLenis withdrew an invitation or an appointment. Moving them to any other label
+-- is a statement about what happened to a dealership or a buyer (EXPIRED would say they missed a
+-- deadline they never missed — the reason this migration exists). Find them first:
+--
+--   SELECT id, auction_id, dealer_id, status FROM auction_invitations WHERE status = 'CANCELLED';
+--   SELECT id, deal_id, status                FROM pickups             WHERE status = 'CANCELLED';
+--
+-- A non-empty result means this is an owner decision about live records, and no script here can
+-- make it for them.
+
+-- Intentionally no DDL. See above: there is nothing correct to write.

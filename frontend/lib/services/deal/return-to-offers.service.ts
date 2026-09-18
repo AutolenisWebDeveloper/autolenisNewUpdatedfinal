@@ -44,6 +44,7 @@ import { enqueueTransactional, cancelByKey } from "@/lib/services/comms/transact
 import { PHASE_7_TEMPLATES, reaffirmationReminderCancelKey } from "@/lib/services/comms/state-recheck-registry";
 import { renderReturnedToOffers } from "@/lib/services/comms/phase7-email-content";
 import { REPEAT_WINDOW_DAYS } from "@/lib/services/trust/anti-circumvention.service";
+import type { TransactionActorRole } from "./transition-authority";
 
 export type ReturnCause =
   | "DEALER_REJECTED"
@@ -128,7 +129,7 @@ async function dealershipWasBlocked(dealId: string, isOutsideWinner: boolean): P
 export function standDownActorRole(params: {
   cause: ReturnCause;
   actorId: string;
-  actorRole?: string | null;
+  actorRole?: TransactionActorRole | null;
 }): string {
   if (params.actorRole) return params.actorRole;
   if (params.actorId === "system") return "SYSTEM";
@@ -162,7 +163,7 @@ export async function returnToRemainingOffers(params: {
   cause: ReturnCause;
   actorId: string;
   /** Optional. Omitted, it is derived from the cause and the actor — see `standDownActorRole`. */
-  actorRole?: string | null;
+  actorRole?: TransactionActorRole | null;
   now?: Date;
 }): Promise<ReturnToOffersResult> {
   const now = params.now ?? new Date();

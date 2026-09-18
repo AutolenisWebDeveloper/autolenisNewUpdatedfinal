@@ -30,7 +30,14 @@ import {
   REFUND_FROM,
 } from "@/lib/payments/deposit-state";
 import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
-import { raiseException } from "@/lib/services/operations/queue-item.service";
+import {
+  raiseException,
+  // Aliased the way `fulfillment-hold.service.ts:32` does, so the two auto-resolution
+  // paths read identically at their call sites.
+  resolve as resolveQueueItem,
+  QueueItemConcurrencyError,
+  OPEN_QUEUE_STATUSES,
+} from "@/lib/services/operations/queue-item.service";
 
 // PaymentIntent metadata types this endpoint can actually fulfil. A
 // signature-valid payment whose type is not in this set is a real charge the
@@ -61,6 +68,40 @@ const ROUTABLE_PI_TYPES = new Set(["deposit", "concierge_deposit", "concierge_fe
 // already-acknowledged webhook, or Stripe retries a delivery that did have an
 // effect. The writer itself throws — the swallow is here, where the trade-off is
 // visible, rather than hidden inside the writer.
+/**
+ * Close the §26 `PAYMENT_FAILURE` row this PaymentIntent opened, once it succeeds.
+ *
+ * NARROW BY CONSTRUCTION: it matches the one row keyed on this intent and only while that
+ * row is still OPEN. A human who already worked it wins — `resolveQueueItem` is a
+ * compare-and-swap and its refusal is the correct answer here, not an error to retry.
+ *
+ * AUTO-RESOLVING IS DEFENSIBLE FOR THIS CODE, and the test is the same one
+ * `closeDisputeException` applies to its own: the condition is settled by the PROVIDER, not
+ * by judgement. "Stripe declined this intent" stops being true the moment Stripe accepts the
+ * same intent. Nothing about the buyer's obligation is decided here — the deposit's own
+ * settlement path below does that.
+ */
+async function resolvePaymentFailureException(paymentIntentId: string): Promise<boolean> {
+  const key = `PAYMENT_FAILURE:${paymentIntentId}`;
+  const open = await prisma.queueItem.findFirst({
+    where: { idempotencyKey: key, status: { in: [...OPEN_QUEUE_STATUSES] } },
+    select: { id: true },
+  });
+  if (!open) return false;
+  try {
+    await resolveQueueItem({
+      queueItemId: open.id,
+      resolution: `The buyer retried and Stripe accepted ${paymentIntentId}. The decline this row was raised about is over.`,
+      resolvedBy: "stripe-webhook",
+      status: "RESOLVED",
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof QueueItemConcurrencyError) return false; // someone else worked it first
+    throw err;
+  }
+}
+
 async function raiseUnroutablePaymentException(pi: Stripe.PaymentIntent, reason: string) {
   try {
     await raiseException({
@@ -170,6 +211,34 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
+
+        // §26 — THE DECLINE THAT PRECEDED THIS IS OVER, AND THE ROW MUST SAY SO.
+        //
+        // Found by the SECOND independent review, and it was a lockout. `PAYMENT_FAILURE`
+        // is raised on `payment_intent.payment_failed` keyed `PAYMENT_FAILURE:<pi.id>`, has
+        // `deadlineHours: null`, and — until this — was resolved by NOTHING. Elements
+        // retries on the same intent, so the ordinary sequence is: card declines → row opens
+        // → buyer retries → payment succeeds → **the row stays open for ever**.
+        //
+        // From that moment `hasOpenException(buyerId)` is true, so the buyer's dashboard
+        // swaps the upgrade card for "we are holding off on plan changes" and
+        // `POST /api/buyer/plan/upgrade` answers 409 — permanently — while the exception
+        // panel keeps telling them "your payment did not go through" about a deposit that is
+        // paid. Card decline rates are a few percent, so this is the ordinary path, not a
+        // corner.
+        //
+        // Auto-resolved for the same reason `closeDisputeException` is: the condition is
+        // settled BY THE PROVIDER, not by judgement. Stripe has taken the money on the same
+        // intent the failure was raised about. Narrow and best-effort — it closes the one row
+        // keyed on this intent, only while it is still open, and a human who already worked
+        // it wins.
+        await resolvePaymentFailureException(pi.id).catch((err) => {
+          logger.error("[stripe/webhook] could not close the payment-failure exception", {
+            paymentIntentId: pi.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
         // `buyerId` is deliberately NOT destructured here. Every branch below resolves
         // the buyer from the DEPOSIT row it acted on (`deposit.buyerId`) rather than from
         // provider metadata, because the admin send-link path mints a Checkout Session
@@ -740,7 +809,19 @@ export async function POST(request: NextRequest) {
             // cascaded to CONTRACT_PENDING back a stage, writing bogus history and
             // duplicate customer notifications.
             if (feeDeal.status === "FEE_PENDING" || feeDeal.status === "FEE_PAID") {
-              await advanceDealStatus(feeDeal.id, "FEE_PAID", { actorRole: "SYSTEM", force: true, data: feeData });
+              // PHASE 10 §28.3 #6 — THE LIVE FEE PATH. `service-fee.service.ts` got a reason
+              // in this phase and THIS did not, which is worse than either: the sibling that
+              // was fixed has no callers (its own comment says so) and this is the one Stripe
+              // actually reaches. Without a reason the forced advance throws AFTER the ledger
+              // row is written, the outer handler 500s, `paymentProviderEvent.processed` stays
+              // false, and Stripe retries the same failure for ever — money captured,
+              // `fee_paid_at` never set. Found by the first independent review.
+              await advanceDealStatus(feeDeal.id, "FEE_PAID", {
+                actorRole: "SYSTEM",
+                force: true,
+                reason: `Concierge fee settled by Stripe (${pi.id}) — a payment receipt is an authoritative fact, so the ladder is forced past the ordering gates`,
+                data: feeData,
+              });
             } else {
               // Before the fee stage, or already past insurance — record the fee
               // fields without touching status. The ladder settles it when the deal
@@ -875,10 +956,44 @@ export async function POST(request: NextRequest) {
             `[stripe/webhook] deposit payment attempt declined for PI ${pi.id} — deposit left PENDING; ` +
               `the intent is live and the buyer may retry on it`,
           );
+
+          // §26 — "Payment failure | Buyer | Preserve request; allow safe retry."
+          //
+          // THE BRANCH ABOVE ALREADY DOES THE PRESERVING, and deliberately does nothing
+          // else. What it had no way to do is give the condition an OWNER: a buyer whose
+          // card keeps declining has a live intent, a preserved request, and nobody
+          // looking. §26 gives that a deadline and a return point ("Stage 5 — the $99
+          // checkout"), and this is the row an operator works from.
+          //
+          // KEYED PER INTENT, NOT PER EVENT, and that is what makes it safe here. Stripe
+          // Elements retries on the SAME PaymentIntent, so a buyer tapping retry five
+          // times is one failing obligation and one case — not five. Without that key
+          // this branch would be the noisiest raise site in the system.
+          //
+          // It does NOT change what the buyer is told: the six-touch series still owns
+          // buyer-facing $99 messaging and rechecks live payment state at send time, so
+          // a decline is already covered by the next due touch. No capability moves.
+          const depositBuyerId = pi.metadata.buyerId;
+          if (depositBuyerId) {
+            await raiseException({
+              code: "PAYMENT_FAILURE",
+              buyerId: depositBuyerId,
+              detail:
+                `Stripe declined the deposit on ${pi.id}` +
+                `${pi.last_payment_error?.message ? `: ${pi.last_payment_error.message}` : ""}. ` +
+                `The intent is LIVE and the deposit stays PENDING — the buyer can retry on it, and must not be charged twice.`,
+              idempotencyKey: `PAYMENT_FAILURE:${pi.id}`,
+            }).catch((err) => {
+              logger.error("[stripe/webhook] could not raise the deposit-failure exception", {
+                paymentIntentId: pi.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }
         }
 
         if (pi.metadata.type === "concierge_fee" || pi.metadata.type === "service_fee") {
-          const { buyerId } = pi.metadata;
+          const { buyerId, dealId } = pi.metadata;
           if (buyerId) {
             await prisma.notification.create({
               data: {
@@ -888,6 +1003,39 @@ export async function POST(request: NextRequest) {
                 body:  "Your concierge fee payment could not be processed. Return to your deal page to retry.",
               },
             }).catch(() => {});
+
+            // §26 — "Premium balance payment fails | Buyer | Retry and notify; the
+            // transaction never stalls and the buyer stays on Standard."
+            //
+            // The notification above was the whole of it, and it is written with a
+            // swallowed `.catch(() => {})` — so on a bad day the buyer was told
+            // nothing AND nobody knew. §26 gives this row an owner and a deadline for
+            // exactly that case.
+            //
+            // THE EXCEPTION IS NOT A DUPLICATE OF THE NOTIFICATION. The notification
+            // is the "notify" half and is the buyer's; the queue row is the "retry"
+            // half and is Operations' — a Premium balance that keeps failing is a
+            // buyer who elected a plan they are being charged for and cannot
+            // complete, and §23's manual-refund review is theirs to start.
+            //
+            // The transaction does not stall on it, which is the rest of that §26
+            // row: nothing here blocks the deal, and the unpaid election is reverted
+            // to Standard at funding clearance by `closePremiumWindowAndRevert`.
+            await raiseException({
+              code: "PREMIUM_BALANCE_PAYMENT_FAILED",
+              buyerId,
+              dealId: dealId ?? undefined,
+              detail: `Stripe declined the concierge fee on ${pi.id}${pi.last_payment_error?.message ? `: ${pi.last_payment_error.message}` : ""}. The buyer stays on Standard until it settles.`,
+              // Per INTENT, not per event: Stripe Elements retries on the same
+              // PaymentIntent, so a buyer tapping retry four times is one failing
+              // obligation, not four Operations cases.
+              idempotencyKey: `PREMIUM_BALANCE_PAYMENT_FAILED:${pi.id}`,
+            }).catch((err) => {
+              logger.error("[stripe/webhook] could not raise the fee-failure exception", {
+                paymentIntentId: pi.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
           }
         }
         break;

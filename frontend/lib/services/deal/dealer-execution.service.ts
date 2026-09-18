@@ -49,6 +49,7 @@ import {
   renderDealerExecutionRequested,
   renderExecutedContractStored,
 } from "@/lib/services/comms/phase8-email-content";
+import type { TransactionActorRole } from "./transition-authority";
 
 export class DealerExecutionError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -92,6 +93,10 @@ export async function requestDealerExecution(dealId: string): Promise<void> {
     await raiseException({
       code: "DEALER_DOES_NOT_EXECUTE",
       dealId,
+      // Carried so the row reaches the dealer surface as well as Operations. This
+      // particular occurrence — "no email address" — is precisely the one a dealership
+      // will not learn about by email, which is why the in-portal notice matters.
+      dealerId: deal.offer?.dealerId ?? null,
       detail:
         "Every required signature is in, but the winning dealership has no email address, so the " +
         "execution request could not be sent. Release is blocked until the executed copy is stored.",
@@ -134,7 +139,7 @@ export async function recordDealerExecution(params: {
   dealId: string;
   executedDocumentUrl: string;
   actorId: string;
-  actorRole?: string;
+  actorRole?: TransactionActorRole;
   now?: Date;
 }): Promise<RecordExecutionResult> {
   const now = params.now ?? new Date();

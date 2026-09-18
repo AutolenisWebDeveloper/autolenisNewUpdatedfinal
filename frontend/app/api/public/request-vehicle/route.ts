@@ -270,6 +270,45 @@ async function handleDraftCapture(request: NextRequest, raw: unknown): Promise<N
     } catch (err) {
       logger.error("[request-vehicle] draft recovery enqueue failed (capture stands):", err);
     }
+
+    // §27.1 rows 3-4 and 9-11 — PHASE 10. The claim link and its three verification
+    // reminders, which had no enqueue site anywhere.
+    //
+    // THE DIFFERENCE FROM DRAFT RECOVERY ABOVE, since the two are adjacent and read alike:
+    // draft recovery is about an unfinished REQUEST and links back to the form; this is
+    // about an unclaimed ACCOUNT and carries the credential that opens it. A visitor can
+    // need both — a saved request they never finished, on an account they never claimed —
+    // and cancelling one must not cancel the other, which is why they carry separate
+    // cancel keys.
+    //
+    // `enqueueGuestVerification` re-reads the buyer and refuses anything that is not a
+    // guest capture, so this call site — an unauthenticated public route — cannot cause a
+    // claim credential to be minted for a claimed account.
+    //
+    // Best-effort, like the sequence above: a visitor's capture must not fail because a
+    // message could not be scheduled.
+    try {
+      const { enqueueGuestVerification } = await import(
+        "@/lib/services/acquisition/guest-verification.service"
+      );
+      const vr = await prisma.vehicleRequest.findUnique({
+        where: { id: vehicleRequestId },
+        select: { buyerId: true },
+      });
+      if (vr?.buyerId) {
+        const seq = await enqueueGuestVerification({
+          buyerId: vr.buyerId,
+          email: d.email,
+          firstName: d.firstName ?? null,
+          vehicleRequestId,
+        });
+        if (!seq.claimSent) {
+          logger.info("[request-vehicle] guest verification sequence not enqueued", { reason: seq.reason });
+        }
+      }
+    } catch (err) {
+      logger.error("[request-vehicle] guest verification enqueue failed (capture stands):", err);
+    }
   }
 
   return NextResponse.json({

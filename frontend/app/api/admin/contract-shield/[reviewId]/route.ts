@@ -101,7 +101,19 @@ export async function POST(request: NextRequest, { params }: Props) {
       await advanceDealStatus(deal.id, "CONTRACT_APPROVED", {
         actorId: admin.adminId,
         actorRole: "ADMIN",
-        reason: reason ?? undefined,
+        // PHASE 10 §28.3 #6. This was `reason ?? undefined`, and the APPROVE action has
+        // no reason field in the UI (`ContractShieldReviewActions.tsx`, `needsReason:
+        // false`) — so `reason` was undefined on every real approval. Once a forced
+        // transition began requiring a reason, that threw AFTER `contractScan.status`
+        // had been written to PASS, leaving the version approved, the scan PASS, and the
+        // deal stranded at CONTRACT_REVIEW with no envelope prepared. Found by the first
+        // independent review.
+        //
+        // The ACTION is the reason, so it is stated rather than demanded from the
+        // operator: the admin's optional note is appended when they wrote one.
+        reason: reason?.trim()
+          ? `Contract Shield approved by an administrator: ${reason.trim()}`
+          : "Contract Shield approved by an administrator",
         force: true,
         data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
@@ -223,7 +235,11 @@ export async function POST(request: NextRequest, { params }: Props) {
       await advanceDealStatus(deal.id, "CONTRACT_PENDING", {
         actorId: admin.adminId,
         actorRole: "ADMIN",
-        reason: reason ?? undefined,
+        // Same defect, same fix. A revision request sends the deal backwards, which is
+        // exactly the transition whose audit row most needs a why.
+        reason: reason?.trim()
+          ? `Contract revision requested by an administrator: ${reason.trim()}`
+          : "Contract revision requested by an administrator",
         force: true,
         data: { contractShieldStatus: "REVISION_REQUESTED" },
       });

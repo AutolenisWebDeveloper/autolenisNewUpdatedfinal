@@ -7,7 +7,6 @@ import { limitAuthAttempt } from "@/lib/security/rate-limit";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { UserRole, BuyerPlan, AffiliateStatus } from "@prisma/client";
-import { sendWelcomeEmail } from "@/lib/services/email/resend.service";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import {
   getAppUrl,
@@ -223,6 +222,20 @@ async function ensurePrismaUser(
             data:  { isGuest: false },
           }),
         ]);
+        // §27.1 — PHASE 10. The guest just claimed, so the claim link and its three
+        // verification reminders are about a question that has been answered.
+        //
+        // `skipIfVerified` and `skipIfAlreadyClaimed` would also stop them at send time and
+        // are the guard that must hold; this cancels them EARLIER so the rows are not sitting
+        // in the outbox for three days looking like pending work. Keyed on the GUEST buyer id,
+        // because that is the row the sequence was enqueued against — the claim moves the
+        // requests to `newBuyerId` but the outbox rows keep the id they were written with.
+        const { cancelGuestVerification } = await import(
+          "@/lib/services/acquisition/guest-verification.service"
+        );
+        await cancelGuestVerification(guestBuyer.id, "guest claimed their account").catch((err) =>
+          logger.error("[ensurePrismaUser] guest verification cancel failed:", err),
+        );
       }).catch(err =>
         logger.error("[ensurePrismaUser] guest transfer failed:", err)
       );
@@ -411,12 +424,55 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
 
   verificationUrl = linkData.properties.action_link;
 
-  // Send branded welcome / verification email via Resend.
+  // §27.1 row 1 "Registration submitted → Buyer → verification link" — PHASE 10, MIGRATED
+  // OFF THE DIRECT RAIL.
+  //
+  // This was `sendWelcomeEmail`, one Resend call inside a try/catch that logged and returned
+  // "Check your email to confirm your account." §27: "No page request determines whether a
+  // transaction communication survives." A Resend blip here produced an account that could
+  // never be verified, a person who had been told to go and look, and no retry, no record and
+  // no alert — the failure was invisible to everyone including the person it happened to.
+  //
+  // The outbox drains every minute (`vercel.json`, `comms-outbox-drain`), so the cost is up to
+  // a minute of latency; the gain is five attempts, a terminal-failure exception, and
+  // suppression the direct rail does not apply at all.
+  //
+  // THE KEY IS THE LINK, NOT THE ADDRESS. `generateLink` mints a fresh `action_link` on every
+  // call, so keying on the email alone would silently swallow the resend a person asks for
+  // after the first link expires — and keying on nothing would let a double-submitted form put
+  // two live credentials in their inbox. Hashing the URL dedupes exactly the duplicate and
+  // nothing else.
   try {
-    await sendWelcomeEmail({ to: email, firstName: firstName ?? email.split("@")[0], verificationUrl });
+    const { enqueueTransactional } = await import("@/lib/services/comms/transactional-dispatcher.service");
+    const { PHASE_2_TEMPLATES } = await import("@/lib/services/comms/state-recheck-registry");
+    const { WELCOME_EMAIL_SUBJECT, renderWelcomeEmail } = await import(
+      "@/lib/services/email/templates/welcome"
+    );
+    const { createHash } = await import("node:crypto");
+    const name = firstName ?? email.split("@")[0];
+    const linkFingerprint = createHash("sha256").update(verificationUrl).digest("hex").slice(0, 32);
+    await enqueueTransactional({
+      triggerEvent: "auth.registration_submitted",
+      templateKey: PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED,
+      channel: "email",
+      recipientKind: "buyer",
+      // No Prisma buyer exists yet — `ensurePrismaUser` runs at `/auth/callback`, which is
+      // reached by clicking THIS link. The address is the only handle there is, and the
+      // recheck for this key is `alwaysSend` precisely because it reads no buyer.
+      recipientId: null,
+      to: email,
+      idempotencyKey: `${PHASE_2_TEMPLATES.REGISTRATION_SUBMITTED}:${linkFingerprint}`,
+      payload: {
+        email,
+        subject: WELCOME_EMAIL_SUBJECT(name),
+        html: renderWelcomeEmail({ firstName: name, verificationUrl }),
+      },
+    });
   } catch (e) {
-    // Non-blocking — welcome email failure must never fail sign-up
-    logger.error("[signUpAction] welcome email failed:", e);
+    // Still non-blocking: a failed ENQUEUE must not fail sign-up either. The difference is
+    // that an enqueue failure is a database failure rather than a provider failure, and the
+    // account exists regardless — the person can ask for a new link.
+    logger.error("[signUpAction] welcome email enqueue failed:", e);
   }
 
   return { success: true, message: "Check your email to confirm your account." };

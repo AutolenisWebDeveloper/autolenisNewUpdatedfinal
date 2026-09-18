@@ -210,6 +210,34 @@ export async function enqueueTransactional(input: EnqueueTransactionalInput, db:
   }
   assertRenderableEmail(input);
 
+  // ── THE RAIL STAMPS ITS OWN TIER. Found by the second independent review. ──
+  //
+  // `deliverEmail` chooses the suppression tier from the PAYLOAD:
+  // `suppressionTier ?? (payload.type === "transactional" ? "hard" : "full")`
+  // (`comms-outbox.service.ts:220-222`). A payload that omits `type` therefore gets the
+  // MARKETING tier — `isEmailSuppressed`, which is soft+hard AND fails closed on a lookup
+  // error (`suppression.service.ts:24-27` returns `true`). `SUPPRESSED` is terminal: no
+  // retry, no `COMMS_TERMINAL_FAILURE`, nothing said.
+  //
+  // What that meant concretely, before this line: a person who had ever unsubscribed from
+  // marketing, or who signed up during one Supabase blip, would silently never receive their
+  // sign-up verification link — and `users.email` is UNIQUE, so they could not try again with
+  // the same address. The direct rail this phase migrated off applied hard-only
+  // (`resend.service.ts:156-174`), so the migration was a regression in exactly the dimension
+  // its own comments claimed to improve.
+  //
+  // Stamped HERE rather than at each call site, because "remember to add `type`" is the
+  // failure mode that produced it: every one of the ten new sites omitted it, and the
+  // convention was followed only where a site had been copied from an older one. This
+  // function IS the transactional rail — a payload on it that is not transactional is a
+  // contradiction, and the two callers that deliberately want the marketing tier say so with
+  // an explicit `suppressionTier: "full"` (`auction-invitation.service.ts:549,1305`), which
+  // takes precedence and is untouched by this.
+  if (input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)) {
+    const payload = input.payload as Record<string, unknown>;
+    if (payload.type === undefined) payload.type = "transactional";
+  }
+
   const dedupKey = input.idempotencyKey ?? `${input.templateKey}:${input.recipientId ?? input.to ?? "unknown"}`;
   const now = new Date();
 
@@ -270,6 +298,50 @@ export async function cancelByKey(cancelKey: string, reason: string, db: Db = pr
   const now = new Date();
   const res = await db.commsOutbox.updateMany({
     where: { cancelKey, status: { in: ["pending", "sending"] } },
+    data: { status: "cancelled", cancelledAt: now, cancelReason: reason, updatedAt: now },
+  });
+  return { cancelled: res.count };
+}
+
+/**
+ * Cancel every not-yet-sent row belonging to a transaction. §24's "close scheduled work".
+ *
+ * ── WHY THIS EXISTS RATHER THAN A LIST OF CANCEL KEYS ───────────────────────
+ *
+ * Phase 10's cancellation orchestration first tried to do this by building keys —
+ * `deal:<id>`, `request:<id>`, `auction:<id>` — and those keys match NOTHING. The real
+ * ones are minted by six different builders (`recapCancelKey`,
+ * `signatureReminderCancelKey`, `contractRequestCancelKey`, `insuranceReviewCancelKey`,
+ * `reaffirmationReminderCancelKey`, `selectionReminderCancelKey`) plus ad-hoc ones in
+ * draft recovery, deposit reminders and invitations. `cancelByKey` matches on exact
+ * equality, so the stop reported `affected: 0, ok: true` and a cancelled buyer kept
+ * receiving every queued reminder. The first independent review found it — inside the
+ * module written to remove exactly that class of silent success.
+ *
+ * Enumerating the keys would have worked until the seventh builder. The REFS are already
+ * on the row: `deal_id`, `vehicle_request_id` and `auction_id` are columns
+ * `enqueueTransactional` fills for precisely this reason ("Transaction refs, so a human
+ * can find what a message was about"). Cancelling by them cannot drift as keys are added.
+ *
+ * SENT ROWS ARE NEVER TOUCHED, same rule as `cancelByKey`: a message that has left
+ * cannot be unsent, and rewriting its status would make the delivery record lie.
+ */
+export async function cancelPendingForTransaction(
+  refs: { dealId?: string | null; vehicleRequestId?: string | null; auctionId?: string | null },
+  reason: string,
+  db: Db = prisma,
+): Promise<CancelResult> {
+  const or: Prisma.CommsOutboxWhereInput[] = [];
+  if (refs.dealId) or.push({ dealId: refs.dealId });
+  if (refs.vehicleRequestId) or.push({ vehicleRequestId: refs.vehicleRequestId });
+  if (refs.auctionId) or.push({ auctionId: refs.auctionId });
+  // No refs means no scope. Cancelling every pending row in the table because a caller
+  // passed nothing is the worst possible reading of an empty filter.
+  if (or.length === 0) return { cancelled: 0 };
+
+  const now = new Date();
+  const res = await db.commsOutbox.updateMany({
+    where: { OR: or, status: { in: ["pending", "sending"] } },
     data: { status: "cancelled", cancelledAt: now, cancelReason: reason, updatedAt: now },
   });
   return { cancelled: res.count };

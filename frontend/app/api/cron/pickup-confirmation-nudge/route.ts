@@ -8,7 +8,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { runPickupConfirmationNudges } from "@/lib/services/pickup/pickup-sla.service";
-import { sweepAppointmentReminders } from "@/lib/services/pickup/pickup-reminders.service";
+import {
+  sweepAppointmentReminders,
+  flagSuspectedNoShows,
+  sweepReleasedNotConfirmed,
+} from "@/lib/services/pickup/pickup-reminders.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { logger } from "@/lib/logger";
 
@@ -26,8 +30,36 @@ export async function GET(request: NextRequest) {
   // THE REMINDERS RUN EVEN IF THE NUDGES THROW. They are unrelated rails and a buyer travelling
   // tomorrow should not lose their reminder because a proposal nudge failed.
   const run = await withCronRun("pickup-confirmation-nudge", async () => {
-    const results = await Promise.allSettled([runPickupConfirmationNudges(), sweepAppointmentReminders()]);
-    const [nudges, reminders] = results;
+    // PHASE 10 — TWO SWEEPS JOIN, AND ONE OF THEM WAS DEAD CODE.
+    //
+    // `flagSuspectedNoShows` has existed since Phase 9, raises §26's PICKUP_MISSED, and
+    // HAD NO CALLER ANYWHERE. It was exported, tested, documented — and unreachable, so
+    // the exception it exists to raise could never fire in production. Found by §8.3's
+    // completeness work, and it is the reason that gate's own header now records what it
+    // cannot see: a raise site proves a code CAN be raised, not that anything calls it.
+    //
+    // `sweepReleasedNotConfirmed` is new and is §26's "Dealer released, buyer has not
+    // confirmed | Operations | Remind buyer; never complete automatically".
+    //
+    // Folded in here rather than given crons of their own, for the reason this file
+    // already gives: identical subject, identical cadence, and a second scheduled entry
+    // is a second thing that can stop running without anybody noticing.
+    const results = await Promise.allSettled([
+      runPickupConfirmationNudges(),
+      sweepAppointmentReminders(),
+      flagSuspectedNoShows(),
+      sweepReleasedNotConfirmed(),
+    ]);
+    const [nudges, reminders, noShows, unconfirmed] = results;
+
+    // Same rule as the two rails below: an independent sweep must not take the others
+    // down, and a rejection is LOGGED rather than left as a string in a 200 response.
+    if (noShows.status === "rejected") {
+      logger.error("[cron/pickup-confirmation-nudge] no-show sweep failed:", noShows.reason);
+    }
+    if (unconfirmed.status === "rejected") {
+      logger.error("[cron/pickup-confirmation-nudge] released-not-confirmed sweep failed:", unconfirmed.reason);
+    }
     if (nudges.status === "rejected" && reminders.status === "rejected") {
       throw nudges.reason;
     }

@@ -27,6 +27,8 @@ interface Captured {
   approvedEmails: number;
   adverseEmails: number;
   underReviewEmails: number;
+  /** PHASE 10: the §27 outbox rows this decision enqueued, by template key. */
+  enqueued: string[];
   adminAlerts: Array<Record<string, unknown>>;
 }
 
@@ -38,6 +40,7 @@ const cap: Captured = {
   approvedEmails: 0,
   adverseEmails: 0,
   underReviewEmails: 0,
+  enqueued: [],
   adminAlerts: [],
 };
 
@@ -118,10 +121,32 @@ const prismaMock = {
 };
 mock.module("@/lib/prisma", { namedExports: { prisma: prismaMock } });
 
+mock.module("@/lib/services/comms/transactional-dispatcher.service", {
+  namedExports: {
+    enqueueTransactional: async (input: { templateKey: string }) => {
+      cap.enqueued.push(input.templateKey);
+      return { enqueued: true, id: "row_1" };
+    },
+  },
+});
+
+mock.module("@/lib/services/operations/queue-item.service", {
+  namedExports: {
+    raiseException: async () => ({ item: { id: "q1" }, created: true }),
+  },
+});
+
 mock.module("@/lib/services/email/resend.service", {
   namedExports: {
+    // PHASE 10: retained so the mock still models the module's real shape, but this export
+    // is NO LONGER CALLED by prequal.service — the approval notice moved onto the §27
+    // dispatcher, so the assertions below count the ENQUEUE. `cap.approvedEmails` staying at
+    // 0 is the point, and the direct rail had no retry and no terminal-failure alert.
     sendPrequalApprovedEmail: async () => { cap.approvedEmails++; },
     sendAdverseActionEmail: async () => { cap.adverseEmails++; return { outcome: "SENT" as const }; },
+    // PHASE 10: retained so the mock still models the module's real shape, but this
+    // export is NO LONGER CALLED by prequal.service — the under-review notice moved
+    // onto the §27 dispatcher. `cap.underReviewEmails` staying at 0 is the point.
     sendPrequalUnderReviewEmail: async () => { cap.underReviewEmails++; },
     sendAdminPrequalAlertEmail: async (a: Record<string, unknown>) => { cap.adminAlerts.push(a); },
   },
@@ -147,16 +172,21 @@ beforeEach(() => {
   cap.approvedEmails = 0;
   cap.adverseEmails = 0;
   cap.underReviewEmails = 0;
+  cap.enqueued = [];
   cap.adminAlerts = [];
 });
 
-test("APPROVED + OFAC cleared ⇒ persists APPROVED, sets budget, sends approval email", async () => {
+test("APPROVED + OFAC cleared ⇒ persists APPROVED, sets budget, ENQUEUES the approval notice", async () => {
   await run({ decision: PreQualDecision.APPROVED, ofacFlagged: false });
   const persisted = cap.upserts[0]!;
   assert.equal(persisted.decision, "APPROVED");
   assert.equal(persisted.maxOtdAmountCents, 4_200_000);
   assert.equal(persisted.checkOfacAlert, false);
-  assert.equal(cap.approvedEmails, 1);
+  assert.ok(
+    cap.enqueued.includes("prequal_approved"),
+    `§27: the decision notice goes through the durable outbox. Enqueued: ${cap.enqueued.join(", ")}`,
+  );
+  assert.equal(cap.approvedEmails, 0, "and NOT through the direct rail, which has no retry");
 });
 
 test("INDETERMINATE OFAC (null) on an APPROVED result ⇒ NEVER persisted APPROVED (fail-closed)", async () => {
@@ -165,6 +195,10 @@ test("INDETERMINATE OFAC (null) on an APPROVED result ⇒ NEVER persisted APPROV
   assert.notEqual(persisted.decision, "APPROVED", "an approval must never be issued without an affirmative OFAC clear");
   assert.equal(persisted.maxOtdAmountCents, 0, "no budget granted under indeterminate OFAC");
   assert.equal(cap.approvedEmails, 0, "no approval email under indeterminate OFAC");
+  assert.ok(
+    !cap.enqueued.includes("prequal_approved"),
+    "and none enqueued either — fail-closed means no notice, on either rail",
+  );
 });
 
 test("OFAC hit (true) ⇒ OFAC_REVIEW + ops notification, no budget", async () => {
@@ -191,7 +225,20 @@ test("Deceased indicator ⇒ MANUAL_REVIEW + under-review email + admin alert", 
   await run({ decision: PreQualDecision.APPROVED, ofacFlagged: false, deceasedFlag: true });
   const persisted = cap.upserts[0]!;
   assert.equal(persisted.decision, "MANUAL_REVIEW");
-  assert.equal(cap.underReviewEmails, 1);
+  // PHASE 10 — THE ASSERTION MOVED WITH THE MESSAGE, and it is a stronger one.
+  //
+  // This counted a DIRECT `sendPrequalUnderReviewEmail` call. §27 requires the notice
+  // to dispatch through the durable outbox — "no page request determines whether a
+  // transaction communication survives" — so the direct send is gone and counting it
+  // would now assert that the message is NOT sent.
+  //
+  // The outbox row is the better assertion anyway: it is what actually survives a
+  // crash, and it is what the §8.3 completeness gate reads.
+  assert.equal(cap.underReviewEmails, 0, "the direct rail must no longer be used");
+  assert.ok(
+    cap.enqueued.includes("prequal_under_review"),
+    `the under-review notice must be enqueued through the §27 dispatcher. Enqueued: ${cap.enqueued.join(", ") || "(nothing)"}`,
+  );
 });
 
 test("MLA covered borrower ⇒ MANUAL_REVIEW", async () => {

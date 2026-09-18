@@ -37,6 +37,7 @@ import type { Prisma } from "@prisma/client";
 import { INSURANCE_SATISFIED } from "./deal.service";
 import type { ClearanceItem, ClearanceOwner } from "./funding-clearance.service";
 import { signatureProgress } from "@/lib/services/esign/required-signers";
+import { NON_BLOCKING_EXCEPTION_CODES } from "@/lib/services/operations/exception-catalogue";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -129,7 +130,30 @@ export async function evaluateCompletionPreconditions(
           possessionDiscrepancy: true,
         },
       },
-      queueItems: { where: { status: "OPEN" }, select: { id: true, exceptionCode: true } },
+      // EXCLUDED AT THE QUERY, not filtered afterwards, so the count and the message below
+      // cannot disagree. `NON_BLOCKING_EXCEPTION_CODES` is the register's own classification
+      // (`blocksTransaction: false`): rows about AutoLenis's own plumbing — an unreachable
+      // comms guard, an undeliverable message, an exhausted provider budget — are real
+      // Operations work and are NOT a reason to stop a buyer completing a purchase they have
+      // paid for, taken delivery of and confirmed.
+      //
+      // Found by CI, and the second independent review had asked about the coupling as a
+      // question. This phase made the comms guard fail closed (correctly), so a runtime with
+      // no Supabase configuration opened `COMMS_GUARD_UNAVAILABLE` on every deal transition —
+      // and §Stage 20 then refused to complete ANY deal. Eight red journeys, one misread row.
+      //
+      // The `exceptionCode: null` branch is spelled out because `NOT IN (...)` is NULL for a
+      // NULL column under SQL's three-valued logic, which would silently drop uncoded rows.
+      queueItems: {
+        where: {
+          status: "OPEN",
+          OR: [
+            { exceptionCode: null },
+            { exceptionCode: { notIn: [...NON_BLOCKING_EXCEPTION_CODES] } },
+          ],
+        },
+        select: { id: true, exceptionCode: true },
+      },
     },
   });
 

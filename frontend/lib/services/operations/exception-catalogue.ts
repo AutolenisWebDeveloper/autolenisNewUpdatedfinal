@@ -82,7 +82,108 @@ export interface ExceptionDefinition {
   readonly raisedByPhase: number;
   /** Where the requirement is stated. */
   readonly specSection: string;
+  /**
+   * Does an OPEN row of this kind mean the buyer's TRANSACTION is held?
+   *
+   * Absent means yes, which is the right default for almost every §26 row: the register
+   * exists because a condition stops a purchase moving, and the surfaces that ask "may this
+   * transaction proceed" — `hasOpenException` (the §26 upgrade suppression) and §Stage 20's
+   * `NO_HOLD_OR_DISCREPANCY` precondition — read every open row on the deal or the buyer.
+   *
+   * ── WHY `false` HAS TO EXIST, AND WHAT IT COST TO LEARN ────────────────────
+   *
+   * A handful of rows are not about the transaction at all. They are about AUTOLENIS'S OWN
+   * PLUMBING — a comms idempotency store that could not be reached, a message that could not
+   * be delivered, a provider budget ceiling — or about the register's own machinery, like the
+   * row that RECORDS an upgrade prompt being suppressed. Every one of them is real Operations
+   * work and belongs on the queue. None of them is a reason to stop a buyer completing a
+   * purchase they have paid for, taken delivery of, and confirmed.
+   *
+   * That was not hypothetical. This phase made the comms guard fail CLOSED (defect 5, which
+   * was right — it had been fail-open in three places), so a missing Supabase configuration
+   * raised `COMMS_GUARD_UNAVAILABLE` on every deal transition. Those rows then failed
+   * §Stage 20's precondition, and **the Phase 9 pickup journeys could no longer complete a
+   * deal at all** — eight CI failures whose cause was an infrastructure row being read as a
+   * transactional hold. The second independent review asked about this exact coupling as a
+   * question; CI answered it.
+   *
+   * Refusing to SEND unguarded is correct. Refusing to let the purchase finish is not, and
+   * the difference is this flag.
+   *
+   * Setting it to `false` is deliberately narrow and is asserted by
+   * `exception-register-completeness.test.ts`: the count is pinned and every entry carries
+   * its reason in prose beside it.
+   */
+  readonly blocksTransaction?: false;
+  /**
+   * How this row is discharged, when it is NOT discharged by a raise site.
+   *
+   * ── WHY THIS FIELD EXISTS (Phase 10, §8.3) ────────────────────────────────
+   *
+   * §8.3 makes Phase 10 assert that "every `exception_code` in the register has at least
+   * one raise site". Wiring the register found that the assertion, taken literally, is
+   * wrong for two small classes of row, and being wrong in opposite directions:
+   *
+   *   · Two rows' REQUIRED RESULT is a rendering rule, not a work item. §26 gives
+   *     "Buyer has no in-radius inventory" the owner SYSTEM, no deadline, and the required
+   *     result "lead with the custom request; never present an empty grid". Opening a
+   *     `queue_items` row for it would put a work item with no owner and no clock in front
+   *     of an operator for every buyer who browses outside a market — and, because
+   *     `hasOpenException` counts every open row, it would suppress the upgrade prompt for
+   *     those buyers indefinitely. The rule is real and it is implemented; a queue row is
+   *     simply the wrong artefact for it.
+   *
+   *   · One row's TRIGGER DOES NOT EXIST YET. "Trade appraisal changed at handover" needs a
+   *     dealership-confirmed final allowance to differ from the agreed one, and
+   *     `trade_in_submissions.final_allowance_cents` has no writer anywhere in this
+   *     repository — §10 rows R18.10 and R18.17 are both still TO IMPLEMENT, and they are
+   *     Phase 9's. Wiring a raise site to some other timestamp would make the register
+   *     report an exception the platform cannot actually detect, which is worse than the
+   *     gap it hides.
+   *
+   * The alternative the gate's own message offered — "remove it from the register with a
+   * recorded reason" — is a REMOVED capability under CLAUDE.md's capability-preservation
+   * invariant and needs owner sign-off. So the row stays, and states its disposition here
+   * where the register is, rather than in an allowlist inside the test. The gate then
+   * enforces the disposition in both directions: a discharged row that GAINS a raise site
+   * fails, so the list cannot rot, and a `BEHAVIOUR` discharge whose proving test has been
+   * deleted fails too.
+   *
+   * Absent — the normal case, 55 of 58 rows — means a raise site through `raiseException`.
+   */
+  readonly dischargedBy?: ExceptionDischarge;
 }
+
+/**
+ * The two non-raise dispositions a register row may carry. Both require a reason in prose,
+ * because the reason is the whole point: a bare exemption flag is an allowlist, and an
+ * allowlist with no reason per entry is how a register stops meaning anything.
+ */
+export type ExceptionDischarge =
+  | {
+      /**
+       * §26's required result is a product BEHAVIOUR and there is no work item. The
+       * behaviour is proven by a test, named here, and the gate asserts that file exists —
+       * so deleting the proof breaks the register rather than quietly widening it.
+       */
+      readonly kind: "BEHAVIOUR";
+      readonly reason: string;
+      /** Repo-relative path of the test that asserts the behaviour. */
+      readonly provenBy: string;
+    }
+  | {
+      /**
+       * The condition cannot be DETECTED yet because the capability that produces it was
+       * never built. Names the §10 parity row and the phase that owns building it, so this
+       * reads as a tracked gap with an address rather than as an exemption.
+       */
+      readonly kind: "UNBUILT";
+      readonly reason: string;
+      /** The §10 parity-map row id(s) that would build the trigger. */
+      readonly parityRow: string;
+      /** The §8.2 phase those rows belong to. */
+      readonly ownedByPhase: number;
+    };
 
 const DEFINITIONS: readonly ExceptionDefinition[] = [
   {
@@ -370,9 +471,24 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Stage 4 — vehicle definition",
     raisedByPhase: 4,
     specSection: "§26; §22a",
+    dischargedBy: {
+      kind: "BEHAVIOUR",
+      reason:
+        "§26 gives this row the owner SYSTEM and no deadline, and its required result is a " +
+        "rendering rule: lead with the custom request, never present an empty grid. " +
+        "`gateCatalogue` exists for exactly this — it has no filter, so the row count out equals " +
+        "the row count in, and `inRadiusCount` is what the page reads to decide whether to lead " +
+        "with the custom-request path (shortlist-radius.ts). A `queue_items` row would be a work " +
+        "item with no owner and no clock, raised for every buyer who browses outside a market, " +
+        "and `hasOpenException` would then suppress their upgrade prompt for as long as it stayed " +
+        "open.",
+      provenBy: "lib/services/shortlist/__tests__/catalogue-gating.test.ts",
+    },
   },
   {
     code: "INVENTORY_PROVIDER_BUDGET_CEILING",
+    // NOT a transactional hold — A provider call budget was exhausted. It stops SOURCING, which is its own gate; it says nothing about a deal that already has a dealership, a contract and a vehicle.
+    blocksTransaction: false,
     type: "INVENTORY_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "Inventory provider call budget near or at its ceiling",
@@ -409,6 +525,17 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Inventory browse — the ZIP prompt",
     raisedByPhase: 4,
     specSection: "§26; §22a",
+    dischargedBy: {
+      kind: "BEHAVIOUR",
+      reason:
+        "The same shape as NO_IN_RADIUS_INVENTORY: owner SYSTEM, no deadline, and a required " +
+        "result that is a rendering rule — ask for a ZIP before distances and shortlist actions, " +
+        "and still render the catalogue. `gateCatalogue` returns `hasZip`, and `shortlistGate` " +
+        "takes it as an input so a card with no known distance offers the ZIP prompt instead of " +
+        "an ADD action. Not knowing where a browsing visitor lives is the ordinary state of an " +
+        "inventory page, not an exception an operator works.",
+      provenBy: "lib/services/shortlist/__tests__/catalogue-gating.test.ts",
+    },
   },
   {
     code: "ALL_OFFERS_EXCEED_BUDGET",
@@ -669,6 +796,23 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     returnPoint: "Stage 18 — handover, or Stage 13 contract revision",
     raisedByPhase: 9,
     specSection: "§26; Stage 18/19c",
+    dischargedBy: {
+      kind: "UNBUILT",
+      reason:
+        "The condition is 'the dealership's final trade allowance at handover differs from the " +
+        "one the contract was built on', and NEITHER figure has a writer. " +
+        "`trade_in_submissions.final_allowance_cents` (schema.prisma:2524) and " +
+        "`preliminary_allowance_cents` (:2529) are read by the recap, the identity firewall and " +
+        "the Contract Shield comparison, and written by nothing — so the comparison at " +
+        "contract-comparison.service.ts:329 is vacuous for trade today. `appraisal_changed_at` IS " +
+        "written, but only by the BUYER editing their own packet (trade-in.service.ts:304), which " +
+        "is a different fact from a dealership re-appraising at the kerb. Phase 10 does not invent " +
+        "a trigger: a raise site keyed to the buyer's own edit would make the register report an " +
+        "exception the document does not describe, and the register would then be lying in the " +
+        "direction that is hardest to notice.",
+      parityRow: "R18.10, R18.17",
+      ownedByPhase: 9,
+    },
   },
   {
     code: "DELIVERY_DISCREPANCY_REPORTED",
@@ -737,6 +881,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   },
   {
     code: "UPGRADE_PROMPT_DURING_OPEN_EXCEPTION",
+    // NOT a transactional hold — Self-referential: this row RECORDS that the suppression fired. Counting it would make the suppression permanent, which is the loop the first review found.
+    blocksTransaction: false,
     type: "PLAN_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "Upgrade prompt fires during an open exception",
@@ -798,6 +944,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   // here and counted separately from the 48.
   {
     code: "COMMS_TERMINAL_FAILURE",
+    // NOT a transactional hold — A message exhausted its attempts. Operations must re-drive it — and the buyer, who may never have received it, must still be able to finish the purchase they have already taken delivery of.
+    blocksTransaction: false,
     type: "COMMS_EXCEPTION",
     ownerRole: OWNER.OPERATIONS,
     label: "Communication terminal failure",
@@ -824,6 +972,8 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
   // program has spent five phases eliminating."
   {
     code: "COMMS_NO_DELIVERABLE_CHANNEL",
+    // NOT a transactional hold — There is no channel that can reach this recipient. That is a contactability problem for Operations to solve, not a hold on the transaction.
+    blocksTransaction: false,
     // The existing `COMMS_EXCEPTION` label, so no enum migration — and `queue_items.exception_code`
     // is plain TEXT with no CHECK, so no migration at all.
     type: "COMMS_EXCEPTION",
@@ -894,6 +1044,73 @@ const DEFINITIONS: readonly ExceptionDefinition[] = [
     raisedByPhase: 2,
     specSection: "§7.2 (iv); rule 16",
   },
+
+  {
+    code: "COMMS_GUARD_UNAVAILABLE",
+    // NOT a transactional hold — The subject is a store AutoLenis could not reach. The message was refused rather than sent unguarded, which is correct; stopping the buyer's purchase because of it is not.
+    blocksTransaction: false,
+    type: "COMMS_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "A transaction message could not be sent because its idempotency guard was unavailable",
+    requiredResult:
+      "Restore the guard, then re-drive the named message; it was refused rather than sent unguarded",
+    // Null by design. The buyer is not owed a notice saying a notice failed — they
+    // are owed the notice. Surfacing this would replace a missing message with a
+    // confusing one.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Check that the idempotency guard's backing store is reachable and its configuration is present, then re-drive the transition named in the detail. The message was NOT sent, so re-driving cannot duplicate it.",
+    deadlineHours: 4,
+    returnPoint: "§27 — the deal-status transition that produced the message",
+    raisedByPhase: 10,
+    specSection: "§27; §28.3 #5, #8",
+  },
+
+  // ── Phase 10, §24 — the two cases the cancellation orchestration opens ──────
+  //
+  // Both are stated OUTSIDE §26's table, like COMMS_TERMINAL_FAILURE (§27) and
+  // LINEAGE_ORPHAN (§3) above, and catalogued here for the same reason: a code with
+  // no register entry has no owner, no deadline and no buyer-visible status, which is
+  // precisely what §26 exists to guarantee every exception has.
+  {
+    code: "DEAL_FROZEN_PENDING_RELEASE",
+    type: "DEAL_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "Transaction cancelled after the dealership executed the contract",
+    requiredResult:
+      "Coordinate the buyer's and dealership's documented release, or another resolution; the Deal is frozen, not cancelled",
+    // §24 calls this "a coordination state, not a cancellation", and the buyer copy
+    // has to carry that difference. Telling a buyer their deal is cancelled when a
+    // dealership holds an executed contract would be false, and telling them nothing
+    // leaves them watching a deal that has visibly stopped.
+    buyerVisibleStatus:
+      "Your purchase is on hold while we agree a release with the dealership. Your deal is not cancelled and nothing further is owed while this is open.",
+    requiredAction:
+      "Contact the dealership and the buyer, obtain a documented release or agree another resolution, then either complete the unwind (CANCELLED/REFUNDED) or resume the deal to the stage it was frozen from. AutoLenis cannot void an executed contract unilaterally (§24).",
+    deadlineHours: 72,
+    returnPoint: "§24 — the stage recorded on the freeze, from deal_status_history",
+    raisedByPhase: 10,
+    specSection: "§24",
+  },
+  {
+    code: "CANCELLATION_CLEANUP_INCOMPLETE",
+    type: "DEAL_EXCEPTION",
+    ownerRole: OWNER.OPERATIONS,
+    label: "A cancellation stop did not complete",
+    requiredResult:
+      "Finish the named stop by hand; the transaction is cancelled but something it should have stopped is still live",
+    // Deliberately null. The buyer's transaction IS cancelled — the failure is on
+    // AutoLenis's side of the boundary, and surfacing "one of our cleanup steps
+    // failed" would alarm without giving them anything to do. §26 permits a null
+    // where the row is an infrastructure condition, and this is one.
+    buyerVisibleStatus: null,
+    requiredAction:
+      "Read the stops listed in the detail and complete each by hand — a live e-sign envelope, an un-revoked release token, an open invitation or a pending outbox row. Each names its own subsystem.",
+    deadlineHours: 24,
+    returnPoint: "§24 — re-run the failed stop; the orchestration is idempotent",
+    raisedByPhase: 10,
+    specSection: "§24; §28.3 #8",
+  },
 ] as const;
 
 /** Every catalogued exception code. */
@@ -911,6 +1128,14 @@ if (BY_CODE.size !== DEFINITIONS.length) {
 export const EXCEPTION_CATALOGUE: readonly ExceptionDefinition[] = DEFINITIONS;
 
 /** Look up a definition, or `undefined` for an uncatalogued code. */
+/**
+ * Codes whose OPEN rows must not gate a transaction. Derived from the register rather than
+ * restated, so a reader cannot drift from it — the mistake `DEALER_VISIBLE_CODES` made.
+ */
+export const NON_BLOCKING_EXCEPTION_CODES: readonly string[] = DEFINITIONS.filter(
+  (d) => d.blocksTransaction === false,
+).map((d) => d.code);
+
 export function findException(code: string): ExceptionDefinition | undefined {
   return BY_CODE.get(code);
 }
