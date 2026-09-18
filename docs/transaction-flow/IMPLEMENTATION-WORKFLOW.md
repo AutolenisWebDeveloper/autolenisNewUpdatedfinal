@@ -76,6 +76,22 @@ This document's own hash moves again with the Phase 9 close, for the same reason
 records: the AS BUILT section below is written into it. The value above is the hash it carried when
 Phase 9 READ it, which is the claim §1 is making.
 
+**Phase 11 pin (2026-09-18).** Phase 11 verified all three governing hashes at its opening, before any
+edit, and **all three MATCHED the owner's instructed values exactly** — no delta to audit this time:
+
+| File | Verified at Phase 11 opening | Result |
+| --- | --- | --- |
+| `docs/transaction-flow/IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` | MATCH |
+| `docs/transaction-flow/AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` | MATCH |
+| `docs/transaction-flow/AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` | MATCH |
+
+This file's hash moves again with the Phase 11 close, for the reason every prior phase records: §8.1k
+is written into it, as are the §8.3 and §8.1 row-11 corrections. The two governing documents it
+describes are **NOT** edited by this phase — acceptance measures the implementation against the
+specification and does not amend the specification, so their hashes above are also their closing
+hashes. The closing hash of this file is reported in the Phase 11 STOP 2 record and in
+`ACCEPTANCE-REPORT.md`.
+
 Content markers required by the master prompt — **VERIFIED except one, which does not match**:
 
 | Marker | Where | Result |
@@ -829,7 +845,7 @@ block. This rule is about reviews already running.
 | 8 | **Contract request, Contract Shield, buyer + co-buyer signing, dealer execution, financing completion & funding clearance, insurance review** — **AS BUILT 2026-09-15, §8.1h** | Stage 13 (14a–14d), Stage 14, Stage 15, §26 rows, §27.1 rows | S[12..14] | 16, 17, 18, 19 (activation owner-gated), 20 | 7 |
 | 9 | **Pickup readiness, scheduling, release token, reminders, handover, possession, atomic completion, post-completion obligations** | Stage 16–21, §26 rows, §27.1 rows | S[15..20] | 21, 22, 26, 27 (no-show/overdue consequences) | 8 |
 | 10 | **Control-plane completion: cancellation orchestration, exception register, communications register, legacy neutralisation, cross-portal parity** | §24, §26 (all 48 rows wired), §27.1 (all 77 rows wired), §28.3, §29 (re-verified), §25.2 consequences | EXC; SAFE; TRANSITION; every portal status surface | 25, 27, 23/24 (completeness) | 9 |
-| 11 | **Acceptance** (no new capability) | §34, §35, master §13 | ACCEPT | — | 10 |
+| 11 | **Acceptance** (no new capability) — **AS BUILT 2026-09-18, §8.1k — NOT ACCEPTED, 11 findings reported, none fixed** | §34, §35, master §13 | ACCEPT | — | 10 |
 
 ### 8.1a Phase 1 — AS BUILT (2026-09-07)
 
@@ -3555,6 +3571,120 @@ in §8.4; the paused-auction re-entry as **§13-D61**; `closeAuction` in its own
 the ruling gave it a caller and closed a live defect one file over. CI was red on this branch at the
 time the list above was first written and is green now — see the phase report.
 
+### 8.1k Phase 11 — Acceptance — AS BUILT (2026-09-18)
+
+Run on `claude/txflow-11-acceptance` from `b8becc05`. **No capability was added.** The only code written
+is test code (`frontend/tests/scenarios/`, `frontend/tests/e2e/form-walk.spec.ts`) plus the two
+infrastructure lines those tests require (`test:scenarios` in `package.json`, mandated by parity row
+T1; its `CHAIN_EXEMPT` entry in `scripts/check-test-coverage.ts`). The deliverable is
+`ACCEPTANCE-REPORT.md` at the repository root. **No defect found in this phase was fixed** — that is
+§8.2's hard constraint, and eleven findings are reported rather than repaired.
+
+**Verdict: NOT ACCEPTED.** §34 admits ACCEPTED only when all four scenarios pass, every §26 code is
+exercised, the form walk is complete and the three portals agree. Three of the four are not met.
+
+#### What the phase measured, and the distinction that makes the numbers mean anything
+
+§8.3's Phase-10 gates prove every `exception_code` HAS a raise site and every `template_key` HAS an
+enqueue site. They do **not** prove anything REACHES those sites — §8.1j says so in its own words, and
+`PICKUP_MISSED` counted as satisfied throughout Phase 9 while its only raiser had no caller. So this
+phase measured the other claim, out of the database rather than out of the source tree:
+`SELECT DISTINCT exception_code FROM queue_items` and `SELECT DISTINCT template_key FROM comms_outbox`
+after driving the suites. A code counts only because a production raise site wrote a row for it.
+
+- **§26: 7 of 55 reached** (58 catalogued, 55 wired, 3 discharged). A LOWER BOUND — several specs delete
+  their own rows in teardown, and capture-at-raise-time was not built.
+- **§27.1: 20 of 79 enqueued.**
+- **Form walk: 18 of 18 public surfaces, 64/64 assertions green**, in three separately reported layers
+  (render / transport / landing). A 400 is a reached handler; a 403 never reached one.
+- **Cross-portal parity: identity PASSES, display FAILS** on 2 of §34's 4 fields, with the deadline as
+  a control.
+- **Assertion discrimination: 3 of 3** proven to fail against a seeded defect.
+
+#### The eleven findings, none fixed
+
+`ACCEPTANCE-REPORT.md` §8 carries each with `file:line` and severity. In brief:
+
+| # | Finding | Severity |
+|---|---|---|
+| F1 | `contract_approved` is discharged by an unintended literal match — a `triggerEvent` string, in a file whose `templateKey` is something else | HIGH |
+| F2a | Three public POST surfaces return 403, including the co-buyer signing ceremony (§34 scenario B) | HIGH |
+| F2b | The CSRF mechanism has **no token issuer** — the control is dead and blocks only legitimate traffic | HIGH |
+| F3 | G35-01's root-level CI step does not exist | MEDIUM |
+| F4 | Cross-portal parity is 2 of 3 — `audience: "OPS"` has no production caller | HIGH |
+| F5 | `scope-guard.test.ts` is stale at `CURRENT_PHASE = 8` and has no non-vacuity floor | MEDIUM |
+| F6 | Phase 3 had no AS BUILT record — written below | LOW |
+| F7 | `INVENTORY_SELECTION` has no production writer; §34's "Selected inventory" entry form is not recorded | MEDIUM |
+| F8 | `trade_in_submissions.verified_payoff_cents` has no writer, and it is the sole gate on `TRADE_PAYOFF` | HIGH |
+| F9 | The auction path never advances the Vehicle Request to `DEAL_CREATED` | MEDIUM |
+| F10 | One endpoint accepts SMS consent under two different key names | LOW |
+
+**F1 is the twelfth instance of this programme's recurring defect, and it sits inside the gate Phase 10
+built to prevent the eleventh.** The implied check, recorded so the next gate does not repeat it:
+*a completeness gate that matches on a string must prove the match is the one it means, not merely that
+the string occurs.* §8.3's "all 77 rows wired" is corrected here to **76 wired plus one discharged by an
+unintended match**.
+
+**F7 caught this phase's own first draft.** The first version of `spine.itest.ts` set
+`entryType: "INVENTORY_SELECTION"` for scenarios A and B — a fixture asserting a column value the
+system cannot produce, inside the phase built to measure exactly that. It was caught by interrogating
+the fixture shape, corrected, and is now asserted so the finding retires deliberately rather than going
+stale.
+
+#### Corrections to this document made by this phase
+
+- **§8.3's completeness claim** — "all 77 rows wired" is one row weaker than asserted (F1).
+- **§8.1j's parity claim** — "Buyer panel, dealer notice and the existing Ops queue now read one
+  projection" is true of two surfaces, not three (F4). `components/buyer/TransactionExceptionPanel.tsx:20`
+  repeats the same wrong claim in a comment.
+- **R16.15 (L6987) and R20.18 (L7066)** — both `[NEW]` markers are RETIRED. Phase 9 and Phase 10 built
+  what those statements said did not exist, so the statements are now false of the code.
+- **T54 (L7543)** — its "Current state: no `## §11` heading" is STALE; the workflow's `## §11` exists at
+  L7773, is machine-generated by `scripts/parity-ledger.mjs` over 1,572 ledger rows, and is gated by
+  `pnpm test:parity-ledger`. Its owner-gated half asks for **master §11**, which **does not exist and
+  cannot**: the master document runs §0–§9, then Stage 1–21, then §22. That is a document defect, not an
+  owner obligation. The checkable criterion is SATISFIED.
+- **§13-D15** — RULED **CLOSED-UNVERIFIED** (owner, this phase). The six-component table is recorded
+  verbatim in `ACCEPTANCE-REPORT.md` §10, including the distinction that Stripe **test mode proves the
+  webhook and reconciliation path while only live mode proves settlement** — two claims that must not be
+  merged.
+- **§8.1b / §8.1c / §8.1d do not exist.** Phase 2's AS BUILT record is at L4132 and Phase 4's at L4957,
+  both inside §8.2. Phase 3 had none at all; it is written below.
+
+#### Phase 3 — AS BUILT (2026-09-10, recorded retrospectively 2026-09-18)
+
+Recorded here because Phase 3 is the only phase in the programme with no AS BUILT record, and Phase 11
+is the last opportunity to write one (F6). This is a retrospective reconstruction from the artifacts on
+disk, not a contemporaneous record, and is labelled as such.
+
+Phase 3's scope section is at L4848 ("Payment gate, money model, plans, settlement opens the sourcing
+case"). Verified present in the tree:
+
+- `frontend/lib/services/sourcing/` and `frontend/lib/services/plan/` — both declared to the scope guard
+  for Phase 3 at `lib/__tests__/scope-guard.test.ts:59-82`, and both exist.
+- `docs/transaction-flow/phase-3-proof/` — the proof package, on disk.
+- `applySettlementEffects` (`lib/services/payment/settlement-effects.service.ts:115`) — the settlement
+  side effect that opens the sourcing case. Exercised end-to-end by all four §34 scenarios in this phase,
+  including the replay case.
+- `SOURCING_CASE_REPLACES_AUCTION_LAUNCH` — the cutover flag, read at
+  `deposit-settlement.service.ts:308`, `settlement-effects.service.ts:24`,
+  `deposit-activation.service.ts:229,244`, `rooftop-sourcing.service.ts:21`.
+- A hash re-verification paragraph for Phase 3 exists at L4426, inside the Phase 2 AS BUILT section —
+  which is why the omission was not visible: Phase 3 left a trace in someone else's record.
+
+**Capability map:** no capability was removed in Phase 3. The legacy settlement → immediate-auction
+branch was NEUTRALISED behind the `LEGACY_PATH_WRITE` adapter, not deleted, and its removal remains
+owner-gated (§8.4, C7/I-02).
+
+#### What the next phase — or the next reader — needs to know
+
+There is no Phase 12. The programme ends here, and it ends with an honest NOT ACCEPTED and eleven
+reported defects rather than a green report. The three facts that would block a real buyer today are
+not code defects at all and none is fixable on a branch: `RESEND_FROM_EMAIL` is unset in production,
+14 send-safe dealer emails exist against §6c's five-rooftop minimum, and the MarketCheck sweep has
+failed daily since 2026-09-03.
+
+
 ### 8.2 Phase scopes
 
 #### Phase 0 — Pre-schema security correction: shut down the authenticated SSN intake
@@ -5507,6 +5637,23 @@ this subsection.
 Every one of the 77 §27.1 rows and 48 §26 rows is assigned to the phase that owns its trigger in §10;
 Phase 10 asserts completeness by a table-driven test that every `template_key` and `exception_code` in
 the register has at least one enqueue/raise site.
+
+**CORRECTED BY PHASE 11 ACCEPTANCE (2026-09-18, §8.1k finding F1).** The communications half of that
+claim is one row weaker than stated. `contract_approved` is counted wired because the literal
+`"contract_approved"` occurs in an enqueueing file — at `lib/services/esign/open-signing.service.ts:157`,
+as a **`triggerEvent`**, on a call whose `templateKey` is `SIGNATURE_REQUIRED`. The constant
+`PHASE_8_TEMPLATES.CONTRACT_APPROVED` is referenced only inside the registry file the scan excludes, and
+nothing enqueues the row: the message is sent by `sendContractApprovedEmail` on the direct Resend rail.
+So the true figure is **76 wired plus one discharged by an unintended match**, and
+`MAX_LEDGERED_ROWS = 1` — which pins `prequal_declined` as the only acknowledged direct-rail row — is
+one short. **A completeness gate that matches on a string must prove the match is the one it means, not
+merely that the string occurs.**
+
+**ALSO CORRECTED (F4).** §8.1j records "Buyer panel, dealer notice and the existing Ops queue now read
+one projection". Two of the three do. `app/admin/queues/page.tsx` reads raw `queue_items` columns
+through `admin-queue.service.ts` and renders them itself, so `audience: "OPS"` has no production caller,
+and the buyer and the Operations queue display different text for §34's checkpoint and responsible-party
+fields.
 
 ### 8.4 Legacy paths — neutralise, monitor, remove later (owner-gated)
 
