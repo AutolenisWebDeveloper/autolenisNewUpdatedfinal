@@ -3618,6 +3618,7 @@ after driving the suites. A code counts only because a production raise site wro
 | F8 | `trade_in_submissions.verified_payoff_cents` has no writer, and it is the sole gate on `TRADE_PAYOFF` | HIGH |
 | F9 | The auction path never advances the Vehicle Request to `DEAL_CREATED` | MEDIUM |
 | F10 | One endpoint accepts SMS consent under two different key names | LOW |
+| F11 | CLAUDE.md's measured counts have drifted again — 79 `test:*` scripts on this branch, a 70-segment chain | LOW |
 
 **F1 is the twelfth instance of this programme's recurring defect, and it sits inside the gate Phase 10
 built to prevent the eleventh.** The implied check, recorded so the next gate does not repeat it:
@@ -3669,6 +3670,41 @@ always did — it is simply the only one not in this document:
 It is the only `phase-*-proof/AS-BUILT.md` in the tree; every other phase's record is a section of this
 file. **§8.1 row 3 is marked accordingly by this phase.** No second account of Phase 3 is written here:
 two divergent records of one phase would be worse than the pointer that was missing.
+
+#### The two independent reviews found the same defect class in this phase's OWN suite
+
+Recorded here because a phase whose warrant is "these assertions are not vacuous" has to
+publish its own audit. The second review's central finding: `ASSERTION DISCRIMINATION` was
+reported as **3 of 3** and was **1 of 3**. Two of the three seeded cases in
+`parity.itest.ts` built their own object literals and re-did the comparison inline, never
+calling the code they claimed to validate — proven by destroying the real comparison and
+watching the test named "the parity comparison is discriminating" stay green, while the
+measurement went green too, which is exactly how a resolved F4 would look.
+
+That is the most dangerous shape available to this phase, because it is self-referential:
+a vacuity check that is itself vacuous licenses every assertion it guards. It sat in the
+same commit as a "same spine" test that asserted over a `const` literal in its own file,
+which makes it a pattern rather than a slip. Both are fixed — there is now one
+`divergences()` function that the measurement and every seeded case call, and the fix was
+verified by repeating the reviewer's own neutralisation experiment (the discrimination
+test now goes RED where it previously stayed green). Also fixed: the §34 replay clause was
+inside `.catch(() => undefined)` so a crashed replay reported as idempotent; the suite's
+own Rule 1 readers (`exceptionCodesRaised` / `templateKeysEnqueued`) had **zero callers**,
+so the headline coverage numbers were hand-transcribed rather than produced; the F7
+assertion read back its own fixture; and the transport layer certified a 404 as walked.
+`ACCEPTANCE-REPORT.md` §18 carries the full table with each disposition.
+
+#### T1's CI job — NOT BUILT
+
+T1 (L7480) requires a "CI job reusing the `migrations` postgres service" and
+"`tests/scenarios/*.itest.ts` green in a CI postgres job". **It does not exist**, and
+`tests/e2e/form-walk.spec.ts` is named in no CI step either — `.github/workflows/ci.yml`
+does not glob `tests/e2e/` and says so in its own comment. Not built because a CI job is a
+change to build behaviour, which C1/C4 put outside an acceptance phase, and because the
+parity case is red by design so chaining it would make one finding a permanent gate for
+unrelated work. **The cost is that this phase's output is unguarded** — every vacuity
+corrected above can be reintroduced with CI green. Recorded as a decision for the owner,
+not an omission, in the same form F3 records G35-01's missing step.
 
 #### What the next phase — or the next reader — needs to know
 

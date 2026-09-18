@@ -34,17 +34,18 @@ Three live-only facts, none fixable here, all of which independently block a rea
 
 | Row | Result |
 |---|---|
-| **SCENARIO A** | PASS through stage 5b of 16 · NOT PROVEN beyond |
-| **SCENARIO B** | PASS through stage 5b of 16 · NOT PROVEN beyond |
-| **SCENARIO C** | PASS through stage 5b of 16 · NOT PROVEN beyond |
-| **SCENARIO D** | PASS through stage 5b of 16 · NOT PROVEN beyond |
+| **SCENARIO A** | PASS to stage 5b of 16 · Standard, no co-buyer, no trade |
+| **SCENARIO B** | PASS to stage 5b of 16 · **Premium + co-buyer**, proven distinct in the database |
+| **SCENARIO C** | PASS to stage 5b of 16 · Standard, no co-buyer, no trade |
+| **SCENARIO D** | PASS to stage 5b of 16 · **Premium + trade carrying a lien**, proven distinct |
+| *what still does NOT differ* | §34's **entry form** (F7 — not recorded at all) and **financing column** (a stage-12 fact the spine does not reach). Asserted in the suite so the limit cannot go stale. |
 | **§26 COVERAGE** | **7 of 55 exercised** (reached, not merely wired) |
 | **§27.1 COVERAGE** | **20 of 79 enqueued** |
-| **FORM WALK** | **18 of 18 walked**, 64/64 assertions green; 3 surfaces proven BROKEN |
+| **FORM WALK** | **18 transports reached** (66/66 assertions green); **3 of 15 endpoints proven to LAND**; 3 surfaces proven BROKEN |
 | **CROSS-PORTAL PARITY** | **FAIL** — 2 of §34's 4 fields diverge, measured |
 | **§13 RECONCILIATION** | **PASS WITH CONDITIONS** — the register was counted and the Phase-11-owned rows dispositioned; 31 rows carrying no explicit marker were **not** individually adjudicated, and that is stated rather than implied (§9) |
 | **§35 SCOPE (G35-01)** | **FAIL** — the acceptance gate it mandates does not exist |
-| **ASSERTION DISCRIMINATION** | 3 of 3 proven to fail on a reintroduced defect |
+| **ASSERTION DISCRIMINATION** | **4 of 4** seeded cases proven wired to the real comparison, plus 4 standalone discrimination tests. *Was 1 of 3 before the second independent review — see §18.* |
 | **ACCEPTANCE VERDICT** | ## NOT ACCEPTED |
 
 **NOT ACCEPTED** is the correct result, not a failure of the phase. §34 admits ACCEPTED only if *all four scenarios pass, every §26 code is exercised, the form walk is complete and the three portals agree.* Three of those four are not met, each for a measured reason stated below.
@@ -63,8 +64,8 @@ Every command below ran in this session and its output was read. Nothing is clai
 | Migration chain | `prisma migrate deploy` on an empty DB | **PASS** — all 121 applied |
 | Preview isolation | `scripts/preview-isolation-preflight.ts` | **PASS** (exit 0; 7 PASS, 3 NOT VERIFIED, each named) |
 | Build | `pnpm build` | **PASS** — `BUILD_ID X88cK05DOxitFIxDnNwAN` |
-| Acceptance suite | `pnpm test:scenarios` | 7 of 8 — the one red is finding **F4**, by design |
-| Form walk | `playwright test form-walk` | **64 / 64 PASS** (desktop + mobile) |
+| Acceptance suite | `pnpm test:scenarios` | **13 of 14** — the one red is finding **F4**, by design |
+| Form walk | `playwright test form-walk` | **66 / 66 PASS** (desktop + mobile) |
 | E2E estate | 13 spec files, mirroring CI's per-spec invocation | 12 green; `phase6` journey 1 environment-dependent (§7) |
 
 The preflight is **discriminating**: it *failed* on its first run (step 8, empty schema) and passed only after the chain applied. A preflight that had passed either way would have proved nothing.
@@ -188,7 +189,7 @@ An operator and a buyer comparing notes on the phone are reading a raw enum agai
 
 ## 8. DEFECTS FOUND AND **NOT** FIXED
 
-Phase 11 adds no capability (§8.2; C4 at workflow L766). Every item below is reported with `file:line` and a severity, and **none is fixed**. Two were found before a line of test code was written; five were found by execution.
+Phase 11 adds no capability (§8.2; C4 at workflow L766). Every item below is reported with `file:line` and a severity, and **none is fixed**. Provenance: **F1–F6 were found at Step Zero**, before a line of test code was written; **F7–F10 were found by execution** and were not predicted (§13); **F11** was found by measuring this repository's own counts.
 
 ### F1 — `contract_approved` is discharged by an unintended literal match · **HIGH**
 
@@ -298,7 +299,7 @@ Adjacent, same family: `final_allowance_cents`, `preliminary_allowance_cents`, `
 
 ### F11 — CLAUDE.md's measured counts have drifted again · **LOW**
 
-CLAUDE.md states 75 `test:*` scripts, a 67-segment `test:all`, five CI jobs. Measured today: **78** `test:*` scripts plus bare `test`, a **70**-segment chain, five jobs. The file already carries a 2026-09-08 note correcting an earlier drift of the same numbers.
+CLAUDE.md states 75 `test:*` scripts, a 67-segment `test:all`, five CI jobs. Measured today: **79** `test:*` scripts plus bare `test` on this branch (78 on `main`; this phase adds `test:scenarios`), a **70**-segment chain, five jobs. *The first version of this finding said 78 — a finding whose whole content is "these counts have drifted" was itself off by one, because it did not count the phase's own change. Corrected by the first independent review.* The file already carries a 2026-09-08 note correcting an earlier drift of the same numbers.
 
 ---
 
@@ -433,7 +434,7 @@ What *is* solid: the migration chain applies cleanly from empty, the money path 
 
 | File | At Phase 11 opening | At Phase 11 close |
 |---|---|---|
-| `IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` (MATCH) | `993ca3702ae7435aa65119f59466e965343e41001661af1f3a387b0471b43a8b` |
+| `IMPLEMENTATION-WORKFLOW.md` | `e06d185e5173072fc8a8962bae7586387b7d03577b340f83b1fced3100e2da79` (MATCH) | `5448533d3b5d2e45d5856535715dae4c8557e0537bd11950e49afee27dae54b3` |
 | `AUTOLENIS-COMPLETE-TRANSACTION-FLOW.md` | `714569988f838ecde8909204093453d075b9402fb33a8203b98cfcbf758eab90` (MATCH) | **unchanged** |
 | `AutoLenis-Transaction-Flow.html` | `8c268f9102fc9dc021f4a58c50ac9e179b24a5509dd09ca27a1a746c9209ff89` (MATCH) | **unchanged** |
 
@@ -449,3 +450,64 @@ specification; it does not amend the specification.
 **121**, unchanged. The full chain was applied to an empty database in this session and all 121
 migrations succeeded. No migration was authored, and none was applied to production — this session held
 no production credential.
+
+
+---
+
+## 18. WHAT THE TWO INDEPENDENT REVIEWS FOUND — IN THIS SUITE, NOT IN THE APPLICATION
+
+Both reviews ran against the first commit. Their findings about the **application** are F1–F11 above. Their findings about **this phase's own test code** are here, because a report whose warrant is "these assertions are not vacuous" has to show its own audit.
+
+### The second review's central finding, and it was right
+
+> `ASSERTION DISCRIMINATION | 3 of 3` was **1 of 3.**
+
+Two of the three seeded cases in `parity.itest.ts` built their own object literals and re-did the comparison inline. They never called the code they claimed to validate. The reviewer proved it decisively: hard-coding both agreement flags destroyed the real comparison, the measurement test went **green** — exactly how a "resolved F4" would look — and the test named *"the parity comparison is discriminating"* **stayed green**.
+
+That is the most dangerous possible defect in this package, because it is self-referential: a vacuity check that is itself vacuous licenses every assertion it guards. It is also the same error as the tautological "same spine" test in the same commit, which makes it a pattern rather than a slip.
+
+**Fixed, and the fix verified by repeating the reviewer's own experiment.** There is now one `divergences()` function; the measurement calls it and every seeded case calls *the same function* with perturbed input. Re-running the neutralisation:
+
+| | before the fix | after the fix |
+|---|---|---|
+| measurement test | green (F4 looks resolved) | green (unchanged — that is the hazard) |
+| discrimination test | **green — proved nothing** | **RED — catches it** |
+
+### Everything else both reviews found in this suite, and its disposition
+
+| Their finding | Disposition |
+|---|---|
+| Four scenarios executed a byte-identical path — `plan`, `coBuyer`, `tradeWithLien` were read **only in the test title**; every scenario recorded `STANDARD` | **FIXED.** B and D now elect Premium, B elects a co-buyer and D a trade-with-lien, all through the production election services, and a test asserts the four left **different rows in the database**. `entry` and `financing` still do not differ — now asserted as a known limit so it cannot go stale. |
+| The "same spine" test asserted over a `const` literal in its own file and could not fail | **FIXED** — replaced by the database-observable differentiation test above. |
+| §34's replay clause was inside `.catch(() => undefined)`; a crashed replay reported as idempotent | **FIXED.** The catch is gone; the replay must **resolve** and return the **same** sourcing case. |
+| `exceptionCodesRaised()` / `templateKeysEnqueued()` — the functions implementing the suite's own Rule 1 — had **zero callers**; the headline coverage numbers were hand-transcribed from an ad-hoc query | **FIXED.** `coverage.itest.ts` now produces them, with a **ratchet** (floors 7 and 20) so a fall is a failure that names itself, plus a test proving the readers read the database rather than a constant. |
+| The F7 assertion read back its own fixture; a real writer would have left it green forever | **FIXED.** F7 is now a **source-level scan** (`f7.itest.ts`) using the repository's own `assertScanned` floor, with a companion test proving the scan finds a literal that *is* present. |
+| The transport layer asserted only `status < 500`, so a **404 passed as walked** — proven by pointing a surface at a nonexistent route | **FIXED.** 404 and 405 are now refusals, and a test proves a nonexistent route really does 404. |
+| `assert.ok(prequal)` passed for DECLINED, MANUAL_REVIEW and the OFAC branch | **FIXED** — the decision must be `APPROVED`. |
+| `assert.ok(effects)` passed on the branch where settlement produced nothing | **FIXED** — `unlocked`, `sourcingCaseId` and `vehicleRequestId` are asserted. |
+| "Three-portal parity" never called `audience: "DEALER"` | **FIXED** — a dealer fixture and the third leg were added; identity parity now genuinely spans three audiences. |
+| The parity control could have compared `null === null` after a catalogue reorder | **FIXED** — a precondition asserts both sides carry a deadline. |
+| Form-walk addresses collided across the two Playwright projects and across runs | **FIXED** — run id + project name + counter, the same construction `_harness.ts` already used. |
+| Transport tests were titled `→ <lane>` but never checked the lane | **FIXED** — retitled to what they check. |
+| The spine hand-flips `deposits.status`, which production owns | **NOT CHANGED — NAMED.** Stripe is unreachable and must be. The deviation is now written into the file and here: the PAID transition itself is **not** proven; only that the effects the webhook triggers behave correctly given it. |
+| §26/§27.1 counts are a lower bound because specs delete their own rows | **NOT CHANGED — STATED** in §4 and in `coverage.itest.ts`. |
+| The parity measurement compares against a hand-copied `opsQueueFields`, so fixing F4 would leave it red | **NOT FIXED — and this is the suite's most significant remaining limit.** Closing it needs the Ops page rendered in a browser and compared to the projection, or the page's extraction exported (a production change this phase may not make). Recorded in §14. |
+
+### The honest reading
+
+**Six of the eleven application findings were confirmed correct by independent spot-check** (F1, F4, F7, F8, F9, F10 explicitly; F2a/F2b, F3, F5 verified line by line). **One was wrong and is retracted** (F6). The defects are real; several of the *assertions originally written to guard them* were not, and that is why two independent reviews are the standing rule rather than one.
+
+---
+
+## 19. T1's CI JOB — NOT BUILT, and disclosed rather than omitted
+
+Parity row **T1** (workflow L7480) specifies more than the suite: *"script `test:scenarios`; CI job reusing the `migrations` postgres service"*, with the acceptance criterion *"`tests/scenarios/*.itest.ts` **green in a CI postgres job**"*.
+
+**That CI job does not exist, and neither new artifact runs in CI:**
+
+- `test:scenarios` is `CHAIN_EXEMPT` in `scripts/check-test-coverage.ts` and is in no job.
+- `tests/e2e/form-walk.spec.ts` is named in no step. `.github/workflows/ci.yml:479-481` states the hazard in its own words — *"`tests/e2e/` is not globbed by any step … a spec that is written and not added here is a spec CI never runs"* — and this phase did not add it.
+
+**Why it was not built:** adding a CI job is a change to the repository's build behaviour, which §8.2's "no new capability" constraint puts outside this phase, and the parity suite is deliberately red on F4 — chaining it would turn one finding into a permanently red gate for unrelated work. **That is the owner's call, not this phase's.**
+
+**What it costs, stated plainly:** the entire Phase 11 output is unguarded. Every vacuity corrected in §18 can be reintroduced, or these files deleted outright, with CI green. This is the same defect class as F3 and F5, and it is recorded here for the same reason — so it is a decision rather than an omission.

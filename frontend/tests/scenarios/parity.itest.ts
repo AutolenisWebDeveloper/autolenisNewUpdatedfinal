@@ -60,8 +60,40 @@ function opsQueueFields(row: {
   };
 }
 
+/**
+ * The §34 four-field comparison, as ONE function.
+ *
+ * WHY IT IS A FUNCTION AND NOT INLINE. The first version computed
+ * `checkpointsAgree` / `ownerLabelsAgree` inline in the measurement test, and the
+ * "discrimination" cases below built their own object literals and re-did the `!==`
+ * themselves. The second independent review proved what that meant: hard-coding
+ * `checkpointsAgree = true` destroyed the real comparison and the test named
+ * "the parity comparison is discriminating" STAYED GREEN. A vacuity proof that is
+ * itself vacuous licenses everything it guards, which made it the single most
+ * dangerous assertion in this package.
+ *
+ * Now there is one implementation. The measurement calls it, and the discrimination
+ * proof calls THE SAME function with perturbed inputs — so a change that breaks the
+ * comparison breaks the proof too. That is the property "discriminating" has to mean.
+ */
+export function divergences(
+  rendered: { code: string | null; owner: string | null; action: string | null; deadline: Date | null },
+  projected: { checkpoint: string; ownerLabel: string; recovery: string; deadlineAt: string | null },
+): string[] {
+  const out: string[] = [];
+  if (rendered.code !== projected.checkpoint)
+    out.push(`checkpoint: Ops page renders "${rendered.code}", projection renders "${projected.checkpoint}"`);
+  if (rendered.owner !== projected.ownerLabel)
+    out.push(`responsible party: Ops page renders "${rendered.owner}", projection renders "${projected.ownerLabel}"`);
+  if (rendered.action !== projected.recovery)
+    out.push(`recovery: Ops page renders ${JSON.stringify(rendered.action)}, projection renders ${JSON.stringify(projected.recovery)}`);
+  return out;
+}
+
 let buyerId = "";
 let userId = "";
+let dealerId = "";
+let dealerUserId = "";
 
 before(async () => {
   const email = `${uid("parity-buyer")}@example.test`;
@@ -73,12 +105,26 @@ before(async () => {
     data: { userId: user.id, firstName: "Parity", lastName: "Fixture" },
   });
   buyerId = buyer.id;
+
+  // The DEALER leg needs a dealership. `exception-lineage.service.ts` returns nothing to
+  // the dealer audience for a row with no `dealer_id`, so a buyer-only fixture would have
+  // made the third portal silently unmeasurable — which is exactly what the first version
+  // of this file did while the report claimed all three were compared.
+  const dealerUser = await prisma.user.create({
+    data: { email: `${uid("parity-dealer")}@example.test`, role: "DEALER", supabaseId: uid("parity-dsb") },
+  });
+  dealerUserId = dealerUser.id;
+  const dealer = await prisma.dealer.create({
+    data: { userId: dealerUser.id, dealershipName: "Parity Motors" },
+  });
+  dealerId = dealer.id;
 });
 
 after(async () => {
   await prisma.queueItem.deleteMany({ where: { buyerId } });
   await prisma.buyer.deleteMany({ where: { id: buyerId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await prisma.dealer.deleteMany({ where: { id: dealerId } });
+  await prisma.user.deleteMany({ where: { id: { in: [userId, dealerUserId] } } });
   await prisma.$disconnect();
 });
 
@@ -105,6 +151,7 @@ test("§34 — one lineage: all three surfaces are fed by the same queue_items r
   const raised = await raiseException({
     code: code as never,
     buyerId,
+    dealerId,
     detail: "Phase 11 acceptance — cross-portal parity probe",
   });
 
@@ -112,103 +159,115 @@ test("§34 — one lineage: all three surfaces are fed by the same queue_items r
 
   const buyerRows = await exceptionLineage({ audience: "BUYER", buyerId });
   const opsRows = await exceptionLineage({ audience: "OPS", buyerId });
+  // THE THIRD PORTAL. Omitting this is how the first version of this file measured two
+  // surfaces while the report claimed three.
+  const dealerRows = await exceptionLineage({ audience: "DEALER", dealerId });
 
   assertNonEmpty(buyerRows, "buyer lineage rows — an empty projection would make every field below vacuously equal");
   assertNonEmpty(opsRows, "ops lineage rows");
+  assertNonEmpty(dealerRows, "dealer lineage rows — without these the third portal is untested, not equal");
 
   const buyerView = buyerRows.find((r) => r.id === raised.item.id);
   const opsView = opsRows.find((r) => r.id === raised.item.id);
+  const dealerView = dealerRows.find((r) => r.id === raised.item.id);
   assert.ok(buyerView, "the buyer projection must contain the row that was raised");
   assert.ok(opsView, "the ops projection must contain the row that was raised");
+  assert.ok(dealerView, "the DEALER projection must contain the row that was raised");
 
-  // IDENTITY parity — the same row, the same code, the same owner, the same instant.
-  assert.equal(buyerView.exceptionCode, opsView.exceptionCode, "same exception code");
-  assert.equal(buyerView.owner, opsView.owner, "same owner ROLE (the enum, not the label)");
-  assert.equal(buyerView.deadlineAt, opsView.deadlineAt, "same deadline instant");
+  // IDENTITY parity — the same row, the same code, the same owner, the same instant,
+  // across ALL THREE audiences.
+  for (const [name, view] of [["ops", opsView], ["dealer", dealerView]] as const) {
+    assert.equal(buyerView.exceptionCode, view.exceptionCode, `same exception code (buyer vs ${name})`);
+    assert.equal(buyerView.owner, view.owner, `same owner ROLE (buyer vs ${name})`);
+    assert.equal(buyerView.deadlineAt, view.deadlineAt, `same deadline instant (buyer vs ${name})`);
+  }
   assert.equal(buyerView.exceptionCode, row.exceptionCode, "projection agrees with the stored row");
 });
 
 test("§34 — DISPLAY parity: what the Operations queue actually renders vs what the projection renders", async () => {
   const code = pickTriPortalCode();
-  const existing = await prisma.queueItem.findFirst({ where: { buyerId, exceptionCode: code } });
-  const row = existing ?? (await prisma.queueItem.findFirstOrThrow({ where: { buyerId } }));
+  // Raised here rather than reused from test 1. The first version reused it, which made
+  // this test fail with a Prisma "no row found" — an unrelated error — whenever it was run
+  // alone with --test-name-pattern, so a triaging reader saw a broken test instead of a
+  // measurement.
+  const own = await raiseException({
+    code: code as never,
+    buyerId,
+    dealerId,
+    occurrenceKey: "display-parity",
+    detail: "Phase 11 acceptance — display parity probe",
+  });
+  const row = await prisma.queueItem.findUniqueOrThrow({ where: { id: own.item.id } });
 
   const opsProjected = (await exceptionLineage({ audience: "OPS", buyerId })).find((r) => r.id === row.id);
   assert.ok(opsProjected, "ops projection must contain the row");
 
   const opsRendered = opsQueueFields(row);
 
-  // §34 field 1 — "the same current checkpoint".
-  //
-  // The projection renders the catalogue's human label. The page renders the raw
-  // enum. These are not the same string, and an operator comparing notes with a
-  // buyer over the phone is comparing "Vehicle hold expired" with
-  // "VEHICLE_HOLD_EXPIRED".
-  const checkpointsAgree = opsRendered.code === opsProjected.checkpoint;
+  // The four fields, through the ONE shared comparison. Nothing is recomputed here.
+  const found = divergences(opsRendered, opsProjected);
 
-  // §34 field 2 — "the same responsible party".
-  const ownerLabelsAgree = opsRendered.owner === opsProjected.ownerLabel;
-
-  // §34 field 3 — "the same deadline". Same instant; compared as instants.
-  const deadlinesAgree =
-    (opsRendered.deadline?.toISOString() ?? null) === opsProjected.deadlineAt;
-
-  // §34 field 4 — "the same recovery action".
-  const recoveryAgrees = opsRendered.action === opsProjected.recovery;
-
-  // This test RECORDS the measurement rather than asserting a predetermined answer.
-  // The deadline is the field the two paths genuinely share, so it is the control:
-  // if it disagreed, the comparison itself would be broken and the other three
-  // results would mean nothing.
+  // §34 field 3 — the deadline — is the control, and it is compared separately because
+  // its job is to prove the comparison is wired at all. Guarded first: `pickTriPortalCode`
+  // returns `candidates[0]`, so a catalogue reorder could hand this test a code with no
+  // deadline, and two nulls compare equal — passing the control while comparing nothing.
+  assert.ok(
+    opsProjected.deadlineAt !== null && opsRendered.deadline !== null,
+    "CONTROL PRECONDITION: the chosen exception must carry a deadline on both sides. " +
+      "Two nulls compare equal and would pass this control while comparing nothing.",
+  );
   assert.equal(
-    deadlinesAgree,
-    true,
+    opsRendered.deadline?.toISOString() ?? null,
+    opsProjected.deadlineAt,
     "CONTROL: the deadline instant must agree between the projection and the page's own " +
       "extraction. If this fails the comparison is broken, not the parity.",
   );
 
-  const divergences: string[] = [];
-  if (!checkpointsAgree)
-    divergences.push(
-      `checkpoint: Ops page renders "${opsRendered.code}", projection renders "${opsProjected.checkpoint}"`,
-    );
-  if (!ownerLabelsAgree)
-    divergences.push(
-      `responsible party: Ops page renders "${opsRendered.owner}", projection renders "${opsProjected.ownerLabel}"`,
-    );
-  if (!recoveryAgrees)
-    divergences.push(
-      `recovery: Ops page renders ${JSON.stringify(opsRendered.action)}, projection renders ${JSON.stringify(opsProjected.recovery)}`,
-    );
-
   assert.deepEqual(
-    divergences,
+    found,
     [],
     "§34 requires the buyer portal, the dealership portal and the Operations queue to DISPLAY the " +
       "same checkpoint, responsible party, deadline and recovery action. The Operations queue does " +
       "not read `exceptionLineage` — it reads raw `queue_items` columns in `app/admin/queues/" +
       "page.tsx:53-66` and renders them itself, so `audience: \"OPS\"` has no production caller. " +
       "Measured divergences:\n  - " +
-      divergences.join("\n  - "),
+      found.join("\n  - "),
   );
 });
 
-test("the parity comparison is discriminating — it fails on a seeded divergence", () => {
-  // If the comparison above cannot fail, its green result means nothing. Prove it can.
-  provesDiscriminating("parity: checkpoint divergence is detected", () => {
-    const rendered = { code: "VEHICLE_HOLD_EXPIRED" };
-    const projected = { checkpoint: "Vehicle hold expired" };
-    const divergences: string[] = [];
-    if (rendered.code !== projected.checkpoint) divergences.push("checkpoint");
-    assert.deepEqual(divergences, []);
+test("the parity comparison is discriminating — proven against the REAL comparison", () => {
+  // Every case below calls `divergences()` — the same function the measurement calls.
+  // A change that breaks the comparison breaks these too. The earlier version built
+  // object literals and re-did the `!==` inline, which proved only that
+  // `assert.deepEqual(["x"], [])` throws; the second independent review destroyed the
+  // real comparison and watched this test stay green.
+  const agreeing = {
+    rendered: { code: "Contract overdue from dealer", owner: "Operations", action: "Do the thing", deadline: new Date(0) },
+    projected: { checkpoint: "Contract overdue from dealer", ownerLabel: "Operations", recovery: "Do the thing", deadlineAt: new Date(0).toISOString() },
+  };
+
+  // Sanity: the shared function must report agreement when the inputs agree. Without
+  // this, a `divergences()` that always returned [] would pass every case below.
+  assert.deepEqual(
+    divergences(agreeing.rendered, agreeing.projected),
+    [],
+    "the shared comparison must report NO divergence when every field agrees — otherwise " +
+      "the seeded cases below prove nothing",
+  );
+
+  provesDiscriminating("parity: a checkpoint divergence is detected by the real comparison", () => {
+    const found = divergences({ ...agreeing.rendered, code: "CONTRACT_OVERDUE_FROM_DEALER" }, agreeing.projected);
+    assert.deepEqual(found, []);
   });
 
-  provesDiscriminating("parity: owner-label divergence is detected", () => {
-    const rendered = { owner: "OPERATIONS" };
-    const projected = { ownerLabel: "Operations" };
-    const divergences: string[] = [];
-    if (rendered.owner !== projected.ownerLabel) divergences.push("owner");
-    assert.deepEqual(divergences, []);
+  provesDiscriminating("parity: an owner-label divergence is detected by the real comparison", () => {
+    const found = divergences({ ...agreeing.rendered, owner: "OPERATIONS" }, agreeing.projected);
+    assert.deepEqual(found, []);
+  });
+
+  provesDiscriminating("parity: a recovery divergence is detected by the real comparison", () => {
+    const found = divergences({ ...agreeing.rendered, action: "something else" }, agreeing.projected);
+    assert.deepEqual(found, []);
   });
 
   provesDiscriminating("parity: an empty projection is refused, not treated as agreement", () => {

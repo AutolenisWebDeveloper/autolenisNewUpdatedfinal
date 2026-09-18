@@ -35,7 +35,8 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const HAS_DB = /autolenis_e2e/.test(process.env.DATABASE_URL ?? "");
 
-test.beforeAll(async () => {
+test.beforeAll(async ({}, testInfo) => {
+  PROJECT = testInfo.project.name;
   test.skip(!HAS_DB, "DATABASE_URL must target autolenis_e2e — refusing to touch any other database");
 });
 test.afterAll(async () => {
@@ -43,9 +44,27 @@ test.afterAll(async () => {
 });
 
 let seq = 0;
+
+/**
+ * A run id plus the PROJECT name plus a counter.
+ *
+ * All three halves are load-bearing, and the first version had only the counter.
+ * `playwright.e2e.config.ts` declares `desktop` and `mobile` and sets
+ * `fullyParallel: true`, and `seq` is module-scoped so it resets per worker — so the two
+ * projects generated IDENTICAL addresses and POSTed them concurrently. `users.email` is
+ * unique, so `affiliate-register` could 500 for whichever worker lost, failing the
+ * `status < 500` assertion intermittently. Re-running with `E2E_RUN_ID` unset reproduced
+ * the same collision against the previous run's rows.
+ *
+ * `tests/scenarios/_harness.ts` had already found and fixed exactly this defect; the
+ * lesson was not carried across the first time.
+ */
+const RUN_ID = process.env.E2E_RUN_ID ?? Date.now().toString(36);
+let PROJECT = "p";
+
 function addr(tag: string): string {
   seq += 1;
-  return `formwalk-${tag}-${seq}-${process.env.E2E_RUN_ID ?? "local"}@example.test`;
+  return `formwalk-${tag}-${PROJECT}-${RUN_ID}-${seq}@example.test`;
 }
 
 // ── The walk table ───────────────────────────────────────────────────────────
@@ -305,6 +324,23 @@ test("the walk table is non-empty and every entry is distinct", () => {
   expect(new Set(SURFACES.map((s) => s.id)).size).toBe(SURFACES.length);
 });
 
+test("the 404 guard is discriminating — a nonexistent route is refused, not walked", async ({
+  request,
+}) => {
+  // The transport assertions above claim a handler was reached. That claim is only worth
+  // anything if a route that does NOT exist fails them. Proven here rather than assumed,
+  // because the first version of this file did assume it and was wrong.
+  const res = await request.post("/api/public/definitely-not-a-route", {
+    data: {},
+    failOnStatusCode: false,
+  });
+  expect(
+    res.status(),
+    "a nonexistent public route must 404 — if it does not, the transport layer's 404 " +
+      "guard cannot distinguish a deleted route from a working one",
+  ).toBe(404);
+});
+
 // ── RENDER layer ─────────────────────────────────────────────────────────────
 
 for (const s of SURFACES.filter((x) => x.render)) {
@@ -344,7 +380,13 @@ async function reach(request: APIRequestContext, s: Surface) {
 }
 
 for (const s of SURFACES) {
-  test(`transport — ${s.id} POST ${s.endpoint} → ${s.lane}`, async ({ request }) => {
+  // NAMED FOR WHAT IT CHECKS. An earlier version was titled
+  // "transport — <id> POST <endpoint> → <lane>", which claimed the submission reached its
+  // lane. It does not check that: a 404, a 401 or a non-CSRF 403 all satisfy the
+  // assertions below. The lane is checked by the LANDING test, which covers three
+  // surfaces, and ACCEPTANCE-REPORT.md §6 states that split rather than implying the
+  // transport layer proves landing.
+  test(`transport — ${s.id} POST ${s.endpoint} reaches its handler (lane NOT asserted here)`, async ({ request }) => {
     const { status, body } = await reach(request, s);
 
     if (s.expectReachable) {
@@ -353,6 +395,19 @@ for (const s of SURFACES) {
         `${s.endpoint} was refused by the CSRF gate before reaching its handler. ` +
           `Status ${status}, body ${body}`,
       ).toBe(false);
+      // 404 and 405 are REFUSALS BY THE ROUTER, not handler responses — the earlier
+      // version asserted only `< 500`, which certified a deleted route as walked. The
+      // second independent review proved it by pointing a walked surface at
+      // `/api/public/feedback-DOES-NOT-EXIST` and watching both projects pass.
+      expect(
+        status,
+        `${s.endpoint} returned 404 — the route does not exist, so nothing was walked. ` +
+          `Body ${body}`,
+      ).not.toBe(404);
+      expect(
+        status,
+        `${s.endpoint} returned 405 — the route exists but not for POST. Body ${body}`,
+      ).not.toBe(405);
       expect(
         status,
         `${s.endpoint} must reach its handler. Status ${status}, body ${body}`,

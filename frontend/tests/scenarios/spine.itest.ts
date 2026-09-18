@@ -40,6 +40,8 @@ import { initiatePrsequal } from "@/lib/services/prequal/prequal.service";
 import { attachOrCreateOpenRequest } from "@/lib/services/vehicle-request/open-request.service";
 import { enterPaymentRequired } from "@/lib/services/vehicle-request/vehicle-request.service";
 import { applySettlementEffects } from "@/lib/services/payment/settlement-effects.service";
+import { recordCoBuyerElection } from "@/lib/services/buyer/co-buyer.service";
+import { recordTradeElection } from "@/lib/services/trade-in/trade-in.service";
 
 
 export interface ScenarioSpec {
@@ -64,7 +66,14 @@ const SCENARIOS: readonly ScenarioSpec[] = [
 ];
 
 /** What each scenario proved, collected for ACCEPTANCE-REPORT.md. */
-export const spineResults: Record<string, { reached: string[]; blocked: string | null }> = {};
+export const spineResults: Record<
+  string,
+  {
+    reached: string[];
+    blocked: string | null;
+    observed?: { coBuyers: number; trades: number; plan: string | null };
+  }
+> = {};
 
 // ─── The spine ──────────────────────────────────────────────────────────────
 
@@ -85,6 +94,18 @@ async function runSpine(s: ScenarioSpec) {
   const buyerId: string = (identity as { buyerId?: string }).buyerId ?? "";
   assert.ok(buyerId, `scenario ${s.name}: resolveIdentity must yield a buyerId`);
   mark("1-identity");
+
+  // §34 column 3 — the plan. NAMED DEVIATION, in the spirit of Rule 2 rather than an
+  // exception to it: `Buyer.plan` has no exported production writer. Its only writers
+  // are route handlers (`app/api/buyer/plan/upgrade/route.ts:108`,
+  // `app/api/admin/buyers/[buyerId]/plan/route.ts:138`) which cannot be called
+  // in-process. Setting the column reproduces what those routes write and nothing more;
+  // `recordRequestPlanElection` — the real election writer — then reads it at settlement
+  // exactly as it would in production (`settlement-effects.service.ts:189`). Recorded
+  // rather than silently done, because an unnamed fixture write is the recurring defect.
+  if (s.plan === "PREMIUM") {
+    await prisma.buyer.update({ where: { id: buyerId }, data: { plan: "PREMIUM" } });
+  }
 
   // STAGE 2 — prequalification, through the sandboxed MicroBilt adapter.
   // MICROBILT_SANDBOX=true returns a hard-coded APPROVED as the FIRST branch
@@ -109,7 +130,18 @@ async function runSpine(s: ScenarioSpec) {
       lengthOfEmployment: "3_TO_5_YEARS",
     } as never,
   );
-  assert.ok(prequal, `scenario ${s.name}: prequalification must return a decision`);
+  // The DECISION is asserted, not merely that an object came back. `initiatePrsequal`
+  // returns `{ prequal, mocked }` on every non-throwing path — including DECLINED,
+  // MANUAL_REVIEW, the OFAC branch and the in-flight-race branch — so `assert.ok(prequal)`
+  // passed for outcomes that would stop the transaction dead. The second independent
+  // review caught that.
+  const decision = (prequal as { prequal?: { decision?: string } })?.prequal?.decision;
+  assert.equal(
+    decision,
+    "APPROVED",
+    `scenario ${s.name}: the spine needs an APPROVED prequalification to continue; got ` +
+      `${decision ?? "no decision at all"}. MICROBILT_SANDBOX=true must be set.`,
+  );
   mark("2-prequal");
 
   // STAGE 3 — the vehicle request. This is §34's column-2 branch and the ONLY
@@ -148,25 +180,58 @@ async function runSpine(s: ScenarioSpec) {
   } as never)) as { vehicleRequest: { id: string } };
   assert.ok(vehicleRequest?.id, `scenario ${s.name}: a Vehicle Request must be created`);
 
-  // F7 asserted rather than only commented: if a writer for INVENTORY_SELECTION is
-  // ever added, this assertion fails and the finding is retired deliberately rather
-  // than silently going stale.
-  const stored = await prisma.vehicleRequest.findUniqueOrThrow({
-    where: { id: vehicleRequest.id },
-    select: { entryType: true, inventoryItemId: true },
-  });
-  assert.equal(
-    stored.entryType,
-    "CUSTOM_REQUEST",
-    `scenario ${s.name}: production writes only CUSTOM_REQUEST for entryType (F7). ` +
-      "If this now reads INVENTORY_SELECTION, a writer was added and F7 is resolved.",
-  );
-  assert.equal(
-    stored.inventoryItemId,
-    null,
-    `scenario ${s.name}: vehicle_requests.inventory_item_id has no production writer (F7)`,
-  );
+  // F7 is asserted at SOURCE level, in `f7.itest.ts`, NOT here.
+  //
+  // The first version read the column back out of the row this very test had just
+  // written, and claimed "if this now reads INVENTORY_SELECTION, a writer was added".
+  // That was false twice over: the only way it could read INVENTORY_SELECTION was for
+  // someone to edit this file's own fixture, and if a real production writer WERE added
+  // the assertion would stay green forever — so the finding would go stale in exactly the
+  // way the comment promised it could not. The second independent review proved it by
+  // flipping the fixture line and watching the test fail with "no writer was added".
+  //
+  // A claim about what production writes has to be checked against production source.
   mark("3-request");
+
+  // §34 scenario B — "co-buyer signs". Through the production election service, which
+  // enforces Rule 2 (no PII without shareConsent) and the prohibited-field scan.
+  //
+  // `elected` is asserted, not just `ok`: the service returns `{ ok: true, elected: false }`
+  // on the de-election branch, so asserting `ok` alone would pass for the exact opposite
+  // of what this scenario claims. That is not hypothetical — the first version of this
+  // block asserted only `ok`.
+  if (s.coBuyer) {
+    const co = (await recordCoBuyerElection(buyerId, vehicleRequest.id, true, {
+      legalFirstName: "Co",
+      legalLastName: `Buyer${s.name}`,
+      email: `${uid(`${tag}-cobuyer`)}@example.test`,
+      isRequiredSigner: true,
+      shareConsent: true,
+    })) as { ok: boolean; elected?: boolean; coBuyer?: { id: string } | null };
+    assert.equal(co.ok, true, `scenario ${s.name}: co-buyer election refused — ${JSON.stringify(co)}`);
+    assert.equal(co.elected, true, `scenario ${s.name}: co-buyer must be ELECTED, not de-elected`);
+    assert.ok(co.coBuyer?.id, `scenario ${s.name}: the election must return the stored co-buyer`);
+    mark("3c-cobuyer");
+  }
+
+  // §34 scenario D — "a trade carrying a lien". Through the production election service.
+  if (s.tradeWithLien) {
+    const trade = (await recordTradeElection(buyerId, vehicleRequest.id, true, {
+      year: 2016,
+      make: "Toyota",
+      model: "Corolla",
+      condition: "GOOD",
+      loanStatus: "FINANCED",
+      loanBalanceCents: 850_000,
+      lienholderName: "Example Credit Union",
+      payoffGoodThroughDate: new Date(Date.now() + 10 * 86_400_000),
+      titleInHand: false,
+      shareConsent: true,
+    })) as { ok: boolean; elected?: boolean };
+    assert.equal(trade.ok, true, `scenario ${s.name}: trade election refused — ${JSON.stringify(trade)}`);
+    assert.equal(trade.elected, true, `scenario ${s.name}: the trade must be ELECTED`);
+    mark("3d-trade-lien");
+  }
 
   // §34 C/D — "Request reaches payment immediately; no pre-payment sourcing spend".
   await enterPaymentRequired(vehicleRequest.id);
@@ -194,6 +259,17 @@ async function runSpine(s: ScenarioSpec) {
   // service the verified webhook calls once the intent has succeeded
   // (settlement-effects.service.ts:115) — calling it directly exercises the same
   // production code the webhook would, without inventing a payment.
+  //
+  // NAMED DEVIATION from Rule 2, and the second in this file. `deposits.status` IS
+  // production-written — by the Stripe webhook's own guarded flip
+  // (`app/api/webhooks/stripe/route.ts:300-303`) and by `deposit-settlement.service.ts`.
+  // The flip below reproduces that exact statement shape (`updateMany` guarded on
+  // `status: "PENDING"`, so it is idempotent the same way) inside the same transaction
+  // the effects run in, because `settlement-effects.service.ts:105-114` requires that
+  // ordering. What it means for the claim: the PAID transition itself is NOT proven
+  // here — only that the effects the webhook triggers afterwards behave correctly given
+  // it. ACCEPTANCE-REPORT.md §3 states the same limit rather than letting "settlement
+  // proven" stand unqualified.
   const deposit = await prisma.deposit.create({
     data: {
       buyerId,
@@ -218,7 +294,18 @@ async function runSpine(s: ScenarioSpec) {
       tx as never,
     );
   });
-  assert.ok(effects, `scenario ${s.name}: settlement must produce effects`);
+  // The SHAPE is asserted, not merely truthiness. `applySettlementEffects` returns a
+  // fully-null object (`{ vehicleRequestId: null, sourcingCaseId: null, unlocked: false }`)
+  // on the no-request-resolved path, so `assert.ok(effects)` passed on the branch where
+  // settlement produced nothing at all.
+  const eff = effects as { unlocked?: boolean; sourcingCaseId?: string | null; vehicleRequestId?: string | null };
+  assert.equal(eff.unlocked, true, `scenario ${s.name}: settlement must UNLOCK the request`);
+  assert.ok(eff.sourcingCaseId, `scenario ${s.name}: settlement must return the sourcing case it opened`);
+  assert.equal(
+    eff.vehicleRequestId,
+    vehicleRequest.id,
+    `scenario ${s.name}: settlement must resolve to THIS request, not another`,
+  );
   mark("4-settlement");
 
   const afterSettle = await prisma.vehicleRequest.findUniqueOrThrow({
@@ -237,19 +324,33 @@ async function runSpine(s: ScenarioSpec) {
 
   // REPLAY — §34 requires replay on every money path. The same settlement applied
   // twice must not open a second case or move the request twice.
-  await prisma
-    .$transaction(async (tx) =>
-      applySettlementEffects(
-        {
-          depositId: deposit.id,
-          buyerId,
-          vehicleRequestId: vehicleRequest.id,
-          settledDepositCents: 9_900,
-        } as never,
-        tx as never,
-      ),
-    )
-    .catch(() => undefined);
+  // NOT wrapped in a catch. An earlier version was, and that made this assertion unable
+  // to tell idempotent from crashed-and-rolled-back: a throwing replay rolls its
+  // transaction back, leaves the count at 1, and would have reported "replay opens no
+  // second case" while the money path was in fact broken. Idempotent means it RESOLVES
+  // and yields the SAME case — both halves are asserted.
+  const replay = (await prisma.$transaction(async (tx) =>
+    applySettlementEffects(
+      {
+        depositId: deposit.id,
+        buyerId,
+        vehicleRequestId: vehicleRequest.id,
+        settledDepositCents: 9_900,
+      } as never,
+      tx as never,
+    ),
+  )) as { sourcingCaseId?: string | null };
+  assert.ok(
+    replay,
+    `scenario ${s.name}: replaying settlement must RESOLVE, not throw — a rolled-back ` +
+      "replay leaves the row count unchanged and would otherwise read as idempotent",
+  );
+  assert.equal(
+    replay.sourcingCaseId,
+    (effects as { sourcingCaseId?: string | null }).sourcingCaseId,
+    `scenario ${s.name}: the replay must resolve to the SAME sourcing case, not merely ` +
+      "avoid creating a second one",
+  );
   const casesAfterReplay = await prisma.sourcingCase.count({
     where: { vehicleRequestId: vehicleRequest.id },
   });
@@ -260,7 +361,21 @@ async function runSpine(s: ScenarioSpec) {
   );
   mark("5b-settlement-replay");
 
-  return { buyerId, vehicleRequestId: vehicleRequest.id, depositId: deposit.id, reached };
+  // Observable production state, so the "four different scenarios" claim is checked
+  // against the DATABASE rather than against this file's own constant.
+  const [coBuyers, trades, buyerRow2] = await Promise.all([
+    prisma.coBuyer.count({ where: { vehicleRequestId: vehicleRequest.id } }),
+    prisma.tradeInSubmission.count({ where: { vehicleRequestId: vehicleRequest.id } }),
+    prisma.buyer.findUnique({ where: { id: buyerId }, select: { plan: true } }),
+  ]);
+
+  return {
+    buyerId,
+    vehicleRequestId: vehicleRequest.id,
+    depositId: deposit.id,
+    reached,
+    observed: { coBuyers, trades, plan: (buyerRow2?.plan as string | null) ?? null },
+  };
 }
 
 // ─── The four scenarios ─────────────────────────────────────────────────────
@@ -269,8 +384,16 @@ for (const s of SCENARIOS) {
   test(`§34 scenario ${s.name} — ${s.entry} · ${s.plan} · ${s.financing}`, async () => {
     try {
       const out = await runSpine(s);
-      spineResults[s.name] = { reached: out.reached, blocked: null };
-      assertNonEmpty(out.reached, `scenario ${s.name}: stages reached`);
+      spineResults[s.name] = { reached: out.reached, blocked: null, observed: out.observed };
+      // A floor that can be breached. `mark()` is called unconditionally seven times, so
+      // `>= 1` was unreachable; the spine must reach the settlement replay or the coverage
+      // numbers no longer describe what ran.
+      assertNonEmpty(out.reached, `scenario ${s.name}: stages reached`, 7);
+      assert.ok(
+        out.reached.includes("5b-settlement-replay"),
+        `scenario ${s.name}: must reach the settlement replay — it is the last stage this ` +
+          "spine claims, and ACCEPTANCE-REPORT.md's coverage numbers assume it ran",
+      );
     } catch (err) {
       spineResults[s.name] = {
         reached: spineResults[s.name]?.reached ?? [],
@@ -281,17 +404,60 @@ for (const s of SCENARIOS) {
   });
 }
 
-test("the four scenarios ran the SAME spine — structurally, not by inspection", () => {
-  // Every scenario is an argument set to one function. The proof that no scenario
-  // took a different route is that there is only one route to take.
-  assert.equal(SCENARIOS.length, 4, "§34 names exactly four scenarios");
-  assert.equal(new Set(SCENARIOS.map((s) => s.name)).size, 4, "scenario names must be distinct");
-  const entries = new Set(SCENARIOS.map((s) => s.entry));
-  assert.equal(entries.size, 2, "§34 requires both entry forms to be exercised");
-  const plans = new Set(SCENARIOS.map((s) => s.plan));
-  assert.equal(plans.size, 2, "§34 requires both plans to be exercised");
-  const paths = new Set(SCENARIOS.map((s) => s.financing));
-  assert.equal(paths.size, 3, "§34 requires EXTERNAL, DEALER and CASH financing paths");
+test("the four scenarios are genuinely DIFFERENT — proven against the database", () => {
+  // WHAT THIS REPLACED, AND WHY.
+  //
+  // The first version asserted `SCENARIOS.length === 4`, `new Set(names).size === 4`,
+  // `entries.size === 2` and so on — every one over a `const` literal declared a hundred
+  // lines above in THIS SAME FILE. It touched no production module and could fail only if
+  // someone edited the adjacent array. It was a check that reported success while checking
+  // nothing, inside the suite whose whole thesis is that ten phases shipped exactly that.
+  // The first independent review caught it, which is the argument for independent review.
+  //
+  // The replacement asserts that the four scenarios left DIFFERENT observable rows behind.
+  // It fails if `runSpine` stops branching — which is the property "four scenarios" means.
+  const names = Object.keys(spineResults);
+  assertNonEmpty(names, "recorded scenario results — with none, every comparison below is vacuous", 4);
+
+  const obs = (n: string) => {
+    const o = spineResults[n]?.observed;
+    assert.ok(o, `scenario ${n} recorded no observable state`);
+    return o;
+  };
+
+  // §34 B is the only co-buyer scenario.
+  assert.equal(obs("B").coBuyers, 1, "B must have a co-buyer, written by recordCoBuyerElection");
+  for (const n of ["A", "C", "D"]) assert.equal(obs(n).coBuyers, 0, `${n} must have no co-buyer`);
+
+  // §34 D is the only trade-with-lien scenario.
+  assert.equal(obs("D").trades, 1, "D must have a trade, written by recordTradeElection");
+  for (const n of ["A", "B", "C"]) assert.equal(obs(n).trades, 0, `${n} must have no trade`);
+
+  // §34 column 3 — B and D Premium, A and C Standard.
+  assert.equal(obs("B").plan, "PREMIUM", "B is the Premium scenario");
+  assert.equal(obs("D").plan, "PREMIUM", "D is the Premium scenario");
+  assert.equal(obs("A").plan, "STANDARD", "A is the Standard scenario");
+  assert.equal(obs("C").plan, "STANDARD", "C is the Standard scenario");
+});
+
+test("what the scenarios do NOT differentiate — asserted, so the limit cannot go stale", () => {
+  // §34's column 4 (External / Dealer-arranged / Cash) is a stage-12 fact, and the entry
+  // form is not recorded at all (F7). The spine reaches stage 5b, so NEITHER column is
+  // exercised by any scenario. Asserting it here keeps the limit in the suite rather than
+  // only in the report: when the spine reaches stage 12 this test fails and must be
+  // updated deliberately, instead of the report quietly overstating what ran.
+  const reached = spineResults["A"]?.reached ?? [];
+  assertNonEmpty(reached, "scenario A stages reached");
+  assert.ok(
+    !reached.some((r) => r.startsWith("12-")),
+    "the spine now reaches stage 12 — §34's financing column is exercisable, and this test " +
+      "plus ACCEPTANCE-REPORT.md §3 must be updated to say so",
+  );
+  assert.ok(
+    reached.includes("5b-settlement-replay"),
+    "the spine must still reach the settlement replay — if it stops earlier, the coverage " +
+      "numbers in ACCEPTANCE-REPORT.md no longer describe this suite",
+  );
 });
 
 after(async () => {
